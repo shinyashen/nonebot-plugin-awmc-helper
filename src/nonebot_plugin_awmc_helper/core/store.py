@@ -67,14 +67,20 @@ class LocalAlias(SQLModel, table=True):
 
 
 class Arcade(SQLModel, table=True):
-    """机厅：华立官方数据（is_custom=False，id 为官方 id）或自定义（id≥10000）。"""
+    """机厅：华立官方数据（is_custom=False，id 为官方 id）或自定义（id≥10000）。
+
+    ``person`` 为本地排卡人数（每日 4 点同步后清零），机器数 ``machines`` 来自华立。
+    """
 
     __tablename__ = "arcade"
 
     id: int = Field(primary_key=True)
     name: str = Field(index=True)
     address: str = ""
+    province: str = ""
+    mall: str = ""
     machines: int = 0
+    person: int = 0
     is_custom: bool = False
     updated_by: str = ""
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -345,7 +351,10 @@ async def upsert_arcade(arcade: Arcade) -> None:
     async with _open_session() as session:
         row = (await session.exec(select(Arcade).where(Arcade.id == arcade.id))).first()
         if row:
-            arcade.is_custom = row.is_custom  # 保留本地自定义标记
+            # 保留本地标记与排卡人数
+            arcade.is_custom = row.is_custom
+            arcade.person = row.person
+            arcade.updated_by = row.updated_by
             await session.delete(row)
         session.add(arcade)
         await session.commit()
@@ -371,6 +380,18 @@ async def delete_arcade(arcade_id: int) -> bool:
             )
         ).all():
             await session.delete(al)
+        await session.commit()
+        return True
+
+
+async def remove_arcade_alias_by_name(alias: str) -> bool:
+    async with _open_session() as session:
+        row = (
+            await session.exec(select(ArcadeAlias).where(ArcadeAlias.alias == alias))
+        ).first()
+        if row is None:
+            return False
+        await session.delete(row)
         await session.commit()
         return True
 
@@ -451,6 +472,19 @@ async def unsubscribe(group_id: str, arcade_id: int) -> None:
         if row:
             await session.delete(row)
             await session.commit()
+
+
+async def reset_all_persons(operator: str = "自动清零") -> int:
+    """全部机厅排卡人数清零（每日 4 点同步后调用），返回受影响机厅数。"""
+    async with _open_session() as session:
+        arcades = list((await session.exec(select(Arcade))).all())
+        for a in arcades:
+            a.person = 0
+            a.updated_by = operator
+            a.updated_at = datetime.now()
+            session.add(a)
+        await session.commit()
+        return len(arcades)
 
 
 async def add_count_log(
