@@ -15,7 +15,32 @@
 
 ## 📖 介绍
 
-这里是插件的详细介绍部分
+NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名、查分（B50/AP50）、
+表格与牌子进度、分数线/推分、猜歌、机厅排卡，一应俱全。
+
+- **功能基准**：[Yuri-YuzuChaN/maimaiDX](https://github.com/Yuri-YuzuChaN/maimaiDX)
+  （HoshinoBot 版），包括 NoneBot 版没有的「机厅排卡」模块；
+- **数据层**：[TrueRou/maimai.py](https://github.com/TrueRou/maimai.py)（PyPI `maimai-py`）
+  统一曲目/成绩模型与多查分器对接；水鱼 / 落雪 / 柚子三源；
+- **架构**：主插件提供核心服务（core），每个功能是独立子插件（plugins/），
+  按 NoneBot 官方《嵌套插件》机制加载，可通过 `awmc_disabled_plugins` 独立停用。
+
+> 素材（曲绘/UI 图片）版权归 SEGA / 华立所有，本仓库不分发素材包，仅供个人学习使用。
+
+### 功能一览
+
+| 子插件 | 指令示例 | 说明 |
+|---|---|---|
+| bind | `绑定水鱼` / `绑定落雪` / `数据源` / `主题` | 查分器绑定与设置 |
+| music_query | `查歌` / `定数查歌` / `bpm查歌` / `曲师查歌` / `谱师查歌` / `<别名>是什么歌` / `id <数字>` | 曲库查询 |
+| alias | `<名称>有什么别名` / `添加别名` / `同意别名` / `当前投票` / `开启别名推送` | 别名查询、申请与推送 |
+| score_query | `b50` / `ap50` / `minfo <曲>` / `ginfo <难度><曲>` | 查分 |
+| score_tools | `分数线 紫799 100` / `我要上20分` / `查看排名` | 分数线/推分/水鱼 RA 排名 |
+| tables | `<等级>定数表` / `13fc完成表` / `真将完成表` / `13fc进度` / `13+分数列表` / `牌子条件` | 完成度表格 |
+| random_song | `来个紫13+` / `随个dx14` / `mai什么` | 随机谱面 |
+| fortune | `今日mai` | 今日运势 |
+| guess | `猜歌` / `猜曲绘` | 群内猜歌游戏 |
+| arcade | `添加机厅` / `订阅机厅` / `XX店+2人` / `机厅几人` | 机厅排卡 |
 
 ## 💿 安装
 
@@ -30,7 +55,6 @@
 使用**清华源**安装
 
     nb plugin install nonebot-plugin-awmc-helper --upgrade -i "https://pypi.tuna.tsinghua.edu.cn/simple"
-
 
 </details>
 
@@ -70,37 +94,77 @@
 
 </details>
 
-<details>
-<summary>使用 nbr 安装(使用 uv 管理依赖可用)</summary>
+### 下载素材包
 
-[nbr](https://github.com/fllesser/nbr) 是一个基于 uv 的 nb-cli，可以方便地管理 nonebot2
+与原版 maimaiDX 相同的官方素材（曲绘 / UI / 字体），下载后解压到任意目录：
 
-    nbr plugin install nonebot-plugin-awmc-helper
-使用 **pypi** 源安装
+- 全量包 `Resource CN1.55.7z`：
+  [Cloudreve](https://cloud.yuzuchan.moe/f/34s7/Resource%20CN1.55.7z) ｜
+  [OneDrive](https://yuzuai-my.sharepoint.com/:u:/g/personal/yuzu_yuzuchan_moe/IQBGKHie6MAaTZy3rME7Q-ruAVKgXDCKROqz5e25KtMeeVY?e=53eC6a)
+- 增量包 `Resource CN1.56 UPDATE.7z`（解压覆盖到同一目录）：
+  [Cloudreve](https://cloud.yuzuchan.moe/f/Jvhl/Resource%20CN1.56%20UPDATE.7z) ｜
+  [OneDrive](https://yuzuai-my.sharepoint.com/:u:/g/personal/yuzu_yuzuchan_moe/IQDS_RzM66klSqvHtUhfFPTfAfpJcbGlIbL-7Q6eSPxM4CA?e=xRPo7b)
 
-    nbr plugin install nonebot-plugin-awmc-helper -i "https://pypi.org/simple"
-使用**清华源**安装
-
-    nbr plugin install nonebot-plugin-awmc-helper -i "https://pypi.tuna.tsinghua.edu.cn/simple"
-
-</details>
-
+下载地址来自上游 maimaiDX README，可能随版本轮换，以
+[其 README](https://github.com/Yuri-YuzuChaN/maimaiDX) 最新为准。
 
 ## ⚙️ 配置
 
-在 nonebot2 项目的`.env`文件中添加下表中的必填配置
+在 nonebot2 项目的 `.env` 文件中添加下表配置：
 
-| 配置项  | 必填  | 默认值 |   说明   |
-| :-----: | :---: | :----: | :------: |
-| 配置项1 |  是   |   无   | 配置说明 |
-| 配置项2 |  否   |   无   | 配置说明 |
+| 配置项 | 必填 | 默认值 | 说明 |
+| :--- | :---: | :---: | :--- |
+| `awmc_static_path` | ✔ | 无 | 素材包 static 目录绝对路径 |
+| `awmc_disabled_plugins` | 否 | `[]` | 停用的子插件目录名列表，如 `["arcade","guess"]` |
+| `awmc_default_provider` | 否 | `divingfish` | 默认查分器 `divingfish` / `lxns` |
+| `awmc_divingfish_developer_token` | 否 | 无 | 水鱼开发者 token |
+| `awmc_lxns_developer_token` | 否 | 无 | 落雪开发者 token |
+| `awmc_lxns_client_id` / `awmc_lxns_client_secret` / `awmc_lxns_redirect_uri` | 否 | 无 | 落雪 OAuth 应用（`绑定落雪` 必需） |
+| `awmc_yuzu_proxy` | 否 | `false` | 柚子 API 走 `.cn` 中转域 |
+| `awmc_alias_push` | 否 | `true` | 别名推送默认态（群可指令覆盖） |
+| `awmc_assets_online` | 否 | `true` | icon/plate 素材在线获取 |
+| `awmc_save_in_memory` | 否 | `true` | 素材常驻内存 |
+| `awmc_cache_ttl_hours` | 否 | `24` | 曲库缓存 TTL（小时） |
+| `awmc_guess_enabled` | 否 | `true` | 猜歌默认态（群可指令覆盖） |
+| `awmc_guess_interval` | 否 | `8` | 猜歌提示间隔（秒） |
+| `awmc_guess_duration` | 否 | `30` | 猜歌揭晓时长（秒） |
+| `awmc_arcade_max_delta` | 否 | `30` | 机厅人数单次变更上限 |
 
 ## 🎉 使用
+
 ### 指令表
-| 指令  | 权限  | 需要@ | 范围  |   说明   |
-| :---: | :---: | :---: | :---: | :------: |
-| 指令1 | 主人  |  否   | 私聊  | 指令说明 |
-| 指令2 | 群员  |  是   | 群聊  | 指令说明 |
+
+完整指令表见 [docs/commands.md](docs/commands.md)。
 
 ### 🎨 效果图
-如果有效果图的话
+
+待补充。
+
+## 数据说明
+
+- 运行时数据（绑定、群开关、本地别名、机厅、数据快照）统一存放在
+  localstore 数据目录下的 `awmc.db`（SQLite）；
+- 用户的查分器凭据（水鱼 Import-Token、落雪个人 token）同样只落盘于该数据库，
+  请妥善保管服务器与数据目录的访问权限；
+- 曲库数据每次刷新成功后快照入库，断网时自动降级为上次快照。
+
+## 开发
+
+```bash
+uv sync
+uv run poe test   # pytest + nonebug
+uv run ruff check .
+```
+
+欢迎通过 Issue / PR 反馈问题；提交信息遵循 Conventional Commits
+（英文头 + 中文描述），详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 鸣谢
+
+- [Yuri-YuzuChaN/maimaiDX](https://github.com/Yuri-YuzuChaN/maimaiDX) —— 功能基准与素材包
+- [TrueRou/maimai.py](https://github.com/TrueRou/maimai.py)（[许可](https://github.com/TrueRou/maimai.py/blob/main/LICENSE)）—— 数据层
+- [NoneBot2](https://nonebot.dev) 与社区插件生态
+
+## License
+
+[MIT](LICENSE)
