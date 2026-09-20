@@ -213,6 +213,12 @@ async def get_group_switch(group_id: str, feature: str) -> bool | None:
         return row.enabled if row else None
 
 
+async def get_switch(group_id: str, feature: str, default: bool) -> bool:
+    """生效开关：群级显式覆盖优先，否则取部署级默认值。"""
+    override = await get_group_switch(group_id, feature)
+    return default if override is None else override
+
+
 async def set_group_switch(group_id: str, feature: str, enabled: bool) -> None:
     async with _open_session() as session:
         row = (

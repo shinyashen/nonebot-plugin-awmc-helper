@@ -131,6 +131,23 @@ async def _(match: Match[str] = RegexMatched()):
         await _render_result(songs, page)
 
 
+async def _vote_hint(name: str) -> str | None:
+    """柚子投票中提示（属柚子扩展；接口不可用/未命中时返回 None）。"""
+    from ...core.ext.yuzu import yuzu_client
+
+    try:
+        found = await yuzu_client.get_apply_songs(name)
+    except Exception:
+        return None
+    if found is None or not found.votes:
+        return None
+    msg = f"未找到别名为「{name}」的歌曲，但找到与此相同别名的投票：\n"
+    for s in found.votes:
+        msg += f"- {s.tag}\n    ID {s.song_id}: {s.apply_alias}\n"
+    msg += "※ 可以使用指令「同意别名 XXXXX」进行投票"
+    return msg
+
+
 @search_alias_song.handle()
 @handle_errors()
 async def _(match: Match[str] = RegexMatched()):
@@ -155,6 +172,11 @@ async def _(match: Match[str] = RegexMatched()):
         msg += "".join(f"{s.id}：{s.title}\n" for s in songs)
         msg += "※ 请使用「id xxxxx」查询指定曲目"
         await UniMessage.text(msg.rstrip("\n")).finish()
+
+    # 柚子投票中提示（网络失败静默跳过）
+    vote_msg = await _vote_hint(name)
+    if vote_msg:
+        await UniMessage.text(vote_msg).finish()
 
     # 纯数字 → ID；id12345 → ID
     if name.isdigit() and (song := await song_service.by_id(int(name))):

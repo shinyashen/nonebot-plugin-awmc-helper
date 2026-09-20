@@ -129,6 +129,7 @@ NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名�
 | `awmc_guess_interval` | 否 | `8` | 猜歌提示间隔（秒） |
 | `awmc_guess_duration` | 否 | `30` | 猜歌揭晓时长（秒） |
 | `awmc_arcade_max_delta` | 否 | `30` | 机厅人数单次变更上限 |
+| `awmc_startup_tasks` | 否 | `true` | 启动时执行后台任务（曲库预热、别名 SSE）；测试/CI 置 `false` |
 
 ## 🎉 使用
 

@@ -44,6 +44,8 @@ class Config(BaseModel):
     awmc_guess_duration: int = 30
     # 机厅人数单次变更上限
     awmc_arcade_max_delta: int = 30
+    # 启动时是否执行后台任务（曲库预热、别名 SSE）；测试/CI 置 false
+    awmc_startup_tasks: bool = True
 
 
 plugin_config: Config = get_plugin_config(Config)

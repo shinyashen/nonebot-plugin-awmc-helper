@@ -126,7 +126,7 @@ def make_song(
 def sample_songs() -> list[Song]:
     """一套覆盖各查询路径的样例曲库。"""
     return [
-        make_song(231, "PENGUIN", aliases=["penguin"], artist="DwikkoAengae"),
+        make_song(231, "PENGUIN", aliases=["企鹅舞"], artist="DwikkoAengae"),
         make_song(
             500,
             "Preferences",

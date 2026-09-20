@@ -23,6 +23,7 @@ from .client import (
     yuzu_provider,
     refresh_songs_cache,
 )
+from ..config import plugin_config
 
 SNAPSHOT_KEY = "songs_snapshot"
 
@@ -321,6 +322,18 @@ class SongService:
         """同步读别名索引（已就绪前提下）。"""
         return self._alias_index.get(alias.lower(), set())
 
+    async def aliases_of(self, song_id: int) -> list[str] | None:
+        """某曲目的全部别名（柚子 + 本地）；曲目不存在返回 None。"""
+        song = await self.by_id(song_id)
+        if song is None:
+            return None
+        aliases = list(song.aliases or [])
+        for la in await store.get_local_aliases():
+            if la.song_id == song_id and la.alias not in aliases:
+                aliases.append(la.alias)
+        # 标题本身不计入别名
+        return [a for a in aliases if a.lower() != song.title.lower()]
+
 
 song_service = SongService()
 """曲库服务单例，全部子插件共享。"""
@@ -329,6 +342,9 @@ song_service = SongService()
 @get_driver().on_startup
 async def _startup() -> None:
     await store.init_db()
+    if not plugin_config.awmc_startup_tasks:
+        logger.debug("awmc_startup_tasks=false，跳过曲库预热（测试环境）")
+        return
     # 不阻塞启动：后台拉取，失败自动降级快照（模块持有强引用防任务被回收）
     global _load_task
     _load_task = asyncio.get_running_loop().create_task(song_service.load())
