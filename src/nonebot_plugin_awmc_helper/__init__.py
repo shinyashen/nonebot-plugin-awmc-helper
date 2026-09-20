@@ -39,19 +39,21 @@ logger.debug("awmc-helper 核心服务初始化完成")
 _plugins_dir = Path(__file__).parent.joinpath("plugins").resolve()
 _disabled = plugin_config.awmc_disabled_plugins
 
-# 官方《嵌套插件》加载方式；配置了停用列表时改为逐个调用官方 load_plugin 跳过对应目录
-if _disabled:
+# 官方《嵌套插件》结构：plugins/ 下每个子目录为独立子插件（awmc. 前缀命名、可停用）。
+# 加载用官方 load_plugin(完整模块名)（同文档"停用扩展"API）逐个加载：
+# 不用 load_plugins(目录)：其内部以 CWD 推导模块名，装到 site-packages 后会
+# ValueError 崩溃（上游缺陷，实测 2.4.3/master 均如此，见 local/QUESTIONS.md Q1）。
+if _plugins_dir.is_dir():
     sub_plugins = [
-        nonebot.load_plugin(f"{__package__}.plugins.{name}")
+        p
         for name in sorted(
-            p.name
-            for p in _plugins_dir.iterdir()
-            if p.is_dir() and (p / "__init__.py").exists() and p.name not in _disabled
+            x.name
+            for x in _plugins_dir.iterdir()
+            if x.is_dir() and (x / "__init__.py").exists() and x.name not in _disabled
         )
+        if (p := nonebot.load_plugin(f"{__package__}.plugins.{name}")) is not None
     ]
-    if skipped := sorted(_disabled):
-        logger.info(f"awmc-helper 已停用子插件：{', '.join(skipped)}")
-elif _plugins_dir.is_dir():
-    sub_plugins = nonebot.load_plugins(str(_plugins_dir))
 else:  # 首个子插件落地前 plugins/ 目录尚不存在
     sub_plugins = []
+if _disabled:
+    logger.info(f"awmc-helper 已停用子插件：{', '.join(sorted(_disabled))}")
