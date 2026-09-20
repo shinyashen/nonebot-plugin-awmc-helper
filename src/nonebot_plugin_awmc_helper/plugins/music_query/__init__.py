@@ -34,9 +34,9 @@ __plugin_meta__ = PluginMetadata(
 
 NOT_FOUND = "没有找到这样的乐曲。\n※ 如果是别名请使用「XXX是什么歌」指令进行查询哦。"
 
-search = on_regex(r"^(定数|bpm|曲师|谱师)?查歌\s?(.*)", re.IGNORECASE, block=True)
+search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
 search_alias_song = on_regex(r"(.+)是(?:什么|啥)歌[？?]?([0-9]+)?$", block=True)
-query_chart = on_regex(r"^id\s?([0-9]+)$", re.IGNORECASE, block=True)
+query_chart = on_regex(r"(?i)^id\s?([0-9]+)$", block=True)
 
 
 def _split_page(args: list[str]) -> tuple[str, int]:

@@ -7,6 +7,7 @@
   启动拉取失败时降级为上次快照，不阻塞 bot 启动。
 """
 
+import random as _random
 import asyncio
 from enum import Enum
 from typing import Any
@@ -313,9 +314,7 @@ class SongService:
         level_index: LevelIndex | None = None,
         exclude_utage: bool = True,
     ) -> tuple[Song, SongDifficulty] | None:
-        """随机谱面：按类型/分类/等级过滤后 random.choice（maimai-py 无随机接口）。"""
-        import random as _random
-
+        """随机谱面：按类型/分类/等级过滤后随机选择（maimai-py 无随机接口）。"""
         candidates: list[tuple[Song, SongDifficulty]] = []
         for song in await self.get_all():
             if genre is not None and song.genre != genre:
