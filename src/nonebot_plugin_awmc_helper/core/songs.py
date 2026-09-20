@@ -21,15 +21,20 @@ from .client import (
     client,
     lxns_provider,
     yuzu_provider,
+    divingfish_provider,
     refresh_songs_cache,
 )
 from ..config import plugin_config
 
 SNAPSHOT_KEY = "songs_snapshot"
 
-# 曲库数据源组合：曲库走落雪（含物量），别名走柚子
+# 曲库数据源组合：曲库走落雪（含物量），别名走柚子；
+# 配置了水鱼开发者 token 时附带曲线数据（ginfo/统计用）
 _SONG_PROVIDER = lxns_provider
 _ALIAS_PROVIDER = yuzu_provider
+_CURVE_PROVIDER = (
+    divingfish_provider if plugin_config.awmc_divingfish_developer_token else None
+)
 
 
 def _json_default(obj: Any) -> Any:
@@ -170,7 +175,17 @@ class SongService:
         await cache.set("ids", [s.id for s in songs], namespace="songs")
         await cache.multi_set(iter((s.id, s) for s in songs), namespace="songs")
         await cache.multi_set(iter((s.title, s.id) for s in songs), namespace="tracks")
+        await self._seed_versions(songs)
         await self._apply_to_cache(songs)
+
+    async def _seed_versions(self, all_songs: list[Song]) -> None:
+        """种子化 versions 缓存（B35/B15 拆分与牌子进度依赖）。"""
+        versions = {
+            f"{s.id} {d.type} {d.level_index}": d.version
+            for s in all_songs
+            for d in s.get_difficulties()
+        }
+        await client._cache.set("versions", versions, namespace="songs")
 
     async def _apply_to_cache(self, all_songs: list[Song]) -> None:
         index: dict[str, set[int]] = {}

@@ -19,12 +19,17 @@ def paginate(data: list[T], page: int, per_page: int) -> tuple[list[T], int]:
     return data[start : start + per_page], total
 
 
-def handle_errors(fallback: str = "出错了，请稍后再试或联系管理员。") -> Callable:
+def handle_errors(
+    fallback: str = "出错了，请稍后再试或联系管理员。",
+    except_with_message: tuple[type[Exception], ...] = (),
+) -> Callable:
     """子插件 handler 的统一异常兜底。
 
-    NoneBot 的 MatcherException（Finished/Rejected/Paused/Skipped 等）
-    在 matcher 控制流程中抛出，必须原样透传；
-    其余异常转友好文案并记录日志，不向用户泄漏堆栈。
+    - NoneBot 的 MatcherException（Finished/Rejected/Paused/Skipped 等）
+      在 matcher 控制流程中抛出，必须原样透传；
+    - ``except_with_message`` 中的业务异常（如 UserScoreError）把 str(e)
+      作为用户文案发送；
+    - 其余异常转友好文案并记录日志，不向用户泄漏堆栈。
     """
 
     def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
@@ -34,6 +39,8 @@ def handle_errors(fallback: str = "出错了，请稍后再试或联系管理员
                 return await func(*args, **kwargs)
             except MatcherException:
                 raise
+            except except_with_message as e:
+                await UniMessage.text(str(e)).finish()
             except Exception:
                 logger.exception("awmc-helper 处理指令时出现未捕获异常")
                 await UniMessage.text(fallback).finish()
