@@ -183,3 +183,11 @@ config/
 
 .DS_Store
 junit.xml
+
+# ---- 本地资料（AI 代理指引、参考仓库克隆、调研笔记、凭据），永不入库 ----
+AGENTS.md
+agents.md
+local/
+
+# ---- 静态素材包（曲绘/UI 素材，用户自行下载，不入库） ----
+static/

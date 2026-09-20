@@ -84,7 +84,7 @@ executionEnvironments = [
 typeCheckingMode = "standard"
 disableBytesTypePromotions = true
 
-[tool.pytest]
+[tool.pytest.ini_options]
 addopts = [
   "--import-mode=prepend", # 导入模式
   "--strict-markers",      # 严格标记模式
@@ -93,6 +93,7 @@ addopts = [
   "-s",                    # 显示打印信息
   "-v",                    # 详细输出
 ]
+testpaths = ["tests"]    # 只收集本仓库测试，忽略 local/ 下的参考仓库
 pythonpath = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
