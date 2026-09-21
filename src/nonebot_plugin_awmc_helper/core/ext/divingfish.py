@@ -7,6 +7,21 @@ import httpx
 from . import ExtError, ExtNetworkError, get_client
 
 RANKING_URL = "https://www.diving-fish.com/api/maimaidxprober/rating_ranking"
+MUSIC_DATA_URL = "https://www.diving-fish.com/api/maimaidxprober/music_data"
+
+
+async def fetch_music_data() -> list[dict]:
+    """直连拉取水鱼曲库（国服对账源：version_cn/定数互证 + 在列判定，song-db-design §7.2）。
+
+    与落雪同为唯二国服源；不得走 MaimaiClient（理由同 lxns.fetch_song_list）。
+    """
+    try:
+        resp = await get_client().get(MUSIC_DATA_URL, timeout=60)
+    except httpx.RequestError as e:
+        raise ExtNetworkError("水鱼曲库网络异常，请稍后再试") from e
+    if resp.status_code != 200:
+        raise ExtError(f"水鱼曲库拉取失败（HTTP {resp.status_code}）")
+    return resp.json()
 
 
 @dataclass

@@ -132,6 +132,108 @@ class KvCache(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
+# 歌曲规范表（01-Data-structure.md 1:1；日服全集 ∪ 国服信息，见 song-db-design §4）
+# ---------------------------------------------------------------------------
+
+
+class SongRow(SQLModel, table=True):
+    """歌曲主表：id 0–9999（宴折基曲），并集 ≈1900 行。"""
+
+    __tablename__ = "song"  # type: ignore[reportGeneralTypeIssues]
+
+    id: int = Field(primary_key=True)
+    title: str = Field(index=True)
+    artist: str = ""
+    genre: str = ""  # 日文流派名（maimai_py Genre 值域）
+    bpm: str = ""  # 01 文档 str（各源 int/str 混存 → 统一 TEXT）
+    image_url: str | None = None  # otoge-db 官方封面哈希名
+
+
+class SongSheetGroup(SQLModel, table=True):
+    """谱面组（sd/dx/utage）：组内谱面 version 完全一致（song-db-design §2.3）。
+
+    ``version`` = 日服更新版本；``version_cn`` = 国服更新版本，NULL = 国服未上线；
+    ``date`` = 日服更新（宴为复活）日期，8 位 int。
+    """
+
+    __tablename__ = "song_sheet_group"  # type: ignore[reportGeneralTypeIssues]
+
+    song_id: int = Field(primary_key=True)
+    kind: str = Field(primary_key=True)  # sd / dx / utage
+    version: int | None = None
+    version_cn: int | None = None
+    date: int | None = None
+
+
+class SongChart(SQLModel, table=True):
+    """谱面：level_id sd/dx 取 0–4，宴取 6 位机台内部 id 的右起第 5 位。
+
+    ``notes_left``/``notes_right`` 仅 buddy 谱使用，``[tap,hold,slide,touch,break]`` JSON。
+    """
+
+    __tablename__ = "song_chart"  # type: ignore[reportGeneralTypeIssues]
+
+    song_id: int = Field(primary_key=True)
+    kind: str = Field(primary_key=True)
+    level_id: int = Field(primary_key=True)
+    designer: str | None = None
+    notes_tap: int = 0
+    notes_hold: int = 0
+    notes_slide: int = 0
+    notes_touch: int = 0
+    notes_break: int = 0
+    kanji: str | None = None  # 仅 utage
+    comment: str | None = None  # 仅 utage（otoge-db 原生字段）
+    is_buddy: bool = False  # 仅 utage
+    notes_left: str | None = None  # JSON
+    notes_right: str | None = None  # JSON
+
+
+class SongChartLevel(SQLModel, table=True):
+    """定数历史（``level`` 数组的关系化，只存变化点，读取方 carry-forward）。
+
+    ``version`` = 该定数自此版本起生效；语义为日服序列（song-db-design §4.4），
+    国服当前定数经 §5.3 规则推导，不入本表。
+    """
+
+    __tablename__ = "song_chart_level"  # type: ignore[reportGeneralTypeIssues]
+
+    song_id: int = Field(primary_key=True)
+    kind: str = Field(primary_key=True)
+    level_id: int = Field(primary_key=True)
+    version: int = Field(primary_key=True)
+    level_value: float | None = None  # 宴为标级推导值（+/无+ → .7/.0）
+
+
+class SongSourceRaw(SQLModel, table=True):
+    """源始 JSON 留档（基建）：otoge-db 无 id，键用 ``title:<曲名>``。"""
+
+    __tablename__ = "song_source_raw"  # type: ignore[reportGeneralTypeIssues]
+
+    source: str = Field(primary_key=True)  # lxns / divingfish / maimaiinfo / otoge-db / extra:<名称>
+    song_id: str = Field(primary_key=True)  # 曲 id 字符串或 title:<曲名>
+    payload: str  # JSON
+    fetched_at: datetime = Field(default_factory=datetime.now)
+
+
+class SongPending(SQLModel, table=True):
+    """信息不足暂存（基建）：主键（机台内部 id）不可得的曲目，补足后批量归并。
+
+    字段级缺失不算 pending（仍入主表、列置空）；pending 只承载阻塞性缺失。
+    """
+
+    __tablename__ = "song_pending"  # type: ignore[reportGeneralTypeIssues]
+
+    source: str = Field(primary_key=True)
+    key: str = Field(primary_key=True)  # 无 id 时 title:<曲名>，有 id 后为 id 字符串
+    reason: str = "missing_id"
+    payload: str  # JSON，该源原始条目（归并时的输入）
+    first_seen: datetime = Field(default_factory=datetime.now)
+    last_seen: datetime = Field(default_factory=datetime.now)
+    attempts: int = 0
+
+
+# ---------------------------------------------------------------------------
 # 引擎管理
 # ---------------------------------------------------------------------------
 

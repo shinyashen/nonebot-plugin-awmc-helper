@@ -46,6 +46,15 @@ class Config(BaseModel):
     awmc_arcade_max_delta: int = 30
     # 启动时是否执行后台任务（曲库预热、别名 SSE）；测试/CI 置 false
     awmc_startup_tasks: bool = True
+    # 国服曲库轮询间隔（分钟，0=禁用）；检测到国服更新时自动重建规范表并刷新运行时
+    awmc_cn_poll_minutes: int = 60
+    # 检测到国服更新后是否自动重建定数表/完成表底图
+    awmc_auto_templates: bool = True
+    # 检测到国服更新后是否向 SUPERUSER 私聊推送通知
+    awmc_update_notify: bool = True
+    # 外部补充源列表（标准 JSON 文件路径或 http(s) URL，仅允许补充日服侧数据，匿名读取；
+    # 可加 ::fill / ::override 后缀指定该源合并模式，默认 override）
+    awmc_extra_song_sources: list[str] = []
 
 
 plugin_config: Config = get_plugin_config(Config)

@@ -10,6 +10,27 @@ LXNS_BASE = "https://maimai.lxns.net"
 SCOPE = "read_player read_user_profile"
 
 
+async def fetch_song_list(notes: bool = True) -> dict:
+    """直连拉取落雪曲库列表（国服规范表的唯一国服谱面源，song-db-design §7.2）。
+
+    - **不得走 MaimaiClient**：``client.songs()`` 会写运行时缓存命名空间，污染 CN 视图；
+    - ``notes=false`` 的轻载荷（≈109KB）仅用于每小时轮询的更新检测；
+    - 必须带开发者 token（未配置时落雪公开列表也可匿名读，但保持与 provider 一致）。
+    """
+    headers = {"Authorization": plugin_config.awmc_lxns_developer_token} if plugin_config.awmc_lxns_developer_token else {}
+    resp = await get_client().get(
+        f"{LXNS_BASE}/api/v0/maimai/song/list?notes={'true' if notes else 'false'}",
+        headers=headers,
+        timeout=60,
+    )
+    if resp.status_code != 200:
+        raise ExtError(f"落雪曲库列表拉取失败（HTTP {resp.status_code}）")
+    data = resp.json()
+    if not data.get("success", True):
+        raise ExtError(str(data.get("message", "落雪曲库列表拉取失败")))
+    return data.get("data", data)
+
+
 class LxnsToken:
     access_token: str
     refresh_token: str | None

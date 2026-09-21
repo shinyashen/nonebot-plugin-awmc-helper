@@ -154,6 +154,71 @@ PLATE_KIND_ZH: dict[str, str] = {
     "舞舞": "全曲目 Full Sync DX（FSD）",
 }
 
+# 完成表预渲染枚举（SUPERUSER 指令与国服更新自动触发共用，song-db-design §7.3）
+PLATE_CHARS = "舞霸真超檄橙晓桃樱紫堇白雪辉熊华爽煌星宙祭祝双宴镜彩丸"
+PLATE_KINDS = ("将", "者", "极", "神", "舞舞")
+
+# ---------------------------------------------------------------------------
+# 版本名 → 版本码（歌曲库日侧骨架用；穷举自 maimai_py Version 枚举，勿凭记忆增删）
+# ---------------------------------------------------------------------------
+
+# maimaiinfo（all_data `from` / dschange 版本名）与 maimai_py divingfish_to_version 的并集：
+# 后者缺 DX 时代的 PLUS 各版与 CiRCLE PLUS，此处按 Version 枚举值补全
+SOURCE_NAME_TO_VERSION: dict[str, int] = {
+    "maimai": 10000,
+    "maimai PLUS": 11000,
+    "maimai GreeN": 12000,
+    "maimai GreeN PLUS": 13000,
+    "maimai ORANGE": 14000,
+    "maimai ORANGE PLUS": 15000,
+    "maimai PiNK": 16000,
+    "maimai PiNK PLUS": 17000,
+    "maimai MURASAKi": 18000,
+    "maimai MURASAKi PLUS": 18500,
+    "maimai MiLK": 19000,
+    "maimai MiLK PLUS": 19500,
+    "maimai FiNALE": 19900,
+    "maimai でらっくす": 20000,
+    "maimai でらっくす PLUS": 20500,
+    "maimai でらっくす Splash": 21000,
+    "maimai でらっくす Splash PLUS": 21500,
+    "maimai でらっくす UNiVERSE": 22000,
+    "maimai でらっくす UNiVERSE PLUS": 22500,
+    "maimai でらっくす FESTiVAL": 23000,
+    "maimai でらっくす FESTiVAL PLUS": 23500,
+    "maimai でらっくす BUDDiES": 24000,
+    "maimai でらっくす BUDDiES PLUS": 24500,
+    "maimai でらっくす PRiSM": 25000,
+    "maimai でらっくす PRiSM PLUS": 25500,
+    "maimai でらっくす CiRCLE": 26000,
+    "maimai でらっくす CiRCLE PLUS": 26500,
+}
+
+# 版本码 → 显示名兜底（maimai_py 枚举之外的已知新版本；数据源 otoge-db/DXRating 已收录。
+# 库跟进新版本枚举后，此处条目自然失效，version_name() 会优先命中枚举）
+EXTRA_VERSION_NAMES: dict[int, str] = {
+    27000: "MAGiCAL",  # 2026-09-17 日服上线；maimai_py 1.5.2 尚未收录（song-db-design §7.4）
+}
+
+
+def version_name(version: int) -> str:
+    """版本码 → 显示名：① maimai_py 枚举精确成员 → ② 数据源版本表 → ③ 原码字符串。
+
+    禁止用 ``Version.from_value`` 判未知码（其语义为「≤ 值的最近枚举」，27000 会被
+    错误钳成 CiRCLE PLUS，song-db-design §7.4）。
+    """
+    try:
+        ver = Version(version)
+    except ValueError:
+        return EXTRA_VERSION_NAMES.get(version, str(version))
+    return VERSION_TO_ZH.get(ver, ver.name)
+
+
+def level_from_value(level_value: float) -> str:
+    """定数 → 标级串（otoge-db 全量验证：x.0–x.5 → 无+，x.6–x.9 → +，0 冲突）。"""
+    base = int(level_value)
+    return f"{base}+" if round(level_value * 10) % 10 >= 6 else f"{base}"
+
 
 # ---------------------------------------------------------------------------
 # NB 版绘图移植用的映射表（core/render/nb_chart.py、best50.py 使用）
