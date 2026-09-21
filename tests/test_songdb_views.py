@@ -219,7 +219,9 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
         assert await song_service.by_id(555) is None  # JP-only
         assert await song_service.by_id(9002) is not None  # CN-only
         dx_song = await song_service.by_id(21)
+        assert dx_song is not None
         master = dx_song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+        assert master is not None
         assert master.level_value == 12.3  # 日服 12.5 未进国服（§5.3）
 
         # 规范表被清空（离线首启模拟）：空数据视为失败 → 快照降级恢复
