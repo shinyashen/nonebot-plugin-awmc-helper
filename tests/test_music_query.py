@@ -3,6 +3,7 @@
 import base64
 
 import pytest
+from mocks import requires_assets
 from nonebug import App
 
 
@@ -124,6 +125,7 @@ async def _assert_image_reply(
         ctx.should_finished()
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_search_single_draws_card(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import music_query
@@ -192,6 +194,7 @@ async def test_alias_search_multi(app: App, songs):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_alias_search_single(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import music_query
@@ -212,6 +215,7 @@ async def test_query_chart_not_found(app: App, songs):
     await _assert_reply(app, "query_chart", "id 99999", "未找到ID为「99999」的乐曲")
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_query_chart_card(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import music_query

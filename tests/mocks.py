@@ -1,7 +1,9 @@
 """测试公共工具：假曲目数据构造与曲库缓存注入。"""
 
 from typing import TYPE_CHECKING
+from pathlib import Path
 
+import pytest
 from maimai_py import (
     Song,
     Genre,
@@ -14,6 +16,13 @@ from maimai_py.models import CurveObject, SongDifficultyUtage
 
 if TYPE_CHECKING:
     from nonebot_plugin_awmc_helper.core.songs import SongService
+
+# NB 版视觉移植的底图来自本地素材包 static/（永不入库，见 AGENTS.md 硬性规则 5）；
+# CI 等无素材环境下跳过依赖底图的渲染测试。
+ASSETS_READY = Path("static/mai/pic/prism_plus/b50.png").exists()
+requires_assets = pytest.mark.skipif(
+    not ASSETS_READY, reason="需本地素材包 static/（不入库），CI 无此环境"
+)
 
 
 def make_diff(

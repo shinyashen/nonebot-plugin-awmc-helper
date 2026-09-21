@@ -1,6 +1,7 @@
 """awmc.score_query 查分子插件测试。"""
 
 import pytest
+from mocks import requires_assets
 from nonebug import App
 
 BASE_DF = "https://www.diving-fish.com/api/maimaidxprober"
@@ -82,6 +83,7 @@ async def test_b50_unbound_hint(app: App, db, songs):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_b50_username_lookup(app: App, db, songs):
     """b50 <水鱼用户名> 公开代查：respx mock 水鱼接口，期望图与真实渲染同源。"""

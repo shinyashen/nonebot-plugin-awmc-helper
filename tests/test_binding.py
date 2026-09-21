@@ -4,6 +4,7 @@ from pathlib import Path
 
 import respx
 import pytest
+from mocks import requires_assets
 
 BASE_DF = "https://www.diving-fish.com/api/maimaidxprober"
 
@@ -150,6 +151,7 @@ async def test_error_mapping_privacy(db, songs):
             await score_service.get_player(binding)
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_b50_render_smoke(db, songs):
     """B50 与成绩列表绘图冒烟。"""
