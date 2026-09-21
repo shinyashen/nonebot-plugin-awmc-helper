@@ -81,7 +81,9 @@ async def test_random_chart(app: App, songs):
 
     from nonebot_plugin_awmc_helper.core.render import song as song_render
 
-    song, diff = await song_service.random(song_type=SongType.DX, level="13+")
+    picked = await song_service.random(song_type=SongType.DX, level="13+")
+    assert picked is not None
+    song, diff = picked
     png = song_render.random_song_bytes(song, diff)
     event = fake_group_message_event_v11(message="随个dx13+")
     expected = Message(
@@ -245,7 +247,9 @@ async def test_guess_manager(songs, monkeypatch):
     assert len(game.hints) == 6
     # 6 条提示后进入曲绘阶段
     for i in range(6):
-        assert game.next_hint().startswith(f"提示{i + 1}")
+        hint = game.next_hint()
+        assert hint is not None
+        assert hint.startswith(f"提示{i + 1}")
     assert game.next_hint() is None
 
     assert not game.match("完全无关的回答")
@@ -275,6 +279,7 @@ async def test_guess_answer_flow(app: App, songs, monkeypatch):
     monkeypatch.setattr(guess_plugin, "_reveal", fake_reveal)
 
     song = await guess_plugin._pick_song()
+    assert song is not None
     game = guess_plugin.GuessGame(
         song, pic_mode=True, group_id="g2", bot=None, event=None
     )
@@ -374,7 +379,9 @@ async def test_mai_what_rise_fallback(app: App, songs, monkeypatch):
         return all_songs[0], all_songs[0].get_difficulties()[0]
 
     monkeypatch.setattr(song_service, "random", fake_random)
-    song, _diff = await song_service.random(exclude_utage=True)
+    picked = await song_service.random(exclude_utage=True)
+    assert picked is not None
+    song, _diff = picked
     png = song_render.song_card_bytes(song)
 
     event = fake_group_message_event_v11(message="mai什么加分")

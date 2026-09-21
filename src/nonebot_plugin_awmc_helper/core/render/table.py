@@ -1,5 +1,7 @@
 """完成度表格绘图：完成表/进度的封面网格。"""
 
+from collections.abc import Sequence
+
 from PIL import Image, ImageDraw
 from maimai_py import Song
 
@@ -20,7 +22,7 @@ BG = "#f2f3f5"
 
 def draw_completion_grid(
     title: str,
-    items: list[tuple[Song, object, str]],
+    items: Sequence[tuple[Song, object, str]],
     per_row: int = 7,
 ) -> Image.Image:
     """完成表网格。

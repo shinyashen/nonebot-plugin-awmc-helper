@@ -5,7 +5,9 @@ import nonebot
 
 
 def test_plugin_loaded():
-    plugins = {p.metadata.name for p in nonebot.get_loaded_plugins()}
+    plugins = {
+        p.metadata.name for p in nonebot.get_loaded_plugins() if p.metadata is not None
+    }
     assert "awmc-helper" in plugins
 
 
@@ -13,6 +15,7 @@ def test_plugin_metadata():
     from nonebot_plugin_awmc_helper import __plugin_meta__
 
     assert __plugin_meta__.name == "awmc-helper"
+    assert __plugin_meta__.homepage is not None
     assert __plugin_meta__.homepage.startswith("https://github.com/shinyashen/")
     assert __plugin_meta__.config is not None
 

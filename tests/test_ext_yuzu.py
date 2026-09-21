@@ -1,10 +1,16 @@
 """core/ext/yuzu：柚子 REST 客户端与 SSE 解析测试（respx mock）。"""
 
+from __future__ import annotations
+
 import json
 import asyncio
+from typing import TYPE_CHECKING
 
 import respx
 import pytest
+
+if TYPE_CHECKING:
+    from nonebot_plugin_awmc_helper.core.ext.yuzu import AliasPush
 
 BASE = "https://www.yuzuchan.moe/api/v2"
 
@@ -169,9 +175,9 @@ async def test_sse_runner_pushes_apply(yuzu_mock, yuzu_ext):
         200, headers={"content-type": "text/event-stream"}, content=sse_payload
     )
 
-    received: list[yuzu_ext.AliasPush] = []
+    received: list[AliasPush] = []
 
-    async def on_apply(push: yuzu_ext.AliasPush) -> None:
+    async def on_apply(push: AliasPush) -> None:
         received.append(push)
         yuzu_ext.stop_alias_push()  # 收到后结束任务
 

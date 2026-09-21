@@ -9,6 +9,7 @@
 
 import asyncio
 from pathlib import Path
+from collections.abc import Sequence
 
 from PIL import Image
 from maimai_py import Song, SongType, SongDifficulty
@@ -141,7 +142,7 @@ def _stamp(img: Image.Image, index: int, done: bool) -> None:
 async def overlay_rating(
     level: str,
     plan_name: str,
-    state_list: list[tuple[Song, object, bool]],
+    state_list: Sequence[tuple[Song, object, bool]],
     page: int,
     per_page: int,
 ) -> bytes | None:

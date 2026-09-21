@@ -329,13 +329,15 @@ async def test_completion_grid_smoke(songs):
     from nonebot_plugin_awmc_helper.core.render.table import completion_grid_bytes
 
     song = await song_service.by_id(231)
-    diff = song.get_difficulty(SongType.DX, 3)
+    assert song is not None
+    diff = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+    assert diff is not None
     png = completion_grid_bytes("测试完成表 1/1", [(song, diff, "done")])
     assert png.startswith(b"\x89PNG")
     assert len(png) > 1000
 
 
-from maimai_py import SongType
+from maimai_py import SongType, LevelIndex
 
 
 @pytest.mark.asyncio
@@ -354,6 +356,7 @@ async def test_table_template_overlay(songs):
     assert path.exists()
 
     song231 = await song_service.by_id(231)
+    assert song231 is not None
     diff = song231.get_difficulties()[0]
     state_list = [(song231, diff, True)]
     png = await table_template.overlay_rating(

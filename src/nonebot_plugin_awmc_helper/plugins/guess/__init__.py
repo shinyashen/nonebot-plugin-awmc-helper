@@ -62,7 +62,13 @@ class GuessGame:
     """一局猜歌/猜曲绘。"""
 
     def __init__(
-        self, song: Song, *, pic_mode: bool, group_id: str, bot: Bot, event: Event
+        self,
+        song: Song,
+        *,
+        pic_mode: bool,
+        group_id: str,
+        bot: Bot | None,
+        event: Event | None,
     ) -> None:
         self.song = song
         self.group_id = group_id
@@ -158,6 +164,9 @@ async def _reveal(game: GuessGame, prefix: str) -> None:
 
 async def _hint_loop(game: GuessGame) -> None:
     """提示循环：逐条发提示 → 裁剪曲绘 → 计时揭晓。"""
+    # 循环仅由 _start_game（携带真实 bot/event）启动，测试路径不进入
+    assert game.bot is not None
+    assert game.event is not None
     try:
         while True:
             hint = game.next_hint()

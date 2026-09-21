@@ -235,7 +235,9 @@ async def test_render_smoke(songs):
         song_list_bytes,
     )
 
-    card = song_card_bytes(await song_service.by_id(231))
+    song231 = await song_service.by_id(231)
+    assert song231 is not None
+    card = song_card_bytes(song231)
     assert card.startswith(b"\x89PNG")
     assert len(card) > 1000
     listing = song_list_bytes(await song_service.get_all(), 1)

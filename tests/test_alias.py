@@ -121,20 +121,20 @@ async def test_local_alias_apply(app: App, songs, tmp_path):
             "已成功为ID「231」添加别名「企鹅」到本地别名库",
             with_session=True,
         )
-    from nonebot_plugin_awmc_helper.core.songs import song_service
+        from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    aliases = await song_service.aliases_of(231)
-    assert aliases is not None
-    assert "企鹅" in aliases
+        aliases = await song_service.aliases_of(231)
+        assert aliases is not None
+        assert "企鹅" in aliases
 
-    # 重复添加 → 提示已存在
-    await _assert_reply(
-        app,
-        alias.alias_local_apply,
-        "添加本地别名 231 企鹅",
-        "本地别名库已存在该别名",
-        with_session=True,
-    )
+        # 重复添加 → 提示已存在（同样必须在 mock 上下文内，避免真实请求柚子）
+        await _assert_reply(
+            app,
+            alias.alias_local_apply,
+            "添加本地别名 231 企鹅",
+            "本地别名库已存在该别名",
+            with_session=True,
+        )
     from nonebot_plugin_awmc_helper.core import store as awmc_store
 
     assert (
