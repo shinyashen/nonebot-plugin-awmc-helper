@@ -92,13 +92,13 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
                 "已使用 QQ 号作为水鱼公开查询凭据。\n"
                 "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」"
                 "（获取方式：水鱼个人页 → 设置 → Import-Token）"
-            ).finish()
-        await UniMessage.text("用法：绑定水鱼 <水鱼用户名>").finish()
+            ).finish(at_sender=True)
+        await UniMessage.text("用法：绑定水鱼 <水鱼用户名>").finish(at_sender=True)
     await binding_service.bind_divingfish_username(binding, arg)
     await UniMessage.text(
         f"已绑定水鱼账号「{arg}」（公开查询）。\n"
         "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」"
-    ).finish()
+    ).finish(at_sender=True)
 
 
 @df_token.handle()
@@ -110,12 +110,12 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         await UniMessage.text(
             "用法：绑定水鱼token <Import-Token>\n"
             "获取方式：水鱼查分器个人页 → 设置 → 生成 Import-Token"
-        ).finish()
+        ).finish(at_sender=True)
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.bind_divingfish_token(binding, token)
     await UniMessage.text(
         "已保存水鱼 Import-Token（仅存于本机数据库，用于查询全量成绩）"
-    ).finish()
+    ).finish(at_sender=True)
 
 
 @lx_bind.handle()
@@ -131,21 +131,23 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
                 "并将获得的授权码回复给机器人（20 分钟内有效）：\n"
                 f"{lxns_ext.build_authorize_url()}\n\n"
                 "收到授权码后发送：落雪授权码 <授权码>"
-            ).finish()
+            ).finish(at_sender=True)
         await UniMessage.text(
             "BOT 管理员尚未配置落雪 OAuth\n"
             "（AWMC_LXNS_CLIENT_ID/SECRET/REDIRECT_URI）。\n"
             "仍可直接绑定：绑定落雪 <个人Token> 或 绑定落雪 <好友码>"
-        ).finish()
+        ).finish(at_sender=True)
     # 带参数直绑：好友码（纯数字）或个人 Token
     binding = await binding_service.ensure(platform, user_id)
     if arg.isdigit() and 9 <= len(arg) <= 12:
         await binding_service.bind_lxns(binding, token=None, friend_code=int(arg))
         await UniMessage.text(
             f"已绑定落雪好友码 {arg}（需要部署配置开发者 Token 才能查询）"
-        ).finish()
+        ).finish(at_sender=True)
     await binding_service.bind_lxns(binding, token=arg, friend_code=None)
-    await UniMessage.text("已绑定落雪个人 Token（仅存于本机数据库）").finish()
+    await UniMessage.text("已绑定落雪个人 Token（仅存于本机数据库）").finish(
+        at_sender=True
+    )
 
 
 @lx_code.handle()
@@ -154,7 +156,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     platform, user_id = _keys(session)
     code = lxns_ext.extract_authorization_code(str(message))
     if code is None:
-        await UniMessage.text("授权码格式有误，请重新提交").finish()
+        await UniMessage.text("授权码格式有误，请重新提交").finish(at_sender=True)
     await _complete_lxns(platform, user_id, code)
 
 
@@ -162,14 +164,14 @@ async def _complete_lxns(platform: str, user_id: str, code: str) -> None:
     try:
         token = await lxns_ext.fetch_token(code)
     except Exception as e:
-        await UniMessage.text(f"落雪授权失败：{e}").finish()
+        await UniMessage.text(f"落雪授权失败：{e}").finish(at_sender=True)
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.bind_lxns(
         binding, token=token.access_token, friend_code=token.friend_code
     )
     pending_bindings.discard(platform, user_id)
     fc = f"，好友码 {token.friend_code}" if token.friend_code else ""
-    await UniMessage.text(f"落雪绑定成功{fc}").finish()
+    await UniMessage.text(f"落雪绑定成功{fc}").finish(at_sender=True)
 
 
 @unbind.handle()
@@ -177,8 +179,8 @@ async def _complete_lxns(platform: str, user_id: str, code: str) -> None:
 async def _(session: Session = UniSession()):
     platform, user_id = _keys(session)
     if await binding_service.unbind(platform, user_id):
-        await UniMessage.text("已解除绑定").finish()
-    await UniMessage.text("尚未绑定").finish()
+        await UniMessage.text("已解除绑定").finish(at_sender=True)
+    await UniMessage.text("尚未绑定").finish(at_sender=True)
 
 
 @set_provider.handle()
@@ -187,15 +189,17 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = str(message).strip()
     service = {"0": SERVICE_DIVINGFISH, "1": SERVICE_LXNS}.get(arg)
     if service is None:
-        await UniMessage.text("用法：数据源 <0|1>（0 = 水鱼，1 = 落雪）").finish()
+        await UniMessage.text("用法：数据源 <0|1>（0 = 水鱼，1 = 落雪）").finish(
+            at_sender=True
+        )
     platform, user_id = _keys(session)
     binding = await binding_service.ensure(platform, user_id)
     try:
         await binding_service.set_service(binding, service)
     except Exception as e:
-        await UniMessage.text(str(e)).finish()
+        await UniMessage.text(str(e)).finish(at_sender=True)
     name = "水鱼" if service == SERVICE_DIVINGFISH else "落雪"
-    await UniMessage.text(f"数据源已切换为{name}").finish()
+    await UniMessage.text(f"数据源已切换为{name}").finish(at_sender=True)
 
 
 @set_theme.handle()
@@ -203,11 +207,13 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = str(message).strip()
     if arg not in ("0", "1"):
-        await UniMessage.text("用法：主题 <0|1>（0 = prism_plus，1 = circle）").finish()
+        await UniMessage.text("用法：主题 <0|1>（0 = prism_plus，1 = circle）").finish(
+            at_sender=True
+        )
     platform, user_id = _keys(session)
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.set_theme(binding, "prism_plus" if arg == "0" else "circle")
-    await UniMessage.text("主题已切换").finish()
+    await UniMessage.text("主题已切换").finish(at_sender=True)
 
 
 @my_bind.handle()
@@ -216,7 +222,7 @@ async def _(session: Session = UniSession()):
     platform, user_id = _keys(session)
     binding = await binding_service.get(platform, user_id)
     if binding is None:
-        await UniMessage.text("尚未绑定").finish()
+        await UniMessage.text("尚未绑定").finish(at_sender=True)
     lines = [f"数据源：{'水鱼' if binding.service == SERVICE_DIVINGFISH else '落雪'}"]
     if binding.divingfish_username:
         lines.append(f"水鱼用户名：{binding.divingfish_username}")
@@ -227,4 +233,4 @@ async def _(session: Session = UniSession()):
     if binding.lxns_token:
         lines.append(f"落雪 Token：{binding.lxns_token[:4]}****")
     lines.append(f"主题：{'prism_plus' if binding.theme == 'prism_plus' else 'circle'}")
-    await UniMessage.text("\n".join(lines)).finish()
+    await UniMessage.text("\n".join(lines)).finish(at_sender=True)

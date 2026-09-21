@@ -17,7 +17,7 @@ async def db(tmp_path):
 async def _assert_reply(app: App, matcher, text: str, reply: str, *, user_id=12345678):
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     event = fake_group_message_event_v11(message=text, user_id=user_id)
@@ -44,7 +44,12 @@ async def _assert_reply(app: App, matcher, text: str, reply: str, *, user_id=123
                 "nickname": "test",
             },
         )
-        ctx.should_call_send(event, Message(reply), result=None, bot=bot)
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            result=None,
+            bot=bot,
+        )
         ctx.should_finished()
 
 

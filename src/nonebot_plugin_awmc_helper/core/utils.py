@@ -40,10 +40,10 @@ def handle_errors(
             except MatcherException:
                 raise
             except except_with_message as e:
-                await UniMessage.text(str(e)).finish()
+                await UniMessage.text(str(e)).finish(at_sender=True)
             except Exception:
                 logger.exception("awmc-helper 处理指令时出现未捕获异常")
-                await UniMessage.text(fallback).finish()
+                await UniMessage.text(fallback).finish(at_sender=True)
 
         return wrapper
 

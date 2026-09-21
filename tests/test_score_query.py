@@ -32,7 +32,7 @@ async def _assert_reply(
 ):
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     event = fake_group_message_event_v11(message=text, user_id=user_id)
@@ -60,7 +60,12 @@ async def _assert_reply(
                     "nickname": "t",
                 },
             )
-        ctx.should_call_send(event, Message(reply), result=None, bot=bot)
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            result=None,
+            bot=bot,
+        )
         ctx.should_finished()
 
 
@@ -131,9 +136,10 @@ async def test_b50_username_lookup(app: App, db, songs):
         event = fake_group_message_event_v11(message="b50 someone")
         expected = Message(
             [
+                MessageSegment.at(12345678),
                 MessageSegment.image(
                     f"base64://{base64.b64encode(expected_png).decode()}"
-                )
+                ),
             ]
         )
         async with app.test_matcher(score_query.b50) as ctx:

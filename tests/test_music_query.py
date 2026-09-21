@@ -28,11 +28,13 @@ async def songs(tmp_path):
     store.set_db_file(None)
 
 
-async def _assert_reply(app: App, matcher_name: str, text: str, reply: str):
+async def _assert_reply(
+    app: App, matcher_name: str, text: str, reply: str, *, user_id=12345678
+):
     """构造群消息并断言文本回复。"""
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     from nonebot_plugin_awmc_helper.plugins import music_query
@@ -42,12 +44,19 @@ async def _assert_reply(app: App, matcher_name: str, text: str, reply: str):
     async with app.test_matcher(matcher) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
-        ctx.should_call_send(event, Message(reply), result=None, bot=bot)
+        expected = Message([MessageSegment.at(user_id), MessageSegment.text(reply)])
+        ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
 
 
 async def _assert_image_reply(
-    app: App, matcher_name: str, text: str, expect_png, suffix: str = ""
+    app: App,
+    matcher_name: str,
+    text: str,
+    expect_png,
+    suffix: str = "",
+    *,
+    user_id=12345678,
 ):
     """断言回复为渲染图（bytes 与同一渲染函数一致）+ 可选文本后缀。
 
@@ -62,7 +71,10 @@ async def _assert_image_reply(
 
     matcher = getattr(music_query, matcher_name)
     png = expect_png()
-    segments = [MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")]
+    segments = [
+        MessageSegment.at(user_id),
+        MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+    ]
     expected = (
         Message(segments)
         if not suffix

@@ -49,7 +49,7 @@ async def _get_binding(session: Session, event: Event, *, required: bool = True)
     if required and binding_service.identifier_or_none(binding) is None:
         await UniMessage.text(
             "尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定"
-        ).finish()
+        ).finish(at_sender=True)
     return binding
 
 
@@ -67,7 +67,7 @@ async def _resolve_song(key: str):
     if key.isdigit():
         song = await song_service.by_id(int(key))
         if song is None:
-            await UniMessage.text(f"未找到ID为「{key}」的乐曲").finish()
+            await UniMessage.text(f"未找到ID为「{key}」的乐曲").finish(at_sender=True)
         return song
     songs = await song_service.by_alias(key)
     if len(songs) == 1:
@@ -75,12 +75,12 @@ async def _resolve_song(key: str):
     if not songs:
         songs = await song_service.by_title_fuzzy(key)
     if not songs:
-        await UniMessage.text(f"没有找到「{key}」对应的乐曲").finish()
+        await UniMessage.text(f"没有找到「{key}」对应的乐曲").finish(at_sender=True)
     if len(songs) > 1:
         msg = f"找到{len(songs)}首相关乐曲：\n"
         msg += "".join(f"{s.id}：{s.title}\n" for s in songs[:10])
         msg += "※ 请使用「minfo <ID>」指定曲目"
-        await UniMessage.text(msg.rstrip("\n")).finish()
+        await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
     return songs[0]
 
 
@@ -106,7 +106,7 @@ async def _(
         scores_b35=bests.scores_b35,
         scores_b15=bests.scores_b15,
     )
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @ap50.handle()
@@ -125,9 +125,9 @@ async def _(session: Session = UniSession(), event: Event = None):  # type: igno
     ap_scores.sort(key=lambda s: s.dx_rating or 0, reverse=True)
     ap_scores = ap_scores[:50]
     if not ap_scores:
-        await UniMessage.text("没有查到 AP/APP 成绩").finish()
+        await UniMessage.text("没有查到 AP/APP 成绩").finish(at_sender=True)
     png = b50_render.score_list_bytes("AP50", ap_scores)
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @minfo.handle()
@@ -139,7 +139,7 @@ async def _(
 ):
     key = str(message).strip()
     if not key:
-        await UniMessage.text("用法：minfo <曲目ID|曲名|别名>").finish()
+        await UniMessage.text("用法：minfo <曲目ID|曲名|别名>").finish(at_sender=True)
     song = await _resolve_song(key)
     binding = await _get_binding(session, event, required=False)
     info = await score_service.get_minfo(song, binding)
@@ -174,7 +174,7 @@ async def _(
     if not info.scores:
         lines.append("尚未游玩该曲目（或无权限查看）")
     png = _minfo_image(song, lines)
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @ginfo.handle()
@@ -188,12 +188,12 @@ async def _(groups: tuple = RegexGroup()):
         SongType.STANDARD, level_index
     )
     if diff is None:
-        await UniMessage.text("该曲目没有此难度谱面").finish()
+        await UniMessage.text("该曲目没有此难度谱面").finish(at_sender=True)
     curve = diff.curve
     if curve is None:
         await UniMessage.text(
             "暂无该谱面的游玩统计（需部署配置水鱼开发者 Token 以启用曲线数据）"
-        ).finish()
+        ).finish(at_sender=True)
     type_abbr = "DX" if diff.type == SongType.DX else "SD"
     lines = [
         f"「{song.id}」{song.title}",
@@ -210,7 +210,7 @@ async def _(groups: tuple = RegexGroup()):
     )
     pie_png = pie_render.pie_bytes(f"{song.title} [{diff.level}] 评级分布", rate_data)
     png = _minfo_image(song, lines, extra_png=pie_png)
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 def _minfo_image(song, lines: list[str], extra_png: bytes | None = None) -> bytes:

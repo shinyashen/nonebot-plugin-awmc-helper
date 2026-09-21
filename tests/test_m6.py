@@ -101,7 +101,7 @@ async def _run(
 ):
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
     from nonebot.adapters.onebot.v11.event import Sender
 
@@ -127,7 +127,12 @@ async def _run(
                 {"group_id": 87654321, "user_id": user_id, "no_cache": True},
                 result={"user_id": user_id, "role": role, "card": "", "nickname": "t"},
             )
-        ctx.should_call_send(event, Message(reply), result=None, bot=bot)
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            result=None,
+            bot=bot,
+        )
         ctx.should_finished()
 
 
@@ -202,7 +207,7 @@ async def test_person_query(app: App, arcade_seed):
 
     # on_regex 版本：通过正则分组取店名
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     from nonebot_plugin_awmc_helper.plugins import arcade
@@ -212,7 +217,15 @@ async def test_person_query(app: App, arcade_seed):
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
         ctx.should_call_send(
-            event, Message("「游戏厅」排卡 0 人"), result=None, bot=bot
+            event,
+            Message(
+                [
+                    MessageSegment.at(12345678),
+                    MessageSegment.text("「游戏厅」排卡 0 人"),
+                ]
+            ),
+            result=None,
+            bot=bot,
         )
         ctx.should_finished()
 

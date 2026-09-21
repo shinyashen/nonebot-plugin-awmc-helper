@@ -81,6 +81,6 @@ async def _(session: Session = UniSession()):
         await (
             UniMessage.text("\n".join(lines))
             .image(raw=song_render.song_card_bytes(song))
-            .finish()
+            .finish(at_sender=True)
         )
-    await UniMessage.text("\n".join(lines)).finish()
+    await UniMessage.text("\n".join(lines)).finish(at_sender=True)

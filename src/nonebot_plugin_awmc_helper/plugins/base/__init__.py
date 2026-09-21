@@ -56,10 +56,10 @@ repo_cmd = on_command("项目地址maimaiDX", aliases={"项目地址maimaidx"}, 
 async def _():
     await UniMessage.image(
         raw=image_to_bytes(text_to_image(HELP_TEXT, size=22))
-    ).finish()
+    ).finish(at_sender=True)
 
 
 @repo_cmd.handle()
 @handle_errors()
 async def _():
-    await UniMessage.text(REPO_URL + "\n求 star，求宣传~").finish()
+    await UniMessage.text(REPO_URL + "\n求 star，求宣传~").finish(at_sender=True)

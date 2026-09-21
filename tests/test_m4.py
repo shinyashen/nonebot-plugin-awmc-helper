@@ -139,7 +139,7 @@ async def _assert_reply(
 ):
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     event = fake_group_message_event_v11(message=text, user_id=user_id)
@@ -167,7 +167,12 @@ async def _assert_reply(
                     "nickname": "t",
                 },
             )
-        ctx.should_call_send(event, Message(reply), result=None, bot=bot)
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            result=None,
+            bot=bot,
+        )
         ctx.should_finished()
 
 
@@ -216,7 +221,10 @@ async def test_score_line_help(app: App):
 
     event = fake_group_message_event_v11(message="分数线 帮助")
     expected = Message(
-        [MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")]
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+        ]
     )
     async with app.test_matcher(score_tools.score_line_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
@@ -255,7 +263,10 @@ async def test_ds_table_command(app: App, songs):
 
     event = fake_group_message_event_v11(message="13+定数表")
     expected = Message(
-        [MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")]
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+        ]
     )
     async with app.test_matcher(tables.ds_table_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
@@ -299,7 +310,10 @@ async def test_plate_help(app: App):
 
     event = fake_group_message_event_v11(message="牌子条件")
     expected = Message(
-        [MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")]
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+        ]
     )
     async with app.test_matcher(tables.plate_help) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))

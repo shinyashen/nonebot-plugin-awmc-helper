@@ -25,7 +25,7 @@ async def _assert_reply(
 ):
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     event = fake_group_message_event_v11(message=text, user_id=user_id)
@@ -53,7 +53,12 @@ async def _assert_reply(
                     "nickname": "t",
                 },
             )
-        ctx.should_call_send(event, Message(reply), result=None, bot=bot)
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            result=None,
+            bot=bot,
+        )
         ctx.should_finished()
 
 
@@ -80,7 +85,10 @@ async def test_random_chart(app: App, songs):
     png = song_render.random_song_bytes(song, diff)
     event = fake_group_message_event_v11(message="随个dx13+")
     expected = Message(
-        [MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")]
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+        ]
     )
     async with app.test_matcher(random_song.random_chart) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
@@ -154,6 +162,7 @@ async def test_fortune(app: App, songs):
     event = fake_group_message_event_v11(message="今日mai")
     expected = Message(
         [
+            MessageSegment.at(12345678),
             MessageSegment.text(text),
             MessageSegment.image(
                 f"base64://{_b64(song_render.song_card_bytes(song)).decode()}"
@@ -288,3 +297,110 @@ async def test_guess_answer_flow(app: App, songs, monkeypatch):
     assert await guess_plugin._handle_answer(session, song.title)
     assert revealed
     assert guess_plugin._game_of("g2") is None
+
+
+@pytest.mark.asyncio
+async def test_pick_rise_song(songs, monkeypatch):
+    """Q8：mai什么加分算法——定数窗口与 SSS+ 排除语义（NB get_mai_what）。"""
+    import dataclasses
+
+    from maimai_py import Score, RateType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.calc import compute_rating
+    from nonebot_plugin_awmc_helper.plugins.random_song import _pick_rise_song
+
+    # 固定选 SD 侧
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.plugins.random_song._random.randint", lambda a, b: 0
+    )
+
+    def extend(sid, level_index, ach, ra):
+        base = Score(
+            id=sid,
+            level="10",
+            level_index=level_index,
+            achievements=ach,
+            fc=None,
+            fs=None,
+            dx_score=2000,
+            dx_rating=ra,
+            play_count=None,
+            play_time=None,
+            rate=RateType.SSS,
+            type=SongType.STANDARD,
+        )
+        return ScoreExtend(
+            **dataclasses.asdict(base),
+            title=f"T{sid}",
+            level_value=10.5,
+            level_dx_score=2400,
+            dx_star=4,
+            version=25000,
+        )
+
+    # 末位 ra=236 → ds=10.5 → 窗口 [10.5,11.5] 命中 231 的 SD Expert(10.5)
+    ra236 = compute_rating(10.5, 100.5)
+    b50 = [extend(500, LevelIndex.BASIC, 99.0, ra236)]
+    got = await _pick_rise_song(b50)
+    assert got is not None
+    assert got.id == 231
+
+    # SSS+ 排除：231 已 SSS+ → 无候选
+    b50.append(extend(231, LevelIndex.EXPERT, 100.5, 9999))
+    got = await _pick_rise_song(b50)
+    assert got is None
+
+    # 窗口无候选：末位 ra 抬高 → ds=11.9 → 窗口 [11.9,12.9] 样例库为空
+    b50 = [extend(500, LevelIndex.BASIC, 99.0, compute_rating(11.9, 99.0))]
+    assert await _pick_rise_song(b50) is None
+
+
+@pytest.mark.asyncio
+async def test_mai_what_rise_fallback(app: App, songs, monkeypatch):
+    """未绑定时 mai什么加分 退化为普通随机（原版行为）。"""
+    import base64
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import random_song
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import song as song_render
+
+    async def fake_random(*a, **kw):
+        all_songs = await song_service.get_all()
+        return all_songs[0], all_songs[0].get_difficulties()[0]
+
+    monkeypatch.setattr(song_service, "random", fake_random)
+    song, _diff = await song_service.random(exclude_utage=True)
+    png = song_render.song_card_bytes(song)
+
+    event = fake_group_message_event_v11(message="mai什么加分")
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+        ]
+    )
+    async with app.test_matcher(random_song.mai_what_rise) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()

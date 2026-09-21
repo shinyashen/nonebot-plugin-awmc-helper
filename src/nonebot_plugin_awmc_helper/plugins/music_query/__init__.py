@@ -57,16 +57,18 @@ def _is_float(value: str) -> bool:
 async def _render_result(songs, page: int) -> None:
     """1 首出卡片；≤5 文本；更多列表图（25/页）。"""
     if not songs:
-        await UniMessage.text(NOT_FOUND).finish()
+        await UniMessage.text(NOT_FOUND).finish(at_sender=True)
     if len(songs) == 1:
-        await UniMessage.image(raw=song_render.song_card_bytes(songs[0])).finish()
+        await UniMessage.image(raw=song_render.song_card_bytes(songs[0])).finish(
+            at_sender=True
+        )
     if len(songs) <= 5:
         text = "".join(f"「{s.id}」 {s.title}\n" for s in songs)
-        await UniMessage.text(text.rstrip("\n")).finish()
+        await UniMessage.text(text.rstrip("\n")).finish(at_sender=True)
     await (
         UniMessage.image(raw=song_render.song_list_bytes(songs, page))
         .text(f"\n第 {page} 页，共 {len(songs)} 首，可用「查歌 <标题> {page + 1}」翻页")
-        .finish()
+        .finish(at_sender=True)
     )
 
 
@@ -76,7 +78,7 @@ async def _(match: Match[str] = RegexMatched()):
     cmd = match.group(1)
     rest = (match.group(2) or "").strip()
     if not cmd and not rest:
-        await UniMessage.text(NOT_FOUND).finish()
+        await UniMessage.text(NOT_FOUND).finish(at_sender=True)
     a_list = rest.split()
 
     if cmd == "定数":
@@ -92,7 +94,7 @@ async def _(match: Match[str] = RegexMatched()):
                 "定数查歌参数错误，请输入正确格式，页数为可选：\n"
                 "定数查歌「定数」「页数」\n"
                 "定数查歌「最小定数」「最大定数」「页数」"
-            ).finish()
+            ).finish(at_sender=True)
         songs = await song_service.by_level_value(min(ds1, ds2), max(ds1, ds2))
         await _render_result(songs, page)
     elif cmd == "bpm":
@@ -108,24 +110,24 @@ async def _(match: Match[str] = RegexMatched()):
                 "bpm查歌参数错误，请输入正确格式，页数为可选：\n"
                 "bpm查歌「bpm」「页数」\n"
                 "bpm查歌「最小bpm」「最大bpm」「页数」"
-            ).finish()
+            ).finish(at_sender=True)
         songs = await song_service.by_bpm(min(b1, b2), max(b1, b2))
         await _render_result(songs, page)
     elif cmd == "曲师":
         if not a_list:
-            await UniMessage.text("曲师查歌「曲师」「页数」").finish()
+            await UniMessage.text("曲师查歌「曲师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_artist(name)
         await _render_result(songs, page)
     elif cmd == "谱师":
         if not a_list:
-            await UniMessage.text("谱师查歌「谱师」「页数」").finish()
+            await UniMessage.text("谱师查歌「谱师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_note_designer(name)
         await _render_result(songs, page)
     else:
         if not a_list:
-            await UniMessage.text(NOT_FOUND).finish()
+            await UniMessage.text(NOT_FOUND).finish(at_sender=True)
         title, page = _split_page(a_list)
         songs = await song_service.by_title_fuzzy(title)
         await _render_result(songs, page)
@@ -165,53 +167,55 @@ async def _(match: Match[str] = RegexMatched()):
         await (
             UniMessage.image(raw=song_render.song_card_bytes(songs[0]))
             .text("\n您要找的是不是这首？")
-            .finish()
+            .finish(at_sender=True)
         )
     if len(songs) > 1:
         msg = f"找到{len(songs)}个相同别名的曲目：\n"
         msg += "".join(f"{s.id}：{s.title}\n" for s in songs)
         msg += "※ 请使用「id xxxxx」查询指定曲目"
-        await UniMessage.text(msg.rstrip("\n")).finish()
+        await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
     vote_msg = await _vote_hint(name)
     if vote_msg:
-        await UniMessage.text(vote_msg).finish()
+        await UniMessage.text(vote_msg).finish(at_sender=True)
 
     # 纯数字 → ID；id12345 → ID
     if name.isdigit() and (song := await song_service.by_id(int(name))):
         await (
             UniMessage.image(raw=song_render.song_card_bytes(song))
             .text("\n您要找的是不是这首？")
-            .finish()
+            .finish(at_sender=True)
         )
     if idm := re.match(r"^id([0-9]+)$", name, re.IGNORECASE):
         song = await song_service.by_id(int(idm.group(1)))
         if not song:
-            await UniMessage.text(f"未找到ID为「{idm.group(1)}」的乐曲").finish()
+            await UniMessage.text(f"未找到ID为「{idm.group(1)}」的乐曲").finish(
+                at_sender=True
+            )
         await (
             UniMessage.image(raw=song_render.song_card_bytes(song))
             .text("\n您要找的是不是这首？")
-            .finish()
+            .finish(at_sender=True)
         )
 
     # 标题关键词兜底
     result = await song_service.by_title_fuzzy(name)
     if not result:
-        await UniMessage.text(error_msg).finish()
+        await UniMessage.text(error_msg).finish(at_sender=True)
     if len(result) <= 5:
         msg = (
             f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
         )
         msg += "".join(f"「{s.id}」 {s.title}\n" for s in result)
         msg += "※ 请使用「id xxxxx」查询指定曲目"
-        await UniMessage.text(msg.rstrip("\n")).finish()
+        await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
     await (
         UniMessage.text(
             f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
         )
         .image(raw=song_render.song_list_bytes(result, page))
-        .finish()
+        .finish(at_sender=True)
     )
 
 
@@ -221,5 +225,5 @@ async def _(match: Match[str] = RegexMatched()):
     _id = match.group(1)
     song = await song_service.by_id(int(_id)) if _id.isdigit() else None
     if not song:
-        await UniMessage.text(f"未找到ID为「{_id}」的乐曲").finish()
-    await UniMessage.image(raw=song_render.song_card_bytes(song)).finish()
+        await UniMessage.text(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
+    await UniMessage.image(raw=song_render.song_card_bytes(song)).finish(at_sender=True)

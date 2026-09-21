@@ -150,7 +150,9 @@ def _arcade_msg(a: store.Arcade) -> str:
 
 @arcade_help.handle()
 async def _():
-    await UniMessage.image(raw=image_to_bytes(text_to_image(ARCADE_HELP))).finish()
+    await UniMessage.image(raw=image_to_bytes(text_to_image(ARCADE_HELP))).finish(
+        at_sender=True
+    )
 
 
 @arcade_add.handle()
@@ -160,10 +162,10 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     if len(args) < 3:
         await UniMessage.text(
             "格式：添加机厅 <店名> <地址> <机台数量> [别称...]"
-        ).finish()
+        ).finish(at_sender=True)
     name, address, count_raw, *aliases = args
     if not count_raw.isdigit():
-        await UniMessage.text("机台数量需为数字").finish()
+        await UniMessage.text("机台数量需为数字").finish(at_sender=True)
     arcades = await store.get_all_arcades()
     new_id = max((a.id for a in arcades), default=9999) + 1
     arcade = store.Arcade(
@@ -177,7 +179,9 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     await store.save_arcade(arcade)
     for al in aliases:
         await store.add_arcade_alias(arcade.id, al)
-    await UniMessage.text(f"已添加机厅「{name}」（ID {arcade.id}）").finish()
+    await UniMessage.text(f"已添加机厅「{name}」（ID {arcade.id}）").finish(
+        at_sender=True
+    )
 
 
 @arcade_del.handle()
@@ -186,9 +190,9 @@ async def _(message: Message = CommandArg()):
     keyword = str(message).strip()
     arcade = await _find_arcade(keyword) if keyword else None
     if arcade is None:
-        await UniMessage.text("没有这样的机厅哦").finish()
+        await UniMessage.text("没有这样的机厅哦").finish(at_sender=True)
     await store.delete_arcade(arcade.id)
-    await UniMessage.text(f"已删除机厅「{arcade.name}」").finish()
+    await UniMessage.text(f"已删除机厅「{arcade.name}」").finish(at_sender=True)
 
 
 @arcade_alias_set.handle()
@@ -199,17 +203,21 @@ async def _(message: Message = CommandArg()):
     if len(args) < 2:
         await UniMessage.text(
             "格式：添加机厅别名 <店名|ID> <别名> / 删除机厅别名 <别名>"
-        ).finish()
+        ).finish(at_sender=True)
     if text.startswith("删除"):
         ok = await store.remove_arcade_alias_by_name(args[1].strip())
-        await UniMessage.text("已删除别名" if ok else "未找到该别名").finish()
+        await UniMessage.text("已删除别名" if ok else "未找到该别名").finish(
+            at_sender=True
+        )
     arcade = await _find_arcade(args[0])
     if arcade is None:
-        await UniMessage.text("没有这样的机厅哦").finish()
+        await UniMessage.text("没有这样的机厅哦").finish(at_sender=True)
     alias = args[1].strip()
     if await store.add_arcade_alias(arcade.id, alias):
-        await UniMessage.text(f"已为「{arcade.name}」添加别名「{alias}」").finish()
-    await UniMessage.text("该别名已存在").finish()
+        await UniMessage.text(f"已为「{arcade.name}」添加别名「{alias}」").finish(
+            at_sender=True
+        )
+    await UniMessage.text("该别名已存在").finish(at_sender=True)
 
 
 @arcade_set.handle()
@@ -217,17 +225,19 @@ async def _(message: Message = CommandArg()):
 async def _(message: Message = CommandArg()):
     parts = str(message).strip().split()
     if len(parts) != 3 or parts[1] != "数量":
-        await UniMessage.text("格式：修改机厅 <店名|ID> 数量 <数量>").finish()
+        await UniMessage.text("格式：修改机厅 <店名|ID> 数量 <数量>").finish(
+            at_sender=True
+        )
     arcade = await _find_arcade(parts[0])
     if arcade is None:
-        await UniMessage.text("没有这样的机厅哦").finish()
+        await UniMessage.text("没有这样的机厅哦").finish(at_sender=True)
     if not parts[2].isdigit():
-        await UniMessage.text("数量需为数字").finish()
+        await UniMessage.text("数量需为数字").finish(at_sender=True)
     arcade.machines = int(parts[2])
     await store.save_arcade(arcade)
     await UniMessage.text(
         f"已修改机厅「{arcade.name}」机台数量为「{parts[2]}」"
-    ).finish()
+    ).finish(at_sender=True)
 
 
 @arcade_sub.handle()
@@ -240,19 +250,19 @@ async def _(
 ):
     group_id = _group_of(session)
     if group_id is None:
-        await UniMessage.text("订阅仅群聊可用").finish()
+        await UniMessage.text("订阅仅群聊可用").finish(at_sender=True)
     if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
-        await UniMessage.text("权限不足：仅群管理员可用").finish()
+        await UniMessage.text("权限不足：仅群管理员可用").finish(at_sender=True)
     keyword = str(message).strip()
     raw_text = event.get_plaintext()
     arcade = await _find_arcade(keyword) if keyword else None
     if arcade is None:
-        await UniMessage.text("没有这样的机厅哦").finish()
+        await UniMessage.text("没有这样的机厅哦").finish(at_sender=True)
     if "取消" in raw_text:
         await store.unsubscribe(group_id, arcade.id)
-        await UniMessage.text(f"已取消订阅「{arcade.name}」").finish()
+        await UniMessage.text(f"已取消订阅「{arcade.name}」").finish(at_sender=True)
     await store.subscribe(group_id, arcade.id)
-    await UniMessage.text(f"已订阅「{arcade.name}」").finish()
+    await UniMessage.text(f"已订阅「{arcade.name}」").finish(at_sender=True)
 
 
 @arcade_show_sub.handle()
@@ -261,7 +271,7 @@ async def _(session: Session = UniSession()):
     group_id = _group_of(session)
     ids = await store.get_subscriptions(group_id) if group_id else []
     if not ids:
-        await UniMessage.text("该群未订阅任何机厅").finish()
+        await UniMessage.text("该群未订阅任何机厅").finish(at_sender=True)
     lines = []
     for i in ids:
         a = await store.get_arcade(i)
@@ -269,7 +279,9 @@ async def _(session: Session = UniSession()):
             lines.append(
                 f"「{a.name}」（ID {a.id}，机台 {a.machines}，排卡 {a.person} 人）"
             )
-    await UniMessage.text("本群订阅的机厅：\n" + "\n".join(lines)).finish()
+    await UniMessage.text("本群订阅的机厅：\n" + "\n".join(lines)).finish(
+        at_sender=True
+    )
 
 
 @arcade_search.handle()
@@ -277,16 +289,16 @@ async def _(session: Session = UniSession()):
 async def _(message: Message = CommandArg()):
     keyword = str(message).strip()
     if not keyword:
-        await UniMessage.text("格式：查找机厅 <关键词>").finish()
+        await UniMessage.text("格式：查找机厅 <关键词>").finish(at_sender=True)
     found = await store.get_arcades_by_name(keyword)
     if not found:
-        await UniMessage.text("没有这样的机厅哦").finish()
+        await UniMessage.text("没有这样的机厅哦").finish(at_sender=True)
     result = ["为您找到以下机厅："] + [_arcade_msg(a) for a in found]
     if len(found) < 5:
-        await UniMessage.text("\n==========\n".join(result)).finish()
-    await UniMessage.image(
-        raw=image_to_bytes(text_to_image("\n".join(result)))
-    ).finish()
+        await UniMessage.text("\n==========\n".join(result)).finish(at_sender=True)
+    await UniMessage.image(raw=image_to_bytes(text_to_image("\n".join(result)))).finish(
+        at_sender=True
+    )
 
 
 async def _alias_matches(arcade_id: int, name: str) -> bool:
@@ -303,15 +315,17 @@ async def _(
 ):
     group_id = _group_of(session)
     if group_id is None:
-        await UniMessage.text("排卡操作仅群聊可用").finish()
+        await UniMessage.text("排卡操作仅群聊可用").finish(at_sender=True)
     if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
-        await UniMessage.text("权限不足：仅群管理员可用").finish()
+        await UniMessage.text("权限不足：仅群管理员可用").finish(at_sender=True)
     name_raw, op, amount_raw, _unit = groups
     if not name_raw:
-        await UniMessage.text("格式：<店名|别称>设置/=/+/- <人数>").finish()
+        await UniMessage.text("格式：<店名|别称>设置/=/+/- <人数>").finish(
+            at_sender=True
+        )
     sub_ids = await store.get_subscriptions(group_id)
     if not sub_ids:
-        await UniMessage.text("该群未订阅机厅，无法更改机厅人数").finish()
+        await UniMessage.text("该群未订阅机厅，无法更改机厅人数").finish(at_sender=True)
     name = name_raw.strip()
     if name.endswith("人数"):
         name = name[:-2]
@@ -324,13 +338,13 @@ async def _(
             arcade = a
             break
     if arcade is None:
-        await UniMessage.text("已订阅的机厅中未找到该机厅").finish()
+        await UniMessage.text("已订阅的机厅中未找到该机厅").finish(at_sender=True)
     if amount_raw in ("＋", "+", "－", "-"):
         amount = 1
     elif amount_raw.isdigit():
         amount = int(amount_raw)
     else:
-        await UniMessage.text("请输入正确的数字").finish()
+        await UniMessage.text("请输入正确的数字").finish(at_sender=True)
     if op in SET_OPS:
         new_person = amount
     elif op in DECREASE_OPS:
@@ -341,13 +355,15 @@ async def _(
     if abs(delta) > plugin_config.awmc_arcade_max_delta:
         await UniMessage.text(
             f"单次变更不能超过 {plugin_config.awmc_arcade_max_delta} 人"
-        ).finish()
+        ).finish(at_sender=True)
     arcade.person = new_person
     arcade.updated_by = _user_of(session)
     arcade.updated_at = datetime.now()
     await store.save_arcade(arcade)
     await store.add_count_log(arcade.id, delta, arcade.machines, _user_of(session))
-    await UniMessage.text(f"「{arcade.name}」当前排卡 {new_person} 人").finish()
+    await UniMessage.text(f"「{arcade.name}」当前排卡 {new_person} 人").finish(
+        at_sender=True
+    )
 
 
 @arcade_person_num.handle()
@@ -356,13 +372,13 @@ async def _(session: Session = UniSession()):
     group_id = _group_of(session)
     ids = await store.get_subscriptions(group_id) if group_id else []
     if not ids:
-        await UniMessage.text("该群未订阅任何机厅").finish()
+        await UniMessage.text("该群未订阅任何机厅").finish(at_sender=True)
     lines = []
     for i in ids:
         a = await store.get_arcade(i)
         if a:
             lines.append(f"「{a.name}」排卡 {a.person} 人（机台 {a.machines}）")
-    await UniMessage.text("\n".join(lines)).finish()
+    await UniMessage.text("\n".join(lines)).finish(at_sender=True)
 
 
 @arcade_person_num_2.handle()
@@ -370,13 +386,13 @@ async def _(session: Session = UniSession()):
 async def _(groups: tuple = RegexGroup()):
     name = (groups[0] or "").strip()
     if not name:
-        await UniMessage.text("格式：<店名|别称>有多少人").finish()
+        await UniMessage.text("格式：<店名|别称>有多少人").finish(at_sender=True)
     found = await store.get_arcades_by_name(name)
     if not found:
-        await UniMessage.text("没有这样的机厅哦").finish()
+        await UniMessage.text("没有这样的机厅哦").finish(at_sender=True)
     await UniMessage.text(
         "\n".join(f"「{a.name}」排卡 {a.person} 人" for a in found)
-    ).finish()
+    ).finish(at_sender=True)
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ async def _assert_reply(
 ):
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     event = fake_group_message_event_v11(message=text, user_id=user_id)
@@ -63,7 +63,12 @@ async def _assert_reply(
                     "nickname": "test",
                 },
             )
-        ctx.should_call_send(event, Message(reply), result=None, bot=bot)
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            result=None,
+            bot=bot,
+        )
         ctx.should_finished()
 
 
@@ -221,7 +226,10 @@ async def test_alias_status(app: App, songs):
 
         png = image_to_bytes(text_to_image("\n".join(lines)))
         expected = Message(
-            [MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")]
+            [
+                MessageSegment.at(12345678),
+                MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+            ]
         )
 
         event = fake_group_message_event_v11(message="当前投票")

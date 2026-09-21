@@ -108,7 +108,7 @@ async def _(groups: tuple = RegexGroup()):
             if d.type != SongType.UTAGE and d.level == level:
                 entries.append((d.level_value, song, d))
     if not entries:
-        await UniMessage.text(f"没有找到等级为「{level}」的谱面").finish()
+        await UniMessage.text(f"没有找到等级为「{level}」的谱面").finish(at_sender=True)
     entries.sort(key=lambda x: -x[0])
     lines = [f"定数表 {level}（共 {len(entries)} 谱面）"]
     for ds, song, d in entries:
@@ -116,7 +116,7 @@ async def _(groups: tuple = RegexGroup()):
         lines.append(f"{ds:.1f}  {type_abbr} 「{song.id}」{song.title}")
     # 分列文本过长，直接文本转图
     png = image_to_bytes(text_to_image("\n".join(lines), size=20))
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @score_table_cmd.handle()
@@ -143,12 +143,12 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             state = "done" if done else ("played" if sc else "new")
             items.append((song, d, state))
     if not items:
-        await UniMessage.text(f"没有找到等级为「{level}」的谱面").finish()
+        await UniMessage.text(f"没有找到等级为「{level}」的谱面").finish(at_sender=True)
     done_count = sum(1 for _, _, s in items if s == "done")
     png = completion_grid_bytes(
         f"{level} {plan_name} 完成表（{done_count}/{len(items)}）", items
     )
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @progress_cmd.handle()
@@ -176,7 +176,9 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             (done_list if done else (remain_list if sc else new_list)).append(song)
     total = len(done_list) + len(remain_list) + len(new_list)
     if total == 0:
-        await UniMessage.text(f"没有找到等级为「{level}」的 DX 谱面").finish()
+        await UniMessage.text(f"没有找到等级为「{level}」的 DX 谱面").finish(
+            at_sender=True
+        )
     page_data, total_pages = paginate(remain_list or new_list, page, 80)
     lines = [
         f"{level} {plan_name} 进度：{len(done_list)}/{total}",
@@ -185,7 +187,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     ]
     lines += [f"「{s.id}」{s.title}" for s in page_data]
     png = image_to_bytes(text_to_image("\n".join(lines), size=20))
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @plate_cmd.handle()
@@ -216,7 +218,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         png = completion_grid_bytes(
             f"{version}{kind} 完成表（{cleared_levels}/{total_levels}）", items
         )
-        await UniMessage.image(raw=png).finish()
+        await UniMessage.image(raw=png).finish(at_sender=True)
     # 进度
     total_levels = await plates.count_all()
     cleared_levels = await plates.count_cleared()
@@ -236,7 +238,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     lines.append(f"未达成 {len(remain_flat)} 个，第 {real}/{total_pages} 页：")
     lines += [f"「{s.id}」{s.title} {li.name}" for s, li in page_data]
     png = image_to_bytes(text_to_image("\n".join(lines), size=20))
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @plate_help.handle()
@@ -248,7 +250,7 @@ async def _():
     lines += [f"{kind}：{desc}" for kind, desc in PLATE_KIND_ZH.items()]
     lines.append("舞/霸：旧作（含 Re:MASTER 单列）全曲谱面")
     png = image_to_bytes(text_to_image("\n".join(lines)))
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @score_list_cmd.handle()
@@ -269,14 +271,16 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         title = f"{ds_raw} 分数列表"
     matched.sort(key=lambda s: s.achievements or 0, reverse=True)
     if not matched:
-        await UniMessage.text("没有找到符合条件的成绩").finish()
+        await UniMessage.text("没有找到符合条件的成绩").finish(at_sender=True)
     from ...core.render.best50 import score_list_bytes
 
     png = score_list_bytes(title, matched, page)
-    await UniMessage.image(raw=png).finish()
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @update_table.handle()
 @handle_errors()
 async def _():
-    await UniMessage.text("本插件的成绩表格均为实时渲染，无需手动更新").finish()
+    await UniMessage.text("本插件的成绩表格均为实时渲染，无需手动更新").finish(
+        at_sender=True
+    )
