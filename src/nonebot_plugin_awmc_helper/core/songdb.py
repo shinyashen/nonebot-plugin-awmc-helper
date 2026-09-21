@@ -34,7 +34,12 @@ from maimai_py.models import (
 )
 
 from . import store
-from ..constants import SOURCE_NAME_TO_VERSION, level_from_value
+from ..constants import (
+    DX_VERSION_CODES,
+    EXTRA_VERSION_NAMES,
+    SOURCE_NAME_TO_VERSION,
+    level_from_value,
+)
 
 Scope = Literal["cn", "jp"]
 
@@ -1116,8 +1121,91 @@ def all_songs(state: State, scope: Scope) -> list[Song]:
 # ---------------------------------------------------------------------------
 
 
+def _level_flat(history: list[tuple[int, float]]) -> list[float]:
+    """变化点序列 → 01 文档的扁平 ``level`` 列表（sd/dx 用）。
+
+    文档语义（Data-structure.md §1）：列表从**该谱面登场版本**起、到日服最新版本，
+    逐版本一个定数值；旧框谱不含旧框值、从 DX 初代起统计。变化点序列的首个版本即
+    登场版本（旧框谱的 dschange 自 DX 初代起记录），据此对位展开；
+    末尾用 DX 版本轴之后的已知/递推码补齐（新版本超出枚举时的兜底）。
+    """
+    if not history:
+        return []
+    # 导出轴固定为 14 个 DX 版本（与文档示例一致）：数据源（dschange）未覆盖
+    # 更新版本时不虚构第 15 个值；导入侧才用扩展轴兼容新版本文档
+    axis = DX_VERSION_CODES
+    start = history[0][0]
+    # 对位：优先用首变化点版本在轴上的位置；早于 DX 初代（旧框）从轴首开始
+    if start in axis:
+        start_idx = axis.index(start)
+    elif start < axis[0]:
+        start_idx = 0
+    else:
+        # 超出已知轴的新版本：按 +500 递推对位（DX 时代惯例）
+        start_idx = len(axis) - 1 + (start - axis[-1]) // 500
+    out: list[float] = []
+    for idx in range(start_idx, start_idx + 4096):  # 理论上限保护
+        code = axis[idx] if idx < len(axis) else axis[-1] + (idx - len(axis) + 1) * 500
+        value = None
+        for v, val in history:
+            if v <= code:
+                value = val
+        if value is None:
+            break  # 登场之前的空档不该出现在展开里，出现即为止
+        out.append(value)
+        if code >= history[-1][0] and idx >= len(axis) - 1:
+            break  # 已覆盖到轴末（=当前日服最新版本）
+    return out
+
+
+def _points_from_flat(
+    values: list[float], debut: int | None
+) -> list[tuple[int, float]]:
+    """01 文档的扁平 ``level`` 列表 → 变化点序列（外部源导入用，§7.5-C）。
+
+    对位规则：登场版本（组 version，旧框取 DX 初代）在轴上有位则从该位起；
+    长度与登场版本不一致或未知时，按「列表末位 = 轴末位（DX 14 版）」端对齐。
+    列表长于 14（文档收录了 MAGiCAL 等新版本）时轴先补 EXTRA 已知码、再按
+    +500 递推。连续相同值合并为变化点。
+    """
+    n = len(values)
+    if n == 0:
+        return []
+    axis = list(DX_VERSION_CODES)
+    extras = sorted(EXTRA_VERSION_NAMES)
+    while len(axis) < n:  # 扩展轴：先已知新版本码，再 +500 递推
+        axis.append(
+            extras[len(axis) - len(DX_VERSION_CODES)]
+            if len(axis) - len(DX_VERSION_CODES) < len(extras)
+            else axis[-1] + 500
+        )
+    start_idx = 0
+    if debut is not None:
+        anchor = max(debut, axis[0])
+        if anchor in axis:
+            start_idx = axis.index(anchor)
+    if start_idx + n > len(axis) or debut is None:
+        start_idx = max(0, len(axis) - n)  # 端对齐
+    points: list[tuple[int, float]] = []
+    for offset, value in enumerate(values):
+        idx = start_idx + offset
+        if idx < len(axis):
+            code = axis[idx]
+        else:  # 超出已知轴：+500 递推（新版本尚未进枚举/EXTRA 表）
+            code = axis[-1] + (idx - len(axis) + 1) * 500
+        if not points or abs(points[-1][1] - value) > 1e-9:
+            points.append((code, value))
+    return points
+
+
 def song_standard_json(state: State, song_id: int) -> dict[str, Any] | None:
-    """单曲 → 01 文档结构（``level`` 为变化点序列 ``[[version, value], …]``）。"""
+    """单曲 → 01 文档结构（Data-structure.md §1 的线格式）。
+
+    - sd/dx ``level``：从登场版本（旧框谱从 DX 初代）到日服最新的扁平定数列表；
+    - utage ``level``：单元素列表，值为标级推导浮点（如 ``12.7`` 表示 ``12+?``）；
+    - ``notes``：``[Tap, Hold, Slide, Touch, Break]`` 五元数组；
+    - buddy 以外 ``notes_left``/``notes_right`` 为 null。
+    """
     row = state.songs.get(song_id)
     if row is None:
         return None
@@ -1131,19 +1219,19 @@ def song_standard_json(state: State, song_id: int) -> dict[str, Any] | None:
             continue
         contents = []
         for level_id, chart in sorted(by_group.get(kind, [])):
+            history = state.history_of(song_id, kind, level_id)
+            level = [history[-1][1]] if kind == "utage" else _level_flat(history)
             content: dict[str, Any] = {
                 "level_id": level_id,
-                "level": [
-                    [v, val] for v, val in state.history_of(song_id, kind, level_id)
-                ],
+                "level": level,
                 "designer": chart.designer,
-                "notes": {
-                    "tap": chart.notes_tap,
-                    "hold": chart.notes_hold,
-                    "slide": chart.notes_slide,
-                    "touch": chart.notes_touch,
-                    "break": chart.notes_break,
-                },
+                "notes": [
+                    chart.notes_tap,
+                    chart.notes_hold,
+                    chart.notes_slide,
+                    chart.notes_touch,
+                    chart.notes_break,
+                ],
             }
             if kind == "utage":
                 content["kanji"] = chart.kanji
@@ -1403,23 +1491,36 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
                         mode == "override" or not target.designer
                     ):
                         target.designer = content["designer"]
-                    notes = content.get("notes") or {}
-                    if notes and (mode == "override" or not target.notes_tap):
-                        target.notes_tap = int(notes.get("tap", 0) or 0)
-                        target.notes_hold = int(notes.get("hold", 0) or 0)
-                        target.notes_slide = int(notes.get("slide", 0) or 0)
-                        target.notes_touch = int(notes.get("touch", 0) or 0)
-                        target.notes_break = int(notes.get("break", 0) or 0)
+                    # 01 文档线格式：notes 为 [Tap, Hold, Slide, Touch, Break]
+                    notes = content.get("notes") or []
+                    if (
+                        isinstance(notes, list)
+                        and len(notes) == 5
+                        and (mode == "override" or not target.notes_tap)
+                    ):
+                        target.notes_tap = int(notes[0])
+                        target.notes_hold = int(notes[1])
+                        target.notes_slide = int(notes[2])
+                        target.notes_touch = int(notes[3])
+                        target.notes_break = int(notes[4])
                     if kind == "utage":
                         if content.get("comment") and (
                             mode == "override" or not target.comment
                         ):
                             target.comment = content["comment"]
-                    history = content.get("level") or []
-                    if history:
-                        points = [(int(v), float(val)) for v, val in history]
-                        if mode == "override" or not state.history_of(
-                            song_id, kind, level_id
+                    # 01 文档线格式：level 为扁平列表（sd/dx 逐版本；宴单元素标级浮点）
+                    flat = content.get("level") or []
+                    if flat:
+                        debut = group.version
+                        if kind == "utage":
+                            points = (
+                                [(debut, float(flat[0]))] if debut is not None else []
+                            )
+                        else:
+                            points = _points_from_flat([float(v) for v in flat], debut)
+                        if points and (
+                            mode == "override"
+                            or not state.history_of(song_id, kind, level_id)
                         ):
                             state.set_history(song_id, kind, level_id, points)
                     applied += 1

@@ -142,24 +142,25 @@ def make_all_data() -> dict[str, dict]:
 
 def make_dschange() -> dict:
     """主段（key 8 diff0 有变化点且末值旧于 all_data）+ __increments__。"""
+    # 实测：dschange 的版本名是英文风格（与 all_data `from` 的日文风格不同）
     dx_versions = [
-        "maimai でらっくす",
-        "maimai でらっくす PLUS",
-        "maimai でらっくす Splash",
-        "maimai でらっくす Splash PLUS",
-        "maimai でらっくす UNiVERSE",
-        "maimai でらっくす UNiVERSE PLUS",
-        "maimai でらっくす FESTiVAL",
-        "maimai でらっくす FESTiVAL PLUS",
-        "maimai でらっくす BUDDiES",
-        "maimai でらっくす BUDDiES PLUS",
-        "maimai でらっくす PRiSM",
-        "maimai でらっくす PRiSM PLUS",
-        "maimai でらっくす CiRCLE",
-        "maimai でらっくす CiRCLE PLUS",
+        "maimai DX",
+        "maimai DX PLUS",
+        "maimai DX Splash",
+        "maimai DX Splash PLUS",
+        "maimai DX UNiVERSE",
+        "maimai DX UNiVERSE PLUS",
+        "maimai DX FESTiVAL",
+        "maimai DX FESTiVAL PLUS",
+        "maimai DX BUDDiES",
+        "maimai DX BUDDiES PLUS",
+        "maimai DX PRiSM",
+        "maimai DX PRiSM PLUS",
+        "maimai DX CiRCLE",
+        "maimai DX CiRCLE PLUS",
     ]
 
-    def seq(values: dict[str, float], since: str = "maimai でらっくす") -> dict:
+    def seq(values: dict[str, float], since: str = "maimai DX") -> dict:
         # 实测：dschange 每谱面的字典自该曲登场版本起记录（§2.9）；
         # 显式版本键的值「自该版本起持续生效」（定数变更不会回退，除非显式再给新键）
         names = dx_versions[dx_versions.index(since) :]
@@ -180,7 +181,7 @@ def make_dschange() -> dict:
             "id": "8",
             "ds": [
                 seq(
-                    {"__base__": 4.0, "maimai でらっくす FESTiVAL": 4.4}
+                    {"__base__": 4.0, "maimai DX FESTiVAL": 4.4}
                 ),  # 末值 4.4 ≠ all_data 4.5
                 seq({"__base__": 6.0}),
                 seq({"__base__": 9.0}),
@@ -191,19 +192,19 @@ def make_dschange() -> dict:
             "name": "Test Song DX",
             "id": "10021",
             "ds": [
-                seq({"__base__": 3.0}, since="maimai でらっくす PLUS"),
-                seq({"__base__": 6.5}, since="maimai でらっくす PLUS"),
-                seq({"__base__": 9.5}, since="maimai でらっくす PLUS"),
+                seq({"__base__": 3.0}, since="maimai DX PLUS"),
+                seq({"__base__": 6.5}, since="maimai DX PLUS"),
+                seq({"__base__": 9.5}, since="maimai DX PLUS"),
                 seq(
-                    {"__base__": 12.3, "maimai でらっくす CiRCLE": 12.5},
-                    since="maimai でらっくす PLUS",
+                    {"__base__": 12.3, "maimai DX CiRCLE": 12.5},
+                    since="maimai DX PLUS",
                 ),
-                seq({"__base__": 13.8}, since="maimai でらっくす PLUS"),
+                seq({"__base__": 13.8}, since="maimai DX PLUS"),
             ],
         },
         "__increments__": [
             {
-                "version": "maimai でらっくす CiRCLE PLUS",
+                "version": "maimai DX CiRCLE PLUS",
                 "label": "CiRCLE PLUS",
                 "songs": {
                     "10777": {

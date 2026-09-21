@@ -162,9 +162,26 @@ PLATE_KINDS = ("将", "者", "极", "神", "舞舞")
 # 版本名 → 版本码（歌曲库日侧骨架用；穷举自 maimai_py Version 枚举，勿凭记忆增删）
 # ---------------------------------------------------------------------------
 
-# maimaiinfo（all_data `from`/dschange）与 maimai_py divingfish_to_version 的并集：
-# 后者缺 DX 时代的 PLUS 各版与 CiRCLE PLUS，此处按 Version 枚举值补全
+# 数据源版本名 → 版本码。两套命名并存（穷举自真实数据，勿凭记忆增删）：
+# - all_data `from`：旧框英文名 + DX 时代日文名（"maimai でらっくす*"，同 maimai_py）；
+# - dschange 版本名 / __increments__.version：DX 时代英文名（"maimai DX*"）
 SOURCE_NAME_TO_VERSION: dict[str, int] = {
+    # —— dschange 系（maimaiinfo/static/dschange.json 实测命名）——
+    "maimai DX": 20000,
+    "maimai DX PLUS": 20500,
+    "maimai DX Splash": 21000,
+    "maimai DX Splash PLUS": 21500,
+    "maimai DX UNiVERSE": 22000,
+    "maimai DX UNiVERSE PLUS": 22500,
+    "maimai DX FESTiVAL": 23000,
+    "maimai DX FESTiVAL PLUS": 23500,
+    "maimai DX BUDDiES": 24000,
+    "maimai DX BUDDiES PLUS": 24500,
+    "maimai DX PRiSM": 25000,
+    "maimai DX PRiSM PLUS": 25500,
+    "maimai DX CiRCLE": 26000,
+    "maimai DX CiRCLE PLUS": 26500,
+    # —— all_data `from` 系（maimai_py divingfish_to_version 缺 PLUS 各版，按枚举补全）——
     "maimai": 10000,
     "maimai PLUS": 11000,
     "maimai GreeN": 12000,
@@ -200,6 +217,26 @@ EXTRA_VERSION_NAMES: dict[int, str] = {
     # 2026-09-17 日服上线；maimai_py 1.5.2 尚未收录（song-db-design §7.4）
     27000: "MAGiCAL",
 }
+
+# DX 时代版本轴（穷举自 Version 枚举 MAIMAI_DX..MAIMAI_DX_CIRCLE_PLUS，勿凭记忆增删）：
+# 01 文档标准 JSON 的 sd/dx `level` 扁平列表即按此轴逐版本对齐
+# （「不包含旧框版本的定数，均从 dx 初代版本开始统计」）
+DX_VERSION_CODES: list[int] = [
+    20000,  # maimai でらっくす
+    20500,  # maimai でらっくす PLUS
+    21000,  # maimai でらっくす Splash
+    21500,  # maimai でらっくす Splash PLUS
+    22000,  # maimai でらっくす UNiVERSE
+    22500,  # maimai でらっくす UNiVERSE PLUS
+    23000,  # maimai でらっくす FESTiVAL
+    23500,  # maimai でらっくす FESTiVAL PLUS
+    24000,  # maimai でらっくす BUDDiES
+    24500,  # maimai でらっくす BUDDiES PLUS
+    25000,  # maimai でらっくす PRiSM
+    25500,  # maimai でらっくす PRiSM PLUS
+    26000,  # maimai でらっくす CiRCLE
+    26500,  # maimai でらっくす CiRCLE PLUS
+]
 
 
 def version_name(version: int) -> str:

@@ -87,10 +87,11 @@ async def test_rebuild_full_union(db):
     # 标准 JSON 与指纹已生成
     doc = await db.kv_get("songdb_json")
     assert doc["8"]["sheets"]["sd"]["version_cn"] == 20000
-    assert doc["8"]["sheets"]["sd"]["contents"][0]["level"] == [
-        [20000, 4.0],
-        [23000, 4.5],
-    ]
+    # 01 文档线格式：level 自登场版本（此处 DX 初代）逐版本共 14 值，23000 起变 4.5
+    assert doc["8"]["sheets"]["sd"]["contents"][0]["level"] == [4.0] * 6 + [4.5] * 8
+    assert doc["8"]["sheets"]["sd"]["contents"][0]["notes"] == [63, 23, 8, 0, 2]
+    # 宴为单元素标级浮点列表
+    assert doc["18"]["sheets"]["utage"]["contents"][0]["level"] == [12.0]
     fp = songdb.CURRENT_FINGERPRINT
     assert fp is not None
     assert len(fp) == 32
@@ -235,17 +236,18 @@ async def test_external_sources_merge(db, tmp_path, monkeypatch):
                     "sheets": {
                         "sd": {
                             "version_cn": 99999,  # 国服内容：必须被忽略
-                            "version": 21000,
+                            "version": 21000,  # 自 21000 起，列表为 12 值（21000→最新）
                             "contents": [
                                 {
                                     "level_id": 0,
                                     "designer": "EXTRA!",
-                                    "level": [[20000, 4.0], [21000, 4.2]],
+                                    # 文档线格式：自登场版本 21000 起 12 值
+                                    "level": [4.2] * 12,
                                 },
                                 {
                                     "level_id": 1,
                                     "designer": "FILLED",
-                                    "notes": {"tap": 1},
+                                    "notes": [1, 0, 0, 0, 0],
                                 },
                             ],
                         }
@@ -282,7 +284,8 @@ async def test_external_sources_merge(db, tmp_path, monkeypatch):
     assert state.groups[(8, "sd")].version_cn == 20000
     assert state.charts[(8, "sd", 0)].designer == "EXTRA!"
     assert state.charts[(8, "sd", 1)].notes_tap == 1  # override 覆盖物量
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (21000, 4.2)]
+    # 扁平列表按登场版本 21000 对位重建变化点（连续去重后单点）
+    assert state.history_of(8, "sd", 0) == [(21000, 4.2)]
     # 哈希未变 → 不重复应用
     summary2 = await songdb.apply_external_sources()
     assert not summary2["changed"]

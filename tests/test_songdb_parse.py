@@ -134,3 +134,31 @@ def test_detect_cn_update():
     added, removed = result
     assert not added
     assert removed == {9002}
+
+
+def test_level_flat_matches_doc_example():
+    """标准 JSON level 线格式：以 01 文档自带谱例（チルノ，id=199）为基准。"""
+    from nonebot_plugin_awmc_helper.core.songdb import _level_flat, _points_from_flat
+
+    # 文档谱例：SD 组 version=12000（旧框）→ 不含旧框值、自 DX 初代起 14 个值
+    history = [(20000, 4.0), (23000, 3.0)]
+    flat = _level_flat(history)
+    assert len(flat) == 14
+    assert flat == [4.0] * 6 + [3.0] * 8  # 23000 = 轴上第 7 位
+    # 文档谱例：DX 组 version=26000（CiRCLE 登场）→ level [3, 3] 共 2 值
+    assert _level_flat([(26000, 3.0)]) == [3.0, 3.0]
+    # 宴为单元素列表（[12.7] 表示标级 12+?），由调用方取末值实现，不走进此函数
+
+    # 导入往返：扁平列表 → 变化点（含文档谱例 2 值情形与端对齐）
+    assert _points_from_flat([4.0] * 6 + [3.0] * 8, 12000) == [
+        (20000, 4.0),
+        (23000, 3.0),
+    ]
+    assert _points_from_flat([3.0, 3.0], 26000) == [(26000, 3.0)]
+    # 未知名曲（debut 未知）：按「末位 = 日服最新版本」端对齐
+    assert _points_from_flat([3.0, 3.0], None) == [(26000, 3.0)]
+    # 15 值（收录 MAGiCAL 27000 后的文档）：DX 14 版 + MAGiCAL，变化点两处
+    assert _points_from_flat([5.0] * 14 + [5.5], None) == [
+        (20000, 5.0),
+        (27000, 5.5),
+    ]
