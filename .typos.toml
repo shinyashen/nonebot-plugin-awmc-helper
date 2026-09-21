@@ -1,0 +1,4 @@
+# typos 拼写检查配置：豁免字体厂商标识与 maimai 官方素材文件名前缀
+[default.extend-words]
+FOT = "FOT" # Fontworks 字体文件前缀（FOT-NewRodin Pro）
+GAM = "GAM" # maimai 素材命名（UI_GAM_Gauge_DXScoreIcon_*.png）
