@@ -266,11 +266,10 @@ async def test_vote_hint_in_music_query(app: App, songs):
             }
         )
         event_user = 12345678
-        from fake import fake_group_message_event_v11
-
         import nonebot
-        from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+        from fake import fake_group_message_event_v11
         from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+        from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
         event = fake_group_message_event_v11(message="企鹅是什么歌", user_id=event_user)
         expected = Message(

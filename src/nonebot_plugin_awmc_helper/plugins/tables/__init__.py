@@ -7,16 +7,18 @@
 - `<版本><牌种>完成表 / 进度`（如 真将完成表 / 樱极进度）
 - `牌子条件`
 - `<等级|定数>分数列表 [页]`
-- `更新定数表 / 更新完成表`（SUPERUSER；本插件实时渲染，直接回复）
+- `更新定数表 / 更新完成表`（SUPERUSER，预渲染底图；查询时叠加成绩）
 """
 
 from nonebot import on_regex, on_command, on_fullmatch
 from maimai_py import FCType, FSType, SongType
 from nonebot.params import RegexGroup
 from nonebot.plugin import PluginMetadata
+from nonebot.permission import SUPERUSER
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from ...config import plugin_config
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import paginate, handle_errors
@@ -31,6 +33,26 @@ __plugin_meta__ = PluginMetadata(
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
 )
+
+from nonebot import get_driver as _get_driver
+
+
+@_get_driver().on_startup
+async def _warn_missing_templates() -> None:
+    """NB 方案：底图未生成时启动告警（提示 SUPERUSER 执行更新指令）。"""
+    if not plugin_config.awmc_startup_tasks:
+        return
+    from ...core.render.table_template import plate_table_dir, rating_table_dir
+
+    if not rating_table_dir().exists() or not any(rating_table_dir().iterdir()):
+        from nonebot import logger
+
+        logger.warning("定数表底图未生成，请 SUPERUSER 执行「更新定数表」")
+    if not plate_table_dir().exists() or not any(plate_table_dir().iterdir()):
+        from nonebot import logger
+
+        logger.warning("完成表底图未生成，请 SUPERUSER 执行「更新完成表」")
+
 
 # 评价计划 → 判定函数（achievement / fc / fs）
 PLANS: dict[str, str] = {
@@ -65,7 +87,8 @@ plate_cmd = on_regex(
 )
 plate_help = on_fullmatch("牌子条件", block=True)
 score_list_cmd = on_regex(rf"^{DS_RE}\s?分数列表\s?([0-9]+)?$", block=True)
-update_table = on_command("更新定数表", aliases={"更新完成表"}, block=True)
+update_rating = on_command("更新定数表", permission=SUPERUSER, block=True)
+update_plate = on_command("更新完成表", permission=SUPERUSER, block=True)
 
 
 def _plan_checker(plan: str):
@@ -144,10 +167,19 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             items.append((song, d, state))
     if not items:
         await UniMessage.text(f"没有找到等级为「{level}」的谱面").finish(at_sender=True)
-    done_count = sum(1 for _, _, s in items if s == "done")
-    png = completion_grid_bytes(
-        f"{level} {plan_name} 完成表（{done_count}/{len(items)}）", items
+    done_count = sum(1 for _, _, st in items if st == "done")
+
+    # Q7 NB 方案：底图存在则叠加印章，否则回退实时网格
+    from ...core.render import table_template
+
+    state_list = [(song, d, st == "done") for song, d, st in items]
+    png = await table_template.overlay_rating(
+        level, plan_name, state_list, page=1, per_page=len(state_list)
     )
+    if png is None:
+        png = completion_grid_bytes(
+            f"{level} {plan_name} 完成表（{done_count}/{len(items)}）", items
+        )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
@@ -200,6 +232,29 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     plates = await score_service.get_plates(binding, f"{version}{kind}")
     if mode == "完成表":
         cleared = await plates.get_cleared()
+        cleared_keys = set()
+        for plate in cleared:
+            for level_index in plate.levels:
+                cleared_keys.add((plate.song.id, SongType.STANDARD, level_index))
+                cleared_keys.add((plate.song.id, SongType.DX, level_index))
+        total_levels = await plates.count_all()
+        cleared_levels = await plates.count_cleared()
+
+        # Q7 NB 方案：底图存在则叠加印章
+        from ...core.render import table_template
+
+        all_items = []
+        for song in await song_service.get_all():
+            for d in song.get_difficulties():
+                if d.type == SongType.UTAGE:
+                    continue
+                all_items.append((song, d))
+        png = await table_template.overlay_plate(
+            version, kind, cleared_keys, all_items, cleared_levels
+        )
+        if png is not None:
+            await UniMessage.image(raw=png).finish(at_sender=True)
+        # 回退：实时网格（仅达成项展示）
         items = []
         for plate in cleared:
             for level_index in sorted(plate.levels, key=lambda x: x.value):
@@ -213,8 +268,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
                 )
                 if d is not None:
                     items.append((plate.song, d, "done"))
-        total_levels = await plates.count_all()
-        cleared_levels = await plates.count_cleared()
         png = completion_grid_bytes(
             f"{version}{kind} 完成表（{cleared_levels}/{total_levels}）", items
         )
@@ -278,9 +331,36 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
-@update_table.handle()
-@handle_errors()
+@update_rating.handle()
+@handle_errors("生成底图失败")
 async def _():
-    await UniMessage.text("本插件的成绩表格均为实时渲染，无需手动更新").finish(
+    from ...constants import LEVEL_LIST
+    from ...core.render import table_template
+
+    await UniMessage.text("正在生成定数表底图，请稍候……").finish(at_sender=True)
+    total = 0
+    for lv in LEVEL_LIST[6:]:  # lv7-15
+        total += await table_template.generate_rating_template(lv, song_service)
+    await UniMessage.text(f"定数表底图生成完成（{total} 谱面次）。").finish(
+        at_sender=True
+    )
+
+
+@update_plate.handle()
+@handle_errors("生成底图失败")
+async def _():
+    from ...core.render import table_template
+
+    await UniMessage.text("正在生成完成表底图，需要一些时间，请稍候……").finish(
+        at_sender=True
+    )
+    kinds = ("将", "者", "极", "神", "舞舞")
+    count = 0
+    for v in PLATE_CHARS:
+        if v in ("舞", "霸"):
+            continue
+        for k in kinds:
+            count += await table_template.generate_plate_template(v, k, song_service)
+    await UniMessage.text(f"完成表底图生成完成（{count} 谱面次）。").finish(
         at_sender=True
     )

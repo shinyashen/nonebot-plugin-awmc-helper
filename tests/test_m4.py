@@ -336,3 +336,28 @@ async def test_completion_grid_smoke(songs):
 
 
 from maimai_py import SongType
+
+
+@pytest.mark.asyncio
+async def test_table_template_overlay(songs):
+    """Q7 端到端：生成定数表底图 → 叠加印章 → 出非空 PNG；无底图时返回 None。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+
+    # 无底图 → 叠加返回 None（先清理可能的残留）
+    (table_template.rating_table_dir() / "13+.png").unlink(missing_ok=True)
+    assert await table_template.overlay_rating("13+", "Full Combo", [], 1, 80) is None
+
+    total = await table_template.generate_rating_template("13+", song_service)
+    assert total > 0
+    path = table_template.rating_table_dir() / "13+.png"
+    assert path.exists()
+
+    song231 = await song_service.by_id(231)
+    diff = song231.get_difficulties()[0]
+    state_list = [(song231, diff, True)]
+    png = await table_template.overlay_rating(
+        "13+", "Full Combo", state_list, 1, per_page=80
+    )
+    assert png is not None
+    assert png.startswith(b"\x89PNG\r\n")

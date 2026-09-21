@@ -126,8 +126,8 @@ async def _assert_image_reply(
 
 @pytest.mark.asyncio
 async def test_search_single_draws_card(app: App, songs):
-    from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
 
     song = await song_service.by_id(500)
     await _assert_image_reply(
@@ -194,8 +194,8 @@ async def test_alias_search_multi(app: App, songs):
 
 @pytest.mark.asyncio
 async def test_alias_search_single(app: App, songs):
-    from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
 
     song = await song_service.by_id(500)
     await _assert_image_reply(
@@ -214,8 +214,8 @@ async def test_query_chart_not_found(app: App, songs):
 
 @pytest.mark.asyncio
 async def test_query_chart_card(app: App, songs):
-    from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
 
     song = await song_service.by_id(231)
     await _assert_image_reply(
