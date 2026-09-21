@@ -258,3 +258,67 @@ async def test_daily_songdb_pipeline(db, monkeypatch):
 
     monkeypatch.setattr(songdb, "refresh_all", boom)
     await songs_mod._daily_songdb()  # 不抛
+
+
+@pytest.mark.asyncio
+async def test_poll_utage_rotation_not_triggered(
+    db, cn_mock, no_templates, monkeypatch
+):
+    """宴轮换不构成更新事件：检测键排除宴（底图不含宴谱，轮换频繁）。"""
+    from nonebot_plugin_awmc_helper.core import songs as songs_mod
+
+    triggered = []
+
+    async def fake_on_update(a, r, t):
+        triggered.append((a, r, t))
+
+    monkeypatch.setattr(songs_mod, "_on_cn_update", fake_on_update)
+
+    await songs_mod._hourly_cn_poll()  # 基线
+    # 双源同时新增一张宴谱（轮换上架）
+    updated = make_lxns()
+    updated["songs"].append(
+        {
+            "id": "110999",
+            "title": "[宴]Rotated In",
+            "artist": "A",
+            "genre": "宴会場",
+            "bpm": 150,
+            "difficulties": {
+                "standard": [],
+                "dx": [],
+                "utage": [
+                    {
+                        "level": "13",
+                        "level_value": 13.0,
+                        "difficulty": 0,
+                        "note_designer": "R",
+                        "version": 25000,
+                        "kanji": "宴",
+                        "description": "x",
+                        "is_buddy": False,
+                        "notes": {},
+                    }
+                ],
+            },
+        }
+    )
+    cn_mock.get(f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}).mock(
+        return_value=httpx.Response(200, json=updated)
+    )
+    df_updated = [
+        *make_divingfish(),
+        {
+            "id": "110999",
+            "title": "[宴]Rotated In",
+            "ds": [13.0],
+            "level": ["13"],
+            "basic_info": {
+                "title": "[宴]Rotated In",
+                "from": "maimai でらっくす PRiSM",
+            },
+        },
+    ]
+    cn_mock.get(DF_URL).mock(return_value=httpx.Response(200, json=df_updated))
+    await songs_mod._hourly_cn_poll()
+    assert triggered == []

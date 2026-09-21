@@ -445,6 +445,27 @@ async def _ensure_templates() -> None:
             logger.exception("底图兜底预渲染失败（保留现状，不阻断）")
 
 
+def _poll_keys(items: list[dict]) -> set[songdb.DetectKey]:
+    """轮询检测键：(song_id, kind)。
+
+    - 排除宴：宴轮换频繁，且定数表/完成表底图均不含宴谱，轮换不构成更新事件；
+    - 排除禁用条目：落雪对删除/下架曲打 disabled 留在列表，禁用即「在列→消失」。
+    """
+    keys: set[songdb.DetectKey] = set()
+    for s in items:
+        if s.get("disabled"):
+            continue
+        raw_id, base = int(s["id"]), int(s["id"]) % 10000
+        if raw_id > 99999:
+            continue
+        diffs = s.get("difficulties", {})
+        if diffs.get("standard"):
+            keys.add((base, "sd"))
+        if diffs.get("dx"):
+            keys.add((base, "dx"))
+    return keys
+
+
 async def _hourly_cn_poll() -> None:
     """国服源小时轮询（§7.2）：ext 直连轻拉双源 → 双源交集判定更新。"""
     from .ext import lxns as ext_lxns
@@ -456,15 +477,24 @@ async def _hourly_cn_poll() -> None:
     except Exception as e:
         logger.warning(f"国服轮询拉取失败，跳过本次检测：{e}")
         return
-    lx_ids = {int(s["id"]) % 10000 for s in light.get("songs", [])}
-    df_ids = {int(item["id"]) % 10000 for item in df}
+    lx_keys = _poll_keys(light.get("songs", []))
+    df_keys: set[songdb.DetectKey] = set()
+    for d in df:  # 水鱼 id 形状即类型：≤4 位 sd、5 位 dx（宴不触发）
+        i = int(d["id"])
+        if i <= 9999:
+            df_keys.add((i, "sd"))
+        elif i <= 99999:
+            df_keys.add((i % 10000, "dx"))
     titles = {int(s["id"]) % 10000: s.get("title", "") for s in light.get("songs", [])}
-    known = set((await store.kv_get(CN_POLL_STATE_KEY) or {}).get("known", []))
-    detected = songdb.detect_cn_update(known, lx_ids, df_ids)
+    known = {
+        (int(sid), kind)
+        for sid, kind in (await store.kv_get(CN_POLL_STATE_KEY) or {}).get("known", [])
+    }
+    detected = songdb.detect_cn_update(known, lx_keys, df_keys)
     await store.kv_set(
         CN_POLL_STATE_KEY,
         {
-            "known": sorted(lx_ids | df_ids),
+            "known": sorted([sid, kind] for sid, kind in lx_keys | df_keys),
             "last_poll": datetime.now().isoformat(timespec="seconds"),
         },
     )
@@ -473,7 +503,7 @@ async def _hourly_cn_poll() -> None:
         return
     added, removed = detected
     logger.info(f"检测到国服曲库更新：新增 {sorted(added)}，下架 {sorted(removed)}")
-    await _on_cn_update(added, removed, titles)
+    await _on_cn_update({sid for sid, _ in added}, {sid for sid, _ in removed}, titles)
 
 
 async def _on_cn_update(

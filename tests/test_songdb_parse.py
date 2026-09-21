@@ -108,10 +108,19 @@ def test_parse_lxns_cn_structure():
     assert not hasattr(cn[18].charts["utage"][0], "comment")
 
 
-def test_detect_cn_update():
-    from nonebot_plugin_awmc_helper.core.songdb import detect_cn_update
+def test_parse_lxns_disabled_flag():
+    from nonebot_plugin_awmc_helper.core.songdb import parse_lxns
 
-    known = {8, 21, 18, 355, 9002}
+    cn = parse_lxns(make_lxns(disable_ids={9002}))
+    assert cn[9002].disabled
+    assert not cn[8].disabled
+
+
+def test_detect_cn_update():
+    from nonebot_plugin_awmc_helper.core.songdb import DetectKey, detect_cn_update
+
+    # 检测键为 (song_id, kind)；宴键不参与检测（见 songs._poll_keys）
+    known: set[DetectKey] = {(8, "sd"), (21, "dx"), (9002, "sd")}
     lx = known
     df = known
     # 首次运行（无基线）不触发
@@ -119,21 +128,21 @@ def test_detect_cn_update():
     # 无变化
     assert detect_cn_update(known, lx, df) is None
     # 单源新增不触发
-    assert detect_cn_update(known, lx | {9001}, df) is None
-    assert detect_cn_update(known, lx, df | {9001}) is None
+    assert detect_cn_update(known, lx | {(9001, "sd")}, df) is None
+    assert detect_cn_update(known, lx, df | {(9001, "sd")}) is None
     # 双源新增交集 → 触发（国服更新确定）
-    result = detect_cn_update(known, lx | {9001}, df | {9001})
+    result = detect_cn_update(known, lx | {(9001, "sd")}, df | {(9001, "sd")})
     assert result is not None
     added, removed = result
-    assert added == {9001}
+    assert added == {(9001, "sd")}
     assert not removed
     # 双源消失交集 → 下架确认；单源消失不触发
-    assert detect_cn_update(known, lx - {9002}, df) is None
-    result = detect_cn_update(known, lx - {9002}, df - {9002})
+    assert detect_cn_update(known, lx - {(9002, "sd")}, df) is None
+    result = detect_cn_update(known, lx - {(9002, "sd")}, df - {(9002, "sd")})
     assert result is not None
     added, removed = result
     assert not added
-    assert removed == {9002}
+    assert removed == {(9002, "sd")}
 
 
 def test_level_flat_matches_doc_example():

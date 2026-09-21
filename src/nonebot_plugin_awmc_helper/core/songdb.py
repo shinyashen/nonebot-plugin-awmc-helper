@@ -141,13 +141,18 @@ class Chart:
 
 @dataclass
 class Entry:
-    """曲级中间结构；``versions`` 按组类型分开（SD/DX key 的 from 可不同）。"""
+    """曲级中间结构；``versions`` 按组类型分开（SD/DX key 的 from 可不同）。
+
+    ``disabled`` 仅落雪侧使用：落雪对删除/禁用曲**打标留在列表**（官方文档：
+    disabled 为 true 不计入 Best 50），并非从列表移除——它是 CN 缺失的信号之一。
+    """
 
     song_id: int
     title: str = ""
     artist: str = ""
     genre: str = ""
     bpm: str = ""
+    disabled: bool = False
     versions: dict[str, int | None] = field(default_factory=dict)
     charts: dict[str, dict[int, Chart]] = field(default_factory=dict)
 
@@ -308,6 +313,7 @@ def parse_lxns(song_list: dict) -> dict[int, Entry]:
         entry.artist = entry.artist or item.get("artist", "")
         entry.genre = entry.genre or item.get("genre", "")
         entry.bpm = entry.bpm or str(item.get("bpm", "") or "")
+        entry.disabled = entry.disabled or bool(item.get("disabled"))
         diffs = item.get("difficulties", {})
         for diff in diffs.get("standard", []):
             entry.group("sd")[int(diff["difficulty"])] = _cn_chart(
@@ -345,6 +351,20 @@ def _cn_chart(diff: dict, level_id: int) -> Chart:
 def parse_divingfish(music_data: list[dict]) -> dict[str, dict]:
     """水鱼曲库 → 对账索引（raw id 字符串 → 条目；version_cn/定数互证 + 在列判定）。"""
     return {str(item["id"]): item for item in music_data}
+
+
+def _df_known_kinds(music_data: dict[str, dict]) -> set[tuple[int, str]]:
+    """水鱼在列集（(song_id, kind)；id 形状定 kind：≤4 位 sd、5 位 dx、6 位宴）。"""
+    known: set[tuple[int, str]] = set()
+    for raw_id in music_data:
+        i = int(raw_id)
+        if i > 99999:
+            known.add((i % 10000, "utage"))
+        elif i > 9999:
+            known.add((i % 10000, "dx"))
+        else:
+            known.add((i, "sd"))
+    return known
 
 
 # ---------------------------------------------------------------------------
@@ -766,14 +786,15 @@ def _crosscheck_df(
 def apply_missing(
     state: State,
     *,
-    cn_known: set[int] | None,
+    cn_known: set[tuple[int, str]] | None,
     jp_known_songs: set[int] | None,
     jp_known_titles: set[str] | None,
     jp_deleted_titles: set[str] | None = None,
 ) -> int:
     """缺失/删除统一规则（§7.5-B）：一侧缺置该侧版本列 NULL，两侧皆无整曲删除。
 
-    - ``cn_known``：国服在列 song_id 集；None = 双源未齐，跳过 CN 缺省同步；
+    - ``cn_known``：国服在列 (song_id, kind) 集（禁用/消失不算在列）；
+      None = 双源未齐，跳过 CN 缺省同步；
     - ``jp_known_songs``：maimaiinfo 解出的 song_id 集；None = 跳过 JP 缺省同步；
     - ``jp_known_titles``：otoge-db 现役归一标题集（None = 不强求）；
     - ``jp_deleted_titles``：otoge 下架标题集（权威下架信号）。
@@ -782,8 +803,8 @@ def apply_missing(
     返回整曲删除数。
     """
     if cn_known is not None:
-        for (song_id, _kind), group in state.groups.items():
-            if group.version_cn is not None and song_id not in cn_known:
+        for (song_id, kind), group in state.groups.items():
+            if group.version_cn is not None and (song_id, kind) not in cn_known:
                 group.version_cn = None
     if jp_known_songs is not None:
         for (song_id, _kind), group in state.groups.items():
@@ -815,7 +836,7 @@ def apply_missing(
         else:
             jp_present = any(g.version is not None for g in groups)
         if cn_known is not None:
-            cn_present = song_id in cn_known
+            cn_present = any((song_id, g.kind) in cn_known for g in groups)
         else:
             cn_present = any(g.version_cn is not None for g in groups)
         if not groups or (not jp_present and not cn_present):
@@ -859,7 +880,7 @@ async def rebuild(payloads: dict[str, Any]) -> dict[str, Any]:
             title = item.get("title", "")
             if title and norm_title(title) not in known_titles:
                 await upsert_pending("otoge-db", f"title:{title}", "missing_id", item)
-    cn_known: set[int] | None = None
+    cn_known: set[tuple[int, str]] | None = None
     if payloads.get("lxns") is not None:
         cn = parse_lxns(payloads["lxns"])
         df = (
@@ -868,8 +889,16 @@ async def rebuild(payloads: dict[str, Any]) -> dict[str, Any]:
             else None
         )
         if df is not None:
-            # CN 缺省同步需双源确认（§7.5-B）：单源抓取失败则不做缺省判定
-            cn_known = set(cn) | {int(k) % 10000 for k in df}
+            # CN 缺省同步需双源确认（§7.5-B）：单源抓取失败则不做缺省判定。
+            # 粒度 (song_id, kind)：落雪对禁用（删除/宴轮换下架）曲打 disabled
+            # 留在列表而非移除，禁用条目不算在列；宴条目独立、可精确到宴组
+            cn_known = {
+                (sid, kind)
+                for sid, entry in cn.items()
+                if not entry.disabled
+                for kind in entry.charts
+            }
+            cn_known |= _df_known_kinds(df)
         apply_cn(state, cn, df)
     removed = apply_missing(
         state,
@@ -1281,20 +1310,22 @@ def fingerprint(state: State) -> str:
 # ---------------------------------------------------------------------------
 
 
+DetectKey = tuple[int, str]
+
+
 def detect_cn_update(
-    known: set[int], lx_ids: set[int], df_ids: set[int]
-) -> tuple[set[int], set[int]] | None:
+    known: set[DetectKey], lx: set[DetectKey], df: set[DetectKey]
+) -> tuple[set[DetectKey], set[DetectKey]] | None:
     """国服更新判定（§7.2）：两源新增集交集非空（新歌）或两源消失集交集非空（下架）。
 
-    ``known`` 为上一轮两源并集（song_id 级）；空集视为首次运行（仅建基线，不触发）。
-    返回 ``(added, removed)``；无更新返回 None。
+    三个集合为同粒度的在列键（建议 ``(song_id, kind)``，调用方排除宴与禁用）；
+    ``known`` 空集视为首次运行（仅建基线，不触发）。返回 ``(added, removed)``，
+    无更新返回 None。
     """
     if not known:
         return None
-    lx, df = {i % 10000 for i in lx_ids}, {i % 10000 for i in df_ids}
-    known_norm = {i % 10000 for i in known}
-    added = (lx - known_norm) & (df - known_norm)
-    removed = (known_norm - lx) & (known_norm - df)
+    added = (lx - known) & (df - known)
+    removed = (known - lx) & (known - df)
     if added or removed:
         return added, removed
     return None

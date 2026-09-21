@@ -366,7 +366,11 @@ def _cn_diff(
     }
 
 
-def make_lxns(with_9001: bool = False, drop_ids: set[int] | None = None) -> dict:
+def make_lxns(
+    with_9001: bool = False,
+    drop_ids: set[int] | None = None,
+    disable_ids: set[int] | None = None,
+) -> dict:
     """落雪列表；``drop_ids`` 模拟国服下架（整曲消失）。"""
     songs: list[dict] = [
         {
@@ -594,6 +598,9 @@ def make_lxns(with_9001: bool = False, drop_ids: set[int] | None = None) -> dict
         )
     if drop_ids:
         songs = [s for s in songs if int(s["id"]) % 10000 not in drop_ids]
+    for s in songs:
+        if disable_ids and int(s["id"]) % 10000 in disable_ids:
+            s["disabled"] = True  # 落雪对删除/下架曲打标留在列表
     return {"songs": songs}
 
 

@@ -180,6 +180,47 @@ async def test_source_failure_tolerated(db):
 
 
 @pytest.mark.asyncio
+async def test_disabled_means_cn_absent(db):
+    """落雪 disabled（删除/宴下架）= CN 缺失：version_cn 置 NULL；组粒度互不影响。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    # 8 被禁用 + 水鱼同步移除：sd 组 version_cn 置 NULL，曲保留（JP 在列）
+    await songdb.rebuild(
+        full_payloads(
+            lxns=make_lxns(disable_ids={8}),
+            divingfish=make_divingfish(drop_ids={8}),
+        )
+    )
+    state = await songdb.State.load()
+    assert 8 in state.songs
+    g = state.groups[(8, "sd")]
+    assert g.version == 20000
+    assert g.version_cn is None
+    # 其他曲不受影响
+    assert state.groups[(21, "dx")].version_cn == 20000
+    # 宴条目单独禁用：仅宴组置 NULL（组粒度）
+    await songdb.rebuild(
+        full_payloads(
+            lxns=make_lxns(disable_ids={355}),
+            divingfish=make_divingfish(drop_ids={355}),
+        )
+    )
+    state = await songdb.State.load()
+    assert state.groups[(355, "utage")].version_cn is None
+    assert state.groups[(355, "utage")].version == 24500
+    # 国服限定曲 9002 被禁用 + JP 也无 → 整曲删除
+    await songdb.rebuild(
+        full_payloads(
+            lxns=make_lxns(disable_ids={9002}),
+            divingfish=make_divingfish(drop_ids={9002}),
+        )
+    )
+    state = await songdb.State.load()
+    assert 9002 not in state.songs
+
+
+@pytest.mark.asyncio
 async def test_pending_and_flush(db):
     """otoge 独有的无 id 条目进 pending；id 到位后归并清理。"""
     from nonebot_plugin_awmc_helper.core import store, songdb
