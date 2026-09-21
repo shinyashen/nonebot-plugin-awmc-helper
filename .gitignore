@@ -191,3 +191,4 @@ local/
 
 # ---- 静态素材包（曲绘/UI 素材，用户自行下载，不入库） ----
 static/
+.zcodeignore
