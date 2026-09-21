@@ -19,9 +19,10 @@ from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDiffic
 from nonebot_plugin_apscheduler import scheduler
 
 from . import store, songdb
-from .client import client, yuzu_provider, divingfish_provider
+from .client import client, lxns_provider, yuzu_provider, divingfish_provider
 from ..config import plugin_config
-from .provider import AwmcSongProvider
+from .provider import AwmcSongProvider, AwmcAliasProvider
+from ..constants import strip_chart_prefix
 
 SNAPSHOT_KEY = "songs_snapshot"
 CN_POLL_STATE_KEY = "cn_poll_state"
@@ -31,7 +32,7 @@ CN_POLL_STATE_KEY = "cn_poll_state"
 # 等价于原落雪 disabled 过滤）；别名走柚子；配置了水鱼开发者 token 时附带
 # 曲线数据。规范表重建后 provider 指纹变化 → maimai_py 自动重建缓存。
 _SONG_PROVIDER = AwmcSongProvider(scope="cn")
-_ALIAS_PROVIDER = yuzu_provider
+_ALIAS_PROVIDER = AwmcAliasProvider(yuzu_provider, lxns_provider)
 _CURVE_PROVIDER = (
     divingfish_provider if plugin_config.awmc_divingfish_developer_token else None
 )
@@ -264,10 +265,20 @@ class SongService:
         )
 
     async def by_alias(self, alias: str) -> list[Song]:
-        """按别名查曲（柚子 + 本地），返回命中的全部曲目（同一别名可对应多曲）。"""
+        """按别名查曲（柚子 + 落雪 + 本地），返回命中的全部曲目。
+
+        同根 id 的标准/DX/宴谱别名已合并；精确未命中时剥离谱面类型前缀
+        （dx/标准/标/旧/sd/宴）重查一次——社区惯用「dx圣诞 / 标39」式前缀
+        区分双谱，合并后带前缀查询也应能命中（Q31；仅查询兜底，不改写数据）。
+        """
         await self.ensure_loaded()
+        ids = self._alias_index.get(alias.lower(), set())
+        if not ids:
+            stripped = strip_chart_prefix(alias)
+            if stripped:
+                ids = self._alias_index.get(stripped, set())
         result: list[Song] = []
-        for song_id in sorted(self._alias_index.get(alias.lower(), set())):
+        for song_id in sorted(ids):
             if song := await self.by_id(song_id):
                 result.append(song)
         return result

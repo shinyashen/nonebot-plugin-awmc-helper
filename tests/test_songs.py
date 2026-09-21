@@ -46,6 +46,27 @@ async def test_alias_lookup_incl_disabled_filter(songs):
 
 
 @pytest.mark.asyncio
+async def test_by_alias_chart_prefix_fallback(songs):
+    """精确未命中时剥离谱面类型前缀重查（Q31：dx/标准/标/旧/sd/宴）。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    # 带前缀命中（种子别名「普瑞」「企鹅舞」）
+    got = await song_service.by_alias("dx普瑞")
+    assert [s.id for s in got] == [500]
+    got = await song_service.by_alias("标准企鹅舞")
+    assert [s.id for s in got] == [231]
+    # 叠层前缀
+    got = await song_service.by_alias("dx标普瑞")
+    assert [s.id for s in got] == [500]
+    # 精确命中优先，不受剥离影响
+    got = await song_service.by_alias("普瑞")
+    assert [s.id for s in got] == [500]
+    # 完全未命中：剥无可剥 → 空
+    assert await song_service.by_alias("不存在的别名") == []
+    assert await song_service.by_alias("dx") == []
+
+
+@pytest.mark.asyncio
 async def test_filters(songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 

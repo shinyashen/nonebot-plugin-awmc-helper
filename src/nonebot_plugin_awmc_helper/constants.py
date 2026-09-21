@@ -4,6 +4,8 @@ maimai-py 的 `Genre` 枚举值是日文分类，库未公开导出中文映射�
 本模块自带「中文/日文 → Genre」双向映射（对齐原版 maimaiDX 的 CATEGORY 语义）。
 """
 
+import re
+
 from maimai_py import Genre, Version, RateType, LevelIndex
 
 # ---------------------------------------------------------------------------
@@ -237,6 +239,29 @@ DX_VERSION_CODES: list[int] = [
     26000,  # maimai でらっくす CiRCLE
     26500,  # maimai でらっくす CiRCLE PLUS
 ]
+
+
+# 谱面类型别名前缀：社区对同根id双谱（标准/DX/宴）的惯用区分写法
+# （dx圣诞、标准39、标星光、旧谱、宴Oshama…）。用于查询侧剥离兜底，
+# 最长优先匹配；数据侧别名保留原样（含前缀）不去除
+_CHART_PREFIX_RE = re.compile(
+    r"^(?:dx|sd|标准谱|标准|旧谱|旧|标|宴)[\s·・.。:：_-]*", re.IGNORECASE
+)
+
+
+def strip_chart_prefix(alias: str, max_strips: int = 2) -> str | None:
+    """剥离别名开头的谱面类型前缀（可叠层，如「dx标39」）；无前缀可剥返回 None。
+
+    仅作查询兜底（「dx+先出谱面的专属绰号」也能命中合并后的根 id），
+    不改写别名数据本身。
+    """
+    current = alias.strip()
+    for _ in range(max_strips):
+        stripped = _CHART_PREFIX_RE.sub("", current, count=1).strip()
+        if stripped == current or not stripped:
+            break
+        current = stripped
+    return current if current != alias.strip() else None
 
 
 def version_name(version: int) -> str:

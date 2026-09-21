@@ -17,7 +17,7 @@ from typing import Any
 from pathlib import Path
 from datetime import datetime
 
-from sqlmodel import Field, SQLModel, select
+from sqlmodel import Field, SQLModel, col, delete, select
 from sqlalchemy import UniqueConstraint
 from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -204,6 +204,16 @@ class SongChartLevel(SQLModel, table=True):
     level_id: int = Field(primary_key=True)
     version: int = Field(primary_key=True)
     level_value: float | None = None  # 宴为标级推导值（+/无+ → .7/.0）
+
+
+class SongAlias(SQLModel, table=True):
+    """远端别名持久化快照（yuzu/lxns 拉取后整源替换）：离线重启时兜底可用。"""
+
+    __tablename__ = "song_alias"  # type: ignore[reportGeneralTypeIssues]
+
+    source: str = Field(primary_key=True)  # yuzu / lxns
+    song_id: int = Field(primary_key=True)
+    alias: str = Field(primary_key=True)
 
 
 class SongSourceRaw(SQLModel, table=True):
@@ -394,6 +404,30 @@ async def remove_local_alias(song_id: int, alias: str) -> bool:
 async def get_local_aliases() -> list[LocalAlias]:
     async with _open_session() as session:
         return list((await session.exec(select(LocalAlias))).all())
+
+
+async def save_song_aliases(source: str, items: dict[int, list[str]]) -> None:
+    """整源替换远端别名快照（单事务；items 为根 id → 别名列表）。"""
+    async with _open_session() as session:
+        await session.execute(delete(SongAlias).where(col(SongAlias.source) == source))
+        for song_id, aliases in items.items():
+            for alias in aliases:
+                session.add(SongAlias(source=source, song_id=song_id, alias=alias))
+        await session.commit()
+
+
+async def load_song_aliases(sources: list[str]) -> dict[int, list[str]]:
+    """读取若干源的别名快照（根 id → 别名列表）。"""
+    async with _open_session() as session:
+        rows = (
+            await session.exec(
+                select(SongAlias).where(col(SongAlias.source).in_(sources))
+            )
+        ).all()
+    merged: dict[int, list[str]] = {}
+    for row in rows:
+        merged.setdefault(row.song_id, []).append(row.alias)
+    return merged
 
 
 async def kv_get(key: str) -> Any | None:

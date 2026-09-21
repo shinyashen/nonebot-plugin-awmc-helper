@@ -1,4 +1,4 @@
-"""自定义 maimai_py provider：规范表 → 库对象（song-db-design §5.6）。
+"""自定义 maimai_py provider：规范表/别名 → 库对象（song-db-design §5.6）。
 
 参考 maimai.py 自带的 ``LocalProvider``（``_hash`` 由数据内容计算）与
 ``docs/concepts/caches.md``「覆写 provider 即替换缓存源」：
@@ -11,12 +11,17 @@
   见 QUESTIONS Q23），本 provider 现阶段服务 JP 视图与数据入口统一（§5.4）。
 """
 
+import json
+import hashlib
 from typing import Literal
 
+from nonebot import logger
 from maimai_py.models import Song
-from maimai_py.providers.base import ISongProvider
+from maimai_py.providers.base import ISongProvider, IAliasProvider
+from maimai_py.providers.lxns import LXNSProvider
+from maimai_py.providers.yuzu import YuzuProvider
 
-from . import songdb
+from . import store, songdb
 
 Scope = Literal["cn", "jp"]
 
@@ -27,9 +32,75 @@ class AwmcSongProvider(ISongProvider):
     def __init__(self, scope: Scope = "cn") -> None:
         self.scope: Scope = scope
 
-    async def get_songs(self, client) -> list[Song]:  # noqa: ANN001（与库接口签名一致）
+    async def get_songs(self, client) -> list[Song]:
         state = await songdb.State.load()
         return songdb.all_songs(state, self.scope)
 
     def _hash(self) -> str:
         return songdb.CURRENT_FINGERPRINT or "empty"
+
+
+class AwmcAliasProvider(IAliasProvider):
+    """柚子 + 落雪 + 本地 三源别名合并 provider（song-db-design §5.6，Q31）。
+
+    - 对齐原版 maimaiDX 的别名合并口径（core/merge/alias.py：柚子+落雪）；
+    - 柚子的 SongID 是谱面级（sd 541 / dx 793 / 宴 66 条），官方 provider 内部
+      已 ``%10000`` 折叠到根 id——同根 id 的标准/DX/宴谱别名在此天然合并；
+    - 叠加落雪别名库（``api/v0/maimai/alias/list``）与 ``local_alias`` 本地别名；
+    - ``_hash`` 基于上次拉取的别名内容：柚子/落雪官方 provider 均为常量哈希，
+      远端别名更新从不触发缓存重建，此处修复为内容驱动。
+    """
+
+    def __init__(self, yuzu: YuzuProvider, lxns: LXNSProvider) -> None:
+        self._yuzu = yuzu
+        self._lxns = lxns
+        self._fingerprint: str | None = None
+
+    async def get_aliases(self, client) -> dict[int, list[str]]:
+        merged: dict[int, list[str]] = {}
+        seen: dict[int, set[str]] = {}
+
+        def _add(song_id: int, aliases: list[str]) -> None:
+            bucket = seen.setdefault(song_id, set())
+            target = merged.setdefault(song_id, [])
+            for alias in aliases:
+                low = alias.lower()
+                if low not in bucket:  # 跨源大小写不敏感去重，保序
+                    bucket.add(low)
+                    target.append(alias)
+
+        # 远端源单源容错：拉取成功即整源写库（song_alias 表）；失败回退库内快照
+        for name, fetch in (
+            ("yuzu", self._fetch_yuzu),
+            ("lxns", self._fetch_lxns),
+        ):
+            pairs: list[tuple[int, list[str]]] | None = None
+            try:
+                pairs = await fetch(client)
+            except Exception as e:
+                logger.warning(f"别名源 {name} 拉取失败，回退上次快照（{e}）")
+            if pairs is not None:
+                await store.save_song_aliases(name, dict(pairs))
+            else:
+                pairs = list((await store.load_song_aliases([name])).items())
+            for sid, aliases in pairs:
+                _add(sid, aliases)
+        for la in await store.get_local_aliases():
+            _add(la.song_id, [la.alias])
+        raw = json.dumps(
+            {str(k): sorted(v) for k, v in merged.items()},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self._fingerprint = hashlib.md5(raw.encode()).hexdigest()
+        return merged
+
+    async def _fetch_yuzu(self, client) -> list[tuple[int, list[str]]]:
+        return list((await self._yuzu.get_aliases(client)).items())
+
+    async def _fetch_lxns(self, client) -> list[tuple[int, list[str]]]:
+        raw = await self._lxns.get_aliases(client)
+        return [(int(sid) % 10000, aliases) for sid, aliases in raw.items()]
+
+    def _hash(self) -> str:
+        return self._fingerprint or "empty"

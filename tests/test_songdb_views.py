@@ -205,6 +205,9 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
         return {}
 
     monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
+    from nonebot_plugin_awmc_helper.core.client import lxns_provider
+
+    monkeypatch.setattr(lxns_provider, "get_aliases", fake_aliases)
     try:
         # 空表判定与冷启动路径
         assert await songdb.is_empty()
@@ -239,7 +242,12 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
                 await session.execute(delete(table))
             await session.commit()
         assert await songdb.is_empty()
-        assert await song_service.load()  # 降级成功而非空数据就绪
+        # 已就绪状态下加载失败：保留旧运行时（不降级、也不清空）
+        assert not await song_service.load()
+        assert await song_service.by_id(8) is not None  # 旧运行时仍在
+        # 未就绪（如重启后首载）：快照降级恢复（load 返回 False 表示非全新加载）
+        song_service._ready.clear()
+        assert not await song_service.load()
         assert await song_service.by_id(8) is not None  # 快照内容
     finally:
         song_service._ready.clear()
