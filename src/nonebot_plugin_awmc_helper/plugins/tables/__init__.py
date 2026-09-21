@@ -19,6 +19,7 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...config import plugin_config
+from ...constants import PLATE_CHARS
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import paginate, handle_errors
@@ -71,7 +72,7 @@ PLANS: dict[str, str] = {
     "fsp": "fs:fsp",
 }
 
-PLATE_CHARS = "舞霸真超檄橙晓桃樱紫堇白雪辉熊华爽煌星宙祭祝双宴镜彩丸"
+# 牌种正则（牌子字符 PLATE_CHARS 与 core 预渲染共用 constants 一份）
 PLATE_KINDS = "舞舞|将|者|极|神"
 
 LEVEL_RE = r"([0-9]+\+?)"
@@ -334,14 +335,12 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 @update_rating.handle()
 @handle_errors("生成底图失败")
 async def _():
-    from ...constants import LEVEL_LIST
     from ...core.render import table_template
 
     await UniMessage.text("正在生成定数表底图，请稍候……").finish(at_sender=True)
-    total = 0
-    for lv in LEVEL_LIST[6:]:  # lv7-15
-        total += await table_template.generate_rating_template(lv, song_service)
-    await UniMessage.text(f"定数表底图生成完成（{total} 谱面次）。").finish(
+    total, failed = await table_template.refresh_all_rating_tables(song_service)
+    extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
+    await UniMessage.text(f"定数表底图生成完成（{total} 谱面次）{extra}。").finish(
         at_sender=True
     )
 
@@ -354,13 +353,8 @@ async def _():
     await UniMessage.text("正在生成完成表底图，需要一些时间，请稍候……").finish(
         at_sender=True
     )
-    kinds = ("将", "者", "极", "神", "舞舞")
-    count = 0
-    for v in PLATE_CHARS:
-        if v in ("舞", "霸"):
-            continue
-        for k in kinds:
-            count += await table_template.generate_plate_template(v, k, song_service)
-    await UniMessage.text(f"完成表底图生成完成（{count} 谱面次）。").finish(
+    total, failed = await table_template.refresh_all_plate_tables(song_service)
+    extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
+    await UniMessage.text(f"完成表底图生成完成（{total} 谱面次）{extra}。").finish(
         at_sender=True
     )

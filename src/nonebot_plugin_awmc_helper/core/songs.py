@@ -9,6 +9,7 @@
 
 import random as _random
 import asyncio
+from datetime import datetime
 from enum import Enum
 from typing import Any
 from dataclasses import asdict, fields
@@ -17,7 +18,7 @@ from nonebot import logger, get_driver
 from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDifficulty
 from nonebot_plugin_apscheduler import scheduler
 
-from . import store
+from . import songdb, store
 from .client import (
     client,
     lxns_provider,
@@ -28,6 +29,7 @@ from .client import (
 from ..config import plugin_config
 
 SNAPSHOT_KEY = "songs_snapshot"
+CN_POLL_STATE_KEY = "cn_poll_state"
 
 # 曲库数据源组合：曲库走落雪（含物量），别名走柚子；
 # 配置了水鱼开发者 token 时附带曲线数据（ginfo/统计用）
@@ -377,3 +379,154 @@ async def _daily_refresh() -> None:
 
 scheduler.add_job(_daily_refresh, "cron", hour=4, minute=0)
 """每日 4 点全量刷新曲库并写快照。"""
+
+
+# ---------------------------------------------------------------------------
+# 歌曲库调度：国服小时轮询 / 每日全量 / 自动预渲染 / SUPERUSER 通知（song-db-design §7）
+# ---------------------------------------------------------------------------
+
+
+async def jp_songs() -> list[Song]:
+    """JP 视图：规范表日侧字段 → maimai_py 对象（§5.2，后续日服功能的数据入口）。
+
+    与 CN 视图互不干扰（不写 ``songs`` 缓存命名空间）；规范表为空返回 []。
+    """
+    state = await songdb.State.load()
+    return songdb.all_songs(state, "jp")
+
+
+async def _notify_superusers(text: str) -> None:
+    """跨适配器向全部 SUPERUSER 主动私聊推送（OB11 优先；失败记 debug 不影响流程）。"""
+    from nonebot_plugin_alconna.uniseg import SupportAdapter, Target, UniMessage
+
+    for user_id in get_driver().config.superusers:
+        try:
+            await UniMessage.text(text).send(
+                target=Target.user(user_id, adapter=SupportAdapter.onebot11)
+            )
+        except Exception as e:  # 平台不支持/未连接等一律跳过
+            logger.debug(f"更新通知发送失败（superuser={user_id}）：{e}")
+
+
+async def _prerender_templates() -> str:
+    """预渲染全部底图（core 实现，自动触发与 SUPERUSER 指令共用），返回结果描述。"""
+    from .render import table_template
+
+    rating_total, rating_failed = await table_template.refresh_all_rating_tables(song_service)
+    plate_total, plate_failed = await table_template.refresh_all_plate_tables(song_service)
+    return (
+        f"定数表 {rating_total} 谱面次（失败 {len(rating_failed)}）"
+        f"、完成表 {plate_total} 谱面次（失败 {len(plate_failed)}）"
+    )
+
+
+async def _ensure_templates() -> None:
+    """底图缺失时的兜底预渲染（首启基线 / 每日兜底，§7.2）。"""
+    from .render import table_template
+
+    if not plugin_config.awmc_auto_templates:
+        return
+    rating_dir, plate_dir = table_template.rating_table_dir(), table_template.plate_table_dir()
+
+    def _empty(path) -> bool:  # noqa: ANN001
+        return not path.exists() or not any(path.iterdir())
+
+    if _empty(rating_dir) or _empty(plate_dir):
+        try:
+            await _prerender_templates()
+        except Exception:
+            logger.exception("底图兜底预渲染失败（保留现状，不阻断）")
+
+
+async def _hourly_cn_poll() -> None:
+    """国服源小时轮询（§7.2）：ext 直连轻拉双源 → 双源交集判定更新。"""
+    from .ext import divingfish as ext_df
+    from .ext import lxns as ext_lxns
+
+    try:
+        light = await ext_lxns.fetch_song_list(notes=False)
+        df = await ext_df.fetch_music_data()
+    except Exception as e:
+        logger.warning(f"国服轮询拉取失败，跳过本次检测：{e}")
+        return
+    lx_ids = {int(s["id"]) % 10000 for s in light.get("songs", [])}
+    df_ids = {int(k) % 10000 for k in df}
+    titles = {int(s["id"]) % 10000: s.get("title", "") for s in light.get("songs", [])}
+    known = set((await store.kv_get(CN_POLL_STATE_KEY) or {}).get("known", []))
+    detected = songdb.detect_cn_update(known, lx_ids, df_ids)
+    await store.kv_set(
+        CN_POLL_STATE_KEY,
+        {
+            "known": sorted(lx_ids | df_ids),
+            "last_poll": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    if detected is None:
+        await _ensure_templates()  # 首启仅建基线；底图缺失时顺带预渲染一次
+        return
+    added, removed = detected
+    logger.info(f"检测到国服曲库更新：新增 {sorted(added)}，下架 {sorted(removed)}")
+    await _on_cn_update(added, removed, titles)
+
+
+async def _on_cn_update(added: set[int], removed: set[int], titles: dict[int, str]) -> None:
+    """更新确认后的串行动作（§7.3）：回填规范表 → 刷运行时 → 预渲染 → 通知。"""
+    try:
+        result = await songdb.refresh_all(include_cn=True, include_jp=False)
+    except Exception:
+        logger.exception("规范表国服回填失败（继续后续动作）")
+        result = {}
+    for warning in result.get("warnings", [])[:20]:
+        logger.warning(f"songdb: {warning}")
+    if not await song_service.refresh():
+        logger.error("国服更新后运行时曲库刷新失败（保留旧运行时）")
+    template_msg = "已跳过（awmc_auto_templates=false）"
+    if plugin_config.awmc_auto_templates:
+        try:
+            template_msg = await _prerender_templates()
+        except Exception:
+            logger.exception("国服更新自动预渲染失败（保留旧底图，不阻断曲库刷新）")
+            template_msg = "失败（保留旧底图）"
+    if plugin_config.awmc_update_notify:
+        new_names = "、".join(f"「{titles.get(i, i)}」" for i in sorted(added)) or "无"
+        gone_names = "、".join(f"「{titles.get(i, i)}」" for i in sorted(removed)) or "无"
+        await _notify_superusers(
+            f"检测到国服曲库更新：新增 {len(added)} 首（{new_names}），"
+            f"下架 {len(removed)} 首（{gone_names}）；底图重建：{template_msg}"
+        )
+
+
+async def _daily_songdb() -> None:
+    """每日 4 点歌曲库全量（§7.1 ⑥⑦⑧）：日侧源 + CN 回填 + 外部源 + 底图兜底。"""
+    try:
+        result = await songdb.refresh_all(include_cn=True, include_jp=True)
+        logger.info(
+            f"歌曲库每日刷新完成：{result['songs']} 曲 / {result['groups']} 组 / "
+            f"{result['charts']} 谱面 / {result['level_points']} 定数变化点，"
+            f"删除 {result['removed']} 曲，国服当前版本 {result['cn_current_version']}"
+        )
+        for warning in result.get("warnings", [])[:20]:
+            logger.warning(f"songdb: {warning}")
+    except Exception:
+        logger.exception("歌曲库每日全量刷新失败（不影响曲库运行时）")
+    try:
+        extra = await songdb.apply_external_sources()
+        if extra.get("changed"):
+            logger.info(f"外部补充源有变化，重建底图（{extra}）")
+            await _prerender_templates()
+    except Exception:
+        logger.exception("外部补充源应用失败（不阻塞）")
+    await _ensure_templates()
+
+
+scheduler.add_job(_daily_songdb, "cron", hour=4, minute=5)
+"""每日 4:05（曲库运行时刷新后）执行歌曲库全量管线。"""
+
+if plugin_config.awmc_cn_poll_minutes > 0:
+    scheduler.add_job(
+        _hourly_cn_poll,
+        "interval",
+        minutes=plugin_config.awmc_cn_poll_minutes,
+        id="awmc_cn_poll",
+    )
+    """国服源小时轮询（awmc_cn_poll_minutes=0 时禁用）。"""

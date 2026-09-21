@@ -11,6 +11,7 @@ import asyncio
 from pathlib import Path
 from collections.abc import Sequence
 
+from nonebot import logger
 from PIL import Image
 from maimai_py import Song, SongType, SongDifficulty
 
@@ -201,3 +202,47 @@ def ensure_dirs() -> None:
         return
     rating_table_dir().mkdir(parents=True, exist_ok=True)
     plate_table_dir().mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# 全量预渲染（SUPERUSER 指令与国服更新自动触发共用，song-db-design §7.3）
+# ---------------------------------------------------------------------------
+
+_template_lock = asyncio.Lock()
+"""预渲染串行锁：CPU 密集，手动指令与自动触发共用同一把。"""
+
+
+async def refresh_all_rating_tables(song_service) -> tuple[int, list[str]]:
+    """全部等级（lv7–15）定数表底图；返回 (谱面次, 失败等级)。失败保留旧底图不抛出。"""
+    from ...constants import LEVEL_LIST
+
+    async with _template_lock:
+        total, failed = 0, []
+        for lv in LEVEL_LIST[6:]:
+            try:
+                total += await generate_rating_template(lv, song_service)
+            except Exception:
+                logger.exception(f"定数表底图生成失败：{lv}")
+                failed.append(lv)
+        return total, failed
+
+
+async def refresh_all_plate_tables(song_service) -> tuple[int, list[str]]:
+    """全部版本牌种完成表底图；返回 (谱面次, 失败版本牌种)。
+
+    牌名映射缺失的版本（库滞后于日服新版本，§7.4）在 generate 内自然返回 0 跳过。
+    """
+    from ...constants import PLATE_CHARS, PLATE_KINDS
+
+    async with _template_lock:
+        total, failed = 0, []
+        for version in PLATE_CHARS:
+            if version in ("舞", "霸"):
+                continue
+            for kind in PLATE_KINDS:
+                try:
+                    total += await generate_plate_template(version, kind, song_service)
+                except Exception:
+                    logger.exception(f"完成表底图生成失败：{version}{kind}")
+                    failed.append(f"{version}{kind}")
+        return total, failed

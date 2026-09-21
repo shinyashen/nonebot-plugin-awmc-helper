@@ -31,6 +31,9 @@ from . import store
 
 Scope = Literal["cn", "jp"]
 
+CURRENT_FINGERPRINT: str | None = None
+"""规范表内容指纹（进程内缓存，rebuild 末尾刷新；AwmcSongProvider._hash 同步读取用）。"""
+
 # ---------------------------------------------------------------------------
 # 解析辅助
 # ---------------------------------------------------------------------------
@@ -743,7 +746,12 @@ async def rebuild(payloads: dict[str, Any]) -> dict[str, Any]:
         "cn_current_version": state.cn_current_version(),
     }
     await store.kv_set("songdb_stat", result)
-    await store.kv_set("songdb_json", standard_json(state))
+    doc = standard_json(state)
+    await store.kv_set("songdb_json", doc)
+    global CURRENT_FINGERPRINT
+    CURRENT_FINGERPRINT = hashlib.md5(
+        json.dumps(doc, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()
     return result
 
 
@@ -1016,6 +1024,74 @@ def fingerprint(state: State) -> str:
     """规范表内容指纹（自定义 provider ``_hash`` 用；数据变更即自动重建缓存）。"""
     raw = json.dumps(standard_json(state), ensure_ascii=False, sort_keys=True)
     return hashlib.md5(raw.encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# 取数编排（ext 直连，不碰 MaimaiClient）与国服更新检测
+# ---------------------------------------------------------------------------
+
+
+def detect_cn_update(
+    known: set[int], lx_ids: set[int], df_ids: set[int]
+) -> tuple[set[int], set[int]] | None:
+    """国服更新判定（§7.2）：两源新增集交集非空（新歌）或两源消失集交集非空（下架）。
+
+    ``known`` 为上一轮两源并集（song_id 级）；空集视为首次运行（仅建基线，不触发）。
+    返回 ``(added, removed)``；无更新返回 None。
+    """
+    if not known:
+        return None
+    lx, df = {i % 10000 for i in lx_ids}, {i % 10000 for i in df_ids}
+    known_norm = {i % 10000 for i in known}
+    added = (lx - known_norm) & (df - known_norm)
+    removed = (known_norm - lx) & (known_norm - df)
+    if added or removed:
+        return added, removed
+    return None
+
+
+async def refresh_all(
+    *,
+    include_cn: bool = True,
+    include_jp: bool = True,
+) -> dict[str, Any]:
+    """拉取全部可用源并重建规范表（单源失败跳过不阻塞），返回合并统计。
+
+    - ``include_cn``：落雪（notes 全量）+ 水鱼；CN 检测用轻载荷由轮询层另行拉取；
+    - ``include_jp``：maimaiinfo all_data+dschange + otoge-db 现役/下架。
+    """
+    from .ext import divingfish as ext_df
+    from .ext import lxns as ext_lxns
+    from .ext import maimaiinfo as ext_info
+    from .ext import otoge_db as ext_otoge
+
+    payloads: dict[str, Any] = {}
+    if include_jp:
+        for name, fetch in (
+            ("maimaiinfo", ext_info.fetch_all_data),
+            ("dschange", ext_info.fetch_dschange),
+            ("otoge_db", ext_otoge.fetch_music_ex),
+            ("otoge_deleted", ext_otoge.fetch_music_ex_deleted),
+        ):
+            try:
+                payloads[name] = await fetch()
+            except Exception as e:
+                logger.warning(f"songdb: {name} 拉取失败，本次跳过（{e}）")
+    if include_cn:
+        try:
+            payloads["lxns"] = await ext_lxns.fetch_song_list(notes=True)
+        except Exception as e:
+            logger.warning(f"songdb: 落雪曲库拉取失败，本次跳过（{e}）")
+        try:
+            payloads["divingfish"] = await ext_df.fetch_music_data()
+        except Exception as e:
+            logger.warning(f"songdb: 水鱼曲库拉取失败，本次跳过（{e}）")
+    result = await rebuild(payloads)
+    try:
+        await flush_pending()
+    except Exception:
+        logger.exception("songdb: 待归并清理失败（不影响规范表）")
+    return result
 
 
 # ---------------------------------------------------------------------------
