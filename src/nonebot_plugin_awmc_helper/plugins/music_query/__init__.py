@@ -13,6 +13,7 @@ import re
 from re import Match
 
 from nonebot import on_regex
+from maimai_py import SongType
 from nonebot.params import RegexMatched
 from nonebot.plugin import PluginMetadata
 from nonebot_plugin_uninfo import Session, UniSession
@@ -24,6 +25,13 @@ from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.render import nb_chart
 from ...core.binding import binding_service
+
+# 谱面前缀 → 卡片主类型（宴 前缀不改变卡片，宴曲本就走宴谱卡分支）
+_PREFIX_TO_TYPE = {
+    "dx": SongType.DX,
+    "标准": SongType.STANDARD,
+    "标": SongType.STANDARD,
+}
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.music_query",
@@ -58,8 +66,11 @@ def _is_float(value: str) -> bool:
         return False
 
 
-async def _chart_card(song, binding) -> bytes:
-    """谱面卡：绑定时拉 B50 嵌成绩与加分预测（Q3 选项 B，对齐 NB 版）。"""
+async def _chart_card(song, binding, prefer_type=None) -> bytes:
+    """谱面卡：绑定时拉 B50 嵌成绩与加分预测（Q3 选项 B，对齐 NB 版）。
+
+    ``prefer_type``：别名带谱面前缀（标准/标 → SD，dx → DX）时指定卡片主类型。
+    """
     from maimai_py import SongType
 
     if nb_chart.is_banquet(song):
@@ -71,7 +82,10 @@ async def _chart_card(song, binding) -> bytes:
         if ident is not None:
             try:
                 bests = await score_service.get_b50(binding)
-                major_dx = bool(song.difficulties.dx)
+                prefer_dx = (
+                    prefer_type == SongType.STANDARD and not song.difficulties.standard
+                ) or prefer_type != SongType.STANDARD
+                major_dx = prefer_dx and bool(song.difficulties.dx)
                 side_type = SongType.DX if major_dx else SongType.STANDARD
                 best_list = [s for s in bests.scores if s.type == side_type]
                 is_full = len(best_list) >= (15 if major_dx else 35)
@@ -79,7 +93,7 @@ async def _chart_card(song, binding) -> bytes:
                 theme = binding.theme or "prism_plus"
             except UserScoreError:
                 pass
-    return nb_chart.song_chart_info(song, calc, is_full, best_list, theme)
+    return nb_chart.song_chart_info(song, calc, is_full, best_list, theme, prefer_type)
 
 
 async def _binding_of(session):
@@ -196,10 +210,11 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
         "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
     )
-    # 别名（柚子 + 本地）
-    songs = await song_service.by_alias(name)
+    # 别名（柚子 + 落雪 + 本地，去前缀合并）；带谱面前缀时卡片偏好该类型
+    songs, strip_info = await song_service.by_alias_detail(name)
+    prefer_type = _PREFIX_TO_TYPE.get(strip_info[1]) if strip_info else None
     if len(songs) == 1:
-        png = await _chart_card(songs[0], binding)
+        png = await _chart_card(songs[0], binding, prefer_type)
         await (
             UniMessage.image(raw=png)
             .text("\n您要找的是不是这首？")

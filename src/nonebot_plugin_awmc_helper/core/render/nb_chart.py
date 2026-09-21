@@ -127,9 +127,17 @@ def new_best_score(
     return value - lowest
 
 
-def _major_diffs(song: Song) -> list:
-    """NB 语义：取主类型 5 档难度（有 DX 用 DX，否则 SD），按难度序。"""
-    diffs = song.difficulties.dx or song.difficulties.standard
+def _major_diffs(song: Song, prefer_type: SongType | None = None) -> list:
+    """取主类型 5 档难度，按难度序。
+
+    NB 原版数据模型中双谱歌曲是两个条目（各带类型与谱面表）；maimai_py 模型
+    合并为一个 Song 后 ``difficulties.dx`` 对双谱曲恒非空，若不指定偏好则 SD
+    谱面不可达。``prefer_type=STANDARD``（前缀「标准/标」搜索）时显示 SD 谱面。
+    """
+    if prefer_type == SongType.STANDARD and song.difficulties.standard:
+        diffs = song.difficulties.standard
+    else:
+        diffs = song.difficulties.dx or song.difficulties.standard
     return sorted(diffs, key=lambda d: d.level_index.value)
 
 
@@ -157,8 +165,13 @@ def song_chart_info(
     is_full: bool,
     best_list: list[ScoreExtend],
     theme: str = "prism_plus",
+    prefer_type: SongType | None = None,
 ) -> bytes:
-    """查歌卡（含可选的用户成绩/加分预测），布局坐标对齐 NB 版。"""
+    """查歌卡（含可选的用户成绩/加分预测），布局坐标对齐 NB 版。
+
+    ``prefer_type=STANDARD``：双谱歌曲显示 SD 徽章与 SD 难度表（前缀「标准/标」
+    搜索）；其余按 NB 默认（有 DX 用 DX）。
+    """
     from PIL import ImageDraw
 
     im = Image.open(
@@ -183,7 +196,8 @@ def song_chart_info(
     version_img = _version_image(song)
     if version_img is not None:
         im.alpha_composite(version_img.resize((182, 90)), (800, 370))
-    type_abbr = "DX" if song.difficulties.dx else "SD"
+    prefer_sd = prefer_type == SongType.STANDARD and song.difficulties.standard
+    type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
     type_path = base / f"{type_abbr}.png"
     if type_path.exists():
         im.alpha_composite(Image.open(type_path).resize((80, 30)), (295, 410))
@@ -224,7 +238,7 @@ def song_chart_info(
         anchor="mm",
     )
 
-    diffs = _major_diffs(song)
+    diffs = _major_diffs(song, prefer_type)
     for index, diff in enumerate(diffs):
         color = (255, 255, 255, 255)
         spacing = 70 * index
