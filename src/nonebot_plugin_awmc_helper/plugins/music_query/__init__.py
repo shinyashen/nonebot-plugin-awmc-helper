@@ -15,11 +15,15 @@ from re import Match
 from nonebot import on_regex
 from nonebot.params import RegexMatched
 from nonebot.plugin import PluginMetadata
+from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
+from ...core.render import nb_chart
+from ...core.binding import binding_service
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.music_query",
@@ -54,14 +58,43 @@ def _is_float(value: str) -> bool:
         return False
 
 
-async def _render_result(songs, page: int) -> None:
+async def _chart_card(song, binding) -> bytes:
+    """谱面卡：绑定时拉 B50 嵌成绩与加分预测（Q3 选项 B，对齐 NB 版）。"""
+    from maimai_py import SongType
+
+    if nb_chart.is_banquet(song):
+        return nb_chart.song_chart_banquet_info(song)
+    calc, is_full, best_list = False, False, []
+    theme = "prism_plus"
+    if binding is not None:
+        ident = binding_service.identifier_or_none(binding)
+        if ident is not None:
+            try:
+                bests = await score_service.get_b50(binding)
+                major_dx = bool(song.difficulties.dx)
+                side_type = SongType.DX if major_dx else SongType.STANDARD
+                best_list = [s for s in bests.scores if s.type == side_type]
+                is_full = len(best_list) >= (15 if major_dx else 35)
+                calc = True
+                theme = binding.theme or "prism_plus"
+            except UserScoreError:
+                pass
+    return nb_chart.song_chart_info(song, calc, is_full, best_list, theme)
+
+
+async def _binding_of(session):
+    return await binding_service.ensure(
+        session.platform or "unknown", str(session.user.id)
+    )
+
+
+async def _render_result(songs, page: int, binding=None) -> None:
     """1 首出卡片；≤5 文本；更多列表图（25/页）。"""
     if not songs:
         await UniMessage.text(NOT_FOUND).finish(at_sender=True)
     if len(songs) == 1:
-        await UniMessage.image(raw=song_render.song_card_bytes(songs[0])).finish(
-            at_sender=True
-        )
+        png = await _chart_card(songs[0], binding)
+        await UniMessage.image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
         text = "".join(f"「{s.id}」 {s.title}\n" for s in songs)
         await UniMessage.text(text.rstrip("\n")).finish(at_sender=True)
@@ -74,7 +107,8 @@ async def _render_result(songs, page: int) -> None:
 
 @search.handle()
 @handle_errors()
-async def _(match: Match[str] = RegexMatched()):
+async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
+    binding = await _binding_of(session)
     cmd = match.group(1)
     rest = (match.group(2) or "").strip()
     if not cmd and not rest:
@@ -96,7 +130,7 @@ async def _(match: Match[str] = RegexMatched()):
                 "定数查歌「最小定数」「最大定数」「页数」"
             ).finish(at_sender=True)
         songs = await song_service.by_level_value(min(ds1, ds2), max(ds1, ds2))
-        await _render_result(songs, page)
+        await _render_result(songs, page, binding)
     elif cmd == "bpm":
         page = 1
         if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
@@ -112,25 +146,25 @@ async def _(match: Match[str] = RegexMatched()):
                 "bpm查歌「最小bpm」「最大bpm」「页数」"
             ).finish(at_sender=True)
         songs = await song_service.by_bpm(min(b1, b2), max(b1, b2))
-        await _render_result(songs, page)
+        await _render_result(songs, page, binding)
     elif cmd == "曲师":
         if not a_list:
             await UniMessage.text("曲师查歌「曲师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_artist(name)
-        await _render_result(songs, page)
+        await _render_result(songs, page, binding)
     elif cmd == "谱师":
         if not a_list:
             await UniMessage.text("谱师查歌「谱师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_note_designer(name)
-        await _render_result(songs, page)
+        await _render_result(songs, page, binding)
     else:
         if not a_list:
             await UniMessage.text(NOT_FOUND).finish(at_sender=True)
         title, page = _split_page(a_list)
         songs = await song_service.by_title_fuzzy(title)
-        await _render_result(songs, page)
+        await _render_result(songs, page, binding)
 
 
 async def _vote_hint(name: str) -> str | None:
@@ -152,7 +186,8 @@ async def _vote_hint(name: str) -> str | None:
 
 @search_alias_song.handle()
 @handle_errors()
-async def _(match: Match[str] = RegexMatched()):
+async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
+    binding = await _binding_of(session)
     name = match.group(1).strip()
     page = int(match.group(2) or 1)
 
@@ -164,8 +199,9 @@ async def _(match: Match[str] = RegexMatched()):
     # 别名（柚子 + 本地）
     songs = await song_service.by_alias(name)
     if len(songs) == 1:
+        png = await _chart_card(songs[0], binding)
         await (
-            UniMessage.image(raw=song_render.song_card_bytes(songs[0]))
+            UniMessage.image(raw=png)
             .text("\n您要找的是不是这首？")
             .finish(at_sender=True)
         )
@@ -182,8 +218,9 @@ async def _(match: Match[str] = RegexMatched()):
 
     # 纯数字 → ID；id12345 → ID
     if name.isdigit() and (song := await song_service.by_id(int(name))):
+        png = await _chart_card(song, binding)
         await (
-            UniMessage.image(raw=song_render.song_card_bytes(song))
+            UniMessage.image(raw=png)
             .text("\n您要找的是不是这首？")
             .finish(at_sender=True)
         )
@@ -193,8 +230,9 @@ async def _(match: Match[str] = RegexMatched()):
             await UniMessage.text(f"未找到ID为「{idm.group(1)}」的乐曲").finish(
                 at_sender=True
             )
+        png = await _chart_card(song, binding)
         await (
-            UniMessage.image(raw=song_render.song_card_bytes(song))
+            UniMessage.image(raw=png)
             .text("\n您要找的是不是这首？")
             .finish(at_sender=True)
         )
@@ -221,9 +259,11 @@ async def _(match: Match[str] = RegexMatched()):
 
 @query_chart.handle()
 @handle_errors()
-async def _(match: Match[str] = RegexMatched()):
+async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
     _id = match.group(1)
     song = await song_service.by_id(int(_id)) if _id.isdigit() else None
     if not song:
         await UniMessage.text(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
-    await UniMessage.image(raw=song_render.song_card_bytes(song)).finish(at_sender=True)
+    binding = await _binding_of(session)
+    png = await _chart_card(song, binding)
+    await UniMessage.image(raw=png).finish(at_sender=True)

@@ -31,7 +31,7 @@ async def songs(tmp_path):
 async def _assert_reply(
     app: App, matcher_name: str, text: str, reply: str, *, user_id=12345678
 ):
-    """构造群消息并断言文本回复。"""
+    """构造群消息并断言文本回复（handler 注入 uninfo Session，需 mock 其信息拉取）。"""
     import nonebot
     from fake import fake_group_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
@@ -44,6 +44,21 @@ async def _assert_reply(
     async with app.test_matcher(matcher) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": user_id, "no_cache": True},
+            result={"user_id": user_id, "role": "member", "card": "", "nickname": "t"},
+        )
         expected = Message([MessageSegment.at(user_id), MessageSegment.text(reply)])
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
@@ -62,6 +77,8 @@ async def _assert_image_reply(
 
     `expect_png` 是无参函数，返回渲染字节（保证期望值与实际发送同源）。
     """
+    import inspect
+
     import nonebot
     from fake import fake_group_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
@@ -70,7 +87,10 @@ async def _assert_image_reply(
     from nonebot_plugin_awmc_helper.plugins import music_query
 
     matcher = getattr(music_query, matcher_name)
-    png = expect_png()
+    result = expect_png()
+    if inspect.isawaitable(result):
+        result = await result
+    png = result
     segments = [
         MessageSegment.at(user_id),
         MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
@@ -85,6 +105,21 @@ async def _assert_image_reply(
     async with app.test_matcher(matcher) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": user_id, "no_cache": True},
+            result={"user_id": user_id, "role": "member", "card": "", "nickname": "t"},
+        )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
 
@@ -92,11 +127,11 @@ async def _assert_image_reply(
 @pytest.mark.asyncio
 async def test_search_single_draws_card(app: App, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.render import song as song_render
+    from nonebot_plugin_awmc_helper.plugins import music_query
 
     song = await song_service.by_id(500)
     await _assert_image_reply(
-        app, "search", "查歌 Preferences", lambda: song_render.song_card_bytes(song)
+        app, "search", "查歌 Preferences", lambda: music_query._chart_card(song, None)
     )
 
 
@@ -160,14 +195,14 @@ async def test_alias_search_multi(app: App, songs):
 @pytest.mark.asyncio
 async def test_alias_search_single(app: App, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.render import song as song_render
+    from nonebot_plugin_awmc_helper.plugins import music_query
 
     song = await song_service.by_id(500)
     await _assert_image_reply(
         app,
         "search_alias_song",
         "普瑞是什么歌",
-        lambda: song_render.song_card_bytes(song),
+        lambda: music_query._chart_card(song, None),
         suffix="\n您要找的是不是这首？",
     )
 
@@ -180,14 +215,14 @@ async def test_query_chart_not_found(app: App, songs):
 @pytest.mark.asyncio
 async def test_query_chart_card(app: App, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.render import song as song_render
+    from nonebot_plugin_awmc_helper.plugins import music_query
 
     song = await song_service.by_id(231)
     await _assert_image_reply(
         app,
         "query_chart",
         "id 231",
-        lambda: song_render.song_card_bytes(song),
+        lambda: music_query._chart_card(song, None),
     )
 
 

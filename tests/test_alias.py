@@ -265,11 +265,48 @@ async def test_vote_hint_in_music_query(app: App, songs):
                 ],
             }
         )
-        await _assert_reply(
-            app,
-            music_query.search_alias_song,
-            "企鹅是什么歌",
-            "未找到别名为「企鹅」的歌曲，但找到与此相同别名的投票："
-            "\n- T9\n    ID 231: 企鹅\n"
-            "※ 可以使用指令「同意别名 XXXXX」进行投票",
+        event_user = 12345678
+        from fake import fake_group_message_event_v11
+
+        import nonebot
+        from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+        from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+
+        event = fake_group_message_event_v11(message="企鹅是什么歌", user_id=event_user)
+        expected = Message(
+            [
+                MessageSegment.at(event_user),
+                MessageSegment.text(
+                    "未找到别名为「企鹅」的歌曲，但找到与此相同别名的投票："
+                    "\n- T9\n    ID 231: 企鹅\n"
+                    "※ 可以使用指令「同意别名 XXXXX」进行投票"
+                ),
+            ]
         )
+        async with app.test_matcher(music_query.search_alias_song) as ctx:
+            bot = ctx.create_bot(
+                base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+            )
+            ctx.receive_event(bot, event)
+            ctx.should_call_api(
+                "get_group_info",
+                {"group_id": 87654321},
+                result={
+                    "group_id": 87654321,
+                    "group_name": "g",
+                    "member_count": 1,
+                    "max_member_count": 10,
+                },
+            )
+            ctx.should_call_api(
+                "get_group_member_info",
+                {"group_id": 87654321, "user_id": event_user, "no_cache": True},
+                result={
+                    "user_id": event_user,
+                    "role": "member",
+                    "card": "",
+                    "nickname": "t",
+                },
+            )
+            ctx.should_call_send(event, expected, result=None, bot=bot)
+            ctx.should_finished()

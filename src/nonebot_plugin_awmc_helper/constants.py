@@ -155,6 +155,44 @@ PLATE_KIND_ZH: dict[str, str] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# NB 版绘图移植用的映射表（core/render/nb_chart.py、best50.py 使用）
+# ---------------------------------------------------------------------------
+
+# 达成率系数表阈值（与 maimai-py ScoreCoefficient 一致，升序）
+ACHIEVEMENT_LIST = [50, 60, 70, 75, 80, 90, 94, 97, 98, 99, 99.5, 100, 100.5]
+
+# RateType 枚举名 → UI_TTR_Rank_*.png 文件名后缀
+RATE_FILE = {
+    "SSSP": "SSSp",
+    "SSS": "SSS",
+    "SSP": "SSp",
+    "SS": "SS",
+    "SP": "Sp",
+    "S": "S",
+    "AAA": "AAA",
+    "AA": "AA",
+    "A": "A",
+    "BBB": "BBB",
+    "BB": "BB",
+    "B": "B",
+    "C": "C",
+    "D": "D",
+}
+
+# FCType/FSType 枚举名 → UI_MSS_MBase_Icon_*.png 文件名后缀
+COMBO_FILE = {"FC": "FC", "FCP": "FCp", "AP": "AP", "APP": "APp"}
+SYNC_FILE = {"FS": "FS", "FSP": "FSp", "FSD": "FSD", "FSDP": "FSDp"}
+
+# Version 枚举 → 版本图文件名（pic/ 下，键与 maimai-py divingfish_to_version 一致）
+try:  # maimai-py 未公开导出该映射时的兜底
+    from maimai_py.enums import divingfish_to_version as _DF_TO_VERSION
+
+    VERSION_IMAGE = {v: k for k, v in _DF_TO_VERSION.items()}
+except ImportError:  # pragma: no cover
+    VERSION_IMAGE = {}
+
+
 def genre_zh(genre: Genre) -> str:
     """Genre 枚举 → 中文分类名。"""
     return GENRE_TO_ZH.get(genre, genre.value)
