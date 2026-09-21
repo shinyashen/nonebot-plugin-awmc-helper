@@ -13,9 +13,10 @@ import re
 from re import Match
 
 from nonebot import on_regex
-from maimai_py import SongType
+from maimai_py import Song, SongType
 from nonebot.params import RegexMatched
 from nonebot.plugin import PluginMetadata
+from maimai_py.models import SongDifficultyUtage
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
@@ -32,6 +33,34 @@ _PREFIX_TO_TYPE = {
     "标准": SongType.STANDARD,
     "标": SongType.STANDARD,
 }
+
+
+def _prefer_from_raw_id(raw_id: int) -> SongType | None:
+    """查分器 id 形状 → 卡片主类型：≤4 位 SD、5 位 DX；6 位宴不改变卡片。"""
+    if raw_id > 99999:
+        return None
+    return SongType.DX if raw_id > 9999 else SongType.STANDARD
+
+
+def _type_entries(
+    songs: "list[Song]",
+) -> "list[tuple[int, str, Song, SongType | None]]":
+    """合并曲目 → 谱面类型条目列表 (查分器 id, 类型标签, 曲目, 卡片偏好)。
+
+    NB 原版双条目语义：SD 条目 id=曲 id、DX 条目 id=曲 id+10000、宴条目
+    id=6 位机台内部 id；同根 id 条目共享别名，搜索全部列出供用户按 id 选择。
+    """
+    entries: list[tuple[int, str, Song, SongType | None]] = []
+    for song in songs:
+        if song.difficulties.standard:
+            entries.append((song.id, "标准谱", song, SongType.STANDARD))
+        if song.difficulties.dx:
+            entries.append((song.id + 10000, "DX谱", song, SongType.DX))
+        for diff in song.get_difficulties(SongType.UTAGE):
+            if isinstance(diff, SongDifficultyUtage):
+                entries.append((diff.diff_id, "宴会场", song, None))
+    return entries
+
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.music_query",
@@ -210,20 +239,35 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
         "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
     )
-    # 别名（柚子 + 落雪 + 本地，去前缀合并）；带谱面前缀时卡片偏好该类型
+    # 别名（柚子 + 落雪 + 本地，去前缀合并）：展开为谱面类型条目（NB 原版
+    # 双条目语义）——同根 id 的标准/DX/宴条目共享别名，搜索应全部列出供选择；
+    # 带谱面前缀（dx/标准/标）时自动定位到对应类型条目，无前缀不设偏好
     songs, strip_info = await song_service.by_alias_detail(name)
     prefer_type = _PREFIX_TO_TYPE.get(strip_info[1]) if strip_info else None
-    if len(songs) == 1:
-        png = await _chart_card(songs[0], binding, prefer_type)
+    entries = _type_entries(songs)
+    if strip_info:
+        if prefer_type is not None:
+            typed = [e for e in entries if e[3] == prefer_type]
+            if typed:
+                entries = typed
+        elif strip_info[1] == "宴":
+            ut_only = [e for e in entries if e[1] == "宴会场"]
+            if ut_only:
+                entries = ut_only
+    if len(entries) == 1:
+        entry_id, _label, song, card_prefer = entries[0]
+        png = await _chart_card(song, binding, card_prefer)
         await (
             UniMessage.image(raw=png)
-            .text("\n您要找的是不是这首？")
+            .text(f"\n您要找的是不是这首？（ID {entry_id}）")
             .finish(at_sender=True)
         )
-    if len(songs) > 1:
-        msg = f"找到{len(songs)}个相同别名的曲目：\n"
-        msg += "".join(f"{s.id}：{s.title}\n" for s in songs)
-        msg += "※ 请使用「id xxxxx」查询指定曲目"
+    if entries:
+        msg = f"找到{len(entries)}个谱面：\n"
+        msg += "".join(
+            f"{eid}：{song.title}（{label}）\n" for eid, label, song, _ in entries
+        )
+        msg += "※ 请使用「id xxxxx」查询指定谱面"
         await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
@@ -231,9 +275,10 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     if vote_msg:
         await UniMessage.text(vote_msg).finish(at_sender=True)
 
-    # 纯数字 → ID；id12345 → ID
+    # 纯数字 → ID（查分器 id 形状推断谱面类型：≤4 位 SD、5 位 DX、6 位宴）
     if name.isdigit() and (song := await song_service.by_id(int(name))):
-        png = await _chart_card(song, binding)
+        prefer = _prefer_from_raw_id(int(name))
+        png = await _chart_card(song, binding, prefer)
         await (
             UniMessage.image(raw=png)
             .text("\n您要找的是不是这首？")
@@ -245,7 +290,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             await UniMessage.text(f"未找到ID为「{idm.group(1)}」的乐曲").finish(
                 at_sender=True
             )
-        png = await _chart_card(song, binding)
+        png = await _chart_card(song, binding, _prefer_from_raw_id(int(idm.group(1))))
         await (
             UniMessage.image(raw=png)
             .text("\n您要找的是不是这首？")

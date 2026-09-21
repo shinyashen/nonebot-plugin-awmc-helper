@@ -189,24 +189,49 @@ async def test_alias_search_multi(app: App, songs):
         app,
         "search_alias_song",
         "共同别名是什么歌",
-        "找到2个相同别名的曲目："
-        "\n231：PENGUIN\n500：Preferences\n※ 请使用「id xxxxx」查询指定曲目",
+        "找到4个谱面："
+        "\n231：PENGUIN（标准谱）"
+        "\n10231：PENGUIN（DX谱）"
+        "\n500：Preferences（标准谱）"
+        "\n10500：Preferences（DX谱）"
+        "\n※ 请使用「id xxxxx」查询指定谱面",
     )
 
 
 @requires_assets
 @pytest.mark.asyncio
 async def test_alias_search_single(app: App, songs):
+    from maimai_py import SongType
+
     from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     song = await song_service.by_id(500)
-    await _assert_image_reply(
+    # 双谱歌曲无前缀搜索 → 列出谱面类型条目供选择（不设偏好）
+    await _assert_reply(
         app,
         "search_alias_song",
         "普瑞是什么歌",
-        lambda: music_query._chart_card(song, None),
-        suffix="\n您要找的是不是这首？",
+        "找到2个谱面："
+        "\n500：Preferences（标准谱）"
+        "\n10500：Preferences（DX谱）"
+        "\n※ 请使用「id xxxxx」查询指定谱面",
+    )
+    # 带 dx 前缀 → 直接定位 DX 条目出卡
+    await _assert_image_reply(
+        app,
+        "search_alias_song",
+        "dx普瑞是什么歌",
+        lambda: music_query._chart_card(song, None, SongType.DX),
+        suffix="\n您要找的是不是这首？（ID 10500）",
+    )
+    # 带「标」前缀 → SD 条目出卡
+    await _assert_image_reply(
+        app,
+        "search_alias_song",
+        "标普瑞是什么歌",
+        lambda: music_query._chart_card(song, None, SongType.STANDARD),
+        suffix="\n您要找的是不是这首？（ID 500）",
     )
 
 
