@@ -12,12 +12,14 @@
 """
 
 import json
+import sqlite3
 from typing import Any
 from pathlib import Path
 from datetime import datetime
 
 from sqlmodel import Field, SQLModel, select
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -159,9 +161,18 @@ def set_db_file(path: Path | None) -> None:
 
 
 async def init_db() -> None:
-    """建表（create_all 起步；字段变更时在此追加简易迁移）。"""
-    async with get_engine().begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    """建表（create_all 起步；字段变更时在此追加简易迁移）。
+
+    create_all 的存在性检查与 CREATE 之间存在竞态：多进程同时初始化同一个
+    库文件（如 pytest-xdist 共享默认路径）时会收到 "table already exists"，
+    对 SQLite 而言即幂等成功，忽略之；本轮事务内自己已建的表由下次调用补齐。
+    """
+    try:
+        async with get_engine().begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+    except (SAOperationalError, sqlite3.OperationalError) as e:
+        if "already exists" not in str(e):
+            raise
 
 
 def _open_session() -> AsyncSession:
