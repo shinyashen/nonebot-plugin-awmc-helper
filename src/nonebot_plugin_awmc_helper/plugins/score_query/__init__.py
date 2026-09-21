@@ -137,7 +137,7 @@ async def _(session: Session = UniSession(), event: Event = None):  # type: igno
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
     session: Session = UniSession(),
-    event: Event = None,
+    event: Event = None,  # type: ignore[assignment]
     message: Message = CommandArg(),  # type: ignore[assignment]
 ):
     key = str(message).strip()
@@ -146,6 +146,8 @@ async def _(
     song = await _resolve_song(key)
     binding = await _get_binding(session, event, required=False)
     info = await score_service.get_minfo(song, binding)
+    if info is None:
+        await UniMessage.text("尚未游玩该曲目（或无权限查看）").finish(at_sender=True)
 
     bests = None
     if binding is not None:
