@@ -18,14 +18,16 @@ from maimai_py.providers.base import ISongProvider
 
 from . import songdb
 
+Scope = Literal["cn", "jp"]
+
 
 class AwmcSongProvider(ISongProvider):
     """以规范表为数据源的曲库 provider（scope=cn/jp 双视图共用一个实现）。"""
 
-    def __init__(self, scope: Literal["cn", "jp"] = "cn") -> None:
-        self.scope = scope
+    def __init__(self, scope: Scope = "cn") -> None:
+        self.scope: Scope = scope
 
-    async def get_songs(self, client) -> list[Song]:  # noqa: ANN001 (与库接口签名一致)
+    async def get_songs(self, client) -> list[Song]:  # noqa: ANN001（与库接口签名一致）
         state = await songdb.State.load()
         return songdb.all_songs(state, self.scope)
 

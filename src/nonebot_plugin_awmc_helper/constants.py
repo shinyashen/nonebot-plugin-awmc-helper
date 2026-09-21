@@ -162,7 +162,7 @@ PLATE_KINDS = ("将", "者", "极", "神", "舞舞")
 # 版本名 → 版本码（歌曲库日侧骨架用；穷举自 maimai_py Version 枚举，勿凭记忆增删）
 # ---------------------------------------------------------------------------
 
-# maimaiinfo（all_data `from` / dschange 版本名）与 maimai_py divingfish_to_version 的并集：
+# maimaiinfo（all_data `from`/dschange）与 maimai_py divingfish_to_version 的并集：
 # 后者缺 DX 时代的 PLUS 各版与 CiRCLE PLUS，此处按 Version 枚举值补全
 SOURCE_NAME_TO_VERSION: dict[str, int] = {
     "maimai": 10000,
@@ -197,7 +197,8 @@ SOURCE_NAME_TO_VERSION: dict[str, int] = {
 # 版本码 → 显示名兜底（maimai_py 枚举之外的已知新版本；数据源 otoge-db/DXRating 已收录。
 # 库跟进新版本枚举后，此处条目自然失效，version_name() 会优先命中枚举）
 EXTRA_VERSION_NAMES: dict[int, str] = {
-    27000: "MAGiCAL",  # 2026-09-17 日服上线；maimai_py 1.5.2 尚未收录（song-db-design §7.4）
+    # 2026-09-17 日服上线；maimai_py 1.5.2 尚未收录（song-db-design §7.4）
+    27000: "MAGiCAL",
 }
 
 

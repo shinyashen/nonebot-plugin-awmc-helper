@@ -17,7 +17,11 @@ async def fetch_song_list(notes: bool = True) -> dict:
     - ``notes=false`` 的轻载荷（≈109KB）仅用于每小时轮询的更新检测；
     - 必须带开发者 token（未配置时落雪公开列表也可匿名读，但保持与 provider 一致）。
     """
-    headers = {"Authorization": plugin_config.awmc_lxns_developer_token} if plugin_config.awmc_lxns_developer_token else {}
+    headers = (
+        {"Authorization": plugin_config.awmc_lxns_developer_token}
+        if plugin_config.awmc_lxns_developer_token
+        else {}
+    )
     resp = await get_client().get(
         f"{LXNS_BASE}/api/v0/maimai/song/list?notes={'true' if notes else 'false'}",
         headers=headers,

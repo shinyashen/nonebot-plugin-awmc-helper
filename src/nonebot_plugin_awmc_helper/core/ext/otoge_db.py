@@ -1,12 +1,13 @@
-"""otoge-db 直连：日服数据充实（zvuc/otoge-db，maimai/data/ 现役表 + 下架记录）。
+"""otoge-db 直连：日服数据充实（zvuc/otoge-db，现役表 + 下架记录）。
 
-- ``music-ex.json``：日服现役曲目（无任何 id，经 title join 使用，song-db-design §2.5）；
+- ``music-ex.json``：日服现役曲目（无任何 id，经 title join 使用，§2.5）；
 - ``music-ex-deleted.json``：权威下架记录（带 deleted_date；「当前下架集」=
   下架记录 ∖ 现役列表，含单张期间限定宴谱）。
 """
 
-import httpx
 from typing import Any
+
+import httpx
 
 from . import ExtError, ExtNetworkError, get_client
 

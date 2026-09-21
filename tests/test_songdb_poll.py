@@ -1,10 +1,9 @@
-"""core/songs 国服轮询与触发链路：双源判定、幂等基线、触发动作、通知开关（§7.2/§7.3）。"""
+"""core/songs 国服轮询与触发链路：双源判定、幂等、触发动作、通知开关。"""
 
 import httpx
-import pytest
 import respx
-
-from songdb_fixtures import make_divingfish, make_lxns
+import pytest
+from songdb_fixtures import make_lxns, make_divingfish
 
 LXNS_BASE = "https://maimai.lxns.net"
 DF_URL = "https://www.diving-fish.com/api/maimaidxprober/music_data"
@@ -13,9 +12,9 @@ DF_URL = "https://www.diving-fish.com/api/maimaidxprober/music_data"
 @pytest.fixture
 def cn_mock():
     with respx.mock(assert_all_called=False) as mock:
-        mock.get(f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}).mock(
-            return_value=httpx.Response(200, json=make_lxns())
-        )
+        mock.get(
+            f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}
+        ).mock(return_value=httpx.Response(200, json=make_lxns()))
         mock.get(DF_URL).mock(return_value=httpx.Response(200, json=make_divingfish()))
         yield mock
 
@@ -48,24 +47,29 @@ def no_templates(monkeypatch):
 
 def _update_mock(cn_mock, *, with_9001: bool, drop: set[int] | None = None):
     cn_mock.get(f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}).mock(
-        return_value=httpx.Response(200, json=make_lxns(with_9001=with_9001, drop_ids=drop))
+        return_value=httpx.Response(
+            200, json=make_lxns(with_9001=with_9001, drop_ids=drop)
+        )
     )
     cn_mock.get(DF_URL).mock(
-        return_value=httpx.Response(200, json=make_divingfish(with_9001=with_9001, drop_ids=drop))
+        return_value=httpx.Response(
+            200, json=make_divingfish(with_9001=with_9001, drop_ids=drop)
+        )
     )
 
 
 @pytest.mark.asyncio
 async def test_poll_baseline_and_idempotent(db, cn_mock, no_templates, monkeypatch):
     """首启仅建基线不触发；无变化不触发；kv 状态持久（重启不重复触发）。"""
-    from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
+    from nonebot_plugin_awmc_helper.core import store
 
     triggered = []
     monkeypatch.setattr(songs_mod, "_on_cn_update", lambda *a: triggered.append(a))
 
     await songs_mod._hourly_cn_poll()  # 首启：基线
     state = await store.kv_get(songs_mod.CN_POLL_STATE_KEY)
+    assert state is not None
     assert state["known"]
     assert triggered == []
     assert no_templates == ["ensure"]  # 首启兜底预渲染检查
@@ -84,6 +88,7 @@ async def test_poll_triggers_on_both_sources(db, cn_mock, no_templates, monkeypa
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
 
     triggered = []
+
     async def fake_on_update(a, r, t):
         triggered.append((a, r, t))
 
@@ -94,7 +99,8 @@ async def test_poll_triggers_on_both_sources(db, cn_mock, no_templates, monkeypa
     await songs_mod._hourly_cn_poll()  # 9001 双源新增
     assert len(triggered) == 1
     added, removed, titles = triggered[0]
-    assert added == {9001} and removed == set()
+    assert added == {9001}
+    assert removed == set()
     assert titles[9001] == "Brand New Song"
 
     # 下一轮不再重复触发（kv 已更新）
@@ -103,7 +109,9 @@ async def test_poll_triggers_on_both_sources(db, cn_mock, no_templates, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_poll_single_source_new_not_triggered(db, cn_mock, no_templates, monkeypatch):
+async def test_poll_single_source_new_not_triggered(
+    db, cn_mock, no_templates, monkeypatch
+):
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
 
     triggered = []
@@ -121,28 +129,32 @@ async def test_poll_single_source_new_not_triggered(db, cn_mock, no_templates, m
 @pytest.mark.asyncio
 async def test_poll_network_failure_skipped(db, cn_mock, no_templates, monkeypatch):
     """单源网络失败：跳过本轮检测、不误清基线。"""
-    from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
+    from nonebot_plugin_awmc_helper.core import store
 
     triggered = []
     monkeypatch.setattr(songs_mod, "_on_cn_update", lambda *a: triggered.append(a))
 
     await songs_mod._hourly_cn_poll()
-    before = (await store.kv_get(songs_mod.CN_POLL_STATE_KEY))["known"]
+    kv_before = await store.kv_get(songs_mod.CN_POLL_STATE_KEY)
+    assert kv_before is not None
+    before = kv_before["known"]
     cn_mock.get(f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}).mock(
         return_value=httpx.Response(500)
     )
     await songs_mod._hourly_cn_poll()
     assert triggered == []
-    assert (await store.kv_get(songs_mod.CN_POLL_STATE_KEY))["known"] == before  # 基线未动
+    kv_after = await store.kv_get(songs_mod.CN_POLL_STATE_KEY)
+    assert kv_after is not None
+    assert kv_after["known"] == before  # 基线未动
 
 
 @pytest.mark.asyncio
 async def test_cn_update_actions_and_notify(db, monkeypatch):
     """触发动作串行：回填→刷运行时→预渲染；预渲染失败不阻断；通知可关。"""
-    from nonebot_plugin_awmc_helper.config import plugin_config
-    from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.config import plugin_config
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     calls = {"refresh_all": [], "runtime": 0, "templates": 0, "notify": []}
@@ -170,7 +182,8 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
 
     await songs_mod._on_cn_update({9001}, set(), {9001: "Brand New Song"})
     assert calls["refresh_all"] == [{"include_cn": True, "include_jp": False}]
-    assert calls["runtime"] == 1 and calls["templates"] == 1
+    assert calls["runtime"] == 1
+    assert calls["templates"] == 1
     assert len(calls["notify"]) == 1
     assert "Brand New Song" in calls["notify"][0]
 
@@ -183,7 +196,8 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
     monkeypatch.setattr(songs_mod, "_prerender_templates", boom)
     await songs_mod._on_cn_update(set(), {9002}, {9002: "CN Only Song"})
     assert calls["runtime"] == 2
-    assert len(calls["notify"]) == 1 and "CN Only Song" in calls["notify"][0]
+    assert len(calls["notify"]) == 1
+    assert "CN Only Song" in calls["notify"][0]
 
     # 通知开关关闭
     monkeypatch.setattr(plugin_config, "awmc_update_notify", False)
@@ -195,15 +209,23 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
 @pytest.mark.asyncio
 async def test_daily_songdb_pipeline(db, monkeypatch):
     """每日全量：JP+CN 全量重建、外部源变化触发预渲染、异常不抛出。"""
-    from nonebot_plugin_awmc_helper.config import plugin_config
-    from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.config import plugin_config
 
     calls = {"refresh": [], "templates": 0}
 
     async def fake_refresh_all(**kw):
         calls["refresh"].append(kw)
-        return {"songs": 10, "groups": 10, "charts": 20, "level_points": 30, "removed": 0, "warnings": [], "cn_current_version": 25500}
+        return {
+            "songs": 10,
+            "groups": 10,
+            "charts": 20,
+            "level_points": 30,
+            "removed": 0,
+            "warnings": [],
+            "cn_current_version": 25500,
+        }
 
     async def fake_prerender():
         calls["templates"] += 1

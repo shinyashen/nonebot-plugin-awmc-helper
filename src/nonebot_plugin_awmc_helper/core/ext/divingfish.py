@@ -11,7 +11,7 @@ MUSIC_DATA_URL = "https://www.diving-fish.com/api/maimaidxprober/music_data"
 
 
 async def fetch_music_data() -> list[dict]:
-    """直连拉取水鱼曲库（国服对账源：version_cn/定数互证 + 在列判定，song-db-design §7.2）。
+    """直连拉取水鱼曲库（国服对账源：version_cn/定数互证，song-db-design §7.2）。
 
     与落雪同为唯二国服源；不得走 MaimaiClient（理由同 lxns.fetch_song_list）。
     """

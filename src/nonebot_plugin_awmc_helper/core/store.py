@@ -168,7 +168,8 @@ class SongSheetGroup(SQLModel, table=True):
 class SongChart(SQLModel, table=True):
     """谱面：level_id sd/dx 取 0–4，宴取 6 位机台内部 id 的右起第 5 位。
 
-    ``notes_left``/``notes_right`` 仅 buddy 谱使用，``[tap,hold,slide,touch,break]`` JSON。
+    ``notes_left``/``notes_right`` 仅 buddy 谱使用，为 ``[tap,hold,slide,touch,break]``
+    的 JSON。
     """
 
     __tablename__ = "song_chart"  # type: ignore[reportGeneralTypeIssues]
@@ -210,7 +211,9 @@ class SongSourceRaw(SQLModel, table=True):
 
     __tablename__ = "song_source_raw"  # type: ignore[reportGeneralTypeIssues]
 
-    source: str = Field(primary_key=True)  # lxns / divingfish / maimaiinfo / otoge-db / extra:<名称>
+    source: str = Field(
+        primary_key=True
+    )  # lxns / divingfish / maimaiinfo / otoge-db / extra:<名称>
     song_id: str = Field(primary_key=True)  # 曲 id 字符串或 title:<曲名>
     payload: str  # JSON
     fetched_at: datetime = Field(default_factory=datetime.now)

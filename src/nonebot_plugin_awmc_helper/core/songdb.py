@@ -5,34 +5,41 @@
 - 表集存**并集**：日服全集（maimaiinfo 骨架）∪ 国服信息（落雪/水鱼，唯二国服源）；
 - 表结构 = 作者 01 文档 1:1，外加 ``song_source_raw``/``song_pending`` 两个基建表；
 - 定数历史只存变化点（``version`` = 自此版本起生效），读取方 carry-forward；
-- 国服当前定数 = 日服历史中 ``version ≤ 国服当前版本`` 的最新值，区间无值取首值
-  （已全量验证 5502/5502，§5.3）；
+- 国服当前定数 = 日服历史中 ``version ≤ 国服当前版本`` 的最新值，
+  区间无值取首值（已全量验证 5502/5502，§5.3）；
 - 每次合并**只让列从空变满**：单源失败跳过该源贡献、不回填已有数据；
   缺失/删除统一规则——一侧缺置该侧版本列 NULL、两侧皆无才整曲删除（§7.5-B）。
 
 本模块全部函数无网络副作用（payload 由 :mod:`core.ext` 拉取后传入），便于测试。
 """
 
-import hashlib
-import json
 import re
+import json
+import asyncio
+import hashlib
 import unicodedata
-from dataclasses import dataclass, field
 from typing import Any, Literal
+from dataclasses import field, dataclass
 
 from nonebot import logger
+from sqlmodel import col, delete, select
 from maimai_py import current_version
-from maimai_py.enums import Genre, LevelIndex, SongType, divingfish_to_version
-from maimai_py.models import BuddyNotes, Song, SongDifficulties, SongDifficulty, SongDifficultyUtage
-from sqlmodel import delete, select
+from maimai_py.enums import Genre, SongType, LevelIndex, divingfish_to_version
+from maimai_py.models import (
+    Song,
+    BuddyNotes,
+    SongDifficulty,
+    SongDifficulties,
+    SongDifficultyUtage,
+)
 
-from ..constants import SOURCE_NAME_TO_VERSION, level_from_value
 from . import store
+from ..constants import SOURCE_NAME_TO_VERSION, level_from_value
 
 Scope = Literal["cn", "jp"]
 
 CURRENT_FINGERPRINT: str | None = None
-"""规范表内容指纹（进程内缓存，rebuild 末尾刷新；AwmcSongProvider._hash 同步读取用）。"""
+"""规范表内容指纹（进程内缓存，rebuild 末尾刷新；供 provider._hash 同步读取）。"""
 
 # ---------------------------------------------------------------------------
 # 解析辅助
@@ -47,7 +54,10 @@ def norm_title(title: str) -> str:
 
 
 def utage_ids(diff_id: int) -> tuple[int, int]:
-    """宴谱 6 位机台内部 id → (song_id, level_id)。已实测 100018→(18,0)、161852→(1852,6)。"""
+    """宴谱 6 位机台内部 id → (song_id, level_id)。
+
+    已实测：100018→(18, 0)、161852→(1852, 6)。
+    """
     return diff_id % 10000, (diff_id // 10000) % 10
 
 
@@ -81,8 +91,12 @@ def _notes_tuple(raw: list, is_dx: bool) -> tuple[int, int, int, int, int]:
     SD 为 4 元组（touch=0）；个别 DX 谱只有 4 元（旧谱无 touch，实测 5 例）。
     """
     vals = list(raw) + [0] * (5 - len(raw))
-    return int(vals[0]), int(vals[1]), int(vals[2]), int(vals[3] if is_dx else 0), int(
-        vals[4] if is_dx else vals[3]
+    return (
+        int(vals[0]),
+        int(vals[1]),
+        int(vals[2]),
+        int(vals[3] if is_dx else 0),
+        int(vals[4] if is_dx else vals[3]),
     )
 
 
@@ -98,9 +112,14 @@ def _utage_kanji(title: str) -> str | None:
 
 @dataclass
 class Chart:
-    """谱面中间结构（日/国侧共用；各字段按来源填充）。"""
+    """谱面中间结构（日/国侧共用；各字段按来源填充）。
+
+    ``title`` 为谱面所属条目的标题：宴条目带 ``[協]`` 等前缀、与基曲标题不同，
+    otoge title join 与待归并判定都必须用它。
+    """
 
     level_id: int
+    title: str = ""
     designer: str | None = None
     notes: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0)
     # 日侧：定数变化点 [(version, value)]（宴为标级推导单行）
@@ -142,8 +161,8 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
 
     songs: dict[int, Entry] = {}
     for key, item in all_data.items():
-        # 宴 = 6 位 key（曲 id 0-9999 为 ≤5 位；100000+level_id*10000+song_id 恒为 6 位，
-        # level_id≥1 时以 "1" 开头而非 "10"，如实测 111852——不能用 startswith("10")）
+        # 宴 = 6 位 key（曲 id 0-9999 为 ≤5 位；100000+level_id*10000+song_id 恒 6 位，
+        # level_id≥1 时以 "1x" 开头而非 "10"，如实测 111852——勿用 startswith("10")）
         is_utage = len(key) == 6 and key.isdigit()
         if is_utage:
             kind = "utage"
@@ -158,6 +177,7 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
         entry.genre = entry.genre or info.get("genre", "")
         entry.bpm = entry.bpm or str(info.get("bpm", "") or "")
 
+        entry_title = info.get("title", "") or entry.title
         group = entry.group(kind)
         version = _source_version(info.get("from"))
         if version is None:
@@ -170,8 +190,8 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
 
         if is_utage:
             # 宴：一个 key = 一张谱面；ds/level 只信首元素，定数由标级串推导
-            chart = Chart(level_id=level_id)
-            chart.kanji = _utage_kanji(info.get("title") or entry.title)
+            chart = Chart(level_id=level_id, title=entry_title)
+            chart.kanji = _utage_kanji(entry_title)
             derived = parse_level_float((item.get("level") or [""])[0])
             if derived is not None and version is not None:
                 chart.history = [(version, derived)]
@@ -182,7 +202,7 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
         ds_values = item.get("ds", [])
         history_by_diff = histories.get(key, {}).get(kind, {})
         for idx in range(len(charts)):
-            chart = Chart(level_id=idx)
+            chart = Chart(level_id=idx, title=entry_title)
             charter = charts[idx].get("charter")
             chart.designer = charter if charter not in (None, "", "-") else None
             chart.notes = _notes_tuple(charts[idx].get("notes", []), kind == "dx")
@@ -198,8 +218,10 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
     return songs
 
 
-def _parse_dschange(dschange: dict) -> dict[str, dict[str, dict[int, list[tuple[int, float]]]]]:
-    """dschange → 内部 id → kind → 难度 → 变化点序列（主段 + ``__increments__`` 合并）。"""
+def _parse_dschange(
+    dschange: dict,
+) -> dict[str, dict[str, dict[int, list[tuple[int, float]]]]]:
+    """dschange → 内部 id → kind → 难度 → 变化点序列（含 ``__increments__`` 合并）。"""
     histories: dict[str, dict[str, dict[int, list[tuple[int, float]]]]] = {}
     for key, item in dschange.items():
         if key == "__increments__":
@@ -264,7 +286,9 @@ def parse_otoge(music_ex: list[dict], deleted: list[dict]) -> OtogeData:
         key = norm_title(item.get("title", ""))
         data.by_title.setdefault(key, []).append(item)
         data.live_titles.add(key)
-    data.deleted_titles = {norm_title(x.get("title", "")) for x in deleted} - data.live_titles
+    data.deleted_titles = {
+        norm_title(x.get("title", "")) for x in deleted
+    } - data.live_titles
     return data
 
 
@@ -281,9 +305,13 @@ def parse_lxns(song_list: dict) -> dict[int, Entry]:
         entry.bpm = entry.bpm or str(item.get("bpm", "") or "")
         diffs = item.get("difficulties", {})
         for diff in diffs.get("standard", []):
-            entry.group("sd")[int(diff["difficulty"])] = _cn_chart(diff, int(diff["difficulty"]))
+            entry.group("sd")[int(diff["difficulty"])] = _cn_chart(
+                diff, int(diff["difficulty"])
+            )
         for diff in diffs.get("dx", []):
-            entry.group("dx")[int(diff["difficulty"])] = _cn_chart(diff, int(diff["difficulty"]))
+            entry.group("dx")[int(diff["difficulty"])] = _cn_chart(
+                diff, int(diff["difficulty"])
+            )
         for diff in diffs.get("utage", []):
             level_id = utage_ids(raw_id)[1]
             chart = _cn_chart(diff, level_id)
@@ -345,7 +373,9 @@ class State:
     def chart(self, song_id: int, kind: str, level_id: int) -> store.SongChart:
         key = (song_id, kind, level_id)
         if key not in self.charts:
-            self.charts[key] = store.SongChart(song_id=song_id, kind=kind, level_id=level_id)
+            self.charts[key] = store.SongChart(
+                song_id=song_id, kind=kind, level_id=level_id
+            )
         return self.charts[key]
 
     def set_history(
@@ -383,9 +413,9 @@ class State:
             for row in (await session.exec(select(store.SongChart))).all():
                 state.charts[(row.song_id, row.kind, row.level_id)] = row
             for row in (await session.exec(select(store.SongChartLevel))).all():
-                state.levels.setdefault((row.song_id, row.kind, row.level_id), []).append(
-                    (row.version, row.level_value or 0.0)
-                )
+                state.levels.setdefault(
+                    (row.song_id, row.kind, row.level_id), []
+                ).append((row.version, row.level_value or 0.0))
         for points in state.levels.values():
             points.sort(key=lambda x: x[0])
         return state
@@ -422,13 +452,15 @@ class State:
 
     # -- 定数 --
 
-    def history_of(self, song_id: int, kind: str, level_id: int) -> list[tuple[int, float]]:
+    def history_of(
+        self, song_id: int, kind: str, level_id: int
+    ) -> list[tuple[int, float]]:
         return self.levels.get((song_id, kind, level_id), [])
 
     def resolve_chart_level(
         self, song_id: int, kind: str, level_id: int, version: int | None = None
     ) -> float | None:
-        """carry-forward 取定数：``version`` 为取值版本（None=最新）；区间无值返回 None。"""
+        """carry-forward 取定数：``version`` 为取值版本（None=最新）；无值返回 None。"""
         points = self.history_of(song_id, kind, level_id)
         if not points:
             return None
@@ -438,13 +470,15 @@ class State:
         return eligible[-1][1] if eligible else None
 
     def cn_current_version(self) -> int:
-        """国服当前版本：取数据 max(version_cn)，回落 maimai_py current_version（§5.3）。"""
-        values = [g.version_cn for g in self.groups.values() if g.version_cn is not None]
+        """国服当前版本：数据 max(version_cn)，回落 maimai_py current_version。"""
+        values = [
+            g.version_cn for g in self.groups.values() if g.version_cn is not None
+        ]
         return max(values) if values else current_version.value
 
 
 def cn_level_value(history: list[tuple[int, float]], cn_current: int) -> float | None:
-    """国服定数推导（§5.3）：≤ 国服当前版本最新值；区间无值取日服首值（同步上线的曲）。"""
+    """国服定数推导（§5.3）：≤ 国服当前版本最新值；区间无值取首值（同步上线的曲）。"""
     eligible = [p for p in history if p[0] <= cn_current]
     if eligible:
         return eligible[-1][1]
@@ -470,69 +504,96 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
             group = state.group(song_id, kind)
             if group.version is None:
                 group.version = entry.versions.get(kind)
-            if ot_items:
-                group.date = group.date or (
-                    _otoge_utage_date(ot_items) if kind == "utage" else _otoge_date(kind, ot_items)
-                )
-                if group.version is None:
-                    group.version = _otoge_version(ot_items)
             for level_id, chart in charts.items():
                 target = state.chart(song_id, kind, level_id)
                 target.designer = target.designer or chart.designer
                 if chart.notes != (0, 0, 0, 0, 0):
-                    target.notes_tap, target.notes_hold = chart.notes[0], chart.notes[1]
-                    target.notes_slide, target.notes_touch = chart.notes[2], chart.notes[3]
+                    target.notes_tap, target.notes_hold = (
+                        chart.notes[0],
+                        chart.notes[1],
+                    )
+                    target.notes_slide, target.notes_touch = (
+                        chart.notes[2],
+                        chart.notes[3],
+                    )
                     target.notes_break = chart.notes[4]
                 if kind == "utage":
                     target.kanji = target.kanji or chart.kanji
                     target.is_buddy = target.is_buddy or chart.is_buddy
                 state.set_history(song_id, kind, level_id, chart.history)
-        # otoge 充实：封面/日期/宴 kanji+comment+buddy 左右物量（join 失败置空 + 汇总告警）
+                # otoge 逐谱面 join：宴标题带前缀、与基曲不同，不能用歌级匹配结果
+                chart_items = (
+                    _otoge_match_title(chart.title or entry.title, otoge)
+                    if otoge
+                    else []
+                )
+                if chart_items:
+                    group.date = group.date or (
+                        _otoge_utage_date(chart_items)
+                        if kind == "utage"
+                        else _otoge_date(kind, chart_items)
+                    )
+                    if group.version is None:
+                        group.version = _otoge_version(chart_items)
+                    if kind == "utage":
+                        _apply_otoge_utage(state, song_id, level_id, chart_items)
+                elif ot_items and kind != "utage":
+                    group.date = group.date or _otoge_date(kind, ot_items)
+                    if group.version is None:
+                        group.version = _otoge_version(ot_items)
+        # otoge 歌级充实：封面/BPM（join 失败置空 + 汇总告警）
         if ot_items:
             row.image_url = row.image_url or (ot_items[0].get("image_url") or None)
             row.bpm = row.bpm or str(ot_items[0].get("bpm") or "")
-            _apply_otoge_utage(state, song_id, ot_items)
         elif otoge is not None and norm_title(entry.title) not in otoge.deleted_titles:
             unmatched += 1
     if unmatched:
         state.warn(f"otoge-db 未收录 {unmatched} 首（封面/日期/宴字段留空，不阻塞）")
 
 
-def _apply_otoge_utage(state: State, song_id: int, ot_items: list[dict]) -> None:
-    """otoge 宴字段充实：kanji/comment/buddy 左右物量 + 标级推导历史（仅填空）。"""
+def _otoge_match_title(title: str, otoge: OtogeData) -> list[dict]:
+    """按给定标题做归一 join（不消歧，返回全部同名条目）。"""
+    if otoge is None:
+        return []
+    return otoge.by_title.get(norm_title(title)) or []
+
+
+def _apply_otoge_utage(
+    state: State, song_id: int, level_id: int, ot_items: list[dict]
+) -> None:
+    """otoge 宴字段充实（单谱面）：kanji/comment/buddy 物量 + 标级推导（仅填空）。"""
     item = next((x for x in ot_items if x.get("kanji")), None)
-    if item is None:
+    if item is None or (song_id, "utage", level_id) not in state.charts:
         return
-    for (sid, kind, level_id), chart in state.charts.items():
-        if sid != song_id or kind != "utage":
-            continue
-        chart.kanji = chart.kanji or item.get("kanji")
-        chart.comment = chart.comment or (item.get("comment") or None)
-        buddy = item.get("buddy") == "○"
-        chart.is_buddy = chart.is_buddy or buddy
-        if buddy and chart.notes_left is None:
-            chart.notes_left = json.dumps(
-                [_safe_int(item.get(f"lev_utage_left_notes_{k}")) or 0 for k in _NOTE_KEYS]
-            )
-            chart.notes_right = json.dumps(
-                [_safe_int(item.get(f"lev_utage_right_notes_{k}")) or 0 for k in _NOTE_KEYS]
-            )
-        # 无历史源的宴谱退化为登场版本单行（§6）；标级推导值
-        if not state.history_of(song_id, "utage", level_id):
-            derived = parse_level_float(item.get("lev_utage", "") or "")
-            group = state.groups.get((song_id, "utage"))
-            if derived is not None and group and group.version is not None:
-                state.set_history(song_id, "utage", level_id, [(group.version, derived)])
+    chart = state.charts[(song_id, "utage", level_id)]
+    chart.kanji = chart.kanji or item.get("kanji")
+    chart.comment = chart.comment or (item.get("comment") or None)
+    buddy = item.get("buddy") == "○"
+    chart.is_buddy = chart.is_buddy or buddy
+    if buddy and chart.notes_left is None:
+        chart.notes_left = json.dumps(
+            [_safe_int(item.get(f"lev_utage_left_notes_{k}")) or 0 for k in _NOTE_KEYS]
+        )
+        chart.notes_right = json.dumps(
+            [_safe_int(item.get(f"lev_utage_right_notes_{k}")) or 0 for k in _NOTE_KEYS]
+        )
+    # 无历史源的宴谱退化为登场版本单行（§6）；标级推导值
+    if not state.history_of(song_id, "utage", level_id):
+        derived = parse_level_float(item.get("lev_utage", "") or "")
+        group = state.groups.get((song_id, "utage"))
+        if derived is not None and group and group.version is not None:
+            state.set_history(song_id, "utage", level_id, [(group.version, derived)])
 
 
 def _otoge_match(entry: Entry, otoge: OtogeData) -> list[dict]:
-    """归一标题 join；同名多义（实测 2 组）按组类型字段消歧。"""
-    items = otoge.by_title.get(norm_title(entry.title))
+    """归一标题 join（歌级）；同名多义（实测 2 组）按组类型字段消歧。"""
+    items = _otoge_match_title(entry.title, otoge)
     if not items:
         return []
     if len(items) == 1:
         return items
-    # 'Link'：SD 条目 vs DX 条目，按本条目的组类型判别；'[宴]Wonderland…'×5：轮换重复取最新
+    # 'Link'：SD 条目 vs DX 条目，按本条目的组类型判别；
+    # '[宴]Wonderland…'×5：轮换重复，取最新 version
     kind = next(iter(entry.charts), "sd")
     need_dx = kind == "dx"
     prefer = [x for x in items if bool(x.get("dx_lev_bas")) == need_dx] or items
@@ -548,12 +609,14 @@ def _otoge_version(items: list[dict]) -> int | None:
 
 
 def _otoge_date(kind: str, items: list[dict]) -> int | None:
-    """日期规则（§3）：sd=date_added（初次收录）；dx=release ‖ date_updated ‖ date_added。"""
+    """日期规则（§3）：sd=date_added；dx=release ‖ date_updated ‖ date_added。"""
     item = items[0]
     added = _safe_int(item.get("date_added"))
     if kind == "sd":
         return added
-    return _safe_int(item.get("release")) or _safe_int(item.get("date_updated")) or added
+    return (
+        _safe_int(item.get("release")) or _safe_int(item.get("date_updated")) or added
+    )
 
 
 def _otoge_utage_date(items: list[dict]) -> int | None:
@@ -593,18 +656,27 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
         for kind, charts in entry.charts.items():
             if not charts:
                 continue
-            versions = {c.cn_version for c in charts.values() if c.cn_version is not None}
+            versions = {
+                c.cn_version for c in charts.values() if c.cn_version is not None
+            }
             group = state.group(song_id, kind)
             if versions:
                 if len(versions) > 1:
-                    state.warn(f"「{entry.title}」{kind} 组内 version_cn 不一致 {versions}，取最小值")
+                    state.warn(
+                        f"「{entry.title}」{kind} 组内 version_cn 不一致 {versions}"
+                        f"，取最小值"
+                    )
                 if group.version_cn is None:
                     group.version_cn = min(versions)
             for level_id, chart in charts.items():
                 target = state.chart(song_id, kind, level_id)
                 if target.designer is None:
                     target.designer = chart.designer
-                elif chart.designer and target.designer != chart.designer and kind != "utage":
+                elif (
+                    chart.designer
+                    and target.designer != chart.designer
+                    and kind != "utage"
+                ):
                     state.warn(
                         f"「{entry.title}」{kind}{level_id} 谱师两源不一致："
                         f"{target.designer} / {chart.designer}"
@@ -619,7 +691,10 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                     )
                 ):
                     target.notes_tap, target.notes_hold = chart.notes[0], chart.notes[1]
-                    target.notes_slide, target.notes_touch = chart.notes[2], chart.notes[3]
+                    target.notes_slide, target.notes_touch = (
+                        chart.notes[2],
+                        chart.notes[3],
+                    )
                     target.notes_break = chart.notes[4]
                 if kind == "utage":
                     target.kanji = target.kanji or chart.kanji
@@ -627,20 +702,27 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                     if chart.left is not None and target.notes_left is None:
                         target.notes_left = json.dumps(chart.left)
                         target.notes_right = json.dumps(chart.right or [])
-                # §5.3 校验：推导国服定数 vs 落雪实测（偏差 > 0.05 记警告，用于发现例外）；
+                # §5.3 校验：推导国服定数 vs 落雪实测（偏差 > 0.05 记警告）；
                 # 宴定数是标级推导的代理值（§3），与实测必然有差，不参与校验
                 if chart.cn_level_value and chart.history and kind != "utage":
                     derived = cn_level_value(chart.history, cn_current)
-                    if derived is not None and abs(derived - chart.cn_level_value) > 0.05:
+                    if (
+                        derived is not None
+                        and abs(derived - chart.cn_level_value) > 0.05
+                    ):
                         state.warn(
-                            f"「{entry.title}」{kind}{level_id} 国服定数推导 {derived} ≠ 落雪 "
-                            f"{chart.cn_level_value}"
+                            f"「{entry.title}」{kind}{level_id} 国服定数推导 "
+                            f"{derived} ≠ 落雪 {chart.cn_level_value}"
                         )
         _crosscheck_df(state, song_id, entry, df, cn_current)
 
 
 def _crosscheck_df(
-    state: State, song_id: int, entry: Entry, df: dict[str, dict] | None, cn_current: int
+    state: State,
+    song_id: int,
+    entry: Entry,
+    df: dict[str, dict] | None,
+    cn_current: int,
 ) -> None:
     """水鱼对账：version_cn（组级 from）与定数；仅告警，写入侧唯一来源仍是落雪。"""
     if not df:
@@ -651,17 +733,23 @@ def _crosscheck_df(
             continue
         group = state.groups.get((song_id, kind))
         from_name = (item.get("basic_info") or {}).get("from")
-        df_version = divingfish_to_version[from_name].value if from_name in divingfish_to_version else None
+        df_version = (
+            divingfish_to_version[from_name].value
+            if from_name in divingfish_to_version
+            else None
+        )
         if group and group.version_cn and df_version and group.version_cn != df_version:
             state.warn(
-                f"「{entry.title}」{kind} version_cn 两源不一致：落雪 {group.version_cn} / 水鱼 {df_version}"
+                f"「{entry.title}」{kind} version_cn 两源不一致："
+                f"落雪 {group.version_cn} / 水鱼 {df_version}"
             )
         for idx, value in enumerate(item.get("ds") or []):
             history = state.history_of(song_id, kind, idx)
             cn_value = cn_level_value(history, cn_current) if history else None
             if cn_value and abs(cn_value - float(value)) > 0.05:
                 state.warn(
-                    f"「{entry.title}」{kind}{idx} 定数两源不一致：落雪 {cn_value} / 水鱼 {value}"
+                    f"「{entry.title}」{kind}{idx} 定数两源不一致："
+                    f"落雪 {cn_value} / 水鱼 {value}"
                 )
 
 
@@ -716,7 +804,9 @@ def apply_missing(
                 jp_known_titles is not None and title_key in jp_known_titles
             )
             if title_key and title_key in (jp_deleted_titles or set()):
-                jp_present = False  # otoge 下架记录为权威 JP 缺失信号（maimaiinfo 可能滞后）
+                jp_present = (
+                    False  # otoge 下架记录为权威 JP 缺失信号（maimaiinfo 可能滞后）
+                )
         else:
             jp_present = any(g.version is not None for g in groups)
         if cn_known is not None:
@@ -750,8 +840,16 @@ async def rebuild(payloads: dict[str, Any]) -> dict[str, Any]:
     if payloads.get("otoge_db") is not None and jp:
         otoge = parse_otoge(payloads["otoge_db"], payloads.get("otoge_deleted") or [])
         apply_jp(state, jp, otoge)
-        # otoge 独有的无 id 条目（宴轮换快照为主）→ 暂存待归并（§7.5-A）
-        known_titles = {norm_title(e.title) for e in jp.values() if e.title}
+        # otoge 独有的无 id 条目（宴轮换快照为主）→ 暂存待归并（§7.5-A）；
+        # 已知标题须含谱面自身标题（宴条目标题 ≠ 基曲标题）
+        known_titles = set()
+        for e in jp.values():
+            if e.title:
+                known_titles.add(norm_title(e.title))
+            for charts in e.charts.values():
+                for c in charts.values():
+                    if c.title:
+                        known_titles.add(norm_title(c.title))
         for item in payloads["otoge_db"]:
             title = item.get("title", "")
             if title and norm_title(title) not in known_titles:
@@ -759,7 +857,11 @@ async def rebuild(payloads: dict[str, Any]) -> dict[str, Any]:
     cn_known: set[int] | None = None
     if payloads.get("lxns") is not None:
         cn = parse_lxns(payloads["lxns"])
-        df = parse_divingfish(payloads["divingfish"]) if payloads.get("divingfish") is not None else None
+        df = (
+            parse_divingfish(payloads["divingfish"])
+            if payloads.get("divingfish") is not None
+            else None
+        )
         if df is not None:
             # CN 缺省同步需双源确认（§7.5-B）：单源抓取失败则不做缺省判定
             cn_known = set(cn) | {int(k) % 10000 for k in df}
@@ -798,21 +900,27 @@ async def _archive_raw(payloads: dict[str, Any]) -> None:
     if payloads.get("lxns") is not None:
         rows += [
             store.SongSourceRaw(
-                source="lxns", song_id=str(item["id"]), payload=json.dumps(item, ensure_ascii=False)
+                source="lxns",
+                song_id=str(item["id"]),
+                payload=json.dumps(item, ensure_ascii=False),
             )
             for item in payloads["lxns"].get("songs", [])
         ]
     if payloads.get("divingfish") is not None:
         rows += [
             store.SongSourceRaw(
-                source="divingfish", song_id=str(item["id"]), payload=json.dumps(item, ensure_ascii=False)
+                source="divingfish",
+                song_id=str(item["id"]),
+                payload=json.dumps(item, ensure_ascii=False),
             )
             for item in payloads["divingfish"]
         ]
     if payloads.get("maimaiinfo") is not None:
         rows += [
             store.SongSourceRaw(
-                source="maimaiinfo", song_id=str(key), payload=json.dumps(item, ensure_ascii=False)
+                source="maimaiinfo",
+                song_id=str(key),
+                payload=json.dumps(item, ensure_ascii=False),
             )
             for key, item in payloads["maimaiinfo"].items()
         ]
@@ -879,22 +987,24 @@ def _chart_from_row(
 ) -> SongDifficulty | SongDifficultyUtage:
     """song_chart 行 → maimai_py 谱面对象（§5.5 映射；curve 由曲线缓存附加）。"""
     song_type = (
-        SongType.UTAGE if kind == "utage" else (SongType.DX if kind == "dx" else SongType.STANDARD)
+        SongType.UTAGE
+        if kind == "utage"
+        else (SongType.DX if kind == "dx" else SongType.STANDARD)
     )
-    kwargs: dict[str, Any] = dict(
-        type=song_type,
-        level=level_from_value(level_value) if level_value else "?",
-        level_value=level_value or 0.0,
-        level_index=LevelIndex(0) if kind == "utage" else LevelIndex(row.level_id),
-        note_designer=row.designer or "-",
-        version=version or 0,
-        tap_num=row.notes_tap,
-        hold_num=row.notes_hold,
-        slide_num=row.notes_slide,
-        touch_num=row.notes_touch,
-        break_num=row.notes_break,
-        curve=None,
-    )
+    kwargs: dict[str, Any] = {
+        "type": song_type,
+        "level": level_from_value(level_value) if level_value else "?",
+        "level_value": level_value or 0.0,
+        "level_index": LevelIndex(0) if kind == "utage" else LevelIndex(row.level_id),
+        "note_designer": row.designer or "-",
+        "version": version or 0,
+        "tap_num": row.notes_tap,
+        "hold_num": row.notes_hold,
+        "slide_num": row.notes_slide,
+        "touch_num": row.notes_touch,
+        "break_num": row.notes_break,
+        "curve": None,
+    }
     if kind == "utage":
         left = json.loads(row.notes_left) if row.notes_left else None
         right = json.loads(row.notes_right) if row.notes_right else None
@@ -958,7 +1068,8 @@ def build_song(
                 level_value = state.resolve_chart_level(song_id, kind, level_id)
             elif scope == "cn":
                 level_value = cn_level_value(
-                    state.history_of(song_id, kind, level_id), state.cn_current_version()
+                    state.history_of(song_id, kind, level_id),
+                    state.cn_current_version(),
                 )
             else:
                 level_value = state.resolve_chart_level(song_id, kind, level_id)
@@ -1022,7 +1133,9 @@ def song_standard_json(state: State, song_id: int) -> dict[str, Any] | None:
         for level_id, chart in sorted(by_group.get(kind, [])):
             content: dict[str, Any] = {
                 "level_id": level_id,
-                "level": [[v, val] for v, val in state.history_of(song_id, kind, level_id)],
+                "level": [
+                    [v, val] for v, val in state.history_of(song_id, kind, level_id)
+                ],
                 "designer": chart.designer,
                 "notes": {
                     "tap": chart.notes_tap,
@@ -1036,8 +1149,12 @@ def song_standard_json(state: State, song_id: int) -> dict[str, Any] | None:
                 content["kanji"] = chart.kanji
                 content["comment"] = chart.comment
                 content["is_buddy"] = chart.is_buddy
-                content["notes_left"] = json.loads(chart.notes_left) if chart.notes_left else None
-                content["notes_right"] = json.loads(chart.notes_right) if chart.notes_right else None
+                content["notes_left"] = (
+                    json.loads(chart.notes_left) if chart.notes_left else None
+                )
+                content["notes_right"] = (
+                    json.loads(chart.notes_right) if chart.notes_right else None
+                )
             contents.append(content)
         sheets[kind] = {
             "version": group.version,
@@ -1057,7 +1174,7 @@ def song_standard_json(state: State, song_id: int) -> dict[str, Any] | None:
 
 
 def standard_json(state: State) -> dict[str, Any]:
-    """全库标准 JSON（kv_cache ``songdb_json``；外部源合并与 provider 指纹的契约格式）。"""
+    """全库标准 JSON（kv_cache ``songdb_json``；外部源合并与指纹的契约格式）。"""
     result = {}
     for song_id in sorted(state.songs):
         if song := song_standard_json(state, song_id):
@@ -1105,10 +1222,10 @@ async def refresh_all(
     - ``include_cn``：落雪（notes 全量）+ 水鱼；CN 检测用轻载荷由轮询层另行拉取；
     - ``include_jp``：maimaiinfo all_data+dschange + otoge-db 现役/下架。
     """
-    from .ext import divingfish as ext_df
     from .ext import lxns as ext_lxns
-    from .ext import maimaiinfo as ext_info
     from .ext import otoge_db as ext_otoge
+    from .ext import divingfish as ext_df
+    from .ext import maimaiinfo as ext_info
 
     payloads: dict[str, Any] = {}
     if include_jp:
@@ -1145,7 +1262,7 @@ async def refresh_all(
 
 
 async def flush_pending() -> int:
-    """批量归并 ``song_pending``：id 已到位（标题 join 命中规范表）即删行，否则计数重试。
+    """批量归并 ``song_pending``：id 已到位（标题 join 命中）即删行，否则计数重试。
 
     入表本身由常规合并完成（id 到位后 maimaiinfo/otoge join 自然生效），此处只做
     收尾清理与重试计数（超阈值由调用方降频）。返回本次归并条数。
@@ -1185,7 +1302,7 @@ async def upsert_pending(source: str, key: str, reason: str, payload: dict) -> N
             )
         ).first()
         if row is None:
-            row = store.SongPending(source=source, key=key, reason=reason)
+            row = store.SongPending(source=source, key=key, reason=reason, payload="{}")
         row.payload = json.dumps(payload, ensure_ascii=False)
         row.last_seen = datetime.now()
         row.attempts += 1
@@ -1222,12 +1339,16 @@ async def apply_external_sources() -> dict[str, Any]:
                     resp.raise_for_status()
                     data = resp.json()
             else:
-                data = json.loads(Path(source).read_text(encoding="utf-8"))
+                data = json.loads(
+                    await asyncio.to_thread(Path(source).read_text, encoding="utf-8")
+                )
             docs.append((source, mode, data))
         except Exception as e:
             logger.error(f"songdb: 外部补充源 {source} 读取失败，跳过（{e}）")
     digest = _hashlib.md5(
-        json.dumps([(m, d) for _, m, d in docs], ensure_ascii=False, sort_keys=True).encode()
+        json.dumps(
+            [(m, d) for _, m, d in docs], ensure_ascii=False, sort_keys=True
+        ).encode()
     ).hexdigest()
     prev = await store.kv_get("songdb_extra_hash")
     summary["hash"] = digest
@@ -1239,7 +1360,7 @@ async def apply_external_sources() -> dict[str, Any]:
 
 
 async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
-    """外部标准 JSON 合并进主表：**只允许日服侧**，``version_cn`` 等国服内容忽略并告警。"""
+    """外部标准 JSON 合并进主表：**只允许日服侧**，写 ``version_cn`` 忽略并告警。"""
     from pathlib import Path
 
     state = await State.load()
@@ -1254,24 +1375,33 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
             if row is None:
                 continue  # 只补充已存在的曲（骨架外的新曲等 id 到位由常规管线处理）
             for field_name in ("title", "artist", "genre", "bpm", "image_url"):
-                if field_name in song_doc and (mode == "override" or not getattr(row, field_name)):
+                if field_name in song_doc and (
+                    mode == "override" or not getattr(row, field_name)
+                ):
                     setattr(row, field_name, song_doc[field_name])
             for kind, sheet in (song_doc.get("sheets") or {}).items():
                 if sheet.get("version_cn") is not None:
                     logger.warning(
-                        f"songdb: 外部源 {name} 试图写 version_cn（id={song_id}），已忽略（国服唯二源）"
+                        f"songdb: 外部源 {name} 试图写 version_cn（id={song_id}），"
+                        "已忽略（国服唯二源）"
                     )
                 group = state.group(song_id, kind)
-                if sheet.get("version") is not None and (mode == "override" or group.version is None):
+                if sheet.get("version") is not None and (
+                    mode == "override" or group.version is None
+                ):
                     group.version = sheet["version"]
-                if sheet.get("date") is not None and (mode == "override" or group.date is None):
+                if sheet.get("date") is not None and (
+                    mode == "override" or group.date is None
+                ):
                     group.date = sheet["date"]
                 for content in sheet.get("contents") or []:
                     level_id = content.get("level_id")
                     if level_id is None:
                         continue
                     target = state.chart(song_id, kind, level_id)
-                    if content.get("designer") and (mode == "override" or not target.designer):
+                    if content.get("designer") and (
+                        mode == "override" or not target.designer
+                    ):
                         target.designer = content["designer"]
                     notes = content.get("notes") or {}
                     if notes and (mode == "override" or not target.notes_tap):
@@ -1281,20 +1411,29 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
                         target.notes_touch = int(notes.get("touch", 0) or 0)
                         target.notes_break = int(notes.get("break", 0) or 0)
                     if kind == "utage":
-                        if content.get("comment") and (mode == "override" or not target.comment):
+                        if content.get("comment") and (
+                            mode == "override" or not target.comment
+                        ):
                             target.comment = content["comment"]
                     history = content.get("level") or []
                     if history:
                         points = [(int(v), float(val)) for v, val in history]
-                        if mode == "override" or not state.history_of(song_id, kind, level_id):
+                        if mode == "override" or not state.history_of(
+                            song_id, kind, level_id
+                        ):
                             state.set_history(song_id, kind, level_id, points)
                     applied += 1
     # 外部片段归档（source=extra:<名称>；同键多 mode 以 mode 后缀区分，重放先清旧行）
-    origins = {f"extra:{Path(name).name if not name.startswith('http') else name}" for name, _m, _d in docs}
+    origins = {
+        f"extra:{Path(name).name if not name.startswith('http') else name}"
+        for name, _m, _d in docs
+    }
     async with store._open_session() as session:
         for origin in origins:
             await session.execute(
-                delete(store.SongSourceRaw).where(store.SongSourceRaw.source == origin)
+                delete(store.SongSourceRaw).where(
+                    col(store.SongSourceRaw.source) == origin
+                )
             )
         for idx, (name, mode, doc) in enumerate(docs):
             origin = f"extra:{Path(name).name if not name.startswith('http') else name}"

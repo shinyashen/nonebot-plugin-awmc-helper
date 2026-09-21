@@ -4,9 +4,9 @@
 - `刷新歌曲库`：手动执行一次完整管线（四源拉取→重建规范表→刷运行时→预渲染）。
 """
 
-from nonebot import on_command, logger
-from nonebot.permission import SUPERUSER
+from nonebot import logger, on_command
 from nonebot.plugin import PluginMetadata
+from nonebot.permission import SUPERUSER
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import songdb
@@ -38,19 +38,23 @@ async def _():
             f"补充数据已重载并重建底图（源 {summary['sources']} 个）。"
         ).finish(at_sender=True)
     await UniMessage.text(
-        f"补充数据无变化（源 {summary['sources']} 个，本次读取 {summary.get('applied', 0)} 处）。"
+        f"补充数据无变化（源 {summary['sources']} 个，"
+        f"本次应用 {summary.get('applied', 0)} 处）。"
     ).finish(at_sender=True)
 
 
 @refresh_songdb.handle()
 @handle_errors("刷新歌曲库失败")
 async def _():
-    await UniMessage.text("正在执行歌曲库完整管线，需要一些时间……").finish(at_sender=True)
+    await UniMessage.text("正在执行歌曲库完整管线，需要一些时间……").finish(
+        at_sender=True
+    )
     result = await songdb.refresh_all(include_cn=True, include_jp=True)
     await song_service.refresh()
     for warning in result.get("warnings", [])[:20]:
         logger.warning(f"songdb: {warning}")
     await UniMessage.text(
         f"歌曲库刷新完成：{result['songs']} 曲 / {result['charts']} 谱面 / "
-        f"{result['level_points']} 定数变化点（国服当前版本 {result['cn_current_version']}）。"
+        f"{result['level_points']} 定数变化点"
+        f"（国服当前版本 {result['cn_current_version']}）。"
     ).finish(at_sender=True)

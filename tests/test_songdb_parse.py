@@ -1,25 +1,30 @@
 """core/songdb 解析层：纯函数与源解析（不走网络、不写库）。"""
 
-import pytest
-
 from songdb_fixtures import (
+    make_lxns,
     make_all_data,
     make_dschange,
-    make_lxns,
-    make_otoge_deleted,
     make_otoge_live,
+    make_otoge_deleted,
 )
 
 
 def test_norm_title_and_utage_ids():
-    from nonebot_plugin_awmc_helper.core.songdb import norm_title, utage_diff_id, utage_ids
+    from nonebot_plugin_awmc_helper.core.songdb import (
+        utage_ids,
+        norm_title,
+        utage_diff_id,
+    )
 
     assert norm_title("LOVE ＆ JOY") == norm_title("love&joy")
     assert norm_title("Garakuta  Doll Play") == "garakutadollplay"
     # 宴 6 位 id 双向（实测样本：100018→(18,0)、161852→(1852,6)）
     assert utage_ids(100018) == (18, 0)
     assert utage_ids(161852) == (1852, 6)
-    assert all(utage_diff_id(s, l) == 100000 + l * 10000 + s for s, l in [(18, 0), (1852, 6)])
+    assert all(
+        utage_diff_id(si, lv) == 100000 + lv * 10000 + si
+        for si, lv in [(18, 0), (1852, 6)]
+    )
 
 
 def test_parse_level_float_and_level_from_value():
@@ -32,9 +37,12 @@ def test_parse_level_float_and_level_from_value():
     assert parse_level_float("14+") == 14.7
     assert parse_level_float("abc") is None
     # 标级=定数纯函数（otoge-db 全量 85 值 0 冲突验证）
-    assert level_from_value(12.0) == "12" and level_from_value(12.5) == "12"
-    assert level_from_value(12.6) == "12+" and level_from_value(12.9) == "12+"
-    assert level_from_value(13.5) == "13" and level_from_value(13.6) == "13+"
+    assert level_from_value(12.0) == "12"
+    assert level_from_value(12.5) == "12"
+    assert level_from_value(12.6) == "12+"
+    assert level_from_value(12.9) == "12+"
+    assert level_from_value(13.5) == "13"
+    assert level_from_value(13.6) == "13+"
 
 
 def test_parse_maimaiinfo_skeleton_and_history():
@@ -53,6 +61,8 @@ def test_parse_maimaiinfo_skeleton_and_history():
     utage_chart = jp[18].charts["utage"][0]
     assert utage_chart.history == [(24000, 12.0)]
     assert utage_chart.kanji == "宴"
+    # 宴条目保留自身标题（带前缀、≠ 基曲标题）：otoge join 与 pending 判定的依据
+    assert utage_chart.title == "[宴]Test Party"
     # from=未知 且无 dschange → 版本不可知
     assert jp[12].versions["sd"] is None
     assert jp[12].charts["sd"][0].history == []
@@ -91,7 +101,9 @@ def test_parse_lxns_cn_structure():
     # 宴：level_id 取 6 位 id 右起第 5 位；buddy 左右物量
     assert cn[18].charts["utage"][0].cn_version == 24000
     buddy = cn[355].charts["utage"][1]  # 6 位 id 110355 → level_id 1
-    assert buddy.is_buddy and buddy.left == [150, 20, 25, 0, 5] and buddy.right == [130, 25, 20, 0, 5]
+    assert buddy.is_buddy
+    assert buddy.left == [150, 20, 25, 0, 5]
+    assert buddy.right == [130, 25, 20, 0, 5]
     # 落雪不提供 comment（解析层无该字段；comment 仅来自 otoge-db，在合并层验证）
     assert not hasattr(cn[18].charts["utage"][0], "comment")
 
@@ -110,9 +122,15 @@ def test_detect_cn_update():
     assert detect_cn_update(known, lx | {9001}, df) is None
     assert detect_cn_update(known, lx, df | {9001}) is None
     # 双源新增交集 → 触发（国服更新确定）
-    added, removed = detect_cn_update(known, lx | {9001}, df | {9001})
-    assert added == {9001} and not removed
+    result = detect_cn_update(known, lx | {9001}, df | {9001})
+    assert result is not None
+    added, removed = result
+    assert added == {9001}
+    assert not removed
     # 双源消失交集 → 下架确认；单源消失不触发
     assert detect_cn_update(known, lx - {9002}, df) is None
-    added, removed = detect_cn_update(known, lx - {9002}, df - {9002})
-    assert not added and removed == {9002}
+    result = detect_cn_update(known, lx - {9002}, df - {9002})
+    assert result is not None
+    added, removed = result
+    assert not added
+    assert removed == {9002}

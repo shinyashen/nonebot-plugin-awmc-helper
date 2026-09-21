@@ -1,14 +1,13 @@
 """core/songdb 双视图与 core/provider：规范表 → maimai_py 对象（§5.5/§5.6）。"""
 
 import pytest
-
 from songdb_fixtures import (
+    make_lxns,
     make_all_data,
     make_dschange,
     make_divingfish,
-    make_lxns,
-    make_otoge_deleted,
     make_otoge_live,
+    make_otoge_deleted,
 )
 
 
@@ -46,16 +45,17 @@ async def built(db):
 @pytest.mark.asyncio
 async def test_jp_view_object_shape(built):
     """JP 视图：Song/谱面字段、宴 6 位 diff_id、buddy、标级由定数推导。"""
-    from maimai_py import LevelIndex, SongType
+    from maimai_py import SongType, LevelIndex
+    from maimai_py.models import SongDifficultyUtage
 
-    from nonebot_plugin_awmc_helper.core.songdb import all_songs, build_song
+    from nonebot_plugin_awmc_helper.core.songdb import build_song
 
     song = build_song(built, 18, "jp")
     assert song is not None
     assert song.title == "[宴]Test Party"
     assert song.version == 24000
     diff = song.get_difficulty(SongType.UTAGE, 100018)  # 按 6 位 diff_id 查找
-    assert diff is not None
+    assert isinstance(diff, SongDifficultyUtage)
     assert diff.diff_id == 100018
     assert diff.kanji == "宴"
     assert diff.description == "パーティーだ！"
@@ -66,14 +66,20 @@ async def test_jp_view_object_shape(built):
     # get_divingfish_id 三态（§5.5）
     assert song.get_divingfish_id(SongType.UTAGE, 100018) == 100018
     dx_song = build_song(built, 21, "jp")
+    assert dx_song is not None
     assert dx_song.get_divingfish_id(SongType.DX, LevelIndex.MASTER) == 21 + 10000
     # buddy 宴
     buddy_song = build_song(built, 355, "jp")
+    assert buddy_song is not None
     bdiff = buddy_song.get_difficulties(SongType.UTAGE)[0]
-    assert bdiff.is_buddy and bdiff.buddy_notes is not None
-    assert bdiff.buddy_notes.left_tap_num == 150 and bdiff.buddy_notes.right_tap_num == 130
+    assert isinstance(bdiff, SongDifficultyUtage)
+    assert bdiff.is_buddy
+    assert bdiff.buddy_notes is not None
+    assert bdiff.buddy_notes.left_tap_num == 150
+    assert bdiff.buddy_notes.right_tap_num == 130
     # JP 定数（含 CiRCLE 变更后的最新值）
     dx_master = dx_song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+    assert dx_master is not None
     assert dx_master.level_value == 12.5
     assert dx_master.level == "12"  # 标级由定数推导：x.5 → 无+
 
@@ -81,12 +87,14 @@ async def test_jp_view_object_shape(built):
 @pytest.mark.asyncio
 async def test_cn_view_uses_cn_values(built):
     """CN 视图：定数取国服推导值（非日服最新）；JP-only 曲不可见、CN-only 曲可见。"""
-    from maimai_py import LevelIndex, SongType
+    from maimai_py import SongType, LevelIndex
 
     from nonebot_plugin_awmc_helper.core.songdb import build_song
 
     song = build_song(built, 21, "cn")
+    assert song is not None
     master = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+    assert master is not None
     # 日服 CiRCLE 已变 12.5，国服应为变更前 12.3（§2.11 差异模式）
     assert master.level_value == 12.3
     assert master.version == 20000  # 国服批次码
@@ -100,8 +108,10 @@ async def test_cn_view_uses_cn_values(built):
 
     cn_ids = {s.id for s in all_songs(built, "cn")}
     jp_ids = {s.id for s in all_songs(built, "jp")}
-    assert 9002 in cn_ids and 9002 not in jp_ids
-    assert 555 in jp_ids and 555 not in cn_ids
+    assert 9002 in cn_ids
+    assert 9002 not in jp_ids
+    assert 555 in jp_ids
+    assert 555 not in cn_ids
 
 
 @pytest.mark.asyncio
@@ -109,21 +119,26 @@ async def test_snapshot_roundtrip_matches_runtime_serializer(built):
     """视图对象与既有快照序列化（song_to_dict/song_from_dict）行为对齐（同一模型类）。"""
     from maimai_py.models import SongDifficultyUtage
 
+    from nonebot_plugin_awmc_helper.core.songs import song_to_dict, song_from_dict
     from nonebot_plugin_awmc_helper.core.songdb import build_song
-    from nonebot_plugin_awmc_helper.core.songs import song_from_dict, song_to_dict
 
     song = build_song(built, 355, "jp")
+    assert song is not None
     restored = song_from_dict(song_to_dict(song))
-    assert restored.id == song.id and restored.title == song.title
+    assert restored.id == song.id
+    assert restored.title == song.title
     orig = song.get_difficulties()[0]
+    assert isinstance(orig, SongDifficultyUtage)
     back = restored.get_difficulties()[0]
     assert isinstance(back, SongDifficultyUtage)  # 宴谱重建为 SongDifficultyUtage
     assert back.diff_id == orig.diff_id
     assert back.is_buddy == orig.is_buddy
     assert back.level_value == orig.level_value
-    assert back.kanji == orig.kanji and back.description == orig.description
+    assert back.kanji == orig.kanji
+    assert back.description == orig.description
     # 快照仅降级查询用：buddy 物量与曲线不回填（既有约定）
-    assert back.buddy_notes is None and back.curve is None
+    assert back.buddy_notes is None
+    assert back.curve is None
 
 
 @pytest.mark.asyncio
@@ -138,7 +153,7 @@ async def test_awmc_provider_hash_and_get_songs(db, monkeypatch):
     await songdb.rebuild(full_payloads())
     fp1 = provider._hash()
     assert fp1 != "empty"
-    jp_songs = await provider.get_songs(None)
+    jp_songs = await provider.get_songs(None)  # type: ignore[arg-type]
     assert {s.id for s in jp_songs} >= {8, 21, 18, 355, 555}
     # 新歌入库 → 指纹变化
     payloads = full_payloads()
@@ -149,11 +164,17 @@ async def test_awmc_provider_hash_and_get_songs(db, monkeypatch):
         "ds": [10.0],
         "level": ["10"],
         "charts": [{"notes": [100, 20, 15, 8, 5], "charter": "F"}],
-        "basic_info": {"title": "Fingerprint Song", "artist": "A", "genre": "舞萌", "bpm": "160", "from": "maimai でらっくす CiRCLE"},
+        "basic_info": {
+            "title": "Fingerprint Song",
+            "artist": "A",
+            "genre": "舞萌",
+            "bpm": "160",
+            "from": "maimai でらっくす CiRCLE",
+        },
     }
     await songdb.rebuild(payloads)
     assert provider._hash() != fp1
-    # 指纹是库级（规范表整体）的，与 scope 无关——同一缓存命名空间本就不能双视图并存（§5.2）
+    # 指纹是库级（规范表整体）的，与 scope 无关（同一缓存命名空间不能双视图并存 §5.2）
     assert AwmcSongProvider(scope="cn")._hash() == provider._hash()
 
 

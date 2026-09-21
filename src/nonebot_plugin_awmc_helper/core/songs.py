@@ -9,16 +9,16 @@
 
 import random as _random
 import asyncio
-from datetime import datetime
 from enum import Enum
 from typing import Any
+from datetime import datetime
 from dataclasses import asdict, fields
 
 from nonebot import logger, get_driver
 from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDifficulty
 from nonebot_plugin_apscheduler import scheduler
 
-from . import songdb, store
+from . import store, songdb
 from .client import (
     client,
     lxns_provider,
@@ -397,7 +397,7 @@ async def jp_songs() -> list[Song]:
 
 async def _notify_superusers(text: str) -> None:
     """跨适配器向全部 SUPERUSER 主动私聊推送（OB11 优先；失败记 debug 不影响流程）。"""
-    from nonebot_plugin_alconna.uniseg import SupportAdapter, Target, UniMessage
+    from nonebot_plugin_alconna.uniseg import Target, UniMessage, SupportAdapter
 
     for user_id in get_driver().config.superusers:
         try:
@@ -412,8 +412,12 @@ async def _prerender_templates() -> str:
     """预渲染全部底图（core 实现，自动触发与 SUPERUSER 指令共用），返回结果描述。"""
     from .render import table_template
 
-    rating_total, rating_failed = await table_template.refresh_all_rating_tables(song_service)
-    plate_total, plate_failed = await table_template.refresh_all_plate_tables(song_service)
+    rating_total, rating_failed = await table_template.refresh_all_rating_tables(
+        song_service
+    )
+    plate_total, plate_failed = await table_template.refresh_all_plate_tables(
+        song_service
+    )
     return (
         f"定数表 {rating_total} 谱面次（失败 {len(rating_failed)}）"
         f"、完成表 {plate_total} 谱面次（失败 {len(plate_failed)}）"
@@ -426,9 +430,12 @@ async def _ensure_templates() -> None:
 
     if not plugin_config.awmc_auto_templates:
         return
-    rating_dir, plate_dir = table_template.rating_table_dir(), table_template.plate_table_dir()
+    rating_dir, plate_dir = (
+        table_template.rating_table_dir(),
+        table_template.plate_table_dir(),
+    )
 
-    def _empty(path) -> bool:  # noqa: ANN001
+    def _empty(path) -> bool:
         return not path.exists() or not any(path.iterdir())
 
     if _empty(rating_dir) or _empty(plate_dir):
@@ -440,8 +447,8 @@ async def _ensure_templates() -> None:
 
 async def _hourly_cn_poll() -> None:
     """国服源小时轮询（§7.2）：ext 直连轻拉双源 → 双源交集判定更新。"""
-    from .ext import divingfish as ext_df
     from .ext import lxns as ext_lxns
+    from .ext import divingfish as ext_df
 
     try:
         light = await ext_lxns.fetch_song_list(notes=False)
@@ -469,7 +476,9 @@ async def _hourly_cn_poll() -> None:
     await _on_cn_update(added, removed, titles)
 
 
-async def _on_cn_update(added: set[int], removed: set[int], titles: dict[int, str]) -> None:
+async def _on_cn_update(
+    added: set[int], removed: set[int], titles: dict[int, str]
+) -> None:
     """更新确认后的串行动作（§7.3）：回填规范表 → 刷运行时 → 预渲染 → 通知。"""
     try:
         result = await songdb.refresh_all(include_cn=True, include_jp=False)
@@ -489,7 +498,9 @@ async def _on_cn_update(added: set[int], removed: set[int], titles: dict[int, st
             template_msg = "失败（保留旧底图）"
     if plugin_config.awmc_update_notify:
         new_names = "、".join(f"「{titles.get(i, i)}」" for i in sorted(added)) or "无"
-        gone_names = "、".join(f"「{titles.get(i, i)}」" for i in sorted(removed)) or "无"
+        gone_names = (
+            "、".join(f"「{titles.get(i, i)}」" for i in sorted(removed)) or "无"
+        )
         await _notify_superusers(
             f"检测到国服曲库更新：新增 {len(added)} 首（{new_names}），"
             f"下架 {len(removed)} 首（{gone_names}）；底图重建：{template_msg}"

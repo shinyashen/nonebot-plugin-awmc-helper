@@ -11,8 +11,8 @@ import asyncio
 from pathlib import Path
 from collections.abc import Sequence
 
-from nonebot import logger
 from PIL import Image
+from nonebot import logger
 from maimai_py import Song, SongType, SongDifficulty
 
 from .fonts import FONT_MONO, font

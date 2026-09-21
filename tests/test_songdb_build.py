@@ -1,16 +1,15 @@
-"""core/songdb 合并管线：rebuild 入库、缺失/删除规则、pending、外部源（tmp DB 全流程）。"""
+"""core/songdb 合并管线：rebuild 入库、缺失/删除规则、pending、外部源。"""
 
 import json
 
 import pytest
-
 from songdb_fixtures import (
+    make_lxns,
     make_all_data,
     make_dschange,
     make_divingfish,
-    make_lxns,
-    make_otoge_deleted,
     make_otoge_live,
+    make_otoge_deleted,
 )
 
 
@@ -54,10 +53,12 @@ async def test_rebuild_full_union(db):
     assert state.groups[(12, "sd")].version is None
     # 国服独有曲（日侧无）：version=None、version_cn=25000
     g = state.groups[(9002, "sd")]
-    assert g.version is None and g.version_cn == 25000
+    assert g.version is None
+    assert g.version_cn == 25000
     # JP-only 曲（国服源完全没有）：version=22000、version_cn=None
     g = state.groups[(555, "dx")]
-    assert g.version == 22000 and g.version_cn is None
+    assert g.version == 22000
+    assert g.version_cn is None
     # 组级版本：SD 来自 from、DX 来自 PLUS；version_cn 取组内谱面值
     assert state.groups[(8, "sd")].version == 20000
     assert state.groups[(8, "sd")].version_cn == 20000
@@ -70,11 +71,14 @@ async def test_rebuild_full_union(db):
     # 封面与宴字段（otoge-db 唯一来源）
     assert state.songs[8].image_url == "abc123.png"
     utage = state.charts[(18, "utage", 0)]
-    assert utage.kanji == "宴" and utage.comment == "パーティーだ！"
+    assert utage.kanji == "宴"
+    assert utage.comment == "パーティーだ！"
     assert not utage.is_buddy
     # buddy 宴左右物量
     buddy = state.charts[(355, "utage", 1)]
     assert buddy.is_buddy
+    assert buddy.notes_left is not None
+    assert buddy.notes_right is not None
     assert json.loads(buddy.notes_left) == [150, 20, 25, 0, 5]
     assert json.loads(buddy.notes_right) == [130, 25, 20, 0, 5]
     # 定数历史（变化点）与宴推导值
@@ -83,8 +87,13 @@ async def test_rebuild_full_union(db):
     # 标准 JSON 与指纹已生成
     doc = await db.kv_get("songdb_json")
     assert doc["8"]["sheets"]["sd"]["version_cn"] == 20000
-    assert doc["8"]["sheets"]["sd"]["contents"][0]["level"] == [[20000, 4.0], [23000, 4.5]]
-    assert songdb.CURRENT_FINGERPRINT and len(songdb.CURRENT_FINGERPRINT) == 32
+    assert doc["8"]["sheets"]["sd"]["contents"][0]["level"] == [
+        [20000, 4.0],
+        [23000, 4.5],
+    ]
+    fp = songdb.CURRENT_FINGERPRINT
+    assert fp is not None
+    assert len(fp) == 32
     # 国服当前版本 = max(version_cn) = 25000（PRiSM）
     assert state.cn_current_version() == 25000
 
@@ -92,7 +101,7 @@ async def test_rebuild_full_union(db):
 @pytest.mark.asyncio
 async def test_cn_derivation_and_fallback(db):
     """国服定数推导：≤ 国服版本末值；同步上线曲走首值兜底（§5.3）。"""
-    from nonebot_plugin_awmc_helper.core.songdb import State, cn_level_value, rebuild
+    from nonebot_plugin_awmc_helper.core.songdb import State, rebuild, cn_level_value
 
     await rebuild(full_payloads())
     state = await State.load()
@@ -114,7 +123,9 @@ async def test_cn_missing_and_restore(db):
     await songdb.rebuild(full_payloads())
     # 双源同时失去 9002 → 国服下架（version_cn 置 NULL），记录保留（日服无 → 整曲删除）
     await songdb.rebuild(
-        full_payloads(lxns=make_lxns(drop_ids={9002}), divingfish=make_divingfish(drop_ids={9002}))
+        full_payloads(
+            lxns=make_lxns(drop_ids={9002}), divingfish=make_divingfish(drop_ids={9002})
+        )
     )
     state = await songdb.State.load()
     assert 9002 not in state.songs  # JP 也无 → 两侧皆无才删
@@ -128,7 +139,7 @@ async def test_cn_missing_and_restore(db):
 
 @pytest.mark.asyncio
 async def test_jp_missing_and_cn_absence_delete(db):
-    """缺失矩阵：JP 在列/国服缺失→保留；两侧信号皆无→整曲删除；JP 历史不受 CN 波动影响。"""
+    """缺失矩阵：一侧缺失保留、两侧信号皆无删除；JP 历史不受 CN 波动影响。"""
     from nonebot_plugin_awmc_helper.core import songdb
 
     await songdb.rebuild(full_payloads())
@@ -136,11 +147,14 @@ async def test_jp_missing_and_cn_absence_delete(db):
     state = await songdb.State.load()
     assert 555 in state.songs
     g = state.groups[(555, "dx")]
-    assert g.version == 22000 and g.version_cn is None
+    assert g.version == 22000
+    assert g.version_cn is None
     assert state.history_of(555, "dx", 0) == [(22000, 4.0)]
     # 国服在列曲（9002）双源同时消失：JP 也无 → 两侧信号皆无 → 整曲删除
     await songdb.rebuild(
-        full_payloads(lxns=make_lxns(drop_ids={9002}), divingfish=make_divingfish(drop_ids={9002}))
+        full_payloads(
+            lxns=make_lxns(drop_ids={9002}), divingfish=make_divingfish(drop_ids={9002})
+        )
     )
     state = await songdb.State.load()
     assert 9002 not in state.songs
@@ -167,7 +181,7 @@ async def test_source_failure_tolerated(db):
 @pytest.mark.asyncio
 async def test_pending_and_flush(db):
     """otoge 独有的无 id 条目进 pending；id 到位后归并清理。"""
-    from nonebot_plugin_awmc_helper.core import songdb, store
+    from nonebot_plugin_awmc_helper.core import store, songdb
 
     await songdb.rebuild(full_payloads())
     from sqlmodel import select
@@ -189,7 +203,13 @@ async def test_pending_and_flush(db):
         "ds": [13.7],
         "level": ["13+"],
         "charts": [{"notes": [250, 45, 35, 5, 12], "charter": "K-A"}],
-        "basic_info": {"title": "[狂]Otoge Only Uta", "artist": "A", "genre": "宴会場", "bpm": "150", "from": "maimai でらっくす BUDDiES PLUS"},
+        "basic_info": {
+            "title": "[狂]Otoge Only Uta",
+            "artist": "A",
+            "genre": "宴会場",
+            "bpm": "150",
+            "from": "maimai でらっくす BUDDiES PLUS",
+        },
     }
     await songdb.rebuild(payloads)
     merged = await songdb.flush_pending()
@@ -217,8 +237,16 @@ async def test_external_sources_merge(db, tmp_path, monkeypatch):
                             "version_cn": 99999,  # 国服内容：必须被忽略
                             "version": 21000,
                             "contents": [
-                                {"level_id": 0, "designer": "EXTRA!", "level": [[20000, 4.0], [21000, 4.2]]},
-                                {"level_id": 1, "designer": "FILLED", "notes": {"tap": 1}},
+                                {
+                                    "level_id": 0,
+                                    "designer": "EXTRA!",
+                                    "level": [[20000, 4.0], [21000, 4.2]],
+                                },
+                                {
+                                    "level_id": 1,
+                                    "designer": "FILLED",
+                                    "notes": {"tap": 1},
+                                },
                             ],
                         }
                     }
@@ -234,7 +262,8 @@ async def test_external_sources_merge(db, tmp_path, monkeypatch):
         [f"{extra}::fill"],
     )
     summary = await songdb.apply_external_sources()
-    assert summary["changed"] and summary["applied"] > 0
+    assert summary["changed"]
+    assert summary["applied"] > 0
     state = await songdb.State.load()
     assert state.charts[(8, "sd", 1)].designer == "FILLED"  # 原 designer 为空 → 填充
     assert state.charts[(8, "sd", 1)].notes_tap == 85  # 已有物量不被 fill 覆盖
@@ -271,6 +300,7 @@ async def test_external_source_invalid_not_blocking(db, tmp_path, monkeypatch):
         [str(bad)],
     )
     summary = await songdb.apply_external_sources()
-    assert not summary["changed"] and summary["applied"] == 0
+    assert not summary["changed"]
+    assert summary["applied"] == 0
     state = await songdb.State.load()
     assert state.groups[(8, "sd")].version == 20000  # 数据无恙
