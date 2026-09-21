@@ -111,7 +111,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     level, target_raw = groups
     target = int(target_raw) if target_raw else 1
     binding = await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
     try:
         bests = await score_service.get_b50(binding)
@@ -201,7 +201,7 @@ async def _(session: Session = UniSession()):
     from ...core.binding import SERVICE_DIVINGFISH
 
     binding = await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
     if binding.service != SERVICE_DIVINGFISH:
         await UniMessage.text("水鱼排行榜仅支持水鱼数据源（数据源 0）查询").finish(

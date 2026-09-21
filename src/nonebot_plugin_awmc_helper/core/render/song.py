@@ -21,7 +21,7 @@ CARD_BG = "#f2f3f5"
 CARD_W = 720
 
 
-def draw_song_card(song: Song) -> Image:
+def draw_song_card(song: Song) -> Image.Image:
     """绘制谱面信息卡：曲绘 + 基本信息 + 各难度谱面数据。"""
     diffs = [
         d for d in song.get_difficulties() if d.type in (SongType.STANDARD, SongType.DX)
@@ -103,7 +103,7 @@ def draw_song_card(song: Song) -> Image:
     return img
 
 
-def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Image:
+def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Image.Image:
     """搜索结果列表图（默认 25 条/页）。"""
     page_data, total = paginate(songs, page, per_page)
 

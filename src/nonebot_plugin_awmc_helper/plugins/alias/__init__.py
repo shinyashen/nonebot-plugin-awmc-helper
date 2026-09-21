@@ -34,6 +34,9 @@ try:  # OneBot v11 可用时提供合并转发能力
 
     _OB11 = True
 except ImportError:  # pragma: no cover
+    OB11Bot = None
+    OB11Message = None
+    OB11Segment = None
     _OB11 = False
 
 PUSH_FEATURE = "alias_push"
@@ -105,11 +108,11 @@ async def _(groups: tuple = RegexGroup()):
     keyword = name.strip()
     songs = await song_service.by_alias(keyword)
     if len(songs) > 1:
-        msg = f"找到{len(songs)}个相同别名的曲目：\n"
-        msg += "\n======\n".join(
-            f"ID：{s.id}\n" + "\n".join(await song_service.aliases_of(s.id) or [])
-            for s in songs
-        )
+        blocks = []
+        for item in songs:
+            aliases = await song_service.aliases_of(item.id)
+            blocks.append(f"ID：{item.id}\n" + "\n".join(aliases or []))
+        msg = f"找到{len(songs)}个相同别名的曲目：\n" + "\n======\n".join(blocks)
         await UniMessage.text(msg).finish(at_sender=True)
     if songs:
         await _send_song_aliases(songs[0].id)
@@ -254,7 +257,7 @@ async def _(groups: tuple = RegexGroup()):
     enabled = groups[0] == "开启"
     count = 0
     for bot in list(get_bots().values()):
-        if _OB11 and isinstance(bot, OB11Bot):
+        if _OB11 and OB11Bot is not None and isinstance(bot, OB11Bot):
             try:
                 group_list = await bot.get_group_list()
             except Exception:
@@ -300,8 +303,10 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
     text = "\n======\n".join(lines)
 
     default = plugin_config.awmc_alias_push
+    if not _OB11 or OB11Bot is None or OB11Message is None or OB11Segment is None:
+        return
     for bot in list(get_bots().values()):
-        if not (_OB11 and isinstance(bot, OB11Bot)):
+        if not isinstance(bot, OB11Bot):
             continue
         try:
             group_list = await bot.get_group_list()
@@ -313,7 +318,11 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
                 continue
             try:
                 forward = OB11Message(
-                    [OB11Segment.node_custom(bot.self_id, "Bot", OB11Message(text))]
+                    [
+                        OB11Segment.node_custom(
+                            int(bot.self_id), "Bot", OB11Message(text)
+                        )
+                    ]
                 )
                 await bot.call_api(
                     "send_group_forward_msg", group_id=int(gid), message=forward

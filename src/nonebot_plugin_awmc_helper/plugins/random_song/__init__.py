@@ -79,7 +79,7 @@ async def _(session: Session = UniSession()):
     未绑定 / B50 拉取失败 / 无候选时退化为普通随机曲目（与原版行为一致）。
     """
     binding = await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
     song = None
     try:

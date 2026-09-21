@@ -34,18 +34,21 @@ __plugin_meta__ = PluginMetadata(
 AP_FC_VALUES = (1, 0)  # FCType.AP / FCType.APP 的枚举值（越小越好）
 
 
-def _at_target(event: Event) -> str | None:
+def _at_target(event: Event | None) -> str | None:
     """消息中被 @ 的目标用户（代查），仅取第一个非全体 at。"""
-    for seg in event.message:
+    message = getattr(event, "message", None)
+    if message is None:
+        return None
+    for seg in message:
         if seg.type == "at" and str(seg.data.get("qq")) != "all":
             return str(seg.data["qq"])
     return None
 
 
-async def _get_binding(session: Session, event: Event, *, required: bool = True):
+async def _get_binding(session: Session, event: Event | None, *, required: bool = True):
     """取（@目标 或 发送者的）绑定；required 时无可用凭据则提示。"""
     user_id = _at_target(event) or str(session.user.id)
-    binding = await binding_service.ensure(session.platform or "unknown", user_id)
+    binding = await binding_service.ensure(str(session.platform or "unknown"), user_id)
     if required and binding_service.identifier_or_none(binding) is None:
         await UniMessage.text(
             "尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定"
@@ -88,9 +91,9 @@ async def _resolve_song(key: str):
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
     session: Session = UniSession(),
-    event: Event = None,
+    event: Event | None = None,
     message: Message = CommandArg(),
-):  # type: ignore[assignment]
+):
     username = str(message).strip()
     if username:  # 水鱼公开代查：b50 <水鱼用户名>
         player, bests = await score_service.get_b50_by_username(username)

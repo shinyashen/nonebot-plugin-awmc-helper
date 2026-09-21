@@ -23,7 +23,7 @@ RISE_ACHIEVEMENTS = (99.0, 99.5, 100.0, 100.5)
 
 def compute_rating(ds: float, achievement: float) -> int:
     """达成率 → RA（maimai-py 系数表）。"""
-    return ScoreCoefficient(achievement).ra(ds)
+    return int(ScoreCoefficient(achievement).ra(ds))
 
 
 def rate_of(achievement: float) -> str:
@@ -33,7 +33,7 @@ def rate_of(achievement: float) -> str:
 
 def min_ra_of(scores: list[ScoreExtend]) -> int:
     """B50 中最低 RA（入线门槛）。"""
-    return min((s.dx_rating or 0 for s in scores), default=0)
+    return int(min((s.dx_rating or 0 for s in scores), default=0))
 
 
 def score_line(diff: SongDifficulty, line: float) -> dict[str, float] | None:
@@ -141,8 +141,9 @@ def rise_recommend(
             best_gain: dict | None = None
             for ach in RISE_ACHIEVEMENTS:
                 new_ra = compute_rating(diff.level_value, ach)
+                base_ra = base.dx_rating or 0
                 if old is None:
-                    if new_ra <= base.dx_rating or 0:
+                    if new_ra <= base_ra:
                         continue
                     gain = new_ra - base_ra
                 else:

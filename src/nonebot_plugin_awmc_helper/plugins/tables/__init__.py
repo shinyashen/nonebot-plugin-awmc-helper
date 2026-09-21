@@ -148,7 +148,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     level, plan = groups
     checker, plan_name = _plan_checker(plan)
     binding = await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
     scores = await score_service.get_scores_all(binding)
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
@@ -190,7 +190,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     page = int(page_raw) if page_raw else 1
     checker, plan_name = _plan_checker(plan)
     binding = await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
     scores = await score_service.get_scores_all(binding)
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
@@ -227,7 +227,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     version, kind, mode, page_raw = groups
     binding = await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
     plates = await score_service.get_plates(binding, f"{version}{kind}")
     if mode == "完成表":
@@ -312,7 +312,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     ds_raw, page_raw = groups
     page = int(page_raw) if page_raw else 1
     binding = await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
     scores = await score_service.get_scores_all(binding)
     if "." in ds_raw:  # 定数

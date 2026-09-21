@@ -105,12 +105,16 @@ def song_from_dict(d: dict[str, Any]) -> Song:
         disabled=d.get("disabled", False),
         difficulties=None,  # type: ignore[arg-type]
     )
-    from maimai_py.models import SongDifficulties
+    from maimai_py.models import SongDifficulties, SongDifficultyUtage
 
     song.difficulties = SongDifficulties(
         standard=[_diff_from_dict(x) for x in diffs["standard"]],
         dx=[_diff_from_dict(x) for x in diffs["dx"]],
-        utage=[_diff_from_dict(x) for x in diffs["utage"]],
+        utage=[
+            x
+            for x in (_diff_from_dict(y) for y in diffs["utage"])
+            if isinstance(x, SongDifficultyUtage)
+        ],  # type: ignore[arg-type]
     )
     return song
 

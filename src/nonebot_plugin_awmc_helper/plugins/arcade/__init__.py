@@ -34,6 +34,7 @@ try:
 
     _SCHED = True
 except ImportError:  # pragma: no cover
+    scheduler = None  # type: ignore[assignment]
     _SCHED = False
 
 __plugin_meta__ = PluginMetadata(
@@ -427,7 +428,7 @@ async def sync_and_reset() -> int:
     return len(official)
 
 
-if _SCHED:
+if _SCHED and scheduler is not None:
 
     async def _daily_job() -> None:
         await sync_and_reset()

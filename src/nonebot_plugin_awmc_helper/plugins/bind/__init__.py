@@ -40,7 +40,7 @@ __plugin_meta__ = PluginMetadata(
 
 def _keys(session: Session) -> tuple[str, str]:
     # 真实事件 platform 为适配器标识（如 "qq"）；部分环境可能为 None，兜底 "unknown"
-    return session.platform or "unknown", str(session.user.id)
+    return str(session.platform or "unknown"), str(session.user.id)
 
 
 df_bind = on_command("绑定水鱼", aliases={"绑定df", "dfbind"}, block=True)
@@ -59,7 +59,9 @@ async def _is_pending_lxns_code(bot: Bot, event: Event) -> bool:
     session = await get_session(bot, event)
     if session is None:
         return False
-    if not pending_bindings.is_active(session.platform, str(session.user.id), "lxns"):
+    if not pending_bindings.is_active(
+        str(session.platform or "unknown"), str(session.user.id), "lxns"
+    ):
         return False
     return lxns_ext.extract_authorization_code(event.get_plaintext()) is not None
 
@@ -76,7 +78,7 @@ async def _(bot: Bot, event: Event):
     assert session is not None
     code = lxns_ext.extract_authorization_code(event.get_plaintext())
     assert code is not None
-    await _complete_lxns(session.platform, str(session.user.id), code)
+    await _complete_lxns(str(session.platform or "unknown"), str(session.user.id), code)
 
 
 @df_bind.handle()

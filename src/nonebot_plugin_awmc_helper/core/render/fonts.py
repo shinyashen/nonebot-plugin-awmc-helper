@@ -1,5 +1,6 @@
 """字体加载（static/font，素材包自带 4 个常用字体）。"""
 
+from typing import cast
 from pathlib import Path
 from functools import lru_cache
 
@@ -16,13 +17,13 @@ FONT_MONO = "ShangguMonoSC-Regular.otf"  # 等宽
 
 
 @lru_cache(maxsize=32)
-def _load_font(name: str, size: int):
+def _load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     path = Path(plugin_config.awmc_static_path) / "font" / name
     if not path.exists():
-        return ImageFont.load_default(size)
-    return ImageFont.truetype(str(path), size)
+        return cast(ImageFont.FreeTypeFont, ImageFont.load_default(size))
+    return cast(ImageFont.FreeTypeFont, ImageFont.truetype(str(path), size))
 
 
-def font(size: int, name: str = FONT_HAN):
+def font(size: int, name: str = FONT_HAN) -> ImageFont.FreeTypeFont:
     """按字体名与字号取字体（进程级缓存）。"""
     return _load_font(name, size)

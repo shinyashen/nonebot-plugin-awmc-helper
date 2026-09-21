@@ -30,7 +30,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 class UserBinding(SQLModel, table=True):
     """用户绑定：(platform, user_id) → 查分器凭据与显示偏好。"""
 
-    __tablename__ = "user_binding"
+    __tablename__ = "user_binding"  # type: ignore[reportGeneralTypeIssues]
 
     platform: str = Field(primary_key=True)
     user_id: str = Field(primary_key=True)
@@ -46,7 +46,7 @@ class UserBinding(SQLModel, table=True):
 class GroupSwitch(SQLModel, table=True):
     """群级开关的显式覆盖：未覆盖的群取 .env 部署级默认值。"""
 
-    __tablename__ = "group_switch"
+    __tablename__ = "group_switch"  # type: ignore[reportGeneralTypeIssues]
 
     group_id: str = Field(primary_key=True)
     feature: str = Field(primary_key=True)  # alias_push / guess
@@ -56,7 +56,7 @@ class GroupSwitch(SQLModel, table=True):
 class LocalAlias(SQLModel, table=True):
     """本地别名，唯一约束防重；查询时热并入曲库别名索引。"""
 
-    __tablename__ = "local_alias"
+    __tablename__ = "local_alias"  # type: ignore[reportGeneralTypeIssues]
     __table_args__ = (UniqueConstraint("song_id", "alias", name="uq_local_alias"),)
 
     id: int | None = Field(default=None, primary_key=True)
@@ -72,7 +72,7 @@ class Arcade(SQLModel, table=True):
     ``person`` 为本地排卡人数（每日 4 点同步后清零），机器数 ``machines`` 来自华立。
     """
 
-    __tablename__ = "arcade"
+    __tablename__ = "arcade"  # type: ignore[reportGeneralTypeIssues]
 
     id: int = Field(primary_key=True)
     name: str = Field(index=True)
@@ -89,7 +89,7 @@ class Arcade(SQLModel, table=True):
 class ArcadeAlias(SQLModel, table=True):
     """机厅别称，用于 `<店名>多少人` 等指令的模糊定位。"""
 
-    __tablename__ = "arcade_alias"
+    __tablename__ = "arcade_alias"  # type: ignore[reportGeneralTypeIssues]
     __table_args__ = (UniqueConstraint("alias", name="uq_arcade_alias"),)
 
     id: int | None = Field(default=None, primary_key=True)
@@ -100,7 +100,7 @@ class ArcadeAlias(SQLModel, table=True):
 class ArcadeSubscription(SQLModel, table=True):
     """群订阅：订阅后人数指令只对本群订阅的机厅生效。"""
 
-    __tablename__ = "arcade_subscription"
+    __tablename__ = "arcade_subscription"  # type: ignore[reportGeneralTypeIssues]
 
     group_id: str = Field(primary_key=True)
     arcade_id: int = Field(primary_key=True)
@@ -109,7 +109,7 @@ class ArcadeSubscription(SQLModel, table=True):
 class ArcadeCountLog(SQLModel, table=True):
     """人数变更流水：记录操作人与时间。"""
 
-    __tablename__ = "arcade_count_log"
+    __tablename__ = "arcade_count_log"  # type: ignore[reportGeneralTypeIssues]
 
     id: int | None = Field(default=None, primary_key=True)
     arcade_id: int = Field(index=True)
@@ -122,7 +122,7 @@ class ArcadeCountLog(SQLModel, table=True):
 class KvCache(SQLModel, table=True):
     """拉取数据的持久快照（key 形如 ``songs_snapshot``），断网降级与冷启动加速。"""
 
-    __tablename__ = "kv_cache"
+    __tablename__ = "kv_cache"  # type: ignore[reportGeneralTypeIssues]
 
     key: str = Field(primary_key=True)
     payload: str  # JSON

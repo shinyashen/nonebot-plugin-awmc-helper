@@ -82,6 +82,15 @@ show-bump = "bump-my-version show-bump"
 pythonVersion = "3.10"
 pythonPlatform = "All"
 defineConstant = { PYDANTIC_V2 = true }
+exclude = [
+  "**/local",
+  "**/local/repos",
+  "**/static",
+  "**/.venv",
+  "**/data",
+  "**/cache",
+  "**/__pycache__",
+]
 executionEnvironments = [
   { root = "./tests", extraPaths = [
     "./src",

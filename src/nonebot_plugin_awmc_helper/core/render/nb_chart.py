@@ -102,8 +102,8 @@ def get_best_rating(level_value: float) -> list[int]:
     """高达成率段的 7 档 RA（NB get_best_rating：最后 6 档 + SSS+ 再 +1，降序）。"""
     from maimai_py.utils import ScoreCoefficient
 
-    ra = [ScoreCoefficient(r).ra(level_value) for r in ACHIEVEMENT_LIST[-6:]]
-    ra.append(ScoreCoefficient(ACHIEVEMENT_LIST[-1]).ra(level_value) + 1)
+    ra = [int(ScoreCoefficient(r).ra(level_value)) for r in ACHIEVEMENT_LIST[-6:]]
+    ra.append(int(ScoreCoefficient(ACHIEVEMENT_LIST[-1]).ra(level_value)) + 1)
     return sorted(ra, reverse=True)
 
 
@@ -115,14 +115,14 @@ def new_best_score(
     song_type: SongType,
 ) -> int:
     """NB new_best_score：已在 B50 → 打到此 ra 的净提升；未入 B50 → 相对入线线。"""
-    lowest = best_list[-1].dx_rating or 0 if best_list else 0
+    lowest = int(best_list[-1].dx_rating or 0) if best_list else 0
     for v in best_list:
         if (
             v.id == song_id
             and v.type == song_type
             and v.level_index.value == level_index_value
         ):
-            old = v.dx_rating or 0
+            old = int(v.dx_rating or 0)
             return value - old if value >= old else 0
     return value - lowest
 
@@ -142,6 +142,8 @@ def _is_new(song: Song) -> bool:
 
 def _version_image(song: Song) -> Image.Image | None:
     ver = Version.from_value(song.version)
+    if ver is None:
+        return None
     name = VERSION_IMAGE.get(ver) or version_zh(song.version)
     path = assets.static_path() / "mai" / "pic" / f"{name}.png"
     if path.exists():

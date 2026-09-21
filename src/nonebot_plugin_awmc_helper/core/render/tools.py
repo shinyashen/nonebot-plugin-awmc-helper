@@ -21,7 +21,7 @@ def image_to_bytes(img: Image.Image, fmt: Literal["PNG", "JPEG"] = "PNG") -> byt
 
 def text_size(text: str, f: ImageFont.FreeTypeFont) -> tuple[int, int]:
     left, top, right, bottom = f.getbbox(text)
-    return right - left, bottom - top
+    return int(right - left), int(bottom - top)
 
 
 def fit_text(text: str, f: ImageFont.FreeTypeFont, max_width: int) -> str:

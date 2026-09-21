@@ -162,13 +162,13 @@ async def _hint_loop(game: GuessGame) -> None:
         while True:
             hint = game.next_hint()
             if hint is not None:
-                await UniMessage.text(hint).send(at_sender=True)
+                await UniMessage.text(hint).send(game.event, game.bot, at_sender=True)
                 await asyncio.sleep(plugin_config.awmc_guess_interval)
                 continue
             await (
                 UniMessage.image(raw=await _cover_hint_bytes(game.song))
                 .text("\n最后提示：曲绘裁剪")
-                .send(at_sender=True)
+                .send(game.event, game.bot, at_sender=True)
             )
             await asyncio.sleep(plugin_config.awmc_guess_duration)
             await _reveal(game, "时间到！")
@@ -189,7 +189,7 @@ async def _pic_loop(game: GuessGame) -> None:
         raise
 
 
-async def _start_game(session: Session, pic_mode: bool) -> None:
+async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) -> None:
     group_id = _group_of(session)
     if group_id is None:
         await UniMessage.text("猜歌仅群聊可用").finish(at_sender=True)
@@ -204,7 +204,7 @@ async def _start_game(session: Session, pic_mode: bool) -> None:
     song = await _pick_song()
     if song is None:
         await UniMessage.text("曲库尚未就绪，请稍后再试").finish(at_sender=True)
-    game = GuessGame(song, pic_mode=pic_mode, group_id=group_id)
+    game = GuessGame(song, pic_mode=pic_mode, group_id=group_id, bot=bot, event=event)
     _games[group_id] = game
     mode_text = "猜曲绘开始" if pic_mode else "猜歌开始"
     await UniMessage.text(f"{mode_text}，直接回复曲目名称/别名/ID 作答").send(

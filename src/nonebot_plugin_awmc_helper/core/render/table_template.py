@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 
 from PIL import Image
-from maimai_py import Song, SongType
+from maimai_py import Song, SongType, SongDifficulty
 
 from .fonts import FONT_MONO, font
 from .tools import fit_text, image_to_bytes
@@ -45,9 +45,7 @@ def _grid_size(count: int, per_row: int = PER_ROW) -> tuple[int, int]:
     return (per_row * (CELL + GAP) + GAP + 10, 70 + rows * (CELL + GAP) + 16)
 
 
-def _draw_grid_base(
-    items: list[tuple[Song, object]],
-) -> Image.Image:
+def _draw_grid_base(items: list[tuple[Song, SongDifficulty]]) -> Image.Image:
     """底图：标题占位 + 每格封面/ID/等级（无任何用户状态）。"""
     from PIL import Image, ImageDraw
 
@@ -96,10 +94,13 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
     from maimai_py import plate_to_version
 
     version_char = version
-    versions = {plate_to_version.get(version_char)}
+    primary = plate_to_version.get(version_char)
     if version_char in ("舞", "霸"):
-        versions = {v for v in plate_to_version.values() if v.value < 20000}
-    versions.discard(None)
+        versions = [v for v in plate_to_version.values() if v.value < 20000]
+    elif primary is not None:
+        versions = [primary]
+    else:
+        return 0
     if not versions:
         return 0
     lo = min(v.value for v in versions)
@@ -171,7 +172,7 @@ async def overlay_plate(
     version: str,
     kind: str,
     cleared_keys: set[tuple],
-    items: list[tuple[Song, object]],
+    items: list[tuple[Song, SongDifficulty]],
     done_count: int,
 ) -> bytes | None:
     """牌子完成表：底图叠加达成印章。items 为该牌子全部 (song, diff)。"""

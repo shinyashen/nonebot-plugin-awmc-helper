@@ -84,7 +84,7 @@ async def _chart_card(song, binding) -> bytes:
 
 async def _binding_of(session):
     return await binding_service.ensure(
-        session.platform or "unknown", str(session.user.id)
+        str(session.platform or "unknown"), str(session.user.id)
     )
 
 

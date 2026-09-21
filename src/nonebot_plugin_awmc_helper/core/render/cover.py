@@ -39,7 +39,7 @@ def crop_cover_randomly(
     cover: Image.Image, rng: random.Random | None = None
 ) -> Image.Image:
     """随机裁剪曲绘（猜歌第 7 提示 / 猜曲绘）。"""
-    rng = rng or random
+    rng = rng if rng is not None else random.Random()
     w, h = cover.size
     weights = frequency_weights(cover)
     scale = rng.uniform(0.15, 0.4)

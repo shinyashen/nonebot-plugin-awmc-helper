@@ -87,9 +87,8 @@ def _check(resp: httpx.Response) -> dict | list:
             data = resp.json()
         except ValueError:
             data = {}
-        raise ExtError(
-            str(data.get("message", f"柚子接口错误（HTTP {resp.status_code}）"))
-        )
+        message = data.get("message") if isinstance(data, dict) else None
+        raise ExtError(str(message or f"柚子接口错误（HTTP {resp.status_code}）"))
     raise ExtError(f"柚子接口服务异常（HTTP {resp.status_code}）")
 
 
@@ -143,7 +142,7 @@ class YuzuClient:
             f"{base_url()}/aliases/maimaidx/songs", params={"name": name}
         )
         data = _check(resp)
-        if isinstance(data, dict) and "message" in data:
+        if not isinstance(data, dict) or "message" in data:
             return None
         items: list[AliasVote | ServerAlias] = []
         for x in data.get("data", []):
@@ -175,6 +174,8 @@ class YuzuClient:
             },
         )
         data = _check(resp)
+        if not isinstance(data, dict):
+            return "提交成功"
         return str(data.get("message", "提交成功"))
 
     async def agree_alias(self, tag: str, user_id: str) -> str:
@@ -184,6 +185,8 @@ class YuzuClient:
             json={"tag": tag, "agree_user": user_id},
         )
         data = _check(resp)
+        if not isinstance(data, dict):
+            return "投票成功"
         return str(data.get("message", "投票成功"))
 
 
