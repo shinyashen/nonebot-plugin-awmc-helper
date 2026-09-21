@@ -85,15 +85,16 @@ alias_global_switch = on_regex(
 update_alias = on_command("更新别名库", permission=SUPERUSER, block=True)
 
 
-async def _send_song_aliases(song_id: int) -> None:
-    """发送某曲目的全部别名（柚子 + 本地）。"""
+async def _send_song_aliases(song_id: int, hint: str = "") -> None:
+    """发送某曲目的全部别名（柚子 + 落雪 + 本地合并视图）。"""
     aliases = await song_service.aliases_of(song_id)
     if aliases is None:
         await UniMessage.text(NOT_FOUND_ALIAS).finish(at_sender=True)
     if not aliases:
         await UniMessage.text("该曲目没有别名").finish(at_sender=True)
+    suffix = f"\n{hint}" if hint else ""
     await UniMessage.text(
-        f"该曲目有以下别名：\nID：{song_id}\n" + "\n".join(aliases)
+        f"该曲目有以下别名：\nID：{song_id}\n" + "\n".join(aliases) + suffix
     ).finish(at_sender=True)
 
 
@@ -106,16 +107,26 @@ async def _(groups: tuple = RegexGroup()):
         return
     assert name is not None
     keyword = name.strip()
-    songs = await song_service.by_alias(keyword)
+    songs, strip_info = await song_service.by_alias_detail(keyword)
+    hint = ""
+    if strip_info:
+        # 前缀剥离命中：提醒别名库已合并，无需再加谱面前缀（Q31）
+        stripped, prefix = strip_info
+        hint = (
+            f"提示：别名库已合并同一歌曲的标准/DX/宴谱面别名，"
+            f"无需添加「{prefix}」前缀，直接搜索「{stripped}」即可。"
+        )
     if len(songs) > 1:
         blocks = []
         for item in songs:
             aliases = await song_service.aliases_of(item.id)
             blocks.append(f"ID：{item.id}\n" + "\n".join(aliases or []))
         msg = f"找到{len(songs)}个相同别名的曲目：\n" + "\n======\n".join(blocks)
+        if hint:
+            msg += f"\n{hint}"
         await UniMessage.text(msg).finish(at_sender=True)
     if songs:
-        await _send_song_aliases(songs[0].id)
+        await _send_song_aliases(songs[0].id, hint)
         return
     if keyword.isdigit():
         await _send_song_aliases(int(keyword))

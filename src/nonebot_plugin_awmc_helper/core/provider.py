@@ -22,6 +22,7 @@ from maimai_py.providers.lxns import LXNSProvider
 from maimai_py.providers.yuzu import YuzuProvider
 
 from . import store, songdb
+from ..constants import normalize_text, strip_chart_prefix
 
 Scope = Literal["cn", "jp"]
 
@@ -57,17 +58,27 @@ class AwmcAliasProvider(IAliasProvider):
         self._fingerprint: str | None = None
 
     async def get_aliases(self, client) -> dict[int, list[str]]:
+        """三源合并，返回**去前缀**别名库（维护口径，Q31）。
+
+        每条别名经 ``strip_chart_prefix`` 剥离谱面类型前缀（dx/标准/标/宴 +
+        该曲宴谱汉字，经 ``normalize_text`` 简繁归一）后入库并入视图；
+        跨源归一化去重，保序。
+        """
         merged: dict[int, list[str]] = {}
         seen: dict[int, set[str]] = {}
+        utage_kanji = await store.get_utage_kanji()
 
         def _add(song_id: int, aliases: list[str]) -> None:
             bucket = seen.setdefault(song_id, set())
             target = merged.setdefault(song_id, [])
+            extra = utage_kanji.get(song_id, set())
             for alias in aliases:
-                low = alias.lower()
-                if low not in bucket:  # 跨源大小写不敏感去重，保序
+                stripped = strip_chart_prefix(alias, extra_prefixes=extra)
+                text = stripped[0] if stripped else alias
+                low = normalize_text(text)
+                if low and low not in bucket:
                     bucket.add(low)
-                    target.append(alias)
+                    target.append(text)
 
         # 远端源单源容错：拉取成功即整源写库（song_alias 表）；失败回退库内快照
         for name, fetch in (

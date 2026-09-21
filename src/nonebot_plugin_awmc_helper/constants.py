@@ -244,24 +244,53 @@ DX_VERSION_CODES: list[int] = [
 # 谱面类型别名前缀：社区对同根id双谱（标准/DX/宴）的惯用区分写法
 # （dx圣诞、标准39、标星光、旧谱、宴Oshama…）。用于查询侧剥离兜底，
 # 最长优先匹配；数据侧别名保留原样（含前缀）不去除
-_CHART_PREFIX_RE = re.compile(
-    r"^(?:dx|sd|标准谱|标准|旧谱|旧|标|宴)[\s·・.。:：_-]*", re.IGNORECASE
-)
+# 谱面类型别名前缀（作者口径，穷举）：dx / 标准 / 标 / 宴 / {宴谱汉字}。
+# 汉字前缀随曲而异（撫/協/蔵…），由调用方从规范表 song_chart.kanji / 运行时
+# 宴谱对象取该曲的汉字后经 extra_prefixes 传入；匹配经 normalize_text 归一，
+# 简体输入（抚/协/藏）同样命中
+_CHART_PREFIX_RE = re.compile(r"^(dx|标准|标|宴)[\s·・.。:：_-]*", re.IGNORECASE)
+
+# zhconv 未覆盖的和制汉字补充映射（2026-09-22 国服宴谱 kanji 全量实测：
+# 蔵/発/両/覚 归一后不变，用户输入 藏/发/两/觉 无法命中）
+_T2S_SUPPLEMENT = str.maketrans({"蔵": "藏", "発": "发", "両": "两", "覚": "觉"})
+
+_t2s_cache: dict[str, str] = {}
 
 
-def strip_chart_prefix(alias: str, max_strips: int = 2) -> str | None:
-    """剥离别名开头的谱面类型前缀（可叠层，如「dx标39」）；无前缀可剥返回 None。
+def normalize_text(text: str) -> str:
+    """别名匹配归一：小写 + NFKC（全角→半角）+ 简体化（和制汉字简体输入兼容）。"""
+    import unicodedata
 
-    仅作查询兜底（「dx+先出谱面的专属绰号」也能命中合并后的根 id），
-    不改写别名数据本身。
+    from zhconv import convert
+
+    lowered = unicodedata.normalize("NFKC", text).lower()
+    if lowered not in _t2s_cache:
+        _t2s_cache[lowered] = convert(lowered, "zh-cn").translate(_T2S_SUPPLEMENT)
+    return _t2s_cache[lowered]
+
+
+def strip_chart_prefix(
+    alias: str, extra_prefixes: "set[str] | frozenset[str] | None" = None
+) -> "tuple[str, str] | None":
+    """剥离别名开头**一层**谱面类型前缀，返回 (剥离后别名, 命中的前缀)。
+
+    - 静态前缀：dx / 标准 / 标 / 宴（作者口径穷举；sd/旧 等不会出现）；
+    - ``extra_prefixes``：该曲宴谱的汉字（单字），按归一化比对（简体输入兼容）；
+    - 只剥一层：叠层前缀（「dx标39」）剥完的「标39」不在去前缀别名库中，
+      自然不命中（作者口径）；无前缀可剥（或剥完为空）返回 None。
     """
-    current = alias.strip()
-    for _ in range(max_strips):
-        stripped = _CHART_PREFIX_RE.sub("", current, count=1).strip()
-        if stripped == current or not stripped:
-            break
-        current = stripped
-    return current if current != alias.strip() else None
+    text = alias.strip()
+    match = _CHART_PREFIX_RE.match(text)
+    if match:
+        stripped = text[match.end() :].strip()
+        return (stripped, match.group(1)) if stripped else None
+    extra = extra_prefixes or set()
+    normalized_extra = {normalize_text(p): p for p in extra if p}
+    first = normalize_text(text[:1])
+    if text and first in normalized_extra:
+        stripped = text[1:].strip()
+        return (stripped, normalized_extra[first]) if stripped else None
+    return None
 
 
 def version_name(version: int) -> str:

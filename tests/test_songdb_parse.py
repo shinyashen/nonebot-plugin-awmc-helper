@@ -171,3 +171,44 @@ def test_level_flat_matches_doc_example():
         (20000, 5.0),
         (27000, 5.5),
     ]
+
+
+def test_normalize_text_and_strip_chart_prefix():
+    """别名归一与谱面前缀剥离（Q31 最终语义：单层、动态 kanji、简繁兼容）。"""
+    from nonebot_plugin_awmc_helper.constants import normalize_text, strip_chart_prefix
+
+    # 归一：小写 + 全角 NFKC + 简体化（含 zhconv 未覆盖的和制汉字补充表）
+    assert normalize_text("ＤＸチルノ") == "dxチルノ"
+    assert normalize_text("撫チルノ") == normalize_text("抚チルノ")
+    assert normalize_text("蔵") == "藏"
+    assert normalize_text("発売前夜") == "发売前夜"  # 発→发；売 为日文写法保留
+    assert normalize_text("蔵") != normalize_text("表")
+
+    # 剥离：单层；静态前缀穷举 dx/标准/标/宴
+    assert strip_chart_prefix("dx圣诞") == ("圣诞", "dx")
+    assert strip_chart_prefix("标39") == ("39", "标")
+    assert strip_chart_prefix("标准企鹅") == ("企鹅", "标准")
+    assert strip_chart_prefix("宴Oshama") == ("Oshama", "宴")
+    # 叠层只剥最外层：「dx标39」→「标39」（去前缀库中不存在，自然不命中）
+    assert strip_chart_prefix("dx标39") == ("标39", "dx")
+    # 纯前缀 / 无前缀
+    assert strip_chart_prefix("dx") is None
+    assert strip_chart_prefix("圣诞") is None
+    # 宴谱汉字：动态前缀 + 简繁归一（協/协、蔵/藏 互认）
+    assert strip_chart_prefix("協love you", extra_prefixes={"協"}) == (
+        "love you",
+        "協",
+    )
+    # 简体输入「协」命中库内规范形「協」（归一化匹配）
+    assert strip_chart_prefix("协love you", extra_prefixes={"協"}) == (
+        "love you",
+        "協",
+    )
+    assert strip_chart_prefix("蔵Glorious", extra_prefixes={"蔵"}) == (
+        "Glorious",
+        "蔵",
+    )
+    assert strip_chart_prefix("藏Glorious", extra_prefixes={"蔵"}) == (
+        "Glorious",
+        "蔵",
+    )  # 报告的前缀为库内规范形（繁/和制原字），简体输入同样命中

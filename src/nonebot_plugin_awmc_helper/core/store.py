@@ -406,6 +406,24 @@ async def get_local_aliases() -> list[LocalAlias]:
         return list((await session.exec(select(LocalAlias))).all())
 
 
+async def get_utage_kanji() -> dict[int, set[str]]:
+    """宴谱汉字映射（根 id → {kanji}）：谱面类型前缀剥离的动态依据。"""
+    async with _open_session() as session:
+        rows = (
+            await session.exec(
+                select(SongChart.song_id, SongChart.kanji).where(
+                    col(SongChart.kind) == "utage",
+                    col(SongChart.kanji).is_not(None),  # type: ignore[arg-type]
+                )
+            )
+        ).all()
+    result: dict[int, set[str]] = {}
+    for song_id, kanji in rows:
+        if kanji:
+            result.setdefault(song_id, set()).add(kanji)
+    return result
+
+
 async def save_song_aliases(source: str, items: dict[int, list[str]]) -> None:
     """整源替换远端别名快照（单事务；items 为根 id → 别名列表）。"""
     async with _open_session() as session:

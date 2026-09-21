@@ -55,9 +55,14 @@ async def test_by_alias_chart_prefix_fallback(songs):
     assert [s.id for s in got] == [500]
     got = await song_service.by_alias("标准企鹅舞")
     assert [s.id for s in got] == [231]
-    # 叠层前缀
-    got = await song_service.by_alias("dx标普瑞")
-    assert [s.id for s in got] == [500]
+    # 叠层前缀只剥一层：「dx标普瑞」→「标普瑞」不在去前缀库中 → 不命中
+    assert await song_service.by_alias("dx标普瑞") == []
+    # by_alias_detail 暴露剥离信息（供别名查询提示语）
+    detail_songs, strip_info = await song_service.by_alias_detail("dx普瑞")
+    assert [s.id for s in detail_songs] == [500]
+    assert strip_info == ("普瑞", "dx")  # (剥离后别名, 命中前缀)
+    _, exact_info = await song_service.by_alias_detail("普瑞")
+    assert exact_info is None
     # 精确命中优先，不受剥离影响
     got = await song_service.by_alias("普瑞")
     assert [s.id for s in got] == [500]

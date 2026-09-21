@@ -63,16 +63,19 @@ async def test_merge_fold_and_persist(db, provider, remote_mock, maimai_client):
 
     from nonebot_plugin_awmc_helper.core import store
 
+    # 数据侧去前缀：dxチルノ 剥为 チルノ；宴 kanji 剥离需 DB 有该曲宴谱汉字
     merged = await provider.get_aliases(maimai_client)
-    # 10199（DX 谱）折叠进根 id 199，与落雪条目并集；100018 折叠进 18
-    assert sorted(merged[199]) == ["9", "dxチルノ", "チルノ"]
-    assert merged[18] == ["協チルノ"]
+    # 10199（DX 谱）折叠进根 id 199，与落雪条目并集
+    assert sorted(merged[199]) == ["9", "チルノ"]
+    assert merged[18] == ["協チルノ"]  # DB 无宴谱汉字记录时 kanji 前缀暂不剥
     assert provider._hash() != "empty"
     # 快照入库（按源）
     async with store._open_session() as session:
         all_rows = list((await session.exec(select(store.SongAlias))).all())
     by_source = {(r.source, r.song_id, r.alias) for r in all_rows}
+    # 快照存原始形态（无损），去前缀统一在合并层发生
     assert ("yuzu", 199, "dxチルノ") in by_source
+    assert ("yuzu", 199, "9") in by_source
     assert ("lxns", 199, "チルノ") in by_source
 
 
@@ -84,7 +87,7 @@ async def test_offline_falls_back_to_snapshot(db, provider, remote_mock, maimai_
     remote_mock.get(LXNS_ALIAS_URL).mock(return_value=httpx.Response(500))
     remote_mock.get(YUZU_ALIAS_URL).mock(return_value=httpx.Response(500))
     merged = await provider.get_aliases(maimai_client)
-    assert sorted(merged[199]) == ["9", "dxチルノ", "チルノ"]
+    assert sorted(merged[199]) == ["9", "チルノ"]
     assert provider._hash() == fp
 
 

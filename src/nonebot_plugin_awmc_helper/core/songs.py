@@ -16,13 +16,14 @@ from dataclasses import asdict, fields
 
 from nonebot import logger, get_driver
 from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDifficulty
+from maimai_py.models import SongDifficultyUtage
 from nonebot_plugin_apscheduler import scheduler
 
 from . import store, songdb
 from .client import client, lxns_provider, yuzu_provider, divingfish_provider
 from ..config import plugin_config
 from .provider import AwmcSongProvider, AwmcAliasProvider
-from ..constants import strip_chart_prefix
+from ..constants import normalize_text, strip_chart_prefix
 
 SNAPSHOT_KEY = "songs_snapshot"
 CN_POLL_STATE_KEY = "cn_poll_state"
@@ -124,10 +125,12 @@ class SongService:
 
     def __init__(self) -> None:
         self._ready = asyncio.Event()
-        # 别名索引：alias(小写) → 曲目 id 集合（柚子别名 + 本地别名，同名可对应多曲）
+        # 别名索引：归一化别名 → 曲目 id 集合（三源合并，同名可对应多曲）
         self._alias_index: dict[str, set[int]] = {}
         # 标题精确索引（小写）→ song_id
         self._title_index: dict[str, int] = {}
+        # 宴谱汉字集（前缀剥离用）：运行时全部宴谱的 kanji 及其简体形态
+        self._utage_kanji: set[str] = set()
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -197,14 +200,20 @@ class SongService:
     async def _apply_to_cache(self, all_songs: list[Song]) -> None:
         index: dict[str, set[int]] = {}
         titles: dict[str, int] = {}
+        utage_kanji: set[str] = set()
         for song in all_songs:
             titles[song.title.lower()] = song.id
             for alias in song.aliases or []:
-                index.setdefault(alias.lower(), set()).add(song.id)
+                index.setdefault(normalize_text(alias), set()).add(song.id)
+            for diff in song.get_difficulties(SongType.UTAGE):
+                if isinstance(diff, SongDifficultyUtage) and diff.kanji:
+                    utage_kanji.add(diff.kanji)
+                    utage_kanji.add(normalize_text(diff.kanji))  # 简体形态
         for la in await store.get_local_aliases():
-            index.setdefault(la.alias.lower(), set()).add(la.song_id)
+            index.setdefault(normalize_text(la.alias), set()).add(la.song_id)
         self._alias_index = index
         self._title_index = titles
+        self._utage_kanji = utage_kanji
         self._ready.set()
 
     # -- 快照 --------------------------------------------------------------
@@ -265,18 +274,31 @@ class SongService:
         )
 
     async def by_alias(self, alias: str) -> list[Song]:
-        """按别名查曲（柚子 + 落雪 + 本地），返回命中的全部曲目。
+        """按别名查曲（柚子 + 落雪 + 本地合并视图）。"""
+        songs, _ = await self.by_alias_detail(alias)
+        return songs
 
-        同根 id 的标准/DX/宴谱别名已合并；精确未命中时剥离谱面类型前缀
-        （dx/标准/标/旧/sd/宴）重查一次——社区惯用「dx圣诞 / 标39」式前缀
-        区分双谱，合并后带前缀查询也应能命中（Q31；仅查询兜底，不改写数据）。
+    async def by_alias_detail(
+        self, alias: str
+    ) -> tuple[list[Song], tuple[str, str] | None]:
+        """按别名查曲并返回剥离信息：``(曲目, (命中前缀, 剥离后别名) | None)``。
+
+        精确未命中时剥离**一层**谱面类型前缀（dx/标准/标/宴/该曲宴谱汉字，
+        简繁归一）重查——别名库已去前缀按根 id 合并，带前缀的社区惯用写法
+        （dx圣诞 / 标39 / 协love you）由此兜底命中（Q31）。
         """
         await self.ensure_loaded()
-        ids = self._alias_index.get(alias.lower(), set())
+        key = normalize_text(alias)
+        ids = self._alias_index.get(key, set())
         if not ids:
-            stripped = strip_chart_prefix(alias)
+            stripped = strip_chart_prefix(alias, extra_prefixes=self._utage_kanji)
             if stripped:
-                ids = self._alias_index.get(stripped, set())
+                ids = self._alias_index.get(normalize_text(stripped[0]), set())
+                if ids:
+                    return await self._songs_of(ids), stripped
+        return await self._songs_of(ids), None
+
+    async def _songs_of(self, ids: set[int]) -> list[Song]:
         result: list[Song] = []
         for song_id in sorted(ids):
             if song := await self.by_id(song_id):
