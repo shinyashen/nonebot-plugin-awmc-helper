@@ -190,3 +190,54 @@ async def test_jp_songs_entrypoint(db):
     songs = await jp_songs()
     assert 8 in {s.id for s in songs}
     assert all(s.difficulties is not None for s in songs)
+
+
+@pytest.mark.asyncio
+async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
+    """§5.4 切换：运行时 CN 视图由规范表构造；空数据按失败走快照降级。"""
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.client import yuzu_provider
+
+    async def fake_aliases(client):
+        return {}
+
+    monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
+    try:
+        # 空表判定与冷启动路径
+        assert await songdb.is_empty()
+        await songdb.rebuild(full_payloads())
+        assert not await songdb.is_empty()
+
+        # 运行时由规范表构造：CN-only 可见、JP-only 不可见、定数为国服推导值
+        assert await song_service.load()
+        song = await song_service.by_id(8)
+        assert song is not None
+        assert song.title == "Test Song SD"
+        assert await song_service.by_id(555) is None  # JP-only
+        assert await song_service.by_id(9002) is not None  # CN-only
+        dx_song = await song_service.by_id(21)
+        master = dx_song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+        assert master.level_value == 12.3  # 日服 12.5 未进国服（§5.3）
+
+        # 规范表被清空（离线首启模拟）：空数据视为失败 → 快照降级恢复
+        from sqlmodel import delete
+
+        from nonebot_plugin_awmc_helper.core import store
+
+        async with store._open_session() as session:
+            for table in (
+                store.SongChartLevel,
+                store.SongChart,
+                store.SongSheetGroup,
+                store.SongRow,
+            ):
+                await session.execute(delete(table))
+            await session.commit()
+        assert await songdb.is_empty()
+        assert await song_service.load()  # 降级成功而非空数据就绪
+        assert await song_service.by_id(8) is not None  # 快照内容
+    finally:
+        song_service._ready.clear()

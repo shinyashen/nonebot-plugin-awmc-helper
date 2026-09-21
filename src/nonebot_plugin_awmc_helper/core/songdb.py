@@ -1299,6 +1299,12 @@ def standard_json(state: State) -> dict[str, Any]:
     return result
 
 
+async def is_empty() -> bool:
+    """规范表是否为空（冷启动判定：空表时运行时加载前须先全量重建）。"""
+    async with store._open_session() as session:
+        return (await session.exec(select(store.SongRow))).first() is None
+
+
 def fingerprint(state: State) -> str:
     """规范表内容指纹（自定义 provider ``_hash`` 用；数据变更即自动重建缓存）。"""
     raw = json.dumps(standard_json(state), ensure_ascii=False, sort_keys=True)

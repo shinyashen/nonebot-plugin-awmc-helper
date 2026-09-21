@@ -19,21 +19,18 @@ from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDiffic
 from nonebot_plugin_apscheduler import scheduler
 
 from . import store, songdb
-from .client import (
-    client,
-    lxns_provider,
-    yuzu_provider,
-    divingfish_provider,
-    refresh_songs_cache,
-)
+from .client import client, yuzu_provider, divingfish_provider
 from ..config import plugin_config
+from .provider import AwmcSongProvider
 
 SNAPSHOT_KEY = "songs_snapshot"
 CN_POLL_STATE_KEY = "cn_poll_state"
 
-# 曲库数据源组合：曲库走落雪（含物量），别名走柚子；
-# 配置了水鱼开发者 token 时附带曲线数据（ginfo/统计用）
-_SONG_PROVIDER = lxns_provider
+# 曲库数据源组合（2026-09-22 数据入口统一，设计稿 §5.4）：
+# 曲库由规范表构造（CN 列；国服定数按 §5.3 推导、version_cn 为空的组不可见，
+# 等价于原落雪 disabled 过滤）；别名走柚子；配置了水鱼开发者 token 时附带
+# 曲线数据。规范表重建后 provider 指纹变化 → maimai_py 自动重建缓存。
+_SONG_PROVIDER = AwmcSongProvider(scope="cn")
 _ALIAS_PROVIDER = yuzu_provider
 _CURVE_PROVIDER = (
     divingfish_provider if plugin_config.awmc_divingfish_developer_token else None
@@ -143,11 +140,14 @@ class SongService:
         return self._ready.is_set()
 
     async def load(self) -> bool:
-        """拉取曲库（含别名）。成功后例行写快照；失败降级快照。"""
+        """加载曲库（规范表构造 + 别名）。成功后例行写快照；失败降级快照。"""
         try:
             songs = await client.songs(
                 provider=_SONG_PROVIDER, alias_provider=_ALIAS_PROVIDER
             )
+            if not await songs.get_all():
+                # 规范表未初始化（离线首启）等场景：空数据按失败处理走降级
+                raise RuntimeError("曲库数据源返回为空")
         except Exception:
             logger.exception("曲库拉取失败")
             if not self._ready.is_set():
@@ -162,8 +162,7 @@ class SongService:
         return True
 
     async def refresh(self) -> bool:
-        """定时/手动刷新：删 provider 哈希键后以同组 provider 重拉。"""
-        await refresh_songs_cache()
+        """刷新曲库：规范表指纹较上次加载有变化时 maimai_py 自动重建缓存。"""
         return await self.load()
 
     async def _apply(self, songs: MaimaiSongs) -> None:
@@ -365,20 +364,23 @@ async def _startup() -> None:
     if not plugin_config.awmc_startup_tasks:
         logger.debug("awmc_startup_tasks=false，跳过曲库预热（测试环境）")
         return
-    # 不阻塞启动：后台拉取，失败自动降级快照（模块持有强引用防任务被回收）
+    # 不阻塞启动：后台执行（模块持有强引用防任务被回收）
     global _load_task
-    _load_task = asyncio.get_running_loop().create_task(song_service.load())
+    _load_task = asyncio.get_running_loop().create_task(_startup_load())
+
+
+async def _startup_load() -> None:
+    """启动链：冷启动（规范表为空先全量重建）→ 运行时加载（失败降级快照）。"""
+    try:
+        if await songdb.is_empty():
+            logger.info("规范表为空，执行歌曲库冷启动全量重建（需要几分钟）……")
+            await songdb.refresh_all(include_cn=True, include_jp=True)
+    except Exception:
+        logger.exception("歌曲库冷启动重建失败（继续尝试加载运行时）")
+    await song_service.load()
 
 
 _load_task: asyncio.Task | None = None
-
-
-async def _daily_refresh() -> None:
-    await song_service.refresh()
-
-
-scheduler.add_job(_daily_refresh, "cron", hour=4, minute=0)
-"""每日 4 点全量刷新曲库并写快照。"""
 
 
 # ---------------------------------------------------------------------------
@@ -558,10 +560,12 @@ async def _daily_songdb() -> None:
     except Exception:
         logger.exception("外部补充源应用失败（不阻塞）")
     await _ensure_templates()
+    # 规范表已可能变化：指纹较上次加载不同时 maimai_py 自动重建运行时缓存
+    await song_service.refresh()
 
 
 scheduler.add_job(_daily_songdb, "cron", hour=4, minute=5)
-"""每日 4:05（曲库运行时刷新后）执行歌曲库全量管线。"""
+"""每日 4:05 执行歌曲库全量管线（四源重建 → 运行时刷新 → 外部源 → 底图兜底）。"""
 
 if plugin_config.awmc_cn_poll_minutes > 0:
     scheduler.add_job(
