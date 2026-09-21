@@ -142,7 +142,9 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
 
     songs: dict[int, Entry] = {}
     for key, item in all_data.items():
-        is_utage = len(key) == 6 and key.startswith("10")
+        # 宴 = 6 位 key（曲 id 0-9999 为 ≤5 位；100000+level_id*10000+song_id 恒为 6 位，
+        # level_id≥1 时以 "1" 开头而非 "10"，如实测 111852——不能用 startswith("10")）
+        is_utage = len(key) == 6 and key.isdigit()
         if is_utage:
             kind = "utage"
             song_id, level_id = utage_ids(int(key))
@@ -226,7 +228,7 @@ def _parse_dschange(dschange: dict) -> dict[str, dict[str, dict[int, list[tuple[
 
 def _dschange_kind(key: str) -> str | None:
     """dschange 键 → kind；宴（6 位）定数不采信，返回 None 跳过。"""
-    if len(key) == 6 and key.startswith("10"):
+    if len(key) == 6 and key.isdigit():
         return None
     return "dx" if len(key) == 5 else "sd"
 
@@ -299,7 +301,8 @@ def parse_lxns(song_list: dict) -> dict[int, Entry]:
 def _cn_chart(diff: dict, level_id: int) -> Chart:
     notes = diff.get("notes") or {}
     chart = Chart(level_id=level_id)
-    chart.designer = diff.get("note_designer") or None
+    designer = diff.get("note_designer")
+    chart.designer = designer if designer not in (None, "", "-") else None
     chart.notes = tuple(int(notes.get(k, 0) or 0) for k in _NOTE_KEYS)  # type: ignore[assignment]
     chart.cn_version = diff.get("version")
     chart.cn_level_value = diff.get("level_value")
@@ -388,18 +391,22 @@ class State:
         return state
 
     async def save(self) -> None:
-        """整库重写四张主表（单事务）；「两侧皆无数据的整曲删除」在此自然发生。"""
+        """整库重写四张主表（单事务）；「两侧皆无数据的整曲删除」在此自然发生。
+
+        行对象按值重建（load 出的 ORM 实例附着在旧 session 上，跨 session 复用
+        会被当作 persistent 走 UPDATE 而撞上刚 DELETE 掉的空表）。
+        """
         async with store._open_session() as session:
             await session.execute(delete(store.SongChartLevel))
             await session.execute(delete(store.SongChart))
             await session.execute(delete(store.SongSheetGroup))
             await session.execute(delete(store.SongRow))
             for row in self.songs.values():
-                session.add(row)
+                session.add(store.SongRow(**row.model_dump()))
             for row in self.groups.values():
-                session.add(row)
+                session.add(store.SongSheetGroup(**row.model_dump()))
             for row in self.charts.values():
-                session.add(row)
+                session.add(store.SongChart(**row.model_dump()))
             for (song_id, kind, level_id), points in self.levels.items():
                 for version, value in points:
                     session.add(
@@ -567,6 +574,16 @@ def _safe_int(value: Any) -> int | None:
 
 def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> None:
     """国侧回填：落雪（version_cn/国服谱面/宴 buddy）+ 水鱼（对账告警，不写入）。"""
+    # 国服当前版本必须取**整批**载荷的最大值（合并过程中 version_cn 尚未写全，
+    # 逐曲读 state 会因处理顺序得到偏小的截点，导致 §5.3 校验误报）
+    all_versions = [
+        c.cn_version
+        for entry in cn.values()
+        for charts in entry.charts.values()
+        for c in charts.values()
+        if c.cn_version is not None
+    ]
+    cn_current = max(all_versions) if all_versions else state.cn_current_version()
     for song_id, entry in cn.items():
         row = state.song(song_id)
         row.title = row.title or entry.title
@@ -610,18 +627,21 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                     if chart.left is not None and target.notes_left is None:
                         target.notes_left = json.dumps(chart.left)
                         target.notes_right = json.dumps(chart.right or [])
-                # §5.3 校验：推导国服定数 vs 落雪实测（偏差 > 0.05 记警告，用于发现例外）
-                if chart.cn_level_value and chart.history:
-                    derived = cn_level_value(chart.history, state.cn_current_version())
+                # §5.3 校验：推导国服定数 vs 落雪实测（偏差 > 0.05 记警告，用于发现例外）；
+                # 宴定数是标级推导的代理值（§3），与实测必然有差，不参与校验
+                if chart.cn_level_value and chart.history and kind != "utage":
+                    derived = cn_level_value(chart.history, cn_current)
                     if derived is not None and abs(derived - chart.cn_level_value) > 0.05:
                         state.warn(
                             f"「{entry.title}」{kind}{level_id} 国服定数推导 {derived} ≠ 落雪 "
                             f"{chart.cn_level_value}"
                         )
-        _crosscheck_df(state, song_id, entry, df)
+        _crosscheck_df(state, song_id, entry, df, cn_current)
 
 
-def _crosscheck_df(state: State, song_id: int, entry: Entry, df: dict[str, dict] | None) -> None:
+def _crosscheck_df(
+    state: State, song_id: int, entry: Entry, df: dict[str, dict] | None, cn_current: int
+) -> None:
     """水鱼对账：version_cn（组级 from）与定数；仅告警，写入侧唯一来源仍是落雪。"""
     if not df:
         return
@@ -638,7 +658,7 @@ def _crosscheck_df(state: State, song_id: int, entry: Entry, df: dict[str, dict]
             )
         for idx, value in enumerate(item.get("ds") or []):
             history = state.history_of(song_id, kind, idx)
-            cn_value = cn_level_value(history, state.cn_current_version()) if history else None
+            cn_value = cn_level_value(history, cn_current) if history else None
             if cn_value and abs(cn_value - float(value)) > 0.05:
                 state.warn(
                     f"「{entry.title}」{kind}{idx} 定数两源不一致：落雪 {cn_value} / 水鱼 {value}"
@@ -664,6 +684,8 @@ def apply_missing(
     - ``jp_known_songs``：maimaiinfo 解出的 song_id 集；None = 跳过 JP 缺省同步；
     - ``jp_known_titles``：otoge-db 现役归一标题集（None = 不强求）；
     - ``jp_deleted_titles``：otoge 下架标题集（权威下架信号）。
+    整曲删除以**源在列信号**判定（任一信号源认为在列即保留；信号源全缺时回落
+    版本列全空），避免「版本未知」与「该服未上线」混淆造成误删。
     返回整曲删除数。
     """
     if cn_known is not None:
@@ -683,10 +705,25 @@ def apply_missing(
             if jp_known_titles is not None and title_key in jp_known_titles:
                 continue
             group.version = None
+    # 两侧皆无（按源在列信号判定）→ 整曲删除；无信号源时回落版本列
     removed = 0
     for song_id in list(state.songs):
+        row = state.songs[song_id]
+        title_key = norm_title(row.title) if row.title else ""
         groups = state.groups_of_song(song_id)
-        if not groups or all(g.version is None and g.version_cn is None for g in groups):
+        if jp_known_songs is not None or jp_known_titles is not None:
+            jp_present = (jp_known_songs is not None and song_id in jp_known_songs) or (
+                jp_known_titles is not None and title_key in jp_known_titles
+            )
+            if title_key and title_key in (jp_deleted_titles or set()):
+                jp_present = False  # otoge 下架记录为权威 JP 缺失信号（maimaiinfo 可能滞后）
+        else:
+            jp_present = any(g.version is not None for g in groups)
+        if cn_known is not None:
+            cn_present = song_id in cn_known
+        else:
+            cn_present = any(g.version_cn is not None for g in groups)
+        if not groups or (not jp_present and not cn_present):
             state.songs.pop(song_id, None)
             for key in [k for k in state.groups if k[0] == song_id]:
                 del state.groups[key]
@@ -806,7 +843,13 @@ async def _archive_raw(payloads: dict[str, Any]) -> None:
         )
     async with store._open_session() as session:
         await session.execute(delete(store.SongSourceRaw))
+        # 同名多义（如 otoge-db 的 'Link'×2）会生成重复键：追加序号去重
+        seen: dict[tuple[str, str], int] = {}
         for row in rows:
+            count = seen.setdefault((row.source, row.song_id), 0)
+            seen[(row.source, row.song_id)] = count + 1
+            if count:
+                row.song_id = f"{row.song_id}#{count + 1}"
             session.add(row)
         await session.commit()
 
@@ -898,6 +941,8 @@ def build_song(
         return None
     version_key = "version_cn" if scope == "cn" else "version"
     groups = state.groups_of_song(song_id)
+    if not any(getattr(g, version_key) is not None for g in groups):
+        return None  # 该 scope 下无任何谱面组（如 JP-only 曲的 CN 视图）
     if index is None:
         index = state.charts_of_song(song_id)
     standard, dx, utage = [], [], []
@@ -1187,14 +1232,16 @@ async def apply_external_sources() -> dict[str, Any]:
     prev = await store.kv_get("songdb_extra_hash")
     summary["hash"] = digest
     if digest != prev and docs:
-        await _merge_extra_docs(docs)
+        summary["applied"] = await _merge_extra_docs(docs)
         await store.kv_set("songdb_extra_hash", digest)
         summary["changed"] = True
     return summary
 
 
-async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> None:
+async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
     """外部标准 JSON 合并进主表：**只允许日服侧**，``version_cn`` 等国服内容忽略并告警。"""
+    from pathlib import Path
+
     state = await State.load()
     applied = 0
     for name, mode, doc in docs:
@@ -1242,16 +1289,24 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> None:
                         if mode == "override" or not state.history_of(song_id, kind, level_id):
                             state.set_history(song_id, kind, level_id, points)
                     applied += 1
-        # 外部片段归档（source=extra:<名称>）
-        async with store._open_session() as session:
+    # 外部片段归档（source=extra:<名称>；同键多 mode 以 mode 后缀区分，重放先清旧行）
+    origins = {f"extra:{Path(name).name if not name.startswith('http') else name}" for name, _m, _d in docs}
+    async with store._open_session() as session:
+        for origin in origins:
+            await session.execute(
+                delete(store.SongSourceRaw).where(store.SongSourceRaw.source == origin)
+            )
+        for idx, (name, mode, doc) in enumerate(docs):
+            origin = f"extra:{Path(name).name if not name.startswith('http') else name}"
             session.add(
                 store.SongSourceRaw(
-                    source=f"extra:{Path(name).name if not name.startswith('http') else name}",
-                    song_id="__doc__",
+                    source=origin,
+                    song_id="__doc__" if idx == 0 else f"__doc__#{mode}#{idx + 1}",
                     payload=json.dumps(doc, ensure_ascii=False),
                 )
             )
-            await session.commit()
+        await session.commit()
     if applied:
         await state.save()
     logger.info(f"songdb: 外部补充源应用完成（{applied} 处谱面级字段）")
+    return applied

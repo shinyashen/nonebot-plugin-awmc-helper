@@ -450,7 +450,7 @@ async def _hourly_cn_poll() -> None:
         logger.warning(f"国服轮询拉取失败，跳过本次检测：{e}")
         return
     lx_ids = {int(s["id"]) % 10000 for s in light.get("songs", [])}
-    df_ids = {int(k) % 10000 for k in df}
+    df_ids = {int(item["id"]) % 10000 for item in df}
     titles = {int(s["id"]) % 10000: s.get("title", "") for s in light.get("songs", [])}
     known = set((await store.kv_get(CN_POLL_STATE_KEY) or {}).get("known", []))
     detected = songdb.detect_cn_update(known, lx_ids, df_ids)

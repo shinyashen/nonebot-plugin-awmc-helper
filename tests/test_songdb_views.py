@@ -1,0 +1,171 @@
+"""core/songdb 双视图与 core/provider：规范表 → maimai_py 对象（§5.5/§5.6）。"""
+
+import pytest
+
+from songdb_fixtures import (
+    make_all_data,
+    make_dschange,
+    make_divingfish,
+    make_lxns,
+    make_otoge_deleted,
+    make_otoge_live,
+)
+
+
+@pytest.fixture
+async def db(tmp_path):
+    from nonebot_plugin_awmc_helper.core import store
+
+    store.set_db_file(tmp_path / "awmc.db")
+    await store.init_db()
+    yield store
+    store.set_db_file(None)
+
+
+def full_payloads(**overrides):
+    payloads = {
+        "maimaiinfo": make_all_data(),
+        "dschange": make_dschange(),
+        "otoge_db": make_otoge_live(),
+        "otoge_deleted": make_otoge_deleted(),
+        "lxns": make_lxns(),
+        "divingfish": make_divingfish(),
+    }
+    payloads.update(overrides)
+    return payloads
+
+
+@pytest.fixture
+async def built(db):
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    return await songdb.State.load()
+
+
+@pytest.mark.asyncio
+async def test_jp_view_object_shape(built):
+    """JP 视图：Song/谱面字段、宴 6 位 diff_id、buddy、标级由定数推导。"""
+    from maimai_py import LevelIndex, SongType
+
+    from nonebot_plugin_awmc_helper.core.songdb import all_songs, build_song
+
+    song = build_song(built, 18, "jp")
+    assert song is not None
+    assert song.title == "[宴]Test Party"
+    assert song.version == 24000
+    diff = song.get_difficulty(SongType.UTAGE, 100018)  # 按 6 位 diff_id 查找
+    assert diff is not None
+    assert diff.diff_id == 100018
+    assert diff.kanji == "宴"
+    assert diff.description == "パーティーだ！"
+    assert diff.level_index == LevelIndex(0)  # 库约定：宴 level_index 恒为 0
+    assert diff.level_value == 12.0
+    assert diff.level == "12"  # 标级由定数纯函数推导
+    assert diff.version == 24000
+    # get_divingfish_id 三态（§5.5）
+    assert song.get_divingfish_id(SongType.UTAGE, 100018) == 100018
+    dx_song = build_song(built, 21, "jp")
+    assert dx_song.get_divingfish_id(SongType.DX, LevelIndex.MASTER) == 21 + 10000
+    # buddy 宴
+    buddy_song = build_song(built, 355, "jp")
+    bdiff = buddy_song.get_difficulties(SongType.UTAGE)[0]
+    assert bdiff.is_buddy and bdiff.buddy_notes is not None
+    assert bdiff.buddy_notes.left_tap_num == 150 and bdiff.buddy_notes.right_tap_num == 130
+    # JP 定数（含 CiRCLE 变更后的最新值）
+    dx_master = dx_song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+    assert dx_master.level_value == 12.5
+    assert dx_master.level == "12"  # 标级由定数推导：x.5 → 无+
+
+
+@pytest.mark.asyncio
+async def test_cn_view_uses_cn_values(built):
+    """CN 视图：定数取国服推导值（非日服最新）；JP-only 曲不可见、CN-only 曲可见。"""
+    from maimai_py import LevelIndex, SongType
+
+    from nonebot_plugin_awmc_helper.core.songdb import build_song
+
+    song = build_song(built, 21, "cn")
+    master = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+    # 日服 CiRCLE 已变 12.5，国服应为变更前 12.3（§2.11 差异模式）
+    assert master.level_value == 12.3
+    assert master.version == 20000  # 国服批次码
+    # 国服限定曲仅 CN 视图可见；JP-only 曲仅 JP 视图可见
+    assert build_song(built, 9002, "cn") is not None
+    assert build_song(built, 9002, "jp") is None
+    assert build_song(built, 555, "jp") is not None
+    assert build_song(built, 555, "cn") is None
+    # JP 视图不含国服限定曲；整库物化按 scope 过滤
+    from nonebot_plugin_awmc_helper.core.songdb import all_songs
+
+    cn_ids = {s.id for s in all_songs(built, "cn")}
+    jp_ids = {s.id for s in all_songs(built, "jp")}
+    assert 9002 in cn_ids and 9002 not in jp_ids
+    assert 555 in jp_ids and 555 not in cn_ids
+
+
+@pytest.mark.asyncio
+async def test_snapshot_roundtrip_matches_runtime_serializer(built):
+    """视图对象与既有快照序列化（song_to_dict/song_from_dict）行为对齐（同一模型类）。"""
+    from maimai_py.models import SongDifficultyUtage
+
+    from nonebot_plugin_awmc_helper.core.songdb import build_song
+    from nonebot_plugin_awmc_helper.core.songs import song_from_dict, song_to_dict
+
+    song = build_song(built, 355, "jp")
+    restored = song_from_dict(song_to_dict(song))
+    assert restored.id == song.id and restored.title == song.title
+    orig = song.get_difficulties()[0]
+    back = restored.get_difficulties()[0]
+    assert isinstance(back, SongDifficultyUtage)  # 宴谱重建为 SongDifficultyUtage
+    assert back.diff_id == orig.diff_id
+    assert back.is_buddy == orig.is_buddy
+    assert back.level_value == orig.level_value
+    assert back.kanji == orig.kanji and back.description == orig.description
+    # 快照仅降级查询用：buddy 物量与曲线不回填（既有约定）
+    assert back.buddy_notes is None and back.curve is None
+
+
+@pytest.mark.asyncio
+async def test_awmc_provider_hash_and_get_songs(db, monkeypatch):
+    """AwmcSongProvider：数据变更 → 指纹变化（库自动重建缓存的依据）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.provider import AwmcSongProvider
+
+    monkeypatch.setattr(songdb, "CURRENT_FINGERPRINT", None)  # 全局复位，避免用例间串扰
+    provider = AwmcSongProvider(scope="jp")
+    assert provider._hash() == "empty"  # 未构建时占位
+    await songdb.rebuild(full_payloads())
+    fp1 = provider._hash()
+    assert fp1 != "empty"
+    jp_songs = await provider.get_songs(None)
+    assert {s.id for s in jp_songs} >= {8, 21, 18, 355, 555}
+    # 新歌入库 → 指纹变化
+    payloads = full_payloads()
+    payloads["maimaiinfo"]["100888"] = {
+        "id": "100888",
+        "title": "Fingerprint Song",
+        "type": "DX",
+        "ds": [10.0],
+        "level": ["10"],
+        "charts": [{"notes": [100, 20, 15, 8, 5], "charter": "F"}],
+        "basic_info": {"title": "Fingerprint Song", "artist": "A", "genre": "舞萌", "bpm": "160", "from": "maimai でらっくす CiRCLE"},
+    }
+    await songdb.rebuild(payloads)
+    assert provider._hash() != fp1
+    # 指纹是库级（规范表整体）的，与 scope 无关——同一缓存命名空间本就不能双视图并存（§5.2）
+    assert AwmcSongProvider(scope="cn")._hash() == provider._hash()
+
+
+@pytest.mark.asyncio
+async def test_jp_songs_entrypoint(db):
+    """core.songs.jp_songs()：JP 视图入口，不依赖 CN 运行时就绪。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.songs import jp_songs, song_service
+
+    await songdb.rebuild(full_payloads())
+    # 运行时未加载（_ready 未置位）也不影响 JP 视图
+    assert not song_service.loaded
+    songs = await jp_songs()
+    assert 8 in {s.id for s in songs}
+    assert all(s.difficulties is not None for s in songs)
