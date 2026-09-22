@@ -341,7 +341,8 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 async def _():
     from ...core.render import table_template
 
-    await UniMessage.text(" 正在生成定数表底图，请稍候……").finish(at_sender=True)
+    # 进度提示必须用 send：finish 会抛 FinishedException 终止 handler，后续逻辑不再执行
+    await UniMessage.text(" 正在生成定数表底图，请稍候……").send(at_sender=True)
     total, failed = await table_template.refresh_all_rating_tables(song_service)
     extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
     await UniMessage.text(f" 定数表底图生成完成（{total} 谱面次）{extra}。").finish(
@@ -354,7 +355,8 @@ async def _():
 async def _():
     from ...core.render import table_template
 
-    await UniMessage.text(" 正在生成完成表底图，需要一些时间，请稍候……").finish(
+    # 进度提示必须用 send：finish 会抛 FinishedException 终止 handler，后续逻辑不再执行
+    await UniMessage.text(" 正在生成完成表底图，需要一些时间，请稍候……").send(
         at_sender=True
     )
     total, failed = await table_template.refresh_all_plate_tables(song_service)

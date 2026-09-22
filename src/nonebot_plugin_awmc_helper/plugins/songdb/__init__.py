@@ -25,7 +25,8 @@ reload_extra = on_command("重载补充数据", permission=SUPERUSER, block=True
 @reload_extra.handle()
 @handle_errors("重载补充数据失败")
 async def _():
-    await UniMessage.text(" 正在重载外部补充数据……").finish(at_sender=True)
+    # 进度提示必须用 send：finish 会抛 FinishedException 终止 handler，后续逻辑不再执行
+    await UniMessage.text(" 正在重载外部补充数据……").send(at_sender=True)
     summary = await songdb.apply_external_sources()
     if summary.get("changed"):
         from ...core.songs import _prerender_templates
