@@ -44,21 +44,21 @@ def _prefer_from_raw_id(raw_id: int) -> SongType | None:
 
 def _type_entries(
     songs: "list[Song]",
-) -> "list[tuple[int, str, Song, SongType | None]]":
+) -> "list[tuple[int, Song, SongType | None]]":
     """合并曲目 → 谱面类型条目列表 (查分器 id, 类型标签, 曲目, 卡片偏好)。
 
     NB 原版双条目语义：SD 条目 id=曲 id、DX 条目 id=曲 id+10000、宴条目
     id=6 位机台内部 id；同根 id 条目共享别名，搜索全部列出供用户按 id 选择。
     """
-    entries: list[tuple[int, str, Song, SongType | None]] = []
+    entries: list[tuple[int, Song, SongType | None]] = []
     for song in songs:
         if song.difficulties.standard:
-            entries.append((song.id, "标准谱", song, SongType.STANDARD))
+            entries.append((song.id, song, SongType.STANDARD))
         if song.difficulties.dx:
-            entries.append((song.id + 10000, "DX谱", song, SongType.DX))
+            entries.append((song.id + 10000, song, SongType.DX))
         for diff in song.get_difficulties(SongType.UTAGE):
             if isinstance(diff, SongDifficultyUtage):
-                entries.append((diff.diff_id, "宴会场", song, None))
+                entries.append((diff.diff_id, song, None))
     return entries
 
 
@@ -247,26 +247,24 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     entries = _type_entries(songs)
     if strip_info:
         if prefer_type is not None:
-            typed = [e for e in entries if e[3] == prefer_type]
+            typed = [e for e in entries if e[2] == prefer_type]
             if typed:
                 entries = typed
         elif strip_info[1] == "宴":
-            ut_only = [e for e in entries if e[1] == "宴会场"]
+            ut_only = [e for e in entries if e[2] is None]
             if ut_only:
                 entries = ut_only
     if len(entries) == 1:
-        entry_id, _label, song, card_prefer = entries[0]
+        _entry_id, song, card_prefer = entries[0]
         png = await _chart_card(song, binding, card_prefer)
         await (
             UniMessage.image(raw=png)
-            .text(f"\n您要找的是不是这首？（ID {entry_id}）")
+            .text("\n您要找的是不是这首？")
             .finish(at_sender=True)
         )
     if entries:
         msg = f"找到{len(entries)}个谱面：\n"
-        msg += "".join(
-            f"{eid}：{song.title}（{label}）\n" for eid, label, song, _ in entries
-        )
+        msg += "".join(f"{eid}：{song.title}\n" for eid, song, _ in entries)
         msg += "※ 请使用「id xxxxx」查询指定谱面"
         await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
 
