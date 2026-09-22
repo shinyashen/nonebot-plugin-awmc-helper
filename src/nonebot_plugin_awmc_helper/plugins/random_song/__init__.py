@@ -54,7 +54,9 @@ async def _(groups: tuple = RegexGroup()):
         song_type=song_type, level=level, level_index=level_index, exclude_utage=True
     )
     if got is None:
-        await UniMessage.text("没有符合条件的谱面，换一个试试吧").finish(at_sender=True)
+        await UniMessage.text(" 没有符合条件的谱面，换一个试试吧").finish(
+            at_sender=True
+        )
     song, diff = got
     await UniMessage.image(raw=song_render.random_song_bytes(song, diff)).finish(
         at_sender=True
@@ -66,7 +68,7 @@ async def _(groups: tuple = RegexGroup()):
 async def _():
     got = await song_service.random(exclude_utage=True)
     if got is None:
-        await UniMessage.text("曲库为空，请稍后再试").finish(at_sender=True)
+        await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
     song, _diff = got
     await UniMessage.image(raw=song_render.song_card_bytes(song)).finish(at_sender=True)
 
@@ -90,7 +92,7 @@ async def _(session: Session = UniSession()):
     if song is None:  # 未绑定或无候选 → 普通随机
         got = await song_service.random(exclude_utage=True)
         if got is None:
-            await UniMessage.text("曲库为空，请稍后再试").finish(at_sender=True)
+            await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
         song, _diff = got
     await UniMessage.image(raw=song_render.song_card_bytes(song)).finish(at_sender=True)
 

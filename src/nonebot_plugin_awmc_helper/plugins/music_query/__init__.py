@@ -356,9 +356,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         raw_id = int(idm.group(1))
         song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
         if not song:
-            await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(
-                at_sender=True
-            )
+            await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
         jp_hit = not await song_service.by_id(raw_id)
         note = "此歌曲为日服限定" if jp_hit else ""
         png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id), jp_hit)

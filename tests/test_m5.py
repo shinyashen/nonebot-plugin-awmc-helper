@@ -55,7 +55,7 @@ async def _assert_reply(
             )
         ctx.should_call_send(
             event,
-            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            Message([MessageSegment.at(user_id), MessageSegment.text(f" {reply}")]),
             result=None,
             bot=bot,
         )
@@ -147,7 +147,7 @@ async def test_fortune(app: App, songs):
 
     rp = fh % 100
     h = fh
-    lines = [f"今日人品值：{rp}"]
+    lines = [f" 今日人品值：{rp}"]
     for i in range(11):
         wm = h & 3
         h >>= 2

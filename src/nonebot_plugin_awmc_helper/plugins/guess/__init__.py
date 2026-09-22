@@ -201,22 +201,22 @@ async def _pic_loop(game: GuessGame) -> None:
 async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) -> None:
     group_id = _group_of(session)
     if group_id is None:
-        await UniMessage.text("猜歌仅群聊可用").finish(at_sender=True)
+        await UniMessage.text(" 猜歌仅群聊可用").finish(at_sender=True)
     if not await _guess_enabled(group_id):
-        await UniMessage.text("本群已关闭猜歌，请管理员使用「开启mai猜歌」开启").finish(
-            at_sender=True
-        )
+        await UniMessage.text(
+            " 本群已关闭猜歌，请管理员使用「开启mai猜歌」开启"
+        ).finish(at_sender=True)
     if _game_of(group_id) is not None:
         await UniMessage.text(
             "本群已有进行中的猜歌，请先作答或使用「重置猜歌」"
         ).finish(at_sender=True)
     song = await _pick_song()
     if song is None:
-        await UniMessage.text("曲库尚未就绪，请稍后再试").finish(at_sender=True)
+        await UniMessage.text(" 曲库尚未就绪，请稍后再试").finish(at_sender=True)
     game = GuessGame(song, pic_mode=pic_mode, group_id=group_id, bot=bot, event=event)
     _games[group_id] = game
     mode_text = "猜曲绘开始" if pic_mode else "猜歌开始"
-    await UniMessage.text(f"{mode_text}，直接回复曲目名称/别名/ID 作答").send(
+    await UniMessage.text(f"  {mode_text}，直接回复曲目名称/别名/ID 作答").send(
         at_sender=True
     )
     if pic_mode:
@@ -286,7 +286,7 @@ async def _(session: Session = UniSession()):
     group_id = _group_of(session)
     game = _game_of(group_id)
     if game is None:
-        await UniMessage.text("当前没有进行中的猜歌").finish(at_sender=True)
+        await UniMessage.text(" 当前没有进行中的猜歌").finish(at_sender=True)
     await _reveal(game, "已强制结束。")
 
 
@@ -295,7 +295,7 @@ async def _(session: Session = UniSession()):
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     group_id = _group_of(session)
     if group_id is None:
-        await UniMessage.text("猜歌开关仅群聊可用").finish(at_sender=True)
+        await UniMessage.text(" 猜歌开关仅群聊可用").finish(at_sender=True)
     enabled = groups[0] == "开启"
     await store.set_group_switch(group_id, GUESS_FEATURE, enabled)
     if not enabled:
@@ -303,4 +303,4 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         if game is not None:
             await _reveal(game, "猜歌已关闭。")
     state = "开启" if enabled else "关闭"
-    await UniMessage.text(f"已{state}本群猜歌").finish(at_sender=True)
+    await UniMessage.text(f" 已{state}本群猜歌").finish(at_sender=True)

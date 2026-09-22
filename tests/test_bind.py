@@ -46,7 +46,7 @@ async def _assert_reply(app: App, matcher, text: str, reply: str, *, user_id=123
         )
         ctx.should_call_send(
             event,
-            Message([MessageSegment.at(user_id), MessageSegment.text(reply)]),
+            Message([MessageSegment.at(user_id), MessageSegment.text(f" {reply}")]),
             result=None,
             bot=bot,
         )

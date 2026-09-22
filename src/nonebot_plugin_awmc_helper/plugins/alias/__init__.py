@@ -65,7 +65,7 @@ _admin_perm = ADMIN()
 """群管/群主权限（uninfo 提供，多适配器通用）。"""
 
 
-NOT_FOUND_ALIAS = "未找到此歌曲\n可以使用「添加别名」指令给该乐曲添加别名"
+NOT_FOUND_ALIAS = " 未找到此歌曲\n可以使用「添加别名」指令给该乐曲添加别名"
 
 alias_song = on_regex(
     r"^(?:id\s?(?P<qid>[0-9]+)|(?P<name>.+?))\s?有什么别[名称]$", block=True
@@ -91,10 +91,10 @@ async def _send_song_aliases(song_id: int, hint: str = "") -> None:
     if aliases is None:
         await UniMessage.text(NOT_FOUND_ALIAS).finish(at_sender=True)
     if not aliases:
-        await UniMessage.text("该曲目没有别名").finish(at_sender=True)
+        await UniMessage.text(" 该曲目没有别名").finish(at_sender=True)
     suffix = f"\n{hint}" if hint else ""
     await UniMessage.text(
-        f"该曲目有以下别名：\nID：{song_id}\n" + "\n".join(aliases) + suffix
+        f" 该曲目有以下别名：\nID：{song_id}\n" + "\n".join(aliases) + suffix
     ).finish(at_sender=True)
 
 
@@ -139,15 +139,15 @@ async def _(groups: tuple = RegexGroup()):
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     args = str(message).strip().split(maxsplit=1)
     if len(args) < 2:
-        await UniMessage.text("参数错误：添加本地别名 <id> <别名>").finish(
+        await UniMessage.text(" 参数错误：添加本地别名 <id> <别名>").finish(
             at_sender=True
         )
     song_id_raw, alias_name = args[0], args[1].strip()
     if not song_id_raw.isdigit():
-        await UniMessage.text("请输入正确的ID").finish(at_sender=True)
+        await UniMessage.text(" 请输入正确的ID").finish(at_sender=True)
     song_id = int(song_id_raw)
     if await song_service.by_id(song_id) is None:
-        await UniMessage.text(f"未找到ID为「{song_id}」的曲目").finish(at_sender=True)
+        await UniMessage.text(f" 未找到ID为「{song_id}」的曲目").finish(at_sender=True)
 
     try:
         server = await yuzu_ext.yuzu_client.get_alias(song_id)
@@ -155,16 +155,16 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         server = None
         logger.warning(f"查询柚子别名失败（忽略并继续本地添加）：{e}")
     if server is not None and server.has(alias_name):
-        await UniMessage.text(f"该曲目的别名「{alias_name}」已存在别名服务器").finish(
+        await UniMessage.text(f" 该曲目的别名「{alias_name}」已存在别名服务器").finish(
             at_sender=True
         )
 
     if await store.add_local_alias(song_id, alias_name, _user_id_of(session)):
         await song_service.reload_alias_index()
         await UniMessage.text(
-            f"已成功为ID「{song_id}」添加别名「{alias_name}」到本地别名库"
+            f" 已成功为ID「{song_id}」添加别名「{alias_name}」到本地别名库"
         ).finish(at_sender=True)
-    await UniMessage.text("本地别名库已存在该别名").finish(at_sender=True)
+    await UniMessage.text(" 本地别名库已存在该别名").finish(at_sender=True)
 
 
 @alias_apply.handle()
@@ -172,25 +172,25 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     args = str(message).strip().split(maxsplit=1)
     if len(args) < 2:
-        await UniMessage.text("参数错误：添加别名 <id> <别名>").finish(at_sender=True)
+        await UniMessage.text(" 参数错误：添加别名 <id> <别名>").finish(at_sender=True)
     song_id_raw, alias_name = args[0], args[1].strip()
     if not song_id_raw.isdigit():
-        await UniMessage.text("请输入正确的ID").finish(at_sender=True)
+        await UniMessage.text(" 请输入正确的ID").finish(at_sender=True)
     song_id = int(song_id_raw)
     if await song_service.by_id(song_id) is None:
-        await UniMessage.text(f"未找到ID为「{song_id}」的曲目").finish(at_sender=True)
+        await UniMessage.text(f" 未找到ID为「{song_id}」的曲目").finish(at_sender=True)
     try:
         server = await yuzu_ext.yuzu_client.get_alias(song_id)
         if server is not None and server.has(alias_name):
             await UniMessage.text(
-                f"该曲目的别名「{alias_name}」已存在别名服务器"
+                f" 该曲目的别名「{alias_name}」已存在别名服务器"
             ).finish(at_sender=True)
         msg = await yuzu_ext.yuzu_client.apply_alias(
             song_id, alias_name, _user_id_of(session), _group_id_of(session) or ""
         )
     except yuzu_ext.ExtError as e:
         msg = str(e)
-    await UniMessage.text(msg).finish(at_sender=True)
+    await UniMessage.text(" " + msg).finish(at_sender=True)
 
 
 @alias_agree.handle()
@@ -198,12 +198,12 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     tag = str(message).strip().upper()
     if not tag:
-        await UniMessage.text("参数错误：同意别名 <TAG>").finish(at_sender=True)
+        await UniMessage.text(" 参数错误：同意别名 <TAG>").finish(at_sender=True)
     try:
         msg = await yuzu_ext.yuzu_client.agree_alias(tag, _user_id_of(session))
     except yuzu_ext.ExtError as e:
         msg = str(e)
-    await UniMessage.text(msg).finish(at_sender=True)
+    await UniMessage.text(" " + msg).finish(at_sender=True)
 
 
 @alias_status.handle()
@@ -215,13 +215,13 @@ async def _(message: Message = CommandArg()):
     except yuzu_ext.ExtError as e:
         await UniMessage.text(str(e)).finish(at_sender=True)
     if not status:
-        await UniMessage.text("未查询到正在进行的别名投票").finish(at_sender=True)
+        await UniMessage.text(" 未查询到正在进行的别名投票").finish(at_sender=True)
 
     page_size = 25
     page = int(args) if args.isdigit() else 1
     page_data, total = paginate(status, page, page_size)
     if not page_data:
-        await UniMessage.text(f"页码超出范围（共 {total} 页）").finish(at_sender=True)
+        await UniMessage.text(f" 页码超出范围（共 {total} 页）").finish(at_sender=True)
     real_page = min(max(page, 1), total)
     lines: list[str] = []
     for s in page_data:
@@ -248,9 +248,9 @@ async def _(
     action = groups[0]
     group_id = _group_id_of(session)
     if group_id is None:
-        await UniMessage.text("别名推送开关仅群聊可用").finish(at_sender=True)
+        await UniMessage.text(" 别名推送开关仅群聊可用").finish(at_sender=True)
     if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
-        await UniMessage.text("权限不足：仅群管理员可用").finish(at_sender=True)
+        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
 
     enabled = action == "开启"
     await store.set_group_switch(group_id, PUSH_FEATURE, enabled)
@@ -259,7 +259,7 @@ async def _(
             "已开启本群别名推送，但部署未启用推送（AWMC_ALIAS_PUSH=false），无法接收"
         ).finish(at_sender=True)
     state = "开启" if enabled else "关闭"
-    await UniMessage.text(f"已{state}maimai别名推送").finish(at_sender=True)
+    await UniMessage.text(f" 已{state}maimai别名推送").finish(at_sender=True)
 
 
 @alias_global_switch.handle()
@@ -277,7 +277,7 @@ async def _(groups: tuple = RegexGroup()):
                 await store.set_group_switch(str(g["group_id"]), PUSH_FEATURE, enabled)
                 count += 1
     state = "开启" if enabled else "关闭"
-    await UniMessage.text(f"已全局{state}maimai别名推送（{count} 个群）").finish(
+    await UniMessage.text(f" 已全局{state}maimai别名推送（{count} 个群）").finish(
         at_sender=True
     )
 
@@ -288,8 +288,8 @@ async def _():
     ok = await song_service.refresh()
     if ok:
         logger.info("手动更新别名库成功")
-        await UniMessage.text("手动更新别名库成功").finish(at_sender=True)
-    await UniMessage.text("手动更新别名库失败，请检查网络").finish(at_sender=True)
+        await UniMessage.text(" 手动更新别名库成功").finish(at_sender=True)
+    await UniMessage.text(" 手动更新别名库失败，请检查网络").finish(at_sender=True)
 
 
 # ---------------------------------------------------------------------------

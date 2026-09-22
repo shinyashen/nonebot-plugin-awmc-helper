@@ -132,7 +132,9 @@ async def _(groups: tuple = RegexGroup()):
             if d.type != SongType.UTAGE and d.level == level:
                 entries.append((d.level_value, song, d))
     if not entries:
-        await UniMessage.text(f"没有找到等级为「{level}」的谱面").finish(at_sender=True)
+        await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
+            at_sender=True
+        )
     entries.sort(key=lambda x: -x[0])
     lines = [f"定数表 {level}（共 {len(entries)} 谱面）"]
     for ds, song, d in entries:
@@ -167,7 +169,9 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             state = "done" if done else ("played" if sc else "new")
             items.append((song, d, state))
     if not items:
-        await UniMessage.text(f"没有找到等级为「{level}」的谱面").finish(at_sender=True)
+        await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
+            at_sender=True
+        )
     done_count = sum(1 for _, _, st in items if st == "done")
 
     # Q7 NB 方案：底图存在则叠加印章，否则回退实时网格
@@ -209,7 +213,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             (done_list if done else (remain_list if sc else new_list)).append(song)
     total = len(done_list) + len(remain_list) + len(new_list)
     if total == 0:
-        await UniMessage.text(f"没有找到等级为「{level}」的 DX 谱面").finish(
+        await UniMessage.text(f"  没有找到等级为「{level}」的 DX 谱面").finish(
             at_sender=True
         )
     page_data, total_pages = paginate(remain_list or new_list, page, 80)
@@ -325,7 +329,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         title = f"{ds_raw} 分数列表"
     matched.sort(key=lambda s: s.achievements or 0, reverse=True)
     if not matched:
-        await UniMessage.text("没有找到符合条件的成绩").finish(at_sender=True)
+        await UniMessage.text("  没有找到符合条件的成绩").finish(at_sender=True)
     from ...core.render.best50 import score_list_bytes
 
     png = score_list_bytes(title, matched, page)
@@ -337,10 +341,10 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 async def _():
     from ...core.render import table_template
 
-    await UniMessage.text("正在生成定数表底图，请稍候……").finish(at_sender=True)
+    await UniMessage.text(" 正在生成定数表底图，请稍候……").finish(at_sender=True)
     total, failed = await table_template.refresh_all_rating_tables(song_service)
     extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
-    await UniMessage.text(f"定数表底图生成完成（{total} 谱面次）{extra}。").finish(
+    await UniMessage.text(f" 定数表底图生成完成（{total} 谱面次）{extra}。").finish(
         at_sender=True
     )
 
@@ -350,11 +354,11 @@ async def _():
 async def _():
     from ...core.render import table_template
 
-    await UniMessage.text("正在生成完成表底图，需要一些时间，请稍候……").finish(
+    await UniMessage.text(" 正在生成完成表底图，需要一些时间，请稍候……").finish(
         at_sender=True
     )
     total, failed = await table_template.refresh_all_plate_tables(song_service)
     extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
-    await UniMessage.text(f"完成表底图生成完成（{total} 谱面次）{extra}。").finish(
+    await UniMessage.text(f" 完成表底图生成完成（{total} 谱面次）{extra}。").finish(
         at_sender=True
     )

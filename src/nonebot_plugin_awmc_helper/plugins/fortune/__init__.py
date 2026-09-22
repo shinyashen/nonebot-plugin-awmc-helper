@@ -63,7 +63,7 @@ async def _(session: Session = UniSession()):
 
     rp = fortune_hash % 100
     h = fortune_hash
-    lines = [f"今日人品值：{rp}"]
+    lines = [f" 今日人品值：{rp}"]
     for i in range(11):
         wm = h & 3
         h >>= 2

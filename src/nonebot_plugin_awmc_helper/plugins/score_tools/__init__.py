@@ -68,7 +68,7 @@ async def _(message: Message = CommandArg()):
         await UniMessage.image(raw=png).finish(at_sender=True)
     m = re.search(r"([绿黄红紫白])\s?([0-9]+)", args)
     if not m:
-        await UniMessage.text("格式错误，输入「分数线 帮助」以查看帮助信息").finish(
+        await UniMessage.text(" 格式错误，输入「分数线 帮助」以查看帮助信息").finish(
             at_sender=True
         )
     level_index = COLOR_TO_LEVEL_INDEX[m.group(1)]
@@ -76,20 +76,20 @@ async def _(message: Message = CommandArg()):
     try:
         line = float(args.split()[-1])
     except ValueError:
-        await UniMessage.text("格式错误，输入「分数线 帮助」以查看帮助信息").finish(
+        await UniMessage.text(" 格式错误，输入「分数线 帮助」以查看帮助信息").finish(
             at_sender=True
         )
     song = await song_service.by_id(chart_id)
     if song is None:
-        await UniMessage.text(f"未找到ID为「{chart_id}」的乐曲").finish(at_sender=True)
+        await UniMessage.text(f" 未找到ID为「{chart_id}」的乐曲").finish(at_sender=True)
     diff = song.get_difficulty(SongType.DX, level_index) or song.get_difficulty(
         SongType.STANDARD, level_index
     )
     if diff is None:
-        await UniMessage.text("该乐曲没有这个等级").finish(at_sender=True)
+        await UniMessage.text(" 该乐曲没有这个等级").finish(at_sender=True)
     result = score_line(diff, line)
     if result is None:
-        await UniMessage.text("分数线参数有误（应为 0-100 之间）").finish(
+        await UniMessage.text(" 分数线参数有误（应为 0-100 之间）").finish(
             at_sender=True
         )
     msg = (
@@ -100,7 +100,7 @@ async def _(message: Message = CommandArg()):
         f"等价于「{result['break_50_tap']:.3f}」个「TAP」"
         f"「GREAT」(-{result['break_50_pct']:.4f}%)"
     )
-    await UniMessage.text(msg).finish(at_sender=True)
+    await UniMessage.text(" " + msg).finish(at_sender=True)
 
 
 @rise_score.handle()
@@ -137,7 +137,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         ]
     rec = rise_recommend(bests.scores, candidates, level=level, target=target)
     if not rec:
-        await UniMessage.text("没有找到可以提升 RA 的曲目，换一个目标试试吧").finish(
+        await UniMessage.text(" 没有找到可以提升 RA 的曲目，换一个目标试试吧").finish(
             at_sender=True
         )
 
@@ -171,7 +171,7 @@ async def _(message: Message = CommandArg()):
             None,
         )
         if found is None:
-            await UniMessage.text("未在查分器排行榜中找到该玩家。").finish(
+            await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(
                 at_sender=True
             )
         rank, u = found
@@ -184,7 +184,7 @@ async def _(message: Message = CommandArg()):
     page = int(args) if args.isdigit() else 1
     page_data, total = paginate(users, page, 50)
     if not page_data:
-        await UniMessage.text(f"页码超出范围（共 {total} 页）").finish(at_sender=True)
+        await UniMessage.text(f"  页码超出范围（共 {total} 页）").finish(at_sender=True)
     real_page = min(max(page, 1), total)
     lines = [f"水鱼 RA 排行榜（第 {real_page}/{total} 页，共 {len(users)} 人）"]
     lines += [
@@ -204,12 +204,12 @@ async def _(session: Session = UniSession()):
         str(session.platform or "unknown"), str(session.user.id)
     )
     if binding.service != SERVICE_DIVINGFISH:
-        await UniMessage.text("水鱼排行榜仅支持水鱼数据源（数据源 0）查询").finish(
+        await UniMessage.text(" 水鱼排行榜仅支持水鱼数据源（数据源 0）查询").finish(
             at_sender=True
         )
     ident = binding_service.identifier_or_none(binding)
     if ident is None or (ident.username is None and ident.qq is None):
-        await UniMessage.text("请先绑定水鱼查分器后再查询排名").finish(at_sender=True)
+        await UniMessage.text(" 请先绑定水鱼查分器后再查询排名").finish(at_sender=True)
     # query/player 响应含 username（DivingFishPlayer.name），qq 查询同样可用
     player = await score_service.get_player(binding)
     username = player.name
@@ -219,4 +219,4 @@ async def _(session: Session = UniSession()):
             await UniMessage.text(
                 f"您的 Rating 为「{u.ra}」，排名第「{i + 1}」名"
             ).finish(at_sender=True)
-    await UniMessage.text("未在查分器排行榜中找到您的记录。").finish(at_sender=True)
+    await UniMessage.text(" 未在查分器排行榜中找到您的记录。").finish(at_sender=True)
