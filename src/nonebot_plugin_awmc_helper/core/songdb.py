@@ -524,7 +524,7 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
         row.artist = row.artist or entry.artist
         row.genre = row.genre or entry.genre
         row.bpm = row.bpm or entry.bpm
-        ot_items = _otoge_match(entry, otoge) if otoge else []
+        otoge_items = _otoge_match(entry, otoge) if otoge else []
         for kind, charts in entry.charts.items():
             group = state.group(song_id, kind)
             if group.version is None:
@@ -562,14 +562,14 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
                         group.version = _otoge_version(chart_items)
                     if kind == "utage":
                         _apply_otoge_utage(state, song_id, level_id, chart_items)
-                elif ot_items and kind != "utage":
-                    group.date = group.date or _otoge_date(kind, ot_items)
+                elif otoge_items and kind != "utage":
+                    group.date = group.date or _otoge_date(kind, otoge_items)
                     if group.version is None:
-                        group.version = _otoge_version(ot_items)
+                        group.version = _otoge_version(otoge_items)
         # otoge 歌级充实：封面/BPM（join 失败置空 + 汇总告警）
-        if ot_items:
-            row.image_url = row.image_url or (ot_items[0].get("image_url") or None)
-            row.bpm = row.bpm or str(ot_items[0].get("bpm") or "")
+        if otoge_items:
+            row.image_url = row.image_url or (otoge_items[0].get("image_url") or None)
+            row.bpm = row.bpm or str(otoge_items[0].get("bpm") or "")
         elif otoge is not None and norm_title(entry.title) not in otoge.deleted_titles:
             unmatched += 1
     if unmatched:
@@ -584,10 +584,10 @@ def _otoge_match_title(title: str, otoge: OtogeData) -> list[dict]:
 
 
 def _apply_otoge_utage(
-    state: State, song_id: int, level_id: int, ot_items: list[dict]
+    state: State, song_id: int, level_id: int, otoge_items: list[dict]
 ) -> None:
     """otoge 宴字段充实（单谱面）：kanji/comment/buddy 物量 + 标级推导（仅填空）。"""
-    item = next((x for x in ot_items if x.get("kanji")), None)
+    item = next((x for x in otoge_items if x.get("kanji")), None)
     if item is None or (song_id, "utage", level_id) not in state.charts:
         return
     chart = state.charts[(song_id, "utage", level_id)]

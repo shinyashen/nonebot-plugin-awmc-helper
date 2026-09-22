@@ -177,13 +177,14 @@ def _fit_version_logo(
     直接 resize 到槽位（比例 2.02）会带来 10~140% 的拉伸变形；按内容双下限
     等比缩放才能兼顾不变形与整组 logo 视觉大小一致。
     """
-    alpha = img.getchannel("A").point(lambda v: 255 if v > 16 else 0)
+    alpha = img.getchannel("A").point(lambda v: 255 if v > 16 else 0)  # type: ignore[arg-type]
     if bb := alpha.getbbox():
         img = img.crop(bb)
     scale = max(72 / img.height, 140 / img.width)
     scale = min(scale, box[0] / img.width, box[1] / img.height)
     return img.resize(
-        (round(img.width * scale), round(img.height * scale)), Image.LANCZOS
+        (round(img.width * scale), round(img.height * scale)),
+        Image.Resampling.LANCZOS,
     )
 
 
