@@ -159,9 +159,7 @@ class SongService:
                 # 规范表未初始化（离线首启）等场景：空数据按失败处理走降级
                 raise RuntimeError("曲库数据源返回为空")
         except Exception:
-            logger.exception(
-                f"曲库拉取失败（{time.monotonic() - started:.1f}s）"
-            )
+            logger.exception(f"曲库拉取失败（{time.monotonic() - started:.1f}s）")
             if not self._ready.is_set():
                 if await self._load_snapshot():
                     logger.warning("已降级使用上次曲库快照（仅支持查询类指令）")

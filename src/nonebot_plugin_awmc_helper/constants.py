@@ -408,3 +408,13 @@ def version_zh(version: int) -> str:
     """曲谱版本整数 → 中文显示名（未知值原样返回）。"""
     ver = Version.from_value(version)
     return VERSION_TO_ZH.get(ver, str(version)) if ver is not None else str(version)
+
+
+def display_song_id(song) -> int:
+    """展示用曲目 id：DX 专用曲官方 id = 根 id + 10000（机台内部 id 规则），
+    其余（含 SD 谱面/兼容谱曲）即根 id。"""
+    if song.difficulties.standard:
+        return song.id
+    if song.difficulties.dx:
+        return song.id + 10000
+    return song.id

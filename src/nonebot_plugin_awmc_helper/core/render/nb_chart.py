@@ -20,6 +20,7 @@ from ...constants import (
     ACHIEVEMENT_LIST,
     JP_VERSION_IMAGE,
     version_zh,
+    display_song_id,
 )
 
 # NB base.py 的东亚字宽判定（截断用）
@@ -260,7 +261,7 @@ def song_chart_info(
     )
     mr.text(
         (405, 435),
-        f"ID {song.id}",
+        f"ID {display_song_id(song)}",
         font=font(22, FONT_RODIN),
         fill=text_color,
         anchor="lm",
@@ -301,12 +302,25 @@ def song_chart_info(
             fill=text_color,
             anchor="mm",
         )
-        for n, field in enumerate(
-            ("tap_num", "hold_num", "slide_num", "touch_num", "break_num")
-        ):
+        # TOTAL 列 = 五项 notes 之和（对齐 NB 六列布局）
+        notes = (
+            diff.tap_num,
+            diff.hold_num,
+            diff.slide_num,
+            diff.touch_num,
+            diff.break_num,
+        )
+        mr.text(
+            (480, 590 + spacing),
+            str(sum(notes)),
+            font=font(25, FONT_RODIN),
+            fill=text_color,
+            anchor="mm",
+        )
+        for n, value in enumerate(notes):
             mr.text(
-                (480 + 122 * n, 590 + spacing),
-                str(getattr(diff, field)),
+                (602 + 122 * n, 590 + spacing),
+                str(value),
                 font=font(25, FONT_RODIN),
                 fill=text_color,
                 anchor="mm",
@@ -391,9 +405,13 @@ def song_chart_banquet_info(song: Song) -> bytes:
         fill=text_color,
         anchor="lm",
     )
+    utage_id = next(
+        (getattr(d, "diff_id", None) for d in song.get_difficulties(SongType.UTAGE)),
+        None,
+    )
     mr.text(
         (405, 435),
-        f"ID {song.id}",
+        f"ID {utage_id if utage_id is not None else song.id}",
         font=font(22, FONT_RODIN),
         fill=text_color,
         anchor="lm",

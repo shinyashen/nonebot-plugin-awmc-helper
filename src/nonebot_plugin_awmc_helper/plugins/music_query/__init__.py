@@ -20,6 +20,7 @@ from maimai_py.models import SongDifficultyUtage
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from ...constants import display_song_id
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import handle_errors
@@ -146,11 +147,11 @@ async def _render_result(songs, page: int, binding=None) -> None:
         png = await _chart_card(songs[0], binding)
         await UniMessage.image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
-        text = "".join(f"「{s.id}」 {s.title}\n" for s in songs)
+        text = "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in songs)
         await UniMessage.text(text.rstrip("\n")).finish(at_sender=True)
     await (
         UniMessage.image(raw=song_render.song_list_bytes(songs, page))
-        .text(f"\n第 {page} 页，共 {len(songs)} 首，可用「查歌 <标题> {page + 1}」翻页")
+        .text(f"第 {page} 页，共 {len(songs)} 首，可用「查歌 <标题> {page + 1}」翻页")
         .finish(at_sender=True)
     )
 
@@ -244,16 +245,16 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 
 async def _render_jp_result(songs, page: int) -> None:
     """日服 fallback 结果：单首出日服卡（封面按需在线拉取），多首文本/列表图。"""
-    note = "\n此歌曲为日服限定"
+    note = "此歌曲为日服限定"
     if len(songs) == 1:
         png = await _chart_card(songs[0], None, None, True)
-        await UniMessage.image(raw=png).text(note).finish(at_sender=True)
+        await UniMessage.text(note).image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
-        text = "".join(f"「{s.id}」 {s.title}\n" for s in songs)
-        await UniMessage.text(text.rstrip("\n") + note).finish(at_sender=True)
+        text = "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in songs)
+        await UniMessage.text(text.rstrip("\n") + "\n" + note).finish(at_sender=True)
     await (
         UniMessage.image(raw=song_render.song_list_bytes(songs, page))
-        .text(f"\n第 {page} 页，共 {len(songs)} 首" + note)
+        .text(f"第 {page} 页，共 {len(songs)} 首\n" + note)
         .finish(at_sender=True)
     )
 
@@ -312,21 +313,19 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             ut_only = [e for e in entries if e[2] is None]
             if ut_only:
                 entries = ut_only
-    jp_note = "\n此歌曲为日服限定" if jp_mode else ""
+    jp_note = "此歌曲为日服限定" if jp_mode else ""
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
         png = await _chart_card(song, binding, card_prefer, jp_mode)
-        await (
-            UniMessage.image(raw=png)
-            .text(f"\n您要找的是不是这首？{jp_note}")
-            .finish(at_sender=True)
-        )
+        # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
+        msg = UniMessage.text(jp_note) if jp_mode else UniMessage()
+        await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
     if entries:
         msg = f"找到{len(entries)}个谱面：\n"
         msg += "".join(f"{eid}：{song.title}\n" for eid, song, _ in entries)
         msg += "※ 请使用「id xxxxx」查询指定谱面"
         if jp_mode:
-            msg += jp_note
+            msg += f"\n{jp_note}"
         await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
@@ -355,13 +354,10 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 at_sender=True
             )
         jp_hit = not await song_service.by_id(raw_id)
-        note = "\n此歌曲为日服限定" if jp_hit else ""
+        note = "此歌曲为日服限定" if jp_hit else ""
         png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id), jp_hit)
-        await (
-            UniMessage.image(raw=png)
-            .text(f"\n您要找的是不是这首？{note}")
-            .finish(at_sender=True)
-        )
+        msg = UniMessage.text(note) if jp_hit else UniMessage()
+        await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
 
     # 标题关键词兜底
     result = await song_service.by_title_fuzzy(name)
@@ -371,7 +367,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         msg = (
             f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
         )
-        msg += "".join(f"「{s.id}」 {s.title}\n" for s in result)
+        msg += "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in result)
         msg += "※ 请使用「id xxxxx」查询指定曲目"
         await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
     await (

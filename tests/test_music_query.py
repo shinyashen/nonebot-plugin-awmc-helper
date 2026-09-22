@@ -71,6 +71,7 @@ async def _assert_image_reply(
     text: str,
     expect_png,
     suffix: str = "",
+    prefix: str = "",
     *,
     user_id=12345678,
 ):
@@ -92,10 +93,12 @@ async def _assert_image_reply(
     if inspect.isawaitable(result):
         result = await result
     png = result
-    segments = [
-        MessageSegment.at(user_id),
-        MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
-    ]
+    segments = [MessageSegment.at(user_id)]
+    if prefix:
+        segments.append(MessageSegment.text(prefix))
+    segments.append(
+        MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")
+    )
     expected = (
         Message(segments)
         if not suffix
@@ -167,7 +170,7 @@ async def test_search_list_image(app: App, songs):
     matched = await song_service.by_title_fuzzy("p")
     assert len(matched) >= 5
     page = 1
-    suffix = f"\n第 {page} 页，共 {len(matched)} 首，可用「查歌 <标题> {page + 1}」翻页"
+    suffix = f"第 {page} 页，共 {len(matched)} 首，可用「查歌 <标题> {page + 1}」翻页"
     await _assert_image_reply(
         app,
         "search",
@@ -223,7 +226,7 @@ async def test_alias_search_single(app: App, songs):
         "search_alias_song",
         "dx普瑞是什么歌",
         lambda: music_query._chart_card(song, None, SongType.DX),
-        suffix="\n您要找的是不是这首？",
+        suffix="您要找的是不是这首？",
     )
     # 带「标」前缀 → SD 条目出卡
     await _assert_image_reply(
@@ -231,7 +234,7 @@ async def test_alias_search_single(app: App, songs):
         "search_alias_song",
         "标普瑞是什么歌",
         lambda: music_query._chart_card(song, None, SongType.STANDARD),
-        suffix="\n您要找的是不是这首？",
+        suffix="您要找的是不是这首？",
     )
 
 

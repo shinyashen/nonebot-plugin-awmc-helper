@@ -355,7 +355,8 @@ async def test_jp_fallback_handler(db, monkeypatch, app):
             "search_alias_song",
             "日限是什么歌",
             lambda: music_query._chart_card(song, None, SongType.DX, True),
-            suffix="\n您要找的是不是这首？\n此歌曲为日服限定",
+            suffix="您要找的是不是这首？",
+            prefix="此歌曲为日服限定",
         )
     finally:
         song_service._ready.clear()
