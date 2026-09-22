@@ -180,6 +180,11 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 "定数查歌「最小定数」「最大定数」「页数」"
             ).finish(at_sender=True)
         songs = await song_service.by_level_value(min(ds1, ds2), max(ds1, ds2))
+        if not songs:
+            # 国服定数未命中 → 日服定数口径 fallback（Q32）
+            songs = await song_service.jp_by_level_value(min(ds1, ds2), max(ds1, ds2))
+            if songs:
+                await _render_jp_result(songs, page)
         await _render_result(songs, page, binding)
     elif cmd == "bpm":
         page = 1
@@ -196,18 +201,33 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 "bpm查歌「最小bpm」「最大bpm」「页数」"
             ).finish(at_sender=True)
         songs = await song_service.by_bpm(min(b1, b2), max(b1, b2))
+        if not songs:
+            # 国服 BPM 未命中 → 日服视图 fallback（Q32）
+            songs = await song_service.jp_by_bpm(min(b1, b2), max(b1, b2))
+            if songs:
+                await _render_jp_result(songs, page)
         await _render_result(songs, page, binding)
     elif cmd == "曲师":
         if not a_list:
             await UniMessage.text("曲师查歌「曲师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_artist(name)
+        if not songs:
+            # 国服曲师未命中 → 日服视图 fallback（Q32）
+            songs = await song_service.jp_by_artist(name)
+            if songs:
+                await _render_jp_result(songs, page)
         await _render_result(songs, page, binding)
     elif cmd == "谱师":
         if not a_list:
             await UniMessage.text("谱师查歌「谱师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_note_designer(name)
+        if not songs:
+            # 国服谱师未命中 → 日服视图 fallback（Q32）
+            songs = await song_service.jp_by_note_designer(name)
+            if songs:
+                await _render_jp_result(songs, page)
         await _render_result(songs, page, binding)
     else:
         if not a_list:

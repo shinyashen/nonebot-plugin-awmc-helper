@@ -148,13 +148,30 @@ async def test_jp_title_fallback(songs, tmp_path):
 
     # 日服限定曲仅入 DB 规范表（CN 运行时视图无此曲）；日服视图只收有谱面组的曲
     async with store._open_session() as session:
-        session.add(store.SongRow(id=2019, title="Cryogenic", image_url="c4ec.png"))
+        session.add(
+            store.SongRow(
+                id=2019,
+                title="Cryogenic",
+                artist="Camellia ft. Petra Gurin「In Falsus」",
+                bpm="180",
+                image_url="c4ec.png",
+            )
+        )
         session.add(
             store.SongSheetGroup(
                 song_id=2019, kind="dx", version=27000, version_cn=None, date=20260702
             )
         )
-        session.add(store.SongChart(song_id=2019, kind="dx", level_id=3, notes_tap=100))
+        session.add(
+            store.SongChart(
+                song_id=2019, kind="dx", level_id=3, notes_tap=100, designer="TEST"
+            )
+        )
+        session.add(
+            store.SongChartLevel(
+                song_id=2019, kind="dx", level_id=3, version=27000, level_value=13.5
+            )
+        )
         await session.commit()
     song_service._jp_view = {}
     song_service._jp_fingerprint = None
@@ -164,6 +181,69 @@ async def test_jp_title_fallback(songs, tmp_path):
         assert got[0].title == "Cryogenic"
         # 国服视图确实没有这首
         assert await song_service.by_title_fuzzy("cryo") == []
+    finally:
+        song_service._jp_view = {}
+        song_service._jp_fingerprint = None
+
+
+@pytest.mark.asyncio
+async def test_jp_attribute_fallbacks(songs):
+    """定数/BPM/曲师/谱师四条属性查询的日服视图版本（Q32）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    song_service._jp_view = {}
+    song_service._jp_fingerprint = None
+    try:
+        # 日服限定曲仅入 DB 规范表（CN 运行时视图无此曲）；日服视图只收有谱面组的曲
+        async with store._open_session() as session:
+            session.add(
+                store.SongRow(
+                    id=2019,
+                    title="Cryogenic",
+                    artist="Camellia ft. Petra Gurin「In Falsus」",
+                    bpm="180",
+                    image_url="c4ec.png",
+                )
+            )
+            session.add(
+                store.SongSheetGroup(
+                    song_id=2019,
+                    kind="dx",
+                    version=27000,
+                    version_cn=None,
+                    date=20260702,
+                )
+            )
+            session.add(
+                store.SongChart(
+                    song_id=2019,
+                    kind="dx",
+                    level_id=3,
+                    notes_tap=100,
+                    designer="TEST",
+                )
+            )
+            session.add(
+                store.SongChartLevel(
+                    song_id=2019,
+                    kind="dx",
+                    level_id=3,
+                    version=27000,
+                    level_value=13.5,
+                )
+            )
+            await session.commit()
+        lv = await song_service.jp_by_level_value(13.0, 14.0)
+        assert [s.id for s in lv] == [2019]
+        assert await song_service.jp_by_level_value(10.0, 11.0) == []
+        bpm = await song_service.jp_by_bpm(170, 190)
+        assert [s.id for s in bpm] == [2019]
+        assert await song_service.jp_by_artist("Camellia") == []
+        artist = "camellia ft. petra gurin「in falsus」"
+        assert [s.id for s in await song_service.jp_by_artist(artist)] == [2019]
+        designer = await song_service.jp_by_note_designer("test")
+        assert [s.id for s in designer] == [2019]
     finally:
         song_service._jp_view = {}
         song_service._jp_fingerprint = None

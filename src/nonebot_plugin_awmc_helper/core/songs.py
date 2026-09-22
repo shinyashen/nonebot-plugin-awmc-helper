@@ -310,6 +310,38 @@ class SongService:
             key=lambda s: s.id,
         )
 
+    async def jp_by_artist(self, artist: str) -> list[Song]:
+        """日服视图曲师查歌（大小写不敏感精确匹配）。"""
+        kw = artist.lower()
+        return [
+            s for s in (await self._jp_songs_map()).values() if s.artist.lower() == kw
+        ]
+
+    async def jp_by_bpm(self, minimum: float, maximum: float) -> list[Song]:
+        """日服视图 BPM 查歌（闭区间）。"""
+        return [
+            s
+            for s in (await self._jp_songs_map()).values()
+            if s.bpm is not None and minimum <= float(s.bpm) <= maximum
+        ]
+
+    async def jp_by_level_value(self, min_ds: float, max_ds: float) -> list[Song]:
+        """日服视图定数查歌（日服定数口径，任意谱面落在 [min, max] 闭区间）。"""
+        return [
+            s
+            for s in (await self._jp_songs_map()).values()
+            if any(min_ds <= d.level_value <= max_ds for d in s.get_difficulties())
+        ]
+
+    async def jp_by_note_designer(self, designer: str) -> list[Song]:
+        """日服视图谱师查歌（任意谱面谱师名匹配，大小写不敏感）。"""
+        kw = designer.lower()
+        return [
+            s
+            for s in (await self._jp_songs_map()).values()
+            if any(d.note_designer.lower() == kw for d in s.get_difficulties())
+        ]
+
     async def jp_by_alias_detail(
         self, alias: str
     ) -> tuple[list[Song], tuple[str, str] | None]:
