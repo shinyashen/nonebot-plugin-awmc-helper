@@ -8,6 +8,8 @@
   各客户端行为与不启用时完全一致（测试/CI 零影响）。
 """
 
+import ssl
+
 import httpx
 from nonebot import logger
 
@@ -34,10 +36,11 @@ class SmartProxyTransport(httpx.AsyncBaseTransport):
         foreign_hosts: tuple[str, ...] = (),
         direct: httpx.AsyncBaseTransport | None = None,
         proxied: httpx.AsyncBaseTransport | None = None,
+        verify: ssl.SSLContext | bool = True,
     ) -> None:
-        self._direct = direct or httpx.AsyncHTTPTransport()
+        self._direct = direct or httpx.AsyncHTTPTransport(verify=verify)
         self._proxied = proxied or httpx.AsyncHTTPTransport(
-            proxy=httpx.Proxy(proxy_url)
+            proxy=httpx.Proxy(proxy_url), verify=verify
         )
         self._foreign_hosts = foreign_hosts
 
@@ -65,8 +68,13 @@ class SmartProxyTransport(httpx.AsyncBaseTransport):
                 raise primary_error from fallback_error
 
 
-def build_smart_transport() -> httpx.AsyncBaseTransport | None:
-    """按当前配置构造智能 transport；未配置代理时返回 None（保持默认行为）。"""
+def build_smart_transport(
+    verify: ssl.SSLContext | bool = True,
+) -> httpx.AsyncBaseTransport | None:
+    """按当前配置构造智能 transport；未配置代理时返回 None（保持默认行为）。
+
+    ``verify`` 透传给底层通道：特定站点需自带补充 CA（如省略中间证书的站）。
+    """
     proxy_url = plugin_config.awmc_proxy
     if not proxy_url:
         return None
@@ -74,4 +82,4 @@ def build_smart_transport() -> httpx.AsyncBaseTransport | None:
     logger.info(
         f"HTTP 智能代理已启用：{proxy_url}（国外站代理优先，命中后缀 {foreign}）"
     )
-    return SmartProxyTransport(proxy_url, foreign_hosts=foreign)
+    return SmartProxyTransport(proxy_url, foreign_hosts=foreign, verify=verify)

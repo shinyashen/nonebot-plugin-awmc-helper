@@ -100,3 +100,11 @@ async def test_ensure_false_when_song_unknown(jp_env, mock):
 
     assert await jp_cover.ensure(999999, cache_dir=cache) is False
     assert route.call_count == 0
+
+
+def test_ssl_context_includes_intermediate():
+    """TLS 上下文并入 GlobalSign 中间证书（maimaidx.jp 官方缺链的修复）。"""
+    from nonebot_plugin_awmc_helper.core.render.jp_cover import _ssl_context
+
+    subjects = str(_ssl_context().get_ca_certs())
+    assert "GlobalSign GCC R46 OV TLS CA 2025" in subjects
