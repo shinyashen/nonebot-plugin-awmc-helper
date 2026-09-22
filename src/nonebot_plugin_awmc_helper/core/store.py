@@ -9,6 +9,9 @@
 
 不入库的只有三类：素材与预渲染图片（static/ 文件）、.env 配置、纯内存态
 （绑定回填会话、进行中的猜歌局）。
+
+所有时间字段统一 naive 本地时（`NaiveDatetime` 标注）：sqlmodel≥0.0.43 的
+DateTime 绑定强制要求 tzinfo，显式标注以维持既有存储格式与读写行为。
 """
 
 import json
@@ -17,6 +20,7 @@ from typing import Any
 from pathlib import Path
 from datetime import datetime
 
+from pydantic import NaiveDatetime
 from sqlmodel import Field, SQLModel, col, delete, select
 from sqlalchemy import UniqueConstraint, text, inspect
 from sqlalchemy.exc import OperationalError as SAOperationalError
@@ -44,7 +48,7 @@ class UserBinding(SQLModel, table=True):
     # 落雪 OAuth refresh_token（maimai-py 暂无刷新流程，先落库防迁移丢失）
     lxns_refresh_token: str | None = Field(default=None)
     theme: str = Field(default="prism_plus")  # prism_plus / circle
-    bound_at: datetime = Field(default_factory=datetime.now)
+    bound_at: NaiveDatetime = Field(default_factory=datetime.now)
 
 
 class GroupSwitch(SQLModel, table=True):
@@ -67,7 +71,7 @@ class LocalAlias(SQLModel, table=True):
     song_id: int = Field(index=True)
     alias: str = Field(index=True)
     created_by: str = ""
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: NaiveDatetime = Field(default_factory=datetime.now)
 
 
 class Arcade(SQLModel, table=True):
@@ -87,7 +91,7 @@ class Arcade(SQLModel, table=True):
     person: int = 0
     is_custom: bool = False
     updated_by: str = ""
-    updated_at: datetime = Field(default_factory=datetime.now)
+    updated_at: NaiveDatetime = Field(default_factory=datetime.now)
 
 
 class ArcadeAlias(SQLModel, table=True):
@@ -120,7 +124,7 @@ class ArcadeCountLog(SQLModel, table=True):
     delta: int
     machines: int  # 变更后的机台数
     operator_id: str
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: NaiveDatetime = Field(default_factory=datetime.now)
 
 
 class KvCache(SQLModel, table=True):
@@ -130,7 +134,7 @@ class KvCache(SQLModel, table=True):
 
     key: str = Field(primary_key=True)
     payload: str  # JSON
-    updated_at: datetime = Field(default_factory=datetime.now)
+    updated_at: NaiveDatetime = Field(default_factory=datetime.now)
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +232,7 @@ class SongSourceRaw(SQLModel, table=True):
     )  # lxns / divingfish / maimaiinfo / otoge-db / extra:<名称>
     song_id: str = Field(primary_key=True)  # 曲 id 字符串或 title:<曲名>
     payload: str  # JSON
-    fetched_at: datetime = Field(default_factory=datetime.now)
+    fetched_at: NaiveDatetime = Field(default_factory=datetime.now)
 
 
 class SongPending(SQLModel, table=True):
@@ -243,8 +247,8 @@ class SongPending(SQLModel, table=True):
     key: str = Field(primary_key=True)  # 无 id 时 title:<曲名>，有 id 后为 id 字符串
     reason: str = "missing_id"
     payload: str  # JSON，该源原始条目（归并时的输入）
-    first_seen: datetime = Field(default_factory=datetime.now)
-    last_seen: datetime = Field(default_factory=datetime.now)
+    first_seen: NaiveDatetime = Field(default_factory=datetime.now)
+    last_seen: NaiveDatetime = Field(default_factory=datetime.now)
     attempts: int = 0
 
 
