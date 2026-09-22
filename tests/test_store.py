@@ -112,3 +112,56 @@ async def test_save_song_aliases_dedupes(tmp_db):
     assert len(merged[8]) == 2  # 重复对被去掉
     assert set(merged[8]) == {"糖糖", "真 Love"}  # 存储层不保证顺序
     assert merged[9] == ["糖糖"]
+
+    # 整源替换：第二次写入覆盖第一次
+    await store.save_song_aliases("yuzu", {8: ["糖糖"]})
+    assert await store.load_song_aliases(["yuzu"]) == {8: ["糖糖"]}
+
+
+@pytest.mark.asyncio
+async def test_binding_refresh_token(tmp_db):
+    store = tmp_db
+    binding = store.UserBinding(
+        platform="qq",
+        user_id="20001",
+        service="lxns",
+        lxns_token="at",
+        lxns_refresh_token="rt",
+    )
+    await store.save_binding(binding)
+    got = await store.get_binding("qq", "20001")
+    assert got is not None
+    assert got.lxns_token == "at"
+    assert got.lxns_refresh_token == "rt"
+
+
+@pytest.mark.asyncio
+async def test_migrate_adds_refresh_token_column(tmp_path: Path):
+    """旧版库（无 lxns_refresh_token 列）经 init_db 迁移补列后可读写该字段。"""
+    import sqlite3
+
+    from nonebot_plugin_awmc_helper.core import store
+
+    legacy = tmp_path / "legacy.db"
+    con = sqlite3.connect(legacy)
+    con.execute(
+        "CREATE TABLE user_binding ("
+        "platform VARCHAR NOT NULL, user_id VARCHAR NOT NULL, service VARCHAR, "
+        "divingfish_username VARCHAR, divingfish_import_token VARCHAR, "
+        "lxns_friend_code INTEGER, lxns_token VARCHAR, theme VARCHAR, "
+        "bound_at VARCHAR, PRIMARY KEY (platform, user_id))"
+    )
+    con.commit()
+    con.close()
+
+    store.set_db_file(legacy)
+    try:
+        await store.init_db()
+        await store.save_binding(
+            store.UserBinding(platform="qq", user_id="1", lxns_refresh_token="rt")
+        )
+        got = await store.get_binding("qq", "1")
+        assert got is not None
+        assert got.lxns_refresh_token == "rt"
+    finally:
+        store.set_db_file(None)

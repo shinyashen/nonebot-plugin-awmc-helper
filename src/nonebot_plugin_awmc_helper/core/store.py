@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import datetime
 
 from sqlmodel import Field, SQLModel, col, delete, select
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, text, inspect
 from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
@@ -41,6 +41,8 @@ class UserBinding(SQLModel, table=True):
     divingfish_import_token: str | None = Field(default=None)
     lxns_friend_code: int | None = Field(default=None)
     lxns_token: str | None = Field(default=None)
+    # 落雪 OAuth refresh_token（maimai-py 暂无刷新流程，先落库防迁移丢失）
+    lxns_refresh_token: str | None = Field(default=None)
     theme: str = Field(default="prism_plus")  # prism_plus / circle
     bound_at: datetime = Field(default_factory=datetime.now)
 
@@ -288,6 +290,35 @@ async def init_db() -> None:
     except (SAOperationalError, sqlite3.OperationalError) as e:
         if "already exists" not in str(e):
             raise
+    await _migrate_columns()
+
+
+_MIGRATE_COLUMNS: dict[str, dict[str, str]] = {
+    # 旧库无 lxns_refresh_token 列（落雪 OAuth 刷新令牌，2026-09-22 起落库）
+    "user_binding": {
+        "lxns_refresh_token": (
+            "ALTER TABLE user_binding ADD COLUMN lxns_refresh_token VARCHAR"
+        ),
+    },
+}
+
+
+async def _migrate_columns() -> None:
+    """为旧库补新列：create_all 不会修改已存在的表，SQLite 靠存在性检查幂等。"""
+    async with get_engine().begin() as conn:
+
+        def _existing(sync_conn):
+            inspector = inspect(sync_conn)
+            return {
+                table: {col["name"] for col in inspector.get_columns(table)}
+                for table in _MIGRATE_COLUMNS
+            }
+
+        schema = await conn.run_sync(_existing)
+        for table, columns in _MIGRATE_COLUMNS.items():
+            for name, ddl in columns.items():
+                if name not in schema[table]:
+                    await conn.execute(text(ddl))
 
 
 def _open_session() -> AsyncSession:
