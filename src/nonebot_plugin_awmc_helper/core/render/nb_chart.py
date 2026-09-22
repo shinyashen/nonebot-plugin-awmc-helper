@@ -219,7 +219,8 @@ def song_chart_info(
     im.alpha_composite(
         Image.open(base / theme / "logo.png").resize((249, 120)), (65, 25)
     )
-    if _is_new(song):
+    # 日服视图与国服新曲标无关：统一不渲染「新曲だよ!」徽章
+    if _is_new(song) and not jp:
         im.alpha_composite(
             Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (842, 100),

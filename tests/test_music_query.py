@@ -60,7 +60,9 @@ async def _assert_reply(
             {"group_id": 87654321, "user_id": user_id, "no_cache": True},
             result={"user_id": user_id, "role": "member", "card": "", "nickname": "t"},
         )
-        expected = Message([MessageSegment.at(user_id), MessageSegment.text(reply)])
+        expected = Message(
+            [MessageSegment.at(user_id), MessageSegment.text(f" {reply}")]
+        )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
 
@@ -95,7 +97,7 @@ async def _assert_image_reply(
     png = result
     segments = [MessageSegment.at(user_id)]
     if prefix:
-        segments.append(MessageSegment.text(prefix))
+        segments.append(MessageSegment.text(f" {prefix}"))
     segments.append(MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"))
     expected = (
         Message(segments)

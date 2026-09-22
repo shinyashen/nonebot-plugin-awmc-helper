@@ -276,7 +276,7 @@ async def test_vote_hint_in_music_query(app: App, songs):
             [
                 MessageSegment.at(event_user),
                 MessageSegment.text(
-                    "未找到别名为「企鹅」的歌曲，但找到与此相同别名的投票："
+                    " 未找到别名为「企鹅」的歌曲，但找到与此相同别名的投票："
                     "\n- T9\n    ID 231: 企鹅\n"
                     "※ 可以使用指令「同意别名 XXXXX」进行投票"
                 ),

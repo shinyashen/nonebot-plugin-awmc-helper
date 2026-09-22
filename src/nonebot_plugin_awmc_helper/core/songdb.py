@@ -291,6 +291,18 @@ class OtogeData:
     deleted_titles: set[str] = field(default_factory=set)  # 下架记录 ∖ 现役列表
 
 
+# otoge-db catcode → maimai_py Genre 值（＆/连写差异归一）
+OTOGE_CATCODE_TO_GENRE: dict[str, str] = {
+    "maimai": "maimai",
+    "POPS＆アニメ": "POPSアニメ",
+    "ゲーム＆バラエティ": "ゲームバラエティ",
+    "niconico＆ボーカロイド": "niconicoボーカロイド",
+    "東方Project": "東方Project",
+    "オンゲキ＆CHUNITHM": "オンゲキCHUNITHM",
+    "宴会場": "宴会場",
+}
+
+
 def parse_otoge(music_ex: list[dict], deleted: list[dict]) -> OtogeData:
     """otoge-db → 标题索引；「当前下架集」= 下架记录 ∖ 现役列表（§2.17）。"""
     data = OtogeData()
@@ -527,6 +539,12 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
         row.genre = row.genre or entry.genre
         row.bpm = row.bpm or entry.bpm
         otoge_items = _otoge_match(entry, otoge) if otoge else []
+        if not row.genre:
+            # maimaiinfo 不含分类：日服限定曲的分类从 otoge-db catcode 映射补齐
+            for item in otoge_items:
+                row.genre = row.genre or OTOGE_CATCODE_TO_GENRE.get(
+                    item.get("catcode") or ""
+                )
         for kind, charts in entry.charts.items():
             group = state.group(song_id, kind)
             if group.version is None:

@@ -28,6 +28,12 @@ from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart
 from ...core.binding import binding_service
 
+
+def _reply(text: str) -> UniMessage:
+    """at 发送者的文本回复（at 与文本之间留一个空格，保持可读性）。"""
+    return UniMessage.text(f" {text}")
+
+
 # 谱面前缀 → 卡片主类型（宴 前缀不改变卡片，宴曲本就走宴谱卡分支）
 _PREFIX_TO_TYPE = {
     "dx": SongType.DX,
@@ -142,13 +148,13 @@ async def _binding_of(session):
 async def _render_result(songs, page: int, binding=None) -> None:
     """1 首出卡片；≤5 文本；更多列表图（25/页）。"""
     if not songs:
-        await UniMessage.text(NOT_FOUND).finish(at_sender=True)
+        await _reply(NOT_FOUND).finish(at_sender=True)
     if len(songs) == 1:
         png = await _chart_card(songs[0], binding)
         await UniMessage.image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
         text = "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in songs)
-        await UniMessage.text(text.rstrip("\n")).finish(at_sender=True)
+        await _reply(text.rstrip("\n")).finish(at_sender=True)
     await (
         UniMessage.image(raw=song_render.song_list_bytes(songs, page))
         .text(f"第 {page} 页，共 {len(songs)} 首，可用「查歌 <标题> {page + 1}」翻页")
@@ -163,7 +169,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     cmd = match.group(1)
     rest = (match.group(2) or "").strip()
     if not cmd and not rest:
-        await UniMessage.text(NOT_FOUND).finish(at_sender=True)
+        await _reply(NOT_FOUND).finish(at_sender=True)
     a_list = rest.split()
 
     if cmd == "定数":
@@ -175,7 +181,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         elif len(a_list) == 1 and _is_float(a_list[0]):
             ds1 = ds2 = float(a_list[0])
         else:
-            await UniMessage.text(
+            await _reply(
                 "定数查歌参数错误，请输入正确格式，页数为可选：\n"
                 "定数查歌「定数」「页数」\n"
                 "定数查歌「最小定数」「最大定数」「页数」"
@@ -196,7 +202,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         elif len(a_list) == 1 and _is_float(a_list[0]):
             b1 = b2 = float(a_list[0])
         else:
-            await UniMessage.text(
+            await _reply(
                 "bpm查歌参数错误，请输入正确格式，页数为可选：\n"
                 "bpm查歌「bpm」「页数」\n"
                 "bpm查歌「最小bpm」「最大bpm」「页数」"
@@ -210,7 +216,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         await _render_result(songs, page, binding)
     elif cmd == "曲师":
         if not a_list:
-            await UniMessage.text("曲师查歌「曲师」「页数」").finish(at_sender=True)
+            await _reply("曲师查歌「曲师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_artist(name)
         if not songs:
@@ -221,7 +227,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         await _render_result(songs, page, binding)
     elif cmd == "谱师":
         if not a_list:
-            await UniMessage.text("谱师查歌「谱师」「页数」").finish(at_sender=True)
+            await _reply("谱师查歌「谱师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_note_designer(name)
         if not songs:
@@ -232,7 +238,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         await _render_result(songs, page, binding)
     else:
         if not a_list:
-            await UniMessage.text(NOT_FOUND).finish(at_sender=True)
+            await _reply(NOT_FOUND).finish(at_sender=True)
         title, page = _split_page(a_list)
         songs = await song_service.by_title_fuzzy(title)
         if not songs:
@@ -248,10 +254,10 @@ async def _render_jp_result(songs, page: int) -> None:
     note = "此歌曲为日服限定"
     if len(songs) == 1:
         png = await _chart_card(songs[0], None, None, True)
-        await UniMessage.text(note).image(raw=png).finish(at_sender=True)
+        await _reply(note).image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
         text = "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in songs)
-        await UniMessage.text(text.rstrip("\n") + "\n" + note).finish(at_sender=True)
+        await _reply(text.rstrip("\n") + "\n" + note).finish(at_sender=True)
     await (
         UniMessage.image(raw=song_render.song_list_bytes(songs, page))
         .text(f"第 {page} 页，共 {len(songs)} 首\n" + note)
@@ -318,7 +324,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         _entry_id, song, card_prefer = entries[0]
         png = await _chart_card(song, binding, card_prefer, jp_mode)
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
-        msg = UniMessage.text(jp_note) if jp_mode else UniMessage()
+        msg = _reply(jp_note) if jp_mode else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
     if entries:
         msg = f"找到{len(entries)}个谱面：\n"
@@ -326,12 +332,12 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         msg += "※ 请使用「id xxxxx」查询指定谱面"
         if jp_mode:
             msg += f"\n{jp_note}"
-        await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
+        await _reply(msg.rstrip("\n")).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
     vote_msg = await _vote_hint(name)
     if vote_msg:
-        await UniMessage.text(vote_msg).finish(at_sender=True)
+        await _reply(vote_msg).finish(at_sender=True)
 
     # 纯数字 → ID（查分器 id 形状推断谱面类型：≤4 位 SD、5 位 DX、6 位宴）
     if name.isdigit():
@@ -350,28 +356,28 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         raw_id = int(idm.group(1))
         song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
         if not song:
-            await UniMessage.text(f"未找到ID为「{idm.group(1)}」的乐曲").finish(
+            await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(
                 at_sender=True
             )
         jp_hit = not await song_service.by_id(raw_id)
         note = "此歌曲为日服限定" if jp_hit else ""
         png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id), jp_hit)
-        msg = UniMessage.text(note) if jp_hit else UniMessage()
+        msg = _reply(note) if jp_hit else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
 
     # 标题关键词兜底
     result = await song_service.by_title_fuzzy(name)
     if not result:
-        await UniMessage.text(error_msg).finish(at_sender=True)
+        await _reply(error_msg).finish(at_sender=True)
     if len(result) <= 5:
         msg = (
             f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
         )
         msg += "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in result)
         msg += "※ 请使用「id xxxxx」查询指定曲目"
-        await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
+        await _reply(msg.rstrip("\n")).finish(at_sender=True)
     await (
-        UniMessage.text(
+        _reply(
             f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
         )
         .image(raw=song_render.song_list_bytes(result, page))
@@ -390,7 +396,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         song = await song_service.jp_by_id(raw_id)  # 国服 miss → 日服 fallback
         jp = song is not None
     if not song:
-        await UniMessage.text(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
+        await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     binding = await _binding_of(session)
     png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id or 0), jp)
     reply = UniMessage.image(raw=png)
