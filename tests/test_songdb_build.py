@@ -547,3 +547,73 @@ async def test_external_merge_syncs_fingerprint(db, tmp_path, monkeypatch):
     # 全库标准 JSON 同步包含新曲
     doc = await store.kv_get("songdb_json")
     assert "指纹新曲" in json.dumps(doc, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_otoge_fills_external_created_row(db, tmp_path, monkeypatch):
+    """maimaiinfo 未收录、外部源已建行的曲：otoge title join 直接充实，不进暂存。"""
+    from sqlmodel import select
+
+    from nonebot_plugin_awmc_helper.core import store, songdb
+
+    await songdb.rebuild(full_payloads())
+    extra = tmp_path / "extra_first.json"
+    extra.write_text(
+        json.dumps(
+            {
+                "2041": {
+                    "title": "Test Song First",
+                    "sheets": {
+                        "dx": {
+                            "version": 27000,
+                            "contents": [{"level_id": 3, "level": [13.5]}],
+                        }
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(extra)],
+    )
+    summary = await songdb.apply_external_sources()
+    assert summary["changed"]
+    # 下一轮重建：otoge 载荷含同名条目（带封面与物量）→ 直接充实已有行
+    payloads = full_payloads()
+    payloads["otoge_db"].append(
+        {
+            "title": "Test Song First",
+            "catcode": "niconico＆ボーカロイド",
+            "version": "27000",
+            "bpm": "162",
+            "image_url": "halo123.png",
+            "release": "250918",
+            "dx_lev_bas": "3",
+            "dx_lev_mas": "13.5",
+            "dx_lev_mas_notes_tap": 1000,
+            "dx_lev_mas_notes_hold": 100,
+            "dx_lev_mas_notes_slide": 80,
+            "dx_lev_mas_notes_touch": 0,
+            "dx_lev_mas_notes_break": 25,
+            "dx_lev_mas_designer": "otoge 谱师",
+        }
+    )
+    await songdb.rebuild(payloads)
+    state = await songdb.State.load()
+    assert state.songs[2041].image_url == "halo123.png"
+    assert state.songs[2041].genre == "niconicoボーカロイド"
+    chart = state.charts[(2041, "dx", 3)]
+    assert (
+        chart.notes_tap,
+        chart.notes_hold,
+        chart.notes_slide,
+        chart.notes_touch,
+        chart.notes_break,
+    ) == (1000, 100, 80, 0, 25)
+    assert state.groups[(2041, "dx")].date == 250918
+    async with store._open_session() as session:
+        pend = list((await session.exec(select(store.SongPending))).all())
+    assert all("Test Song First" not in p.key for p in pend)

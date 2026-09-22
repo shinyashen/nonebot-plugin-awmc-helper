@@ -603,6 +603,53 @@ def _otoge_match_title(title: str, otoge: OtogeData) -> list[dict]:
     return otoge.by_title.get(norm_title(title)) or []
 
 
+_OTOLEVEL_IDS = {"bas": 0, "adv": 1, "exp": 2, "mas": 3, "rem": 4}
+
+
+def _fill_row_from_otoge(state: State, song_id: int, item: dict) -> None:
+    """otoge-db 直接充实规范表已有行（maimaiinfo 未收录、外部源先建行的曲）。
+
+    仅填空不覆盖（与 apply_jp 的 join 充实同口径）；谱面物量按
+    ``dx_lev_<难度>_notes_*``（SD 为 ``lev_<难度>_notes_*``）字段对位，
+    设计者仅 exp/mas 字段可得，rem 仅 SD 存在。
+    """
+    row = state.songs.get(song_id)
+    if row is None:
+        return
+    row.image_url = row.image_url or (item.get("image_url") or None)
+    row.bpm = row.bpm or str(item.get("bpm") or "")
+    if not row.genre:
+        row.genre = OTOGE_CATCODE_TO_GENRE.get(item.get("catcode") or "") or ""
+    kind = "dx" if any(k.startswith("dx_lev") for k in item) else "sd"
+    prefix = "dx_lev" if kind == "dx" else "lev"
+    group = state.group(song_id, kind)
+    if group.date is None:
+        group.date = _otoge_date(kind, [item])
+    for suffix, level_id in _OTOLEVEL_IDS.items():
+        if kind == "dx" and suffix == "rem":
+            continue
+        target = state.chart(song_id, kind, level_id)
+        designer = item.get(f"{prefix}_{suffix}_designer")
+        if designer and not target.designer:
+            target.designer = designer
+        tap = _safe_int(item.get(f"{prefix}_{suffix}_notes_tap"))
+        if tap is None:
+            continue
+        if (
+            target.notes_tap,
+            target.notes_hold,
+            target.notes_slide,
+            target.notes_touch,
+            target.notes_break,
+        ) != (0, 0, 0, 0, 0):
+            continue  # 已有物量（maimaiinfo 权威）不覆盖
+        target.notes_tap = tap
+        target.notes_hold = _safe_int(item.get(f"{prefix}_{suffix}_notes_hold")) or 0
+        target.notes_slide = _safe_int(item.get(f"{prefix}_{suffix}_notes_slide")) or 0
+        target.notes_touch = _safe_int(item.get(f"{prefix}_{suffix}_notes_touch")) or 0
+        target.notes_break = _safe_int(item.get(f"{prefix}_{suffix}_notes_break")) or 0
+
+
 def _apply_otoge_utage(
     state: State, song_id: int, level_id: int, otoge_items: list[dict]
 ) -> None:
@@ -906,10 +953,24 @@ async def rebuild(
                 for c in charts.values():
                     if c.title:
                         known_titles.add(norm_title(c.title))
+        # 外部源已建行但 maimaiinfo 未收录（先发数据）：title join 直接充实，
+        # 不进暂存——暂存只收规范表尚无行的条目（§7.5-A 宴快照为主）
+        state_titles: dict[str, int] = {}
+        for row in state.songs.values():
+            if row.title:
+                state_titles.setdefault(norm_title(row.title), row.id)
         for item in payloads["otoge_db"]:
             title = item.get("title", "")
-            if title and norm_title(title) not in known_titles:
+            if not title:
+                continue
+            key = norm_title(title)
+            if key in known_titles:
+                continue
+            song_id = state_titles.get(key)
+            if song_id is None:
                 await upsert_pending("otoge-db", f"title:{title}", "missing_id", item)
+            else:
+                _fill_row_from_otoge(state, song_id, item)
     cn_known: set[tuple[int, str]] | None = None
     if payloads.get("lxns") is not None:
         cn = parse_lxns(payloads["lxns"])
