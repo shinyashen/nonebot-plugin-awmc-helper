@@ -12,6 +12,7 @@
 """
 
 import json
+import time
 import hashlib
 from typing import Literal
 
@@ -88,10 +89,19 @@ class AwmcAliasProvider(IAliasProvider):
             ("lxns", self._fetch_lxns),
         ):
             pairs: list[tuple[int, list[str]]] | None = None
+            started = time.monotonic()
             try:
                 pairs = await fetch(client)
+                logger.info(
+                    f"曲库加载：别名源 {name} 拉取成功 "
+                    f"{sum(len(v) for v in pairs)} 条"
+                    f"（{time.monotonic() - started:.1f}s）"
+                )
             except Exception as e:
-                logger.warning(f"别名源 {name} 拉取失败，回退上次快照（{e}）")
+                logger.warning(
+                    f"别名源 {name} 拉取失败，回退上次快照"
+                    f"（{time.monotonic() - started:.1f}s：{e}）"
+                )
             if pairs is not None:
                 await store.save_song_aliases(name, dict(pairs))
             else:
@@ -100,6 +110,7 @@ class AwmcAliasProvider(IAliasProvider):
                 _add(sid, aliases)
         for la in await store.get_local_aliases():
             _add(la.song_id, [la.alias])
+        logger.info(f"曲库加载：别名合并完成，覆盖 {len(merged)} 曲")
         raw = json.dumps(
             {str(k): sorted(v) for k, v in merged.items()},
             ensure_ascii=False,

@@ -276,6 +276,11 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         # 国服视图未命中 → 日服视图 fallback（Q32：日服作为国服查歌的兜底）
         songs, strip_info = await song_service.jp_by_alias_detail(name)
         jp_mode = bool(songs)
+    if not songs:
+        # 别名全网未命中：输入本身可能就是曲目名（如新曲尚无人录别名），
+        # 日服标题兜底（国服侧标题按设计走「查歌」指令）
+        songs = await song_service.jp_by_title_fuzzy(name)
+        jp_mode = bool(songs)
     prefer_type = _PREFIX_TO_TYPE.get(strip_info[1]) if strip_info else None
     entries = _type_entries(songs)
     if strip_info:

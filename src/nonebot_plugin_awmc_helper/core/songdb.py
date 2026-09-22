@@ -15,6 +15,7 @@
 
 import re
 import json
+import time
 import asyncio
 import hashlib
 import unicodedata
@@ -1353,6 +1354,12 @@ async def refresh_all(
     from .ext import divingfish as ext_df
     from .ext import maimaiinfo as ext_info
 
+    total_started = time.monotonic()
+    logger.info(
+        "songdb：开始全量重建（"
+        + ("国服+日服" if include_cn and include_jp else "仅国服")
+        + "）……"
+    )
     payloads: dict[str, Any] = {}
     if include_jp:
         for name, fetch in (
@@ -1361,20 +1368,45 @@ async def refresh_all(
             ("otoge_db", ext_otoge.fetch_music_ex),
             ("otoge_deleted", ext_otoge.fetch_music_ex_deleted),
         ):
+            started = time.monotonic()
             try:
                 payloads[name] = await fetch()
+                logger.info(
+                    f"songdb：{name} 拉取成功（{time.monotonic() - started:.1f}s）"
+                )
             except Exception as e:
-                logger.warning(f"songdb: {name} 拉取失败，本次跳过（{e}）")
+                logger.warning(
+                    f"songdb: {name} 拉取失败，本次跳过"
+                    f"（{time.monotonic() - started:.1f}s：{e}）"
+                )
     if include_cn:
+        started = time.monotonic()
         try:
             payloads["lxns"] = await ext_lxns.fetch_song_list(notes=True)
+            logger.info(
+                f"songdb：lxns 拉取成功（{time.monotonic() - started:.1f}s）"
+            )
         except Exception as e:
-            logger.warning(f"songdb: 落雪曲库拉取失败，本次跳过（{e}）")
+            logger.warning(
+                f"songdb: 落雪曲库拉取失败，本次跳过"
+                f"（{time.monotonic() - started:.1f}s：{e}）"
+            )
+        started = time.monotonic()
         try:
             payloads["divingfish"] = await ext_df.fetch_music_data()
+            logger.info(
+                f"songdb：divingfish 拉取成功（{time.monotonic() - started:.1f}s）"
+            )
         except Exception as e:
-            logger.warning(f"songdb: 水鱼曲库拉取失败，本次跳过（{e}）")
+            logger.warning(
+                f"songdb: 水鱼曲库拉取失败，本次跳过"
+                f"（{time.monotonic() - started:.1f}s：{e}）"
+            )
     result = await rebuild(payloads)
+    logger.info(
+        f"songdb：重建完成——曲 {result['songs']}、谱面组 {result['groups']}、"
+        f"谱面 {result['charts']}（总耗时 {time.monotonic() - total_started:.1f}s）"
+    )
     try:
         await flush_pending()
     except Exception:

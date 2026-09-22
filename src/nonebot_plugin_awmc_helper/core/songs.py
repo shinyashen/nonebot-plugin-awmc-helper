@@ -7,6 +7,7 @@
   启动拉取失败时降级为上次快照，不阻塞 bot 启动。
 """
 
+import time
 import random as _random
 import asyncio
 from enum import Enum
@@ -149,6 +150,7 @@ class SongService:
 
     async def load(self) -> bool:
         """加载曲库（规范表构造 + 别名）。成功后例行写快照；失败降级快照。"""
+        started = time.monotonic()
         try:
             songs = await client.songs(
                 provider=_SONG_PROVIDER, alias_provider=_ALIAS_PROVIDER
@@ -157,7 +159,9 @@ class SongService:
                 # 规范表未初始化（离线首启）等场景：空数据按失败处理走降级
                 raise RuntimeError("曲库数据源返回为空")
         except Exception:
-            logger.exception("曲库拉取失败")
+            logger.exception(
+                f"曲库拉取失败（{time.monotonic() - started:.1f}s）"
+            )
             if not self._ready.is_set():
                 if await self._load_snapshot():
                     logger.warning("已降级使用上次曲库快照（仅支持查询类指令）")
@@ -166,7 +170,12 @@ class SongService:
             return False
         await self._apply(songs)
         await self._write_snapshot(songs)
-        logger.info(f"曲库加载完成，共 {len(await songs.get_all())} 首")
+        # 日服视图与国服视图口径并列展示（CN 视图不含仅日服曲目）
+        jp_count = len(await self._jp_songs_map())
+        logger.info(
+            f"曲库加载完成：国服 {len(await songs.get_all())} 首，"
+            f"日服 {jp_count} 首（耗时 {time.monotonic() - started:.1f}s）"
+        )
         return True
 
     async def refresh(self) -> bool:
