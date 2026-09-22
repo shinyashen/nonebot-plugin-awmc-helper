@@ -221,7 +221,7 @@ async def test_person_query(app: App, arcade_seed):
             Message(
                 [
                     MessageSegment.at(12345678),
-                    MessageSegment.text("「游戏厅」排卡 0 人"),
+                    MessageSegment.text(" 「游戏厅」排卡 0 人"),
                 ]
             ),
             result=None,

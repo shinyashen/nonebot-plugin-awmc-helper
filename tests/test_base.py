@@ -22,7 +22,7 @@ async def test_repo_address(app: App):
             Message(
                 [
                     MessageSegment.at(12345678),
-                    MessageSegment.text(base.REPO_URL + "\n求 star，求宣传~"),
+                    MessageSegment.text(" " + base.REPO_URL + "\n求 star，求宣传~"),
                 ]
             ),
             result=None,

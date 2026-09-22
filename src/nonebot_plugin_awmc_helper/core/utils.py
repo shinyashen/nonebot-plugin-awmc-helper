@@ -19,6 +19,44 @@ def paginate(data: list[T], page: int, per_page: int) -> tuple[list[T], int]:
     return data[start : start + per_page], total
 
 
+def _install_at_space_send_wrapper() -> None:
+    """注册 alconna 发送包装器（导入期设置，全局生效）。
+
+    - 群聊：alconna 插入 at 后，若紧邻的是文本且不以空格开头，补一个分隔空格
+      （已有前导空格的文案不会重复添加）；
+    - 私聊：不插 at，也就不需要空格——去掉文案的前导空格，避免私聊消息
+      以空白开头；
+    - 依赖 nonebot_plugin_alconna 的 current_send_wrapper 上下文，低版本缺失时
+      静默跳过（退化为不带空格的行为）。
+    """
+    try:
+        from nonebot_plugin_alconna.uniseg import At, Text
+        from nonebot_plugin_alconna.uniseg.message import current_send_wrapper
+    except ImportError:  # pragma: no cover
+        return
+
+    async def send_wrapper(bot, target, message):
+        private = getattr(target, "message_type", None) == "private"
+        first = message[0] if len(message) else None
+        if private:
+            if isinstance(first, Text) and first.text.startswith(" "):
+                first.text = first.text.lstrip(" ")
+            return message
+        if (
+            len(message) >= 2
+            and isinstance(first, At)
+            and isinstance(message[1], Text)
+            and not message[1].text.startswith(" ")
+        ):
+            message.insert(1, Text(" "))
+        return message
+
+    current_send_wrapper.set(send_wrapper)
+
+
+_install_at_space_send_wrapper()
+
+
 def handle_errors(
     fallback: str = "出错了，请稍后再试或联系管理员。",
     except_with_message: tuple[type[Exception], ...] = (),
