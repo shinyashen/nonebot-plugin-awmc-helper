@@ -661,6 +661,8 @@ async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
     state = await songdb.State.load()
     chart = state.charts[(1903, "utage", 1)]
     assert chart.is_buddy
+    assert chart.notes_left is not None
     assert json.loads(chart.notes_left) == [10, 2, 3, 4, 5]
+    assert chart.notes_right is not None
     assert json.loads(chart.notes_right) == [20, 4, 6, 8, 10]
     assert state.groups[(1903, "utage")].version == 27000

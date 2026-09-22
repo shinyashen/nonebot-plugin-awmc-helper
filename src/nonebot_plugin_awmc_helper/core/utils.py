@@ -1,14 +1,17 @@
 """核心层通用工具：分页、统一异常兜底装饰器。"""
 
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 from functools import wraps
 from collections.abc import Callable, Awaitable
 
 from nonebot import logger
+from nonebot.adapters import Bot, Event, Message
 from nonebot.exception import MatcherException
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 T = TypeVar("T")
+# 与 alconna SendWrapper 协议同款泛型（send 原类型原样返回）
+_TM = TypeVar("_TM", bound=str | Message | UniMessage)
 
 
 def paginate(data: list[T], page: int, per_page: int) -> tuple[list[T], int]:
@@ -35,21 +38,23 @@ def _install_at_space_send_wrapper() -> None:
     except ImportError:  # pragma: no cover
         return
 
-    async def send_wrapper(bot, target, message):
-        private = getattr(target, "message_type", None) == "private"
-        first = message[0] if len(message) else None
+    # 签名对齐 alconna 的 SendWrapper 协议（泛型 _TM），运行时 send 恒为 UniMessage
+    async def send_wrapper(bot: Bot, event: Event, send: _TM) -> _TM:
+        msg = cast(UniMessage, send)
+        private = getattr(event, "message_type", None) == "private"
+        first = msg[0] if len(msg) else None
         if private:
             if isinstance(first, Text) and first.text.startswith(" "):
                 first.text = first.text.lstrip(" ")
-            return message
+            return send
         if (
-            len(message) >= 2
+            len(msg) >= 2
             and isinstance(first, At)
-            and isinstance(message[1], Text)
-            and not message[1].text.startswith(" ")
+            and isinstance(msg[1], Text)
+            and not msg[1].text.startswith(" ")
         ):
-            message.insert(1, Text(" "))
-        return message
+            msg.insert(1, Text(" "))
+        return send
 
     current_send_wrapper.set(send_wrapper)
 

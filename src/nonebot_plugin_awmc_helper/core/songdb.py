@@ -543,9 +543,10 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
         if not row.genre:
             # maimaiinfo 不含分类：日服限定曲的分类从 otoge-db catcode 映射补齐
             for item in otoge_items:
-                row.genre = row.genre or OTOGE_CATCODE_TO_GENRE.get(
-                    item.get("catcode") or ""
-                )
+                mapped = OTOGE_CATCODE_TO_GENRE.get(item.get("catcode") or "")
+                if mapped:
+                    row.genre = mapped
+                    break
         for kind, charts in entry.charts.items():
             group = state.group(song_id, kind)
             if group.version is None:
