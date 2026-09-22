@@ -466,7 +466,8 @@ async def save_song_aliases(source: str, items: dict[int, list[str]]) -> None:
     精确去重，否则整源写入触发唯一约束整体失败。
     """
     async with _open_session() as session:
-        await session.execute(delete(SongAlias).where(col(SongAlias.source) == source))
+        # SQLModel 已弃用 session.execute，delete 一律走 exec
+        await session.exec(delete(SongAlias).where(col(SongAlias.source) == source))
         seen: set[tuple[int, str]] = set()
         for song_id, aliases in items.items():
             for alias in aliases:

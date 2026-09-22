@@ -240,7 +240,7 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
                 store.SongSheetGroup,
                 store.SongRow,
             ):
-                await session.execute(delete(table))
+                await session.exec(delete(table))
             await session.commit()
         assert await songdb.is_empty()
         # 已就绪状态下加载失败：保留旧运行时（不降级、也不清空）

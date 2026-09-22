@@ -466,10 +466,11 @@ class State:
         会被当作 persistent 走 UPDATE 而撞上刚 DELETE 掉的空表）。
         """
         async with store._open_session() as session:
-            await session.execute(delete(store.SongChartLevel))
-            await session.execute(delete(store.SongChart))
-            await session.execute(delete(store.SongSheetGroup))
-            await session.execute(delete(store.SongRow))
+            # SQLModel 已弃用 session.execute，delete/insert 一律走 exec
+            await session.exec(delete(store.SongChartLevel))
+            await session.exec(delete(store.SongChart))
+            await session.exec(delete(store.SongSheetGroup))
+            await session.exec(delete(store.SongRow))
             for row in self.songs.values():
                 session.add(store.SongRow(**row.model_dump()))
             for row in self.groups.values():
@@ -1071,7 +1072,7 @@ async def _archive_raw(payloads: dict[str, Any]) -> None:
             )
         )
     async with store._open_session() as session:
-        await session.execute(delete(store.SongSourceRaw))
+        await session.exec(delete(store.SongSourceRaw))
         # 同名多义（如 otoge-db 的 'Link'×2）会生成重复键：追加序号去重
         seen: dict[tuple[str, str], int] = {}
         for row in rows:
@@ -1869,7 +1870,7 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
     }
     async with store._open_session() as session:
         for origin in origins:
-            await session.execute(
+            await session.exec(
                 delete(store.SongSourceRaw).where(
                     col(store.SongSourceRaw.source) == origin
                 )
