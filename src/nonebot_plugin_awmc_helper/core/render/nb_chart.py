@@ -17,6 +17,7 @@ from ...constants import (
     GENRE_TO_ZH,
     VERSION_IMAGE,
     ACHIEVEMENT_LIST,
+    JP_VERSION_IMAGE,
     version_zh,
 )
 
@@ -148,7 +149,15 @@ def _is_new(song: Song) -> bool:
     return song.version >= current_version.value
 
 
-def _version_image(song: Song) -> Image.Image | None:
+def _version_image(song: Song, jp: bool = False) -> Image.Image | None:
+    if jp:
+        # 日服视图：DX 世代用日服 logo（pic/jp/，按版本码精确匹配，MAGiCAL 等
+        # 超枚举版本同样命中）；旧框中日 logo 相同，回落通用路径
+        jp_name = JP_VERSION_IMAGE.get(song.version)
+        if jp_name:
+            path = assets.static_path() / "mai" / "pic" / "jp" / f"{jp_name}.png"
+            if path.exists():
+                return Image.open(path).convert("RGBA")
     ver = Version.from_value(song.version)
     if ver is None:
         return None
@@ -166,11 +175,13 @@ def song_chart_info(
     best_list: list[ScoreExtend],
     theme: str = "prism_plus",
     prefer_type: SongType | None = None,
+    jp: bool = False,
 ) -> bytes:
     """查歌卡（含可选的用户成绩/加分预测），布局坐标对齐 NB 版。
 
     ``prefer_type=STANDARD``：双谱歌曲显示 SD 徽章与 SD 难度表（前缀「标准/标」
     搜索）；其余按 NB 默认（有 DX 用 DX）。
+    ``jp=True``：日服视图渲染，版本 logo 用日服世代图（pic/jp/）。
     """
     from PIL import ImageDraw
 
@@ -193,7 +204,7 @@ def song_chart_info(
         )
     cover = assets.cover(song.id).resize((242, 242))
     im.alpha_composite(cover, (133, 197))
-    version_img = _version_image(song)
+    version_img = _version_image(song, jp)
     if version_img is not None:
         im.alpha_composite(version_img.resize((182, 90)), (800, 370))
     prefer_sd = prefer_type == SongType.STANDARD and song.difficulties.standard

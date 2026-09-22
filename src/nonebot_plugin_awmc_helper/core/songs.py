@@ -131,6 +131,10 @@ class SongService:
         self._title_index: dict[str, int] = {}
         # 宴谱汉字集（前缀剥离用）：运行时全部宴谱的 kanji 及其简体形态
         self._utage_kanji: set[str] = set()
+        # 日服视图缓存（国服查不到时的 fallback，Q32）：根 id → 日服 Song
+        self._alias_provider = _ALIAS_PROVIDER
+        self._jp_view: dict[int, Song] = {}
+        self._jp_fingerprint: str | None = None
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -277,6 +281,56 @@ class SongService:
         """按别名查曲（柚子 + 落雪 + 本地合并视图）。"""
         songs, _ = await self.by_alias_detail(alias)
         return songs
+
+    async def _jp_songs_map(self) -> dict[int, Song]:
+        """日服视图缓存：根 id → 日服 Song（规范表指纹失效时重建）。"""
+        fp = songdb.CURRENT_FINGERPRINT
+        if self._jp_view and self._jp_fingerprint == fp:
+            return self._jp_view
+        state = await songdb.State.load()
+        self._jp_view = {s.id: s for s in songdb.all_songs(state, "jp")}
+        self._jp_fingerprint = fp
+        return self._jp_view
+
+    async def jp_by_alias_detail(
+        self, alias: str
+    ) -> tuple[list[Song], tuple[str, str] | None]:
+        """日服视图按别名查曲（国服查不到时的 fallback，Q32）。
+
+        别名库用 provider 的完整合并视图（含仅日服条目），匹配语义与国服侧
+        一致（归一化 + 单层谱面前缀剥离，宴谱汉字取日服视图自身）。
+        """
+        await self.ensure_loaded()
+        jp = await self._jp_songs_map()
+        if not jp:
+            return [], None
+        lib = getattr(self._alias_provider, "last_merged", None)
+        if not lib:  # 尚未拉取成功：回退 song_alias 快照
+            lib = await store.load_song_aliases(["yuzu", "lxns"])
+        index: dict[str, set[int]] = {}
+        for sid, aliases in lib.items():
+            for a in aliases:
+                index.setdefault(normalize_text(a), set()).add(sid)
+        jp_kanji: set[str] = set()
+        for song in jp.values():
+            for diff in song.get_difficulties(SongType.UTAGE):
+                if isinstance(diff, SongDifficultyUtage) and diff.kanji:
+                    jp_kanji.add(diff.kanji)
+                    jp_kanji.add(normalize_text(diff.kanji))
+        key = normalize_text(alias)
+        ids = index.get(key, set())
+        strip_info = None
+        if not ids:
+            stripped = strip_chart_prefix(alias, extra_prefixes=jp_kanji)
+            if stripped:
+                ids = index.get(normalize_text(stripped[0]), set())
+                strip_info = stripped
+        return [jp[i] for i in sorted(ids) if i in jp], strip_info
+
+    async def jp_by_id(self, song_id: int) -> Song | None:
+        """日服视图按根 id 取曲（id 搜索的 fallback）。"""
+        jp = await self._jp_songs_map()
+        return jp.get(song_id % 10000)
 
     async def by_alias_detail(
         self, alias: str

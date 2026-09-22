@@ -56,6 +56,8 @@ class AwmcAliasProvider(IAliasProvider):
         self._yuzu = yuzu
         self._lxns = lxns
         self._fingerprint: str | None = None
+        self.last_merged: dict[int, list[str]] = {}
+        """最近一次合并的完整别名库（含仅日服曲目条目），日服 fallback 搜索用。"""
 
     async def get_aliases(self, client) -> dict[int, list[str]]:
         """三源合并，返回**去前缀**别名库（维护口径，Q31）。
@@ -104,6 +106,7 @@ class AwmcAliasProvider(IAliasProvider):
             sort_keys=True,
         )
         self._fingerprint = hashlib.md5(raw.encode()).hexdigest()
+        self.last_merged = merged
         return merged
 
     async def _fetch_yuzu(self, client) -> list[tuple[int, list[str]]]:

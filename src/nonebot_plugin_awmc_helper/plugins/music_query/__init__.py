@@ -95,10 +95,12 @@ def _is_float(value: str) -> bool:
         return False
 
 
-async def _chart_card(song, binding, prefer_type=None) -> bytes:
+async def _chart_card(song, binding, prefer_type=None, jp: bool = False) -> bytes:
     """谱面卡：绑定时拉 B50 嵌成绩与加分预测（Q3 选项 B，对齐 NB 版）。
 
     ``prefer_type``：别名带谱面前缀（标准/标 → SD，dx → DX）时指定卡片主类型。
+    ``jp=True``：日服视图渲染（日服 logo；不嵌国服 B50——谱面与定数可能不同，
+    混算无意义）。
     """
     from maimai_py import SongType
 
@@ -106,7 +108,7 @@ async def _chart_card(song, binding, prefer_type=None) -> bytes:
         return nb_chart.song_chart_banquet_info(song)
     calc, is_full, best_list = False, False, []
     theme = "prism_plus"
-    if binding is not None:
+    if binding is not None and not jp:
         ident = binding_service.identifier_or_none(binding)
         if ident is not None:
             try:
@@ -122,7 +124,9 @@ async def _chart_card(song, binding, prefer_type=None) -> bytes:
                 theme = binding.theme or "prism_plus"
             except UserScoreError:
                 pass
-    return nb_chart.song_chart_info(song, calc, is_full, best_list, theme, prefer_type)
+    return nb_chart.song_chart_info(
+        song, calc, is_full, best_list, theme, prefer_type, jp
+    )
 
 
 async def _binding_of(session):
@@ -243,6 +247,11 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     # 双条目语义）——同根 id 的标准/DX/宴条目共享别名，搜索应全部列出供选择；
     # 带谱面前缀（dx/标准/标）时自动定位到对应类型条目，无前缀不设偏好
     songs, strip_info = await song_service.by_alias_detail(name)
+    jp_mode = False
+    if not songs:
+        # 国服视图未命中 → 日服视图 fallback（Q32：日服作为国服查歌的兜底）
+        songs, strip_info = await song_service.jp_by_alias_detail(name)
+        jp_mode = bool(songs)
     prefer_type = _PREFIX_TO_TYPE.get(strip_info[1]) if strip_info else None
     entries = _type_entries(songs)
     if strip_info:
@@ -254,18 +263,21 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             ut_only = [e for e in entries if e[2] is None]
             if ut_only:
                 entries = ut_only
+    jp_note = "\n此歌曲为日服限定" if jp_mode else ""
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
-        png = await _chart_card(song, binding, card_prefer)
+        png = await _chart_card(song, binding, card_prefer, jp_mode)
         await (
             UniMessage.image(raw=png)
-            .text("\n您要找的是不是这首？")
+            .text(f"\n您要找的是不是这首？{jp_note}")
             .finish(at_sender=True)
         )
     if entries:
         msg = f"找到{len(entries)}个谱面：\n"
         msg += "".join(f"{eid}：{song.title}\n" for eid, song, _ in entries)
         msg += "※ 请使用「id xxxxx」查询指定谱面"
+        if jp_mode:
+            msg += jp_note
         await UniMessage.text(msg.rstrip("\n")).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
@@ -274,24 +286,31 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         await UniMessage.text(vote_msg).finish(at_sender=True)
 
     # 纯数字 → ID（查分器 id 形状推断谱面类型：≤4 位 SD、5 位 DX、6 位宴）
-    if name.isdigit() and (song := await song_service.by_id(int(name))):
-        prefer = _prefer_from_raw_id(int(name))
-        png = await _chart_card(song, binding, prefer)
-        await (
-            UniMessage.image(raw=png)
-            .text("\n您要找的是不是这首？")
-            .finish(at_sender=True)
-        )
+    if name.isdigit():
+        raw_id = int(name)
+        song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
+        if song:
+            jp_hit = not await song_service.by_id(raw_id)
+            note = "\n此歌曲为日服限定" if jp_hit else ""
+            png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id), jp_hit)
+            await (
+                UniMessage.image(raw=png)
+                .text(f"\n您要找的是不是这首？{note}")
+                .finish(at_sender=True)
+            )
     if idm := re.match(r"^id([0-9]+)$", name, re.IGNORECASE):
-        song = await song_service.by_id(int(idm.group(1)))
+        raw_id = int(idm.group(1))
+        song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
         if not song:
             await UniMessage.text(f"未找到ID为「{idm.group(1)}」的乐曲").finish(
                 at_sender=True
             )
-        png = await _chart_card(song, binding, _prefer_from_raw_id(int(idm.group(1))))
+        jp_hit = not await song_service.by_id(raw_id)
+        note = "\n此歌曲为日服限定" if jp_hit else ""
+        png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id), jp_hit)
         await (
             UniMessage.image(raw=png)
-            .text("\n您要找的是不是这首？")
+            .text(f"\n您要找的是不是这首？{note}")
             .finish(at_sender=True)
         )
 
@@ -319,9 +338,17 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 @handle_errors()
 async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
     _id = match.group(1)
-    song = await song_service.by_id(int(_id)) if _id.isdigit() else None
+    raw_id = int(_id) if _id.isdigit() else None
+    song = await song_service.by_id(raw_id) if raw_id else None
+    jp = False
+    if song is None and raw_id:
+        song = await song_service.jp_by_id(raw_id)  # 国服 miss → 日服 fallback
+        jp = song is not None
     if not song:
         await UniMessage.text(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     binding = await _binding_of(session)
-    png = await _chart_card(song, binding)
-    await UniMessage.image(raw=png).finish(at_sender=True)
+    png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id or 0), jp)
+    reply = UniMessage.image(raw=png)
+    if jp:
+        reply = reply.text("\n此歌曲为日服限定")
+    await reply.finish(at_sender=True)

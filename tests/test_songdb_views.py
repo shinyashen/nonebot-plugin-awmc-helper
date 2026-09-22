@@ -1,6 +1,7 @@
 """core/songdb 双视图与 core/provider：规范表 → maimai_py 对象（§5.5/§5.6）。"""
 
 import pytest
+from mocks import requires_assets
 from songdb_fixtures import (
     make_lxns,
     make_all_data,
@@ -293,3 +294,68 @@ def test_search_prefix_to_type_mapping():
     assert _PREFIX_TO_TYPE["标准"] == SongType.STANDARD
     assert _PREFIX_TO_TYPE["标"] == SongType.STANDARD
     assert "宴" not in _PREFIX_TO_TYPE
+
+
+@pytest.mark.asyncio
+async def test_jp_fallback_search(db, monkeypatch):
+    """日服 fallback（Q32）：国服视图未命中 → 日服视图按别名/id 命中。"""
+    from nonebot_plugin_awmc_helper.core import store, songdb
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.client import lxns_provider, yuzu_provider
+
+    async def fake_aliases(client):
+        return {}
+
+    monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
+    monkeypatch.setattr(lxns_provider, "get_aliases", fake_aliases)
+    await songdb.rebuild(full_payloads())
+    await store.add_local_alias(555, "日限", "tester")
+    try:
+        assert await song_service.load()
+        # 国服视图查不到 JP-only 曲
+        assert not await song_service.by_alias("日限")
+        assert await song_service.by_id(555) is None
+        # 日服 fallback：别名命中；谱面前缀剥离同样生效
+        jp_songs, _ = await song_service.jp_by_alias_detail("日限")
+        assert [s.id for s in jp_songs] == [555]
+        jp_pref, _ = await song_service.jp_by_alias_detail("dx日限")
+        assert [s.id for s in jp_pref] == [555]
+        # id fallback
+        jp_song = await song_service.jp_by_id(555)
+        assert jp_song is not None
+        assert jp_song.version == 22000
+    finally:
+        song_service._ready.clear()
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_jp_fallback_handler(db, monkeypatch, app):
+    """搜歌日服 fallback 端到端：日服 logo 卡 + 「此歌曲为日服限定」标注。"""
+    from maimai_py import SongType
+    from test_music_query import _assert_image_reply
+
+    from nonebot_plugin_awmc_helper.core import store, songdb
+    from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.client import lxns_provider, yuzu_provider
+
+    async def fake_aliases(client):
+        return {}
+
+    monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
+    monkeypatch.setattr(lxns_provider, "get_aliases", fake_aliases)
+    await songdb.rebuild(full_payloads())
+    await store.add_local_alias(555, "日限", "tester")
+    try:
+        await song_service.load()
+        song = await song_service.jp_by_id(555)
+        await _assert_image_reply(
+            app,
+            "search_alias_song",
+            "日限是什么歌",
+            lambda: music_query._chart_card(song, None, SongType.DX, True),
+            suffix="\n您要找的是不是这首？\n此歌曲为日服限定",
+        )
+    finally:
+        song_service._ready.clear()

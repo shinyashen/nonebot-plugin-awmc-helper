@@ -368,6 +368,28 @@ RATE_FILE = {
 COMBO_FILE = {"FC": "FC", "FCP": "FCp", "AP": "AP", "APP": "APp"}
 SYNC_FILE = {"FS": "FS", "FSP": "FSp", "FSD": "FSD", "FSDP": "FSDp"}
 
+# 日服 DX 世代版本码 → 日服 logo 文件名（static/mai/pic/jp/ 下）。
+# 现有素材库的 DX 代 logo 为国服特有版本，日服视图渲染时改用本表；
+# 旧框（<20000）中日 logo 相同，走 VERSION_IMAGE 通用路径。
+# MAGiCAL(27000) 等超出 maimai_py 枚举的版本同样在此映射（song-db-design §7.4）
+JP_VERSION_IMAGE: dict[int, str] = {
+    20000: "DX",
+    20500: "DX PLUS",
+    21000: "Splash",
+    21500: "Splash PLUS",
+    22000: "UNiVERSE",
+    22500: "UNiVERSE PLUS",
+    23000: "FESTiVAL",
+    23500: "FESTiVAL PLUS",
+    24000: "BUDDiES",
+    24500: "BUDDiES PLUS",
+    25000: "PRiSM",
+    25500: "PRiSM PLUS",
+    26000: "CiRCLE",
+    26500: "CiRCLE PLUS",
+    27000: "MAGiCAL",
+}
+
 # Version 枚举 → 版本图文件名（pic/ 下，键与 maimai-py divingfish_to_version 一致）
 try:  # maimai-py 未公开导出该映射时的兜底
     from maimai_py.enums import divingfish_to_version as _DF_TO_VERSION

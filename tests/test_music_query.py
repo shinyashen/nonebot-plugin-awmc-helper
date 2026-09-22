@@ -243,15 +243,18 @@ async def test_query_chart_not_found(app: App, songs):
 @requires_assets
 @pytest.mark.asyncio
 async def test_query_chart_card(app: App, songs):
+    from maimai_py import SongType
+
     from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     song = await song_service.by_id(231)
+    # SD 形状 id → 卡片显示标准谱（NB 双条目语义：id 即条目类型）
     await _assert_image_reply(
         app,
         "query_chart",
         "id 231",
-        lambda: music_query._chart_card(song, None),
+        lambda: music_query._chart_card(song, None, SongType.STANDARD),
     )
 
 
