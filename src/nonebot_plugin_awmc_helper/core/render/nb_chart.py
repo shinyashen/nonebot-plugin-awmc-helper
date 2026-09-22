@@ -168,6 +168,25 @@ def _version_image(song: Song, jp: bool = False) -> Image.Image | None:
     return None
 
 
+def _fit_version_logo(
+    img: Image.Image, box: tuple[int, int] = (182, 90)
+) -> Image.Image:
+    """版本 logo 等比适配槽位：裁透明留白 → 高≥72 且 宽≥140（取大者）→ 不超槽位。
+
+    各世代素材画布的留白量与宽高比差异很大（国服 AR 1.2~4.9、日服 1.4~2.8），
+    直接 resize 到槽位（比例 2.02）会带来 10~140% 的拉伸变形；按内容双下限
+    等比缩放才能兼顾不变形与整组 logo 视觉大小一致。
+    """
+    alpha = img.getchannel("A").point(lambda v: 255 if v > 16 else 0)
+    if bb := alpha.getbbox():
+        img = img.crop(bb)
+    scale = max(72 / img.height, 140 / img.width)
+    scale = min(scale, box[0] / img.width, box[1] / img.height)
+    return img.resize(
+        (round(img.width * scale), round(img.height * scale)), Image.LANCZOS
+    )
+
+
 def song_chart_info(
     song: Song,
     calc: bool,
@@ -206,7 +225,10 @@ def song_chart_info(
     im.alpha_composite(cover, (133, 197))
     version_img = _version_image(song, jp)
     if version_img is not None:
-        im.alpha_composite(version_img.resize((182, 90)), (800, 370))
+        logo = _fit_version_logo(version_img)
+        im.alpha_composite(
+            logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
+        )
     prefer_sd = prefer_type == SongType.STANDARD and song.difficulties.standard
     type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
     type_path = base / f"{type_abbr}.png"
