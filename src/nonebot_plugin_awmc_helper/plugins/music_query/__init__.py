@@ -214,7 +214,28 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             await UniMessage.text(NOT_FOUND).finish(at_sender=True)
         title, page = _split_page(a_list)
         songs = await song_service.by_title_fuzzy(title)
+        if not songs:
+            # 国服标题未命中 → 日服视图 fallback（Q32，与别名 fallback 同口径）
+            songs = await song_service.jp_by_title_fuzzy(title)
+            if songs:
+                await _render_jp_result(songs, page)
         await _render_result(songs, page, binding)
+
+
+async def _render_jp_result(songs, page: int) -> None:
+    """日服 fallback 结果：单首出日服卡（封面按需在线拉取），多首文本/列表图。"""
+    note = "\n此歌曲为日服限定"
+    if len(songs) == 1:
+        png = await _chart_card(songs[0], None, None, True)
+        await UniMessage.image(raw=png).text(note).finish(at_sender=True)
+    if len(songs) <= 5:
+        text = "".join(f"「{s.id}」 {s.title}\n" for s in songs)
+        await UniMessage.text(text.rstrip("\n") + note).finish(at_sender=True)
+    await (
+        UniMessage.image(raw=song_render.song_list_bytes(songs, page))
+        .text(f"\n第 {page} 页，共 {len(songs)} 首" + note)
+        .finish(at_sender=True)
+    )
 
 
 async def _vote_hint(name: str) -> str | None:

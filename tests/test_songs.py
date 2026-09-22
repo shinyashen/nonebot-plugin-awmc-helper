@@ -138,3 +138,32 @@ async def test_local_alias_hot_reload(songs):
     got = await song_service.by_alias("废曲别名")
     assert got is not None
     assert got[0].id == 902
+
+
+@pytest.mark.asyncio
+async def test_jp_title_fallback(songs, tmp_path):
+    """国服标题未命中 → 日服视图标题子串匹配（Q32）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    # 日服限定曲仅入 DB 规范表（CN 运行时视图无此曲）；日服视图只收有谱面组的曲
+    async with store._open_session() as session:
+        session.add(store.SongRow(id=2019, title="Cryogenic", image_url="c4ec.png"))
+        session.add(
+            store.SongSheetGroup(
+                song_id=2019, kind="dx", version=27000, version_cn=None, date=20260702
+            )
+        )
+        session.add(store.SongChart(song_id=2019, kind="dx", level_id=3, notes_tap=100))
+        await session.commit()
+    song_service._jp_view = {}
+    song_service._jp_fingerprint = None
+    try:
+        got = await song_service.jp_by_title_fuzzy("cryo")
+        assert [s.id for s in got] == [2019]
+        assert got[0].title == "Cryogenic"
+        # 国服视图确实没有这首
+        assert await song_service.by_title_fuzzy("cryo") == []
+    finally:
+        song_service._jp_view = {}
+        song_service._jp_fingerprint = None

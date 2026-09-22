@@ -292,6 +292,15 @@ class SongService:
         self._jp_fingerprint = fp
         return self._jp_view
 
+    async def jp_by_title_fuzzy(self, title: str) -> list[Song]:
+        """日服视图标题子串匹配（国服查歌 fallback，大小写不敏感，按 id 升序）。"""
+        jp = await self._jp_songs_map()
+        kw = title.lower()
+        return sorted(
+            (s for s in jp.values() if kw in s.title.lower()),
+            key=lambda s: s.id,
+        )
+
     async def jp_by_alias_detail(
         self, alias: str
     ) -> tuple[list[Song], tuple[str, str] | None]:
