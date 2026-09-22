@@ -28,6 +28,11 @@ class Config(BaseModel):
     awmc_lxns_redirect_uri: str | None = None
     # 柚子 API 走 .cn 中转域
     awmc_yuzu_proxy: bool = False
+    # 智能代理地址（如 http://127.0.0.1:7796）：国外站代理优先、国内站直连优先，
+    # 连接失败自动互为回退；空 = 不启用代理层
+    awmc_proxy: str | None = None
+    # 追加的「国外站」host 后缀（内置 GitHub 系；命中后缀的站走代理优先）
+    awmc_foreign_hosts: list[str] = []
     # 别名推送默认态（兼 SSE 常驻连接的启动开关）
     awmc_alias_push: bool = True
     # icon/plate 素材在线获取

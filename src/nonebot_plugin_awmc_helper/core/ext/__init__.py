@@ -10,6 +10,8 @@
 
 import httpx
 
+from ..http import build_smart_transport
+
 
 class ExtError(Exception):
     """外部接口业务错误（message 面向用户可读）。"""
@@ -29,6 +31,7 @@ def get_client() -> httpx.AsyncClient:
         _client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
             follow_redirects=True,
+            transport=build_smart_transport(),
         )
     return _client
 

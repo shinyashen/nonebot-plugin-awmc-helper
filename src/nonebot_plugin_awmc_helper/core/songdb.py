@@ -34,6 +34,7 @@ from maimai_py.models import (
 )
 
 from . import store
+from .http import build_smart_transport
 from ..constants import (
     DX_VERSION_CODES,
     EXTRA_VERSION_NAMES,
@@ -1459,7 +1460,9 @@ async def apply_external_sources() -> dict[str, Any]:
         mode = mode if mode in ("fill", "override") else "override"
         try:
             if source.startswith(("http://", "https://")):
-                async with httpx.AsyncClient(timeout=30) as http:
+                async with httpx.AsyncClient(
+                    timeout=30, transport=build_smart_transport()
+                ) as http:
                     resp = await http.get(source)  # 匿名读取，不加鉴权头（作者拍板）
                     resp.raise_for_status()
                     data = resp.json()

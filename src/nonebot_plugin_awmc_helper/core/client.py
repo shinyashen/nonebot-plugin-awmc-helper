@@ -13,6 +13,7 @@
 
 from maimai_py import LXNSProvider, MaimaiClient, YuzuProvider, DivingFishProvider
 
+from .http import build_smart_transport
 from ..config import plugin_config
 
 
@@ -26,8 +27,11 @@ def _build_yuzu() -> YuzuProvider:
     return ProxyYuzuProvider() if plugin_config.awmc_yuzu_proxy else YuzuProvider()
 
 
-client = MaimaiClient(cache_ttl=plugin_config.awmc_cache_ttl_hours * 3600)
-"""唯一的 MaimaiClient 实例（进程单例），全插件共享。"""
+client = MaimaiClient(
+    cache_ttl=plugin_config.awmc_cache_ttl_hours * 3600,
+    transport=build_smart_transport(),
+)
+"""唯一的 MaimaiClient 实例（进程单例），全插件共享；transport 挂智能代理层。"""
 
 divingfish_provider = DivingFishProvider(
     developer_token=plugin_config.awmc_divingfish_developer_token
