@@ -217,6 +217,8 @@ async def test_daily_songdb_pipeline(db, monkeypatch):
 
     async def fake_refresh_all(**kw):
         calls["refresh"].append(kw)
+        # 模拟 refresh_all 的 extra 应用结果：配置了外部源且内容有变化时触发底图重建
+        changed = bool(plugin_config.awmc_extra_song_sources)
         return {
             "songs": 10,
             "groups": 10,
@@ -225,6 +227,11 @@ async def test_daily_songdb_pipeline(db, monkeypatch):
             "removed": 0,
             "warnings": [],
             "cn_current_version": 25500,
+            "extra": {
+                "sources": len(plugin_config.awmc_extra_song_sources),
+                "applied": 1 if changed else 0,
+                "changed": changed,
+            },
         }
 
     async def fake_prerender():

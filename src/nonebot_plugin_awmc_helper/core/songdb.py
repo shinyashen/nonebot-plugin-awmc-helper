@@ -792,6 +792,7 @@ def apply_missing(
     jp_known_songs: set[int] | None,
     jp_known_titles: set[str] | None,
     jp_deleted_titles: set[str] | None = None,
+    extra_known_ids: set[int] | None = None,
 ) -> int:
     """缺失/删除统一规则（§7.5-B）：一侧缺置该侧版本列 NULL，两侧皆无整曲删除。
 
@@ -799,7 +800,9 @@ def apply_missing(
       None = 双源未齐，跳过 CN 缺省同步；
     - ``jp_known_songs``：maimaiinfo 解出的 song_id 集；None = 跳过 JP 缺省同步；
     - ``jp_known_titles``：otoge-db 现役归一标题集（None = 不强求）；
-    - ``jp_deleted_titles``：otoge 下架标题集（权威下架信号）。
+    - ``jp_deleted_titles``：otoge 下架标题集（权威下架信号）；
+    - ``extra_known_ids``：外部补充源（机台快照等）给出的 id 集——在列信号最强
+      （日服当前机台数据），优先于 otoge 下架记录（§7.5-C）。
     整曲删除以**源在列信号**判定（任一信号源认为在列即保留；信号源全缺时回落
     版本列全空），避免「版本未知」与「该服未上线」混淆造成误删。
     返回整曲删除数。
@@ -820,6 +823,8 @@ def apply_missing(
                 continue
             if jp_known_titles is not None and title_key in jp_known_titles:
                 continue
+            if extra_known_ids is not None and song_id in extra_known_ids:
+                continue  # 机台快照在列（maimaiinfo/otoge 均滞后），版本保留
             group.version = None
     # 两侧皆无（按源在列信号判定）→ 整曲删除；无信号源时回落版本列
     removed = 0
@@ -835,6 +840,8 @@ def apply_missing(
                 jp_present = (
                     False  # otoge 下架记录为权威 JP 缺失信号（maimaiinfo 可能滞后）
                 )
+            if extra_known_ids is not None and song_id in extra_known_ids:
+                jp_present = True  # 机台当前数据在列，覆盖一切滞后信号
         else:
             jp_present = any(g.version is not None for g in groups)
         if cn_known is not None:
@@ -853,11 +860,14 @@ def apply_missing(
     return removed
 
 
-async def rebuild(payloads: dict[str, Any]) -> dict[str, Any]:
+async def rebuild(
+    payloads: dict[str, Any], *, extra_jp_ids: set[int] | None = None
+) -> dict[str, Any]:
     """规范表重建入口：接收各源 payload（None = 该源本次未拉取成功，跳过），写回 DB。
 
     payloads 键：``maimaiinfo`` / ``dschange`` / ``otoge_db`` / ``otoge_deleted`` /
-    ``lxns`` / ``divingfish``。返回统计与告警（已写日志，供通知拼接）。
+    ``lxns`` / ``divingfish``。``extra_jp_ids`` 为外部补充源的 id 集（JP 在列信号，
+    §7.5-C）。返回统计与告警（已写日志，供通知拼接）。
     """
     state = await State.load()
     jp: dict[int, Entry] = {}
@@ -908,6 +918,7 @@ async def rebuild(payloads: dict[str, Any]) -> dict[str, Any]:
         jp_known_songs=set(jp) if jp else None,
         jp_known_titles=set(otoge.live_titles) if otoge else None,
         jp_deleted_titles=set(otoge.deleted_titles) if otoge else set(),
+        extra_known_ids=extra_jp_ids,
     )
     await state.save()
     await _archive_raw(payloads)
@@ -1383,9 +1394,7 @@ async def refresh_all(
         started = time.monotonic()
         try:
             payloads["lxns"] = await ext_lxns.fetch_song_list(notes=True)
-            logger.info(
-                f"songdb：lxns 拉取成功（{time.monotonic() - started:.1f}s）"
-            )
+            logger.info(f"songdb：lxns 拉取成功（{time.monotonic() - started:.1f}s）")
         except Exception as e:
             logger.warning(
                 f"songdb: 落雪曲库拉取失败，本次跳过"
@@ -1402,11 +1411,23 @@ async def refresh_all(
                 f"songdb: 水鱼曲库拉取失败，本次跳过"
                 f"（{time.monotonic() - started:.1f}s：{e}）"
             )
-    result = await rebuild(payloads)
+    # 外部补充源：读取一次，id 集作 JP 在列信号参与删除判定，重建后合并（§7.5-C）
+    try:
+        extra_docs = await _load_extra_docs()
+    except Exception:
+        logger.exception("songdb: 外部补充源读取失败（不影响规范表重建）")
+        extra_docs = []
+    result = await rebuild(payloads, extra_jp_ids=extra_jp_ids(extra_docs))
     logger.info(
         f"songdb：重建完成——曲 {result['songs']}、谱面组 {result['groups']}、"
         f"谱面 {result['charts']}（总耗时 {time.monotonic() - total_started:.1f}s）"
     )
+    if extra_docs:
+        try:
+            result["extra"] = await apply_external_sources(preloaded=extra_docs)
+        except Exception:
+            logger.exception("songdb: 外部补充源应用失败（不影响规范表）")
+    # 归并在外部源之后：本轮由外部源创建的曲即可清理对应 pending 行
     try:
         await flush_pending()
     except Exception:
@@ -1468,26 +1489,20 @@ async def upsert_pending(source: str, key: str, reason: str, payload: dict) -> N
         await session.commit()
 
 
-async def apply_external_sources() -> dict[str, Any]:
-    """读取并应用外部补充源（§7.5-C）：仅日服侧，标准 JSON，override/fill 字段级合并。
+async def _load_extra_docs() -> list[tuple[str, str, dict]]:
+    """读取外部补充源配置（§7.5-C），返回 (来源名, mode, 文档) 列表。
 
     配置 ``awmc_extra_song_sources`` 每项为路径/URL，可带 ``::fill``/``::override``
-    后缀指定该源合并模式（默认 override，人工即权威）。返回
-    {sources, applied, changed}；内容哈希记 kv_cache，变化才写库。
+    后缀指定该源合并模式（默认 override，人工即权威）。读取失败记 error 跳过。
     """
-    import hashlib as _hashlib
     from pathlib import Path
 
     import httpx
 
     from ..config import plugin_config
 
-    specs = plugin_config.awmc_extra_song_sources
-    summary: dict[str, Any] = {"sources": len(specs), "applied": 0, "changed": False}
-    if not specs:
-        return summary
-    docs: list[tuple[str, str, dict]] = []  # (来源名, mode, 文档)
-    for spec in specs:
+    docs: list[tuple[str, str, dict]] = []
+    for spec in plugin_config.awmc_extra_song_sources:
         source, _, mode = spec.partition("::")
         mode = mode if mode in ("fill", "override") else "override"
         try:
@@ -1505,6 +1520,31 @@ async def apply_external_sources() -> dict[str, Any]:
             docs.append((source, mode, data))
         except Exception as e:
             logger.error(f"songdb: 外部补充源 {source} 读取失败，跳过（{e}）")
+    return docs
+
+
+def extra_jp_ids(docs: list[tuple[str, str, dict]]) -> set[int]:
+    """外部源文档给出的 id 集——JP 在列信号（apply_missing 删除判定用，§7.5-C）。"""
+    return {int(key) for _n, _m, doc in docs for key in doc if str(key).isdigit()}
+
+
+async def apply_external_sources(
+    preloaded: list[tuple[str, str, dict]] | None = None,
+) -> dict[str, Any]:
+    """读取并应用外部补充源（§7.5-C）：仅日服侧，标准 JSON，override/fill 字段级合并。
+
+    返回 {sources, applied, changed}；内容哈希记 kv_cache，变化才写库。
+    ``preloaded`` 传入已读取的文档（refresh_all 管线复用，避免重复读取）。
+    """
+    import hashlib as _hashlib
+
+    from ..config import plugin_config
+
+    specs = plugin_config.awmc_extra_song_sources
+    summary: dict[str, Any] = {"sources": len(specs), "applied": 0, "changed": False}
+    if not specs:
+        return summary
+    docs = preloaded if preloaded is not None else await _load_extra_docs()
     digest = _hashlib.md5(
         json.dumps(
             [(m, d) for _, m, d in docs], ensure_ascii=False, sort_keys=True
@@ -1519,21 +1559,112 @@ async def apply_external_sources() -> dict[str, Any]:
     return summary
 
 
+def _jp_current_version(state: State) -> int | None:
+    """日服当前版本：数据 max(组 version)，无任何值时 None。"""
+    values = [g.version for g in state.groups.values() if g.version is not None]
+    return max(values) if values else None
+
+
+def _merge_current_level(
+    state: State,
+    song_id: int,
+    kind: str,
+    level_id: int,
+    value: float,
+    debut: int | None,
+    anchor: int | None,
+) -> None:
+    """单元素 level 列表（快照源的「当前定数」）合并进定数历史（§7.5-C）。
+
+    - 无历史：退化为登场版本单行（§6 口径，登场地板到 DX 初代）；
+    - 有历史且末值一致：幂等 no-op；
+    - 有历史且末值不同：锚定到日服当前版本追加变化点（末点已在锚点则原位校正）
+      ——快照源只知道「现在值」，变化点版本取当前版本是新鲜快照的最优近似，
+      绝不改写历史版本上的值。
+    """
+    history = state.history_of(song_id, kind, level_id)
+    if not history:
+        base = debut if debut is not None else anchor
+        if base is None:
+            logger.debug(
+                f"songdb: 外部源当前定数无从锚定"
+                f"（id={song_id} {kind}{level_id}={value}），跳过"
+            )
+            return
+        state.set_history(
+            song_id, kind, level_id, [(max(base, DX_VERSION_CODES[0]), value)]
+        )
+        return
+    last_version, last_value = history[-1]
+    if abs(last_value - value) <= 1e-9:
+        return
+    if anchor is None:
+        anchor = last_version
+    if last_version == anchor:
+        history[-1] = (anchor, value)
+        logger.info(
+            f"songdb: 外部源校正当前定数（id={song_id} {kind}{level_id}）"
+            f"{last_value} → {value}"
+        )
+    else:
+        history.append((anchor, value))
+        logger.info(
+            f"songdb: 外部源追加定数更新（id={song_id} {kind}{level_id}）"
+            f"自版本 {anchor}：{last_value} → {value}"
+        )
+    state.set_history(song_id, kind, level_id, history)
+
+
 async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
-    """外部标准 JSON 合并进主表：**只允许日服侧**，写 ``version_cn`` 忽略并告警。"""
+    """外部标准 JSON 合并进主表：**只允许日服侧**，写 ``version_cn`` 忽略并告警。
+
+    主表缺失的曲（骨架外新曲、maimaiinfo 滞后的新版曲等，文档自带 id）直接
+    创建（仅日侧行，version_cn 恒 NULL）；单元素 sd/dx ``level`` 按「当前定数」
+    语义合并（:func:`_merge_current_level`），多元素列表按 01 文档线格式对位。
+    """
     from pathlib import Path
 
     state = await State.load()
     applied = 0
+    created = 0
     for name, mode, doc in docs:
+        # 锚定版本取「状态已有 ∨ 本文档最大」——与曲处理顺序无关
+        anchor = max(
+            (
+                v
+                for v in [
+                    _jp_current_version(state),
+                    *[
+                        sheet.get("version")
+                        for _k2, s2 in doc.items()
+                        if isinstance(s2, dict)
+                        for sheet in (s2.get("sheets") or {}).values()
+                        if isinstance(sheet, dict) and sheet.get("version")
+                    ],
+                ]
+                if v is not None
+            ),
+            default=None,
+        )
         for song_id_str, song_doc in doc.items():
             if not song_id_str.isdigit():
                 logger.warning(f"songdb: 外部源 {name} 非法 id {song_id_str!r}，跳过")
                 continue
             song_id = int(song_id_str)
+            if not isinstance(song_doc, dict):
+                logger.warning(f"songdb: 外部源 {name} id={song_id} 条目非对象，跳过")
+                continue
             row = state.songs.get(song_id)
             if row is None:
-                continue  # 只补充已存在的曲（骨架外的新曲等 id 到位由常规管线处理）
+                title = song_doc.get("title") or ""
+                if not title:
+                    continue  # 连标题都缺失的条目无法建曲
+                row = state.song(song_id)
+                created += 1
+                logger.info(
+                    f"songdb: 外部源 {name} 新增曲 id={song_id}「{title}」"
+                    "（日侧行，version_cn=NULL，骨架待常规管线补全）"
+                )
             for field_name in ("title", "artist", "genre", "bpm", "image_url"):
                 if field_name in song_doc and (
                     mode == "override" or not getattr(row, field_name)
@@ -1576,10 +1707,11 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
                         target.notes_touch = int(notes[3])
                         target.notes_break = int(notes[4])
                     if kind == "utage":
-                        if content.get("comment") and (
-                            mode == "override" or not target.comment
-                        ):
-                            target.comment = content["comment"]
+                        for field in ("kanji", "comment"):
+                            if content.get(field) and (
+                                mode == "override" or not getattr(target, field)
+                            ):
+                                setattr(target, field, content[field])
                     # 01 文档线格式：level 为扁平列表（sd/dx 逐版本；宴单元素标级浮点）
                     flat = content.get("level") or []
                     if flat:
@@ -1588,13 +1720,34 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
                             points = (
                                 [(debut, float(flat[0]))] if debut is not None else []
                             )
+                            if points and (
+                                mode == "override"
+                                or not state.history_of(song_id, kind, level_id)
+                            ):
+                                state.set_history(song_id, kind, level_id, points)
+                        elif len(flat) == 1:
+                            # 单元素 = 快照源的「当前定数」（§7.5-C 语义）
+                            if mode == "fill" and state.history_of(
+                                song_id, kind, level_id
+                            ):
+                                pass  # fill 不动已有历史
+                            else:
+                                _merge_current_level(
+                                    state,
+                                    song_id,
+                                    kind,
+                                    level_id,
+                                    float(flat[0]),
+                                    debut,
+                                    anchor,
+                                )
                         else:
                             points = _points_from_flat([float(v) for v in flat], debut)
-                        if points and (
-                            mode == "override"
-                            or not state.history_of(song_id, kind, level_id)
-                        ):
-                            state.set_history(song_id, kind, level_id, points)
+                            if points and (
+                                mode == "override"
+                                or not state.history_of(song_id, kind, level_id)
+                            ):
+                                state.set_history(song_id, kind, level_id, points)
                     applied += 1
     # 外部片段归档（source=extra:<名称>；同键多 mode 以 mode 后缀区分，重放先清旧行）
     origins = {
@@ -1618,7 +1771,9 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
                 )
             )
         await session.commit()
-    if applied:
+    if applied or created:
         await state.save()
-    logger.info(f"songdb: 外部补充源应用完成（{applied} 处谱面级字段）")
+    logger.info(
+        f"songdb: 外部补充源应用完成（{applied} 处谱面级字段、新增 {created} 曲）"
+    )
     return applied

@@ -348,3 +348,150 @@ async def test_external_source_invalid_not_blocking(db, tmp_path, monkeypatch):
     assert summary["applied"] == 0
     state = await songdb.State.load()
     assert state.groups[(8, "sd")].version == 20000  # 数据无恙
+
+
+@pytest.mark.asyncio
+async def test_external_source_current_level(db, tmp_path, monkeypatch):
+    """单元素 level = 快照源「当前定数」语义（§7.5-C）：
+
+    - 有历史且末值不同：锚定日服当前版本**追加**变化点，绝不清掉既有变化点；
+    - 末值相同：幂等 no-op；
+    - 无历史：退化为登场版本单行；
+    - fill 模式：已有历史一律不动。
+    """
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    doc = tmp_path / "magical.json"
+    doc.write_text(
+        json.dumps(
+            {
+                # sd0 已有历史 [(20000, 4.0), (23000, 4.5)]，快照当前定数 4.8
+                "8": {
+                    "sheets": {
+                        "sd": {
+                            "contents": [{"level_id": 0, "level": [4.8]}],
+                        }
+                    }
+                },
+                # 无历史（from=未知、无 dschange）：登场版本在文档中给出
+                "12": {
+                    "sheets": {
+                        "sd": {
+                            "version": 23000,
+                            "contents": [{"level_id": 0, "level": [5.2]}],
+                        }
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(doc)],
+    )
+    summary = await songdb.apply_external_sources()
+    assert summary["changed"]
+    state = await songdb.State.load()
+    # 既有变化点保留，末尾按日服当前版本（夹具 max 组版本 = 26500 increments 曲）追加
+    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5), (26500, 4.8)]
+    # 无历史 → 登场版本单行（§6 退化口径）
+    assert state.groups[(12, "sd")].version == 23000
+    assert state.history_of(12, "sd", 0) == [(23000, 5.2)]
+    # 幂等：同值重放（绕过哈希门直接合并）不再追加
+    await songdb._merge_extra_docs(
+        [("magical.json", "override", json.loads(doc.read_text(encoding="utf-8")))]
+    )
+    state = await songdb.State.load()
+    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5), (26500, 4.8)]
+    # fill 模式：已有历史不动
+    fill_doc = tmp_path / "fill.json"
+    fill_doc.write_text(
+        json.dumps(
+            {"8": {"sheets": {"sd": {"contents": [{"level_id": 0, "level": [9.9]}]}}}},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [f"{fill_doc}::fill"],
+    )
+    await songdb.apply_external_sources()
+    state = await songdb.State.load()
+    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5), (26500, 4.8)]
+
+
+@pytest.mark.asyncio
+async def test_external_source_creates_missing_song(db, tmp_path, monkeypatch):
+    """骨架外新曲（文档自带 id）直接创建日侧行，并经 extra 在列信号免于误删。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    doc = tmp_path / "new.json"
+    doc.write_text(
+        json.dumps(
+            {
+                "6001": {
+                    "title": "Magical New Song",
+                    "artist": " Someone ",
+                    "genre": "オニゲー",
+                    "bpm": "200",
+                    "sheets": {
+                        "sd": {
+                            "version": 27000,
+                            "contents": [
+                                {"level_id": 0, "level": [3.0]},
+                                {
+                                    "level_id": 3,
+                                    "level": [13.5],
+                                    "designer": "MAGI",
+                                },
+                            ],
+                        },
+                        "utage": {
+                            "version": 27000,
+                            "contents": [
+                                {
+                                    "level_id": 0,
+                                    "level": [12.7],
+                                    "kanji": "魔",
+                                    "comment": "マジカル",
+                                    "is_buddy": False,
+                                }
+                            ],
+                        },
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(doc)],
+    )
+    summary = await songdb.apply_external_sources()
+    assert summary["changed"]
+    state = await songdb.State.load()
+    assert state.songs[6001].title == "Magical New Song"
+    assert state.groups[(6001, "sd")].version == 27000
+    assert state.groups[(6001, "sd")].version_cn is None  # 恒 NULL（日侧行）
+    assert state.history_of(6001, "sd", 3) == [(27000, 13.5)]
+    assert state.charts[(6001, "utage", 0)].kanji == "魔"
+    assert state.charts[(6001, "utage", 0)].comment == "マジカル"
+    doc_json = songdb.standard_json(state)
+    assert doc_json["6001"]["title"] == "Magical New Song"
+    # 下次全量重建：extra id 作为 JP 在列信号 → 曲与组版本保留
+    await songdb.rebuild(full_payloads(), extra_jp_ids={6001})
+    state = await songdb.State.load()
+    assert 6001 in state.songs
+    assert state.groups[(6001, "sd")].version == 27000
+    assert state.history_of(6001, "sd", 3) == [(27000, 13.5)]
+    # 无信号时（maimaiinfo/otoge 均不知晓）→ 两侧皆无 → 整曲删除
+    await songdb.rebuild(full_payloads())
+    state = await songdb.State.load()
+    assert 6001 not in state.songs

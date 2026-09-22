@@ -676,6 +676,7 @@ async def _on_cn_update(
 
 async def _daily_songdb() -> None:
     """每日 4 点歌曲库全量（§7.1 ⑥⑦⑧）：日侧源 + CN 回填 + 外部源 + 底图兜底。"""
+    extra: dict = {}
     try:
         result = await songdb.refresh_all(include_cn=True, include_jp=True)
         logger.info(
@@ -685,15 +686,16 @@ async def _daily_songdb() -> None:
         )
         for warning in result.get("warnings", [])[:20]:
             logger.warning(f"songdb: {warning}")
+        extra = result.get("extra") or {}
     except Exception:
         logger.exception("歌曲库每日全量刷新失败（不影响曲库运行时）")
-    try:
-        extra = await songdb.apply_external_sources()
-        if extra.get("changed"):
-            logger.info(f"外部补充源有变化，重建底图（{extra}）")
+    if extra.get("changed"):
+        # 外部源已在 refresh_all 内应用（含新曲创建），此处只负责底图重建
+        logger.info(f"外部补充源有变化，重建底图（{extra}）")
+        try:
             await _prerender_templates()
-    except Exception:
-        logger.exception("外部补充源应用失败（不阻塞）")
+        except Exception:
+            logger.exception("外部补充源触发的预渲染失败（保留旧底图，不阻塞）")
     await _ensure_templates()
     # 规范表已可能变化：指纹较上次加载不同时 maimai_py 自动重建运行时缓存
     await song_service.refresh()
