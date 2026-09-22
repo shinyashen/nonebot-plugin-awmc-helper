@@ -1032,9 +1032,20 @@ async def _archive_raw(payloads: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+# 国服口径的分类名（落雪/水鱼）→ maimai_py Genre 值：两套叫法并存，构建曲对象前归一
+_GENRE_ALIASES: dict[str, str] = {
+    "流行&动漫": "POPSアニメ",
+    "niconico & VOCALOID": "niconicoボーカロイド",
+    "东方Project": "東方Project",
+    "其他游戏": "ゲームバラエティ",
+    "音击&中二节奏": "オンゲキCHUNITHM",
+    "舞萌": "maimai",
+}
+
+
 def _genre_of(name: str) -> Genre:
     try:
-        return Genre(name)
+        return Genre(_GENRE_ALIASES.get(name, name))
     except ValueError:
         return Genre.maimai
 

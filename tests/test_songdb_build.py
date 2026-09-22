@@ -495,3 +495,18 @@ async def test_external_source_creates_missing_song(db, tmp_path, monkeypatch):
     await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
     assert 6001 not in state.songs
+
+
+def test_genre_alias_normalization():
+    """国服口径分类名（落雪/水鱼）归一为 maimai_py Genre 值，未知名回落 maimai。"""
+    from maimai_py import Genre
+
+    from nonebot_plugin_awmc_helper.core.songdb import _genre_of
+
+    assert _genre_of("其他游戏") == Genre.ゲームバラエティ
+    assert _genre_of("流行&动漫") == Genre.POPSアニメ
+    assert _genre_of("niconico & VOCALOID") == Genre.niconicoボーカロイド
+    assert _genre_of("东方Project") == Genre.東方Project
+    assert _genre_of("音击&中二节奏") == Genre.オンゲキCHUNITHM
+    assert _genre_of("舞萌") == Genre.maimai
+    assert _genre_of("未实装") == Genre.maimai
