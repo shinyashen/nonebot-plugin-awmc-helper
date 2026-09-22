@@ -101,3 +101,14 @@ async def test_arcade_tables(tmp_db):
 
     assert await store.delete_arcade(10000)
     assert await store.get_arcade(10000) is None
+
+
+@pytest.mark.asyncio
+async def test_save_song_aliases_dedupes(tmp_db):
+    """远端源内同曲完全重复的别名（柚子数据实测存在）入库前精确去重。"""
+    store = tmp_db
+    await store.save_song_aliases("yuzu", {8: ["糖糖", "糖糖", "真 Love"], 9: ["糖糖"]})
+    merged = await store.load_song_aliases(["yuzu"])
+    assert len(merged[8]) == 2  # 重复对被去掉
+    assert set(merged[8]) == {"糖糖", "真 Love"}  # 存储层不保证顺序
+    assert merged[9] == ["糖糖"]

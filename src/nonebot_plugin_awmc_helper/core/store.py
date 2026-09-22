@@ -425,11 +425,19 @@ async def get_utage_kanji() -> dict[int, set[str]]:
 
 
 async def save_song_aliases(source: str, items: dict[int, list[str]]) -> None:
-    """整源替换远端别名快照（单事务；items 为根 id → 别名列表）。"""
+    """整源替换远端别名快照（单事务；items 为根 id → 别名列表）。
+
+    远端数据存在同曲完全重复的别名（柚子源实测），入库前按 (song_id, alias)
+    精确去重，否则整源写入触发唯一约束整体失败。
+    """
     async with _open_session() as session:
         await session.execute(delete(SongAlias).where(col(SongAlias.source) == source))
+        seen: set[tuple[int, str]] = set()
         for song_id, aliases in items.items():
             for alias in aliases:
+                if (song_id, alias) in seen:
+                    continue
+                seen.add((song_id, alias))
                 session.add(SongAlias(source=source, song_id=song_id, alias=alias))
         await session.commit()
 
