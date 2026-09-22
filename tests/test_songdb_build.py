@@ -617,3 +617,50 @@ async def test_otoge_fills_external_created_row(db, tmp_path, monkeypatch):
     async with store._open_session() as session:
         pend = list((await session.exec(select(store.SongPending))).all())
     assert all("Test Song First" not in p.key for p in pend)
+
+
+@pytest.mark.asyncio
+async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
+    """外部源宴 buddy 谱：notes_left/notes_right 与 is_buddy 合并进谱面行。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    extra = tmp_path / "extra_buddy.json"
+    extra.write_text(
+        json.dumps(
+            {
+                "1903": {
+                    "title": "Test Buddy Uta",
+                    "sheets": {
+                        "utage": {
+                            "version": 27000,
+                            "contents": [
+                                {
+                                    "level_id": 1,
+                                    "kanji": "奏",
+                                    "is_buddy": True,
+                                    "level": [13.0],
+                                    "notes_left": [10, 2, 3, 4, 5],
+                                    "notes_right": [20, 4, 6, 8, 10],
+                                }
+                            ],
+                        }
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(extra)],
+    )
+    summary = await songdb.apply_external_sources()
+    assert summary["changed"]
+    state = await songdb.State.load()
+    chart = state.charts[(1903, "utage", 1)]
+    assert chart.is_buddy
+    assert json.loads(chart.notes_left) == [10, 2, 3, 4, 5]
+    assert json.loads(chart.notes_right) == [20, 4, 6, 8, 10]
+    assert state.groups[(1903, "utage")].version == 27000

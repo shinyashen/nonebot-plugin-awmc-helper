@@ -1806,7 +1806,20 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
                         target.notes_slide = int(notes[2])
                         target.notes_touch = int(notes[3])
                         target.notes_break = int(notes[4])
+                    # 01 文档双人谱口径：宴 buddy 左右手物量（JSON 存 notes_left/right）
+                    for key in ("notes_left", "notes_right"):
+                        val = content.get(key)
+                        if (
+                            isinstance(val, list)
+                            and len(val) == 5
+                            and (mode == "override" or getattr(target, key) is None)
+                        ):
+                            setattr(target, key, json.dumps([int(v) for v in val]))
                     if kind == "utage":
+                        if content.get("is_buddy") is not None and (
+                            mode == "override" or not target.is_buddy
+                        ):
+                            target.is_buddy = bool(content["is_buddy"])
                         for field in ("kanji", "comment"):
                             if content.get(field) and (
                                 mode == "override" or not getattr(target, field)
