@@ -950,12 +950,7 @@ async def rebuild(
         "cn_current_version": state.cn_current_version(),
     }
     await store.kv_set("songdb_stat", result)
-    doc = standard_json(state)
-    await store.kv_set("songdb_json", doc)
-    global CURRENT_FINGERPRINT
-    CURRENT_FINGERPRINT = hashlib.md5(
-        json.dumps(doc, ensure_ascii=False, sort_keys=True).encode()
-    ).hexdigest()
+    await _refresh_standard_json(state)
     return result
 
 
@@ -1339,6 +1334,21 @@ def standard_json(state: State) -> dict[str, Any]:
         if song := song_standard_json(state, song_id):
             result[str(song_id)] = song
     return result
+
+
+async def _refresh_standard_json(state: State) -> str:
+    """重算全库标准 JSON 并同步指纹。
+
+    任何规范表直写（重建、外部源合并）之后都必须调用：日服视图等缓存以
+    ``CURRENT_FINGERPRINT`` 为失效键，写库不更新指纹会让缓存读不到新数据。
+    """
+    doc = standard_json(state)
+    await store.kv_set("songdb_json", doc)
+    global CURRENT_FINGERPRINT
+    CURRENT_FINGERPRINT = hashlib.md5(
+        json.dumps(doc, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()
+    return CURRENT_FINGERPRINT
 
 
 async def is_empty() -> bool:
@@ -1802,6 +1812,8 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
         await session.commit()
     if applied or created:
         await state.save()
+    # 外部源直写主表不经过 rebuild，指纹必须在此同步，否则日服视图缓存失效键不变
+    await _refresh_standard_json(state)
     logger.info(
         f"songdb: 外部补充源应用完成（{applied} 处谱面级字段、新增 {created} 曲）"
     )

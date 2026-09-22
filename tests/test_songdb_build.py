@@ -510,3 +510,40 @@ def test_genre_alias_normalization():
     assert _genre_of("音击&中二节奏") == Genre.オンゲキCHUNITHM
     assert _genre_of("舞萌") == Genre.maimai
     assert _genre_of("未实装") == Genre.maimai
+
+
+@pytest.mark.asyncio
+async def test_external_merge_syncs_fingerprint(db, tmp_path, monkeypatch):
+    """外部源直写主表后必须同步指纹，否则日服视图缓存失效键不变、读不到新曲。"""
+    from nonebot_plugin_awmc_helper.core import store, songdb
+
+    await songdb.rebuild(full_payloads())
+    fp_before = songdb.CURRENT_FINGERPRINT
+    extra = tmp_path / "new_song.json"
+    extra.write_text(
+        json.dumps(
+            {
+                "2041": {
+                    "title": "指纹新曲",
+                    "sheets": {
+                        "dx": {
+                            "version": 27000,
+                            "contents": [{"level_id": 1, "level": [7.5]}],
+                        }
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(extra)],
+    )
+    summary = await songdb.apply_external_sources()
+    assert summary["changed"]
+    assert songdb.CURRENT_FINGERPRINT != fp_before
+    # 全库标准 JSON 同步包含新曲
+    doc = await store.kv_get("songdb_json")
+    assert "指纹新曲" in json.dumps(doc, ensure_ascii=False)
