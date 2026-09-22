@@ -96,9 +96,7 @@ async def _assert_image_reply(
     segments = [MessageSegment.at(user_id)]
     if prefix:
         segments.append(MessageSegment.text(prefix))
-    segments.append(
-        MessageSegment.image(f"base64://{base64.b64encode(png).decode()}")
-    )
+    segments.append(MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"))
     expected = (
         Message(segments)
         if not suffix
