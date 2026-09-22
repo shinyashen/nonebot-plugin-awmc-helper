@@ -477,6 +477,15 @@ async def save_song_aliases(source: str, items: dict[int, list[str]]) -> None:
         await session.commit()
 
 
+async def song_image_url(song_id: int) -> str | None:
+    """曲绘文件名（otoge-db 官方图名；日服封面在线拉取用），无则 None。"""
+    async with _open_session() as session:
+        row = (
+            await session.exec(select(SongRow).where(col(SongRow.id) == song_id))
+        ).first()
+    return row.image_url if row else None
+
+
 async def load_song_aliases(sources: list[str]) -> dict[int, list[str]]:
     """读取若干源的别名快照（根 id → 别名列表）。"""
     async with _open_session() as session:

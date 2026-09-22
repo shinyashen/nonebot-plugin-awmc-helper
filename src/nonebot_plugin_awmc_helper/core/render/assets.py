@@ -9,11 +9,17 @@ from pathlib import Path
 from functools import cache
 
 from PIL import Image
+from nonebot_plugin_localstore import get_data_dir
 
 from ...config import plugin_config
 
 THEMES = ("prism_plus", "circle")
 DEFAULT_THEME = "prism_plus"
+
+
+def jp_cache_dir() -> Path:
+    """日服在线封面缓存目录（localstore 缓存区；static 素材目录永不写入）。"""
+    return get_data_dir("nonebot_plugin_awmc_helper") / "jp_covers"
 
 
 class Assets:
@@ -45,23 +51,29 @@ class Assets:
         return cls.get(base / name)
 
     @classmethod
+    def cover_candidates(cls, song_id: int) -> tuple[Path, ...]:
+        """曲绘候选链：static 素材 → 日服封面缓存（jp_cover 在线拉取落盘）→ 0.png。"""
+        return (
+            cls.static_path() / "mai" / "cover" / f"{song_id}.png",
+            jp_cache_dir() / f"{song_id}.png",
+            cls.static_path() / "mai" / "cover" / "0.png",
+        )
+
+    @classmethod
     def cover(cls, song_id: int) -> Image.Image:
-        """曲绘（400×400），缺失回退 0.png；素材缺失时返回占位图。"""
-        path = cls.static_path() / "mai" / "cover" / f"{song_id}.png"
-        if not path.exists():
-            path = cls.static_path() / "mai" / "cover" / "0.png"
-        if not path.exists():
-            return Image.new("RGBA", (400, 400), "#666666")
-        return cls.get(path)
+        """曲绘（400×400），按候选链取第一个存在的；全缺时返回占位图。"""
+        for path in cls.cover_candidates(song_id):
+            if path.exists():
+                return cls.get(path)
+        return Image.new("RGBA", (400, 400), "#666666")
 
     @classmethod
     def cover_path(cls, song_id: int) -> Path | None:
-        """曲绘文件路径（缺失时回退 0.png；两者都缺失返回 None）。"""
-        path = cls.static_path() / "mai" / "cover" / f"{song_id}.png"
-        if path.exists():
-            return path
-        fallback = cls.static_path() / "mai" / "cover" / "0.png"
-        return fallback if fallback.exists() else None
+        """曲绘文件路径（按候选链取第一个存在的；全缺返回 None）。"""
+        for path in cls.cover_candidates(song_id):
+            if path.exists():
+                return path
+        return None
 
     @classmethod
     def plate_version(cls, version: str, kind: str) -> Image.Image | None:

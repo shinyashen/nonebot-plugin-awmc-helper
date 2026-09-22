@@ -18,6 +18,8 @@ _BUILTIN_FOREIGN_HOSTS: tuple[str, ...] = (
     "github.io",
     "githubusercontent.com",
     "githubassets.com",
+    # 日服官方站：封面（maimai-mobile/img/Music）等资源，国内直连基本不可达
+    "maimaidx.jp",
 )
 
 _FALLBACK_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError)

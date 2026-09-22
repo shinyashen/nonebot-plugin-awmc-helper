@@ -24,7 +24,7 @@ from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
-from ...core.render import nb_chart
+from ...core.render import jp_cover, nb_chart
 from ...core.binding import binding_service
 
 # 谱面前缀 → 卡片主类型（宴 前缀不改变卡片，宴曲本就走宴谱卡分支）
@@ -106,6 +106,9 @@ async def _chart_card(song, binding, prefer_type=None, jp: bool = False) -> byte
 
     if nb_chart.is_banquet(song):
         return nb_chart.song_chart_banquet_info(song)
+    if jp:
+        # 日服限定曲本地无素材：按需在线拉取官方曲绘（代理优先，落盘缓存）
+        await jp_cover.ensure(song.id)
     calc, is_full, best_list = False, False, []
     theme = "prism_plus"
     if binding is not None and not jp:
