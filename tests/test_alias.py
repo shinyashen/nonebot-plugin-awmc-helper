@@ -77,7 +77,10 @@ async def test_alias_of_song(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import alias
 
     await _assert_reply(
-        app, alias.alias_song, "企鹅舞有什么别名", "该曲目有以下别名：\nID：231\n企鹅舞"
+        app,
+        alias.alias_song,
+        "企鹅舞有什么别名",
+        "该曲目有以下别名：\nID：231、10231\n企鹅舞",
     )
 
 
@@ -89,8 +92,92 @@ async def test_alias_by_id(app: App, songs):
         app,
         alias.alias_song,
         "id 500有什么别名",
-        "该曲目有以下别名：\nID：500\n普瑞\n普雷呃伦斯",
+        "该曲目有以下别名：\nID：500、10500\n普瑞\n普雷呃伦斯",
     )
+
+
+@pytest.mark.asyncio
+async def test_alias_dx_only_song_ids(app: App, songs):
+    """只有 DX 谱的曲：仅展示 DX id（根 id+10000），不纳入标准位根 id。"""
+    from mocks import make_diff, make_song, sample_songs, seed_service
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.plugins import alias
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    dx_only = make_song(
+        603, "DXOnlySong", aliases=["敌敌畏"], diffs=[make_diff(type=SongType.DX)]
+    )
+    await seed_service(song_service, [*sample_songs(), dx_only])
+    await _assert_reply(
+        app,
+        alias.alias_song,
+        "敌敌畏有什么别名",
+        "该曲目有以下别名：\nID：10603\n敌敌畏",
+    )
+
+
+@pytest.mark.asyncio
+async def test_alias_utage_only_song_ids(app: App, songs):
+    """只有宴谱的曲：仅展示宴谱机台 id（无标准/DX 位）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import alias
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await store.add_local_alias(901, "宴曲", "u")
+    await song_service.reload_alias_index()
+    await _assert_reply(
+        app,
+        alias.alias_song,
+        "id 901有什么别名",
+        "该曲目有以下别名：\nID：100001\n宴曲",
+    )
+
+
+@pytest.mark.asyncio
+async def test_alias_multi_match_forward(app: App, songs):
+    """多曲命中别名：OB11 以合并转发逐曲展示（首条为命中数量）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import alias
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    # 本地别名让「企鹅」同时命中 231（柚子别名企鹅舞）与 500（本地+柚子别名）
+    await store.add_local_alias(231, "企鹅", "u")
+    await store.add_local_alias(500, "企鹅", "u")
+    await song_service.reload_alias_index()
+
+    event = fake_group_message_event_v11(message="企鹅有什么别名", user_id=12345678)
+    expected = Message(
+        [
+            MessageSegment.node_custom(
+                1234567890, "Bot", Message("找到2个相同别名的曲目：")
+            ),
+            MessageSegment.node_custom(
+                1234567890, "Bot", Message("ID：231、10231\n企鹅舞\n企鹅")
+            ),
+            MessageSegment.node_custom(
+                1234567890, "Bot", Message("ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅")
+            ),
+        ]
+    )
+    async with app.test_matcher(alias.alias_song) as ctx:
+        bot = ctx.create_bot(
+            base=Bot,
+            adapter=nonebot.get_adapter(OnebotV11Adapter),
+            self_id="1234567890",  # 合并转发节点 user_id 取 self_id，须为数字
+        )
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "send_group_forward_msg",
+            {"group_id": 87654321, "messages": expected},
+            result=None,
+        )
+        ctx.should_finished()
 
 
 @pytest.mark.asyncio

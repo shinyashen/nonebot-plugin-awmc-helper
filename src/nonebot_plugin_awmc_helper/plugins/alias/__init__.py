@@ -16,9 +16,10 @@ from nonebot import logger, get_bots, on_regex, get_driver, on_command
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Bot, Event, Message
+from nonebot.exception import MatcherException
 from nonebot.permission import SUPERUSER
 from nonebot_plugin_uninfo import ADMIN, Session, SceneType, UniSession
-from nonebot_plugin_alconna.uniseg import UniMessage
+from nonebot_plugin_alconna.uniseg import Reference, CustomNode, UniMessage
 
 from ...core import store
 from ...config import plugin_config
@@ -85,22 +86,49 @@ alias_global_switch = on_regex(
 update_alias = on_command("更新别名库", permission=SUPERUSER, block=True)
 
 
+def _ids_text(song) -> str:
+    """曲目的可用 id 展示文本（如 363、10363、100363），按谱面组实际存在取舍。"""
+    return "、".join(map(str, song_service.available_ids(song)))
+
+
 async def _send_song_aliases(song_id: int, hint: str = "") -> None:
-    """发送某曲目的全部别名（柚子 + 落雪 + 本地合并视图）。"""
-    aliases = await song_service.aliases_of(song_id)
-    if aliases is None:
+    """发送某曲目的全部别名（柚子 + 落雪 + 本地合并视图），ID 展示全部可用 id。"""
+    song = await song_service.by_id(song_id)
+    if song is None:
         await UniMessage.text(NOT_FOUND_ALIAS).finish(at_sender=True)
+    aliases = await song_service.aliases_of(song_id)
     if not aliases:
         await UniMessage.text(" 该曲目没有别名").finish(at_sender=True)
     suffix = f"\n{hint}" if hint else ""
     await UniMessage.text(
-        f" 该曲目有以下别名：\nID：{song_id}\n" + "\n".join(aliases) + suffix
+        f" 该曲目有以下别名：\nID：{_ids_text(song)}\n" + "\n".join(aliases) + suffix
     ).finish(at_sender=True)
+
+
+async def _finish_multi_forward(header: str, blocks: list[str], bot: Bot) -> bool:
+    """多曲命中时以合并转发发送（首条命中数量，之后每曲一条）。
+
+    仅 OB11 走合并转发（与别名推送同口径）；适配器不支持或协议端发送失败
+    返回 False，由调用方降级为普通消息。
+    """
+    if not (_OB11 and OB11Bot is not None and isinstance(bot, OB11Bot)):
+        return False
+    nodes = [
+        CustomNode(uid=bot.self_id, name="Bot", content=text)
+        for text in (header, *blocks)
+    ]
+    try:
+        await UniMessage(Reference(nodes=nodes)).finish()
+    except MatcherException:
+        raise  # finish 的控制流异常（已发送成功），原样上抛
+    except Exception:
+        logger.warning("别名多曲命中合并转发发送失败，降级为普通消息")
+    return False
 
 
 @alias_song.handle()
 @handle_errors("查询别名失败，请稍后再试")
-async def _(groups: tuple = RegexGroup()):
+async def _(bot: Bot, groups: tuple = RegexGroup()):
     qid, name = groups
     if qid:
         await _send_song_aliases(int(qid))
@@ -120,11 +148,14 @@ async def _(groups: tuple = RegexGroup()):
         blocks = []
         for item in songs:
             aliases = await song_service.aliases_of(item.id)
-            blocks.append(f"ID：{item.id}\n" + "\n".join(aliases or []))
-        msg = f"找到{len(songs)}个相同别名的曲目：\n" + "\n======\n".join(blocks)
+            blocks.append(f"ID：{_ids_text(item)}\n" + "\n".join(aliases or []))
         if hint:
-            msg += f"\n{hint}"
-        await UniMessage.text(msg).finish(at_sender=True)
+            blocks[-1] += f"\n{hint}"
+        header = f"找到{len(songs)}个相同别名的曲目："
+        if not await _finish_multi_forward(header, blocks, bot):
+            msg = header + "\n" + "\n======\n".join(blocks)
+            await UniMessage.text(msg).finish(at_sender=True)
+        return
     if songs:
         await _send_song_aliases(songs[0].id, hint)
         return

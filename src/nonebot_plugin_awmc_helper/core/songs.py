@@ -476,6 +476,29 @@ class SongService:
         """同步读别名索引（已就绪前提下）。"""
         return self._alias_index.get(alias.lower(), set())
 
+    @staticmethod
+    def available_ids(song: Song) -> list[int]:
+        """曲目的全部**可用** id（升序），按谱面组实际存在与否决定：
+
+        - SD id（=根 id）：仅有标准谱组时纳入（只有 DX 谱的曲不含根 id）；
+        - DX id（根 id+10000）：仅有 DX 谱组时纳入；
+        - 宴谱机台 id：逐谱纳入（``SongDifficultyUtage.diff_id``，
+          100000 + level_id * 10000 + 根 id）。
+        """
+        ids: list[int] = []
+        if song.get_difficulties(SongType.STANDARD):
+            ids.append(song.id)
+        if song.get_difficulties(SongType.DX):
+            ids.append(song.id + 10000)
+        ids.extend(
+            sorted(
+                d.diff_id
+                for d in song.get_difficulties(SongType.UTAGE)
+                if isinstance(d, SongDifficultyUtage)
+            )
+        )
+        return ids or [song.id]  # 无任何谱面的异常数据兜底，避免展示空 ID
+
     async def aliases_of(self, song_id: int) -> list[str] | None:
         """某曲目的全部别名（柚子 + 本地）；曲目不存在返回 None。"""
         song = await self.by_id(song_id)
