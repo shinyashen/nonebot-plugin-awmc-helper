@@ -15,12 +15,12 @@ from nonebot.adapters import Event, Message
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from ...constants import SERVICE_DISPLAY, COLOR_TO_LEVEL_INDEX, chart_display_id
+from ...constants import SERVICE_DISPLAY, COLOR_TO_LEVEL_INDEX
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.utils import handle_errors
-from ...core.render import pie as pie_render
 from ...core.render import info as info_render
+from ...core.render import stats as stats_render
 from ...core.render import best50 as b50_render
 from ...core.render import nb_chart
 from ...core.binding import session_keys, binding_service
@@ -241,8 +241,7 @@ async def _(groups: tuple = RegexGroup()):
     )
     if diff is None:
         await UniMessage.text(" 该曲目没有此难度谱面").finish(at_sender=True)
-    curve = diff.curve
-    if curve is None:
+    if diff.curve is None:
         await UniMessage.text(
             "暂无该谱面的游玩统计（需部署配置水鱼开发者 Token 以启用曲线数据）"
         ).finish(at_sender=True)
@@ -250,35 +249,20 @@ async def _(groups: tuple = RegexGroup()):
     # 卡片主类型跟随所选谱面（选 SD 色谱显示 SD 卡）
     prefer = SongType.STANDARD if diff.type == SongType.STANDARD else None
     card = nb_chart.song_chart_info(song, False, False, [], "prism_plus", prefer)
-    type_abbr = "DX" if diff.type == SongType.DX else "SD"
-    lines = [
-        f"「{chart_display_id(song, diff)}」{song.title}",
-        f"谱面：{type_abbr} {diff.level}（{diff.level_value:.1f}）",
-        f"样本数：{curve.sample_size}",
-        f"拟合定数：{curve.fit_level_value:.1f}",
-        f"平均达成率：{curve.avg_achievements:.2f}%"
-        f"（σ {curve.stdev_achievements:.2f}）",
-        f"平均 DX 分：{curve.avg_dx_score:.0f}",
-    ]
-    rate_data = sorted(
-        ((rate.name, int(cnt)) for rate, cnt in curve.rate_sample_size.items()),
-        key=lambda x: -x[1],
-    )
-    pie_png = pie_render.pie_bytes(f"{song.title} [{diff.level}] 评级分布", rate_data)
-    png = _ginfo_image(card, lines, extra_png=pie_png)
+    # R9：统计信息画入双环统计卡（样本/拟合/均值/σ/DX + 全连与评级分布）
+    stats_png = stats_render.song_global_data(song, diff)
+    png = _ginfo_image(card, stats_png)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
-def _ginfo_image(
-    card: bytes, lines: list[str], extra_png: bytes | None = None
-) -> bytes:
-    """富谱面卡 + 统计文本行（+ 可选分布图）纵向拼接。"""
+def _ginfo_image(card: bytes, stats_png: bytes) -> bytes:
+    """富谱面卡 + 统计卡纵向拼接。"""
     from PIL import Image
 
-    text_img = text_to_image("\n".join(lines), size=22, padding=14)
-    extras: list[Image.Image] = [Image.open(io.BytesIO(card)).convert("RGBA"), text_img]
-    if extra_png:
-        extras.append(Image.open(io.BytesIO(extra_png)).convert("RGBA"))
+    extras: list[Image.Image] = [
+        Image.open(io.BytesIO(card)).convert("RGBA"),
+        Image.open(io.BytesIO(stats_png)).convert("RGBA"),
+    ]
     total_h = sum(im.size[1] for im in extras) + 8 * (len(extras) - 1)
     w = max(im.size[0] for im in extras)
     out = Image.new("RGBA", (w, total_h), "#f2f3f5")

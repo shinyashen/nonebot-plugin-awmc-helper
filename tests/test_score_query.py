@@ -160,7 +160,7 @@ async def _send_image_reply(
 @requires_assets
 @pytest.mark.asyncio
 async def test_ginfo_rich_chart_card(app: App, db, songs):
-    """ginfo 与查歌同源富谱面卡（R2）：紫231 → DX 主类型卡 + 统计文本 + 评级分布图。"""
+    """ginfo 富谱面卡 + 双环统计卡（R2/R9）：紫231 → DX 主类型卡 + 统计卡。"""
     import base64
 
     from mocks import seed_service
@@ -168,37 +168,18 @@ async def test_ginfo_rich_chart_card(app: App, db, songs):
     from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
     from nonebot_plugin_awmc_helper.plugins import score_query
-    from nonebot_plugin_awmc_helper.constants import chart_display_id
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.render import pie as pie_render
+    from nonebot_plugin_awmc_helper.core.render import stats as stats_render
     from nonebot_plugin_awmc_helper.core.render import nb_chart
 
     seeded = await seed_service(song_service, [_curve_song()])
     song = seeded[0]
     diff = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
-    curve = diff.curve
 
-    # 与 handler 相同的调用路径 → 相同数据 → 相同渲染
+    # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（R9 统计卡）
     card = nb_chart.song_chart_info(song, False, False, [], "prism_plus", None)
-    lines = [
-        f"「{chart_display_id(song, diff)}」{song.title}",
-        f"谱面：DX {diff.level}（{diff.level_value:.1f}）",
-        f"样本数：{curve.sample_size}",
-        f"拟合定数：{curve.fit_level_value:.1f}",
-        f"平均达成率：{curve.avg_achievements:.2f}%"
-        f"（σ {curve.stdev_achievements:.2f}）",
-        f"平均 DX 分：{curve.avg_dx_score:.0f}",
-    ]
-    rate_data = sorted(
-        ((rate.name, int(cnt)) for rate, cnt in curve.rate_sample_size.items()),
-        key=lambda x: -x[1],
-    )
     expected_png = score_query._ginfo_image(
-        card,
-        lines,
-        extra_png=pie_render.pie_bytes(
-            f"{song.title} [{diff.level}] 评级分布", rate_data
-        ),
+        card, stats_render.song_global_data(song, diff)
     )
     expected = Message(
         [
