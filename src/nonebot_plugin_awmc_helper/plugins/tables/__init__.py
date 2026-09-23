@@ -129,24 +129,24 @@ def _plan_checker(plan: str):
 
 @ds_table_cmd.handle()
 @handle_errors("生成定数表失败")
-async def _(groups: tuple = RegexGroup()):
+async def _(
+    groups: tuple = RegexGroup(),
+):
+    """定数表（R8，NB DrawRatingTable(level_text=True) 版式网格图）。"""
+    from ...core.render import table_template
+
     (level,) = groups
     entries = []
     for song in await song_service.get_all():
         for d in song.get_difficulties():
             if d.type != SongType.UTAGE and d.level == level:
-                entries.append((d.level_value, song, d))
+                entries.append((song, d))
     if not entries:
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
         )
-    entries.sort(key=lambda x: -x[0])
-    lines = [f"定数表 {level}（共 {len(entries)} 谱面）"]
-    for ds, song, d in entries:
-        type_abbr = "DX" if d.type == SongType.DX else "SD"
-        lines.append(f"{ds:.1f}  {type_abbr} 「{song.id}」{song.title}")
-    # 分列文本过长，直接文本转图
-    png = image_to_bytes(text_to_image("\n".join(lines), size=20))
+    entries.sort(key=lambda x: -x[1].level_value)
+    png = table_template.rating_table_level_text(level, entries)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

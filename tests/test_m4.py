@@ -333,22 +333,16 @@ async def test_ds_table_command(app: App, songs):
 
     from nonebot_plugin_awmc_helper.plugins import tables
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.render.tools import (
-        text_to_image,
-        image_to_bytes,
-    )
+    from nonebot_plugin_awmc_helper.core.render import table_template
 
+    # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（R8 网格版式）
     entries = []
     for song in await song_service.get_all():
         for d in song.get_difficulties():
             if d.type != SongType.UTAGE and d.level == "13+":
-                entries.append((d.level_value, song, d))
-    entries.sort(key=lambda x: -x[0])
-    lines = [f"定数表 13+（共 {len(entries)} 谱面）"]
-    for ds, song, d in entries:
-        type_abbr = "DX" if d.type == SongType.DX else "SD"
-        lines.append(f"{ds:.1f}  {type_abbr} 「{song.id}」{song.title}")
-    png = image_to_bytes(text_to_image("\n".join(lines), size=20))
+                entries.append((song, d))
+    entries.sort(key=lambda x: -x[1].level_value)
+    png = table_template.rating_table_level_text("13+", entries)
 
     import nonebot
     from fake import fake_group_message_event_v11

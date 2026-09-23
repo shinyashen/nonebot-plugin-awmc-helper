@@ -15,7 +15,7 @@ from PIL import Image
 from nonebot import logger
 from maimai_py import Song, SongType, SongDifficulty
 
-from .fonts import FONT_MONO, font
+from .fonts import FONT_MONO, FONT_RODIN, font
 from .tools import fit_text, image_to_bytes
 from .assets import assets
 
@@ -42,21 +42,36 @@ def _grid_layout(index: int, per_row: int = PER_ROW) -> tuple[int, int]:
     return 10 + c * (CELL + GAP), 70 + r * (CELL + GAP)
 
 
-def _grid_size(count: int, per_row: int = PER_ROW) -> tuple[int, int]:
+def _grid_layout_offset(
+    index: int, top_offset: int, per_row: int = PER_ROW
+) -> tuple[int, int]:
+    r, c = divmod(index, per_row)
+    return 10 + c * (CELL + GAP), top_offset + r * (CELL + GAP)
+
+
+def _grid_size(
+    count: int, per_row: int = PER_ROW, top_offset: int = 70
+) -> tuple[int, int]:
     rows = -(-count // per_row)
-    return (per_row * (CELL + GAP) + GAP + 10, 70 + rows * (CELL + GAP) + 16)
+    return (per_row * (CELL + GAP) + GAP + 10, top_offset + rows * (CELL + GAP) + 16)
 
 
-def _draw_grid_base(items: list[tuple[Song, SongDifficulty]]) -> Image.Image:
-    """底图：标题占位 + 每格封面/ID/等级（无任何用户状态）。"""
+def _draw_grid_base(
+    items: list[tuple[Song, SongDifficulty]], top_offset: int = 70
+) -> Image.Image:
+    """底图：标题占位 + 每格封面/ID/等级（无任何用户状态）。
+
+    ``top_offset``：格子起始 y（默认 70 紧凑布局；定数表 Level 大字版式
+    传 240 预留标题区）。
+    """
     from PIL import Image, ImageDraw
 
-    w, h = _grid_size(len(items))
+    w, h = _grid_size(len(items), top_offset=top_offset)
     img = Image.new("RGBA", (w, h), "#f2f3f5")
     draw = ImageDraw.Draw(img)
     f_small = font(14, FONT_MONO)
     for i, (song, diff) in enumerate(items):
-        x, y = _grid_layout(i)
+        x, y = _grid_layout_offset(i, top_offset)
         draw.rounded_rectangle(
             (x, y, x + CELL, y + CELL), 10, fill="#ffffff", outline="#2e323c", width=2
         )
@@ -168,6 +183,54 @@ async def overlay_rating(
         fill="#e6761f",
     )
     return image_to_bytes(base)
+
+
+_FONT_BLUE = (114, 188, 254, 255)
+
+
+def rating_table_level_text(
+    level: str, entries: list[tuple[Song, SongDifficulty]]
+) -> bytes:
+    """`<等级>定数表`（R8，NB DrawRatingTable(level_text=True) 版式）。
+
+    预渲染底图存在时直接叠加「Level. {level}」大字（素材包无字底图的替代：
+    我方底图顶部预留不足，大字按底图宽自适应），否则实时绘制网格并预留
+    标题区；最终按 NB 同款 0.8 缩放输出。
+    """
+    from PIL import ImageDraw
+
+    path = rating_table_dir() / f"{level}.png"
+    if path.exists():
+        im = _open_template(path)
+    else:
+        im = _draw_grid_base(entries, top_offset=240)
+    width = im.size[0]
+    scale = width / 1400  # NB 底图 1400 宽的等比映射
+    dr = ImageDraw.Draw(im)
+    x = round(495 * scale)
+    y = round(220 * scale) if path.exists() else 220
+    dr.text(
+        (x, y),
+        "Level.",
+        font=font(round(70 * scale) or 44, FONT_RODIN),
+        fill=_FONT_BLUE,
+        anchor="ld",
+        stroke_width=round(8 * scale) or 5,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    dr.text(
+        (x + round(255 * scale) + 10, y),
+        level,
+        font=font(round(100 * scale) or 62, FONT_RODIN),
+        fill=_FONT_BLUE,
+        anchor="ld",
+        stroke_width=round(8 * scale) or 5,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    im = im.resize(
+        (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS
+    )
+    return image_to_bytes(im)
 
 
 async def overlay_plate(
