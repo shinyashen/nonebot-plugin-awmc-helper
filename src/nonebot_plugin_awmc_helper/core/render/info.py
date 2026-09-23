@@ -8,7 +8,7 @@
 - ``service`` 为空（未绑定纯谱面视图）时省略「Data from …」署名行。
 """
 
-from maimai_py import Song, Genre, SongType, LevelIndex, ScoreExtend
+from maimai_py import Song, Genre, SongType, ScoreExtend
 
 from ..calc import dx_star_ratio
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
@@ -25,6 +25,7 @@ from ...constants import (
     RATE_FILE,
     SYNC_FILE,
     COMBO_FILE,
+    SERVICE_DISPLAY,
     chart_display_id,
 )
 
@@ -38,16 +39,8 @@ _GENRE_FILE: dict[Genre, str] = {
     Genre.オンゲキCHUNITHM: "info_ongeki.png",
 }
 
-SERVICE_DISPLAY = {"divingfish": "DivingFish", "lxns": "LXNS"}
-"""绑定数据源 → 卡片署名显示名。"""
-
 _TEXT_COLOR = (124, 129, 255, 255)
 _CIRCLE_COLOR = (249, 62, 172, 255)
-
-
-def _major_slots(song: Song, prefer_type: SongType | None) -> list[LevelIndex]:
-    """卡片主类型谱面组的难度槽（难度序）。"""
-    return [d.level_index for d in _major_diffs(song, prefer_type)]
 
 
 def song_play_data(
@@ -135,7 +128,7 @@ def song_play_data(
 
     # 按难度行成绩（只取主类型谱面的成绩入槽）
     by_slot = {s.level_index: s for s in play_result if s.type == major_type}
-    slots = _major_slots(song, prefer_type)
+    slots = [d.level_index for d in diffs]
     step_y = 100
     for num, level_index in enumerate(slots):
         y = step_y * num

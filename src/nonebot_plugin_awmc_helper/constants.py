@@ -394,6 +394,9 @@ RATE_FILE = {
 COMBO_FILE = {"FC": "FC", "FCP": "FCp", "AP": "AP", "APP": "APp"}
 SYNC_FILE = {"FS": "FS", "FSP": "FSp", "FSD": "FSD", "FSDP": "FSDp", "SYNC": "Sync"}
 
+# 绑定数据源 → 卡片署名显示名（minfo 成绩卡 / 推分行卡 Data from …）
+SERVICE_DISPLAY = {"divingfish": "DivingFish", "lxns": "LXNS"}
+
 # 日服 DX 世代版本码 → 日服 logo 文件名（static/mai/pic/jp/ 下）。
 # 现有素材库的 DX 代 logo 为国服特有版本，日服视图渲染时改用本表；
 # 旧框（<20000）中日 logo 相同，走 VERSION_IMAGE 通用路径。

@@ -106,7 +106,10 @@ async def _(message: Message = CommandArg()):
 @rise_score.handle()
 @handle_errors("推分推荐失败，请稍后再试")
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
-    from ...core.songs import song_service
+    from maimai_py import SongType as _SongType
+
+    from ...constants import SERVICE_DISPLAY
+    from ...core.render.score import DrawScore
 
     level, target_raw = groups
     target = int(target_raw) if target_raw else 1
@@ -138,18 +141,12 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         await UniMessage.text(" 没有找到可以提升 RA 的曲目，换一个目标试试吧").finish(
             at_sender=True
         )
-
-    lines = [f"当前 B50 最低 RA {lowest_ra}，推荐曲目（目标 +{target}）："]
-    for r in rec:
-        song, diff = r["song"], r["diff"]
-        type_abbr = "DX" if diff.type == SongType.DX else "SD"
-        lines.append(
-            f"「{song.id}」{song.title}\n"
-            f"  {type_abbr} {diff.level}（{diff.level_value:.1f}）"
-            f" → 打到 {r['achievements']:.1f}%（{r['rate']}）"
-            f" RA {r['new_ra']}（+{r['gain']}）"
-        )
-    png = image_to_bytes(text_to_image("\n".join(lines), size=24))
+    # R3：NB DrawScore 行卡版式——左栏旧版本（SD）右栏新版本（DX），各取前 5
+    sd_rec = [r for r in rec if r["diff"].type != _SongType.DX][:5]
+    dx_rec = [r for r in rec if r["diff"].type == _SongType.DX][:5]
+    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+    card = DrawScore(960, service=service)
+    png = card.draw_rise(sd_rec, dx_rec, 960)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

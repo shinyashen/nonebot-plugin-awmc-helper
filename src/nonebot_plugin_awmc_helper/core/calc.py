@@ -158,6 +158,11 @@ def rise_recommend(
                         "rate": rate_of(ach),
                         "new_ra": new_ra,
                         "gain": gain,
+                        # 旧成绩（推分行卡显示；未游玩为 0，对齐 NB RiseResult 默认值）
+                        "old_achievements": (
+                            float(old.achievements or 0) if old else 0.0
+                        ),
+                        "old_ra": int(old.dx_rating or 0) if old else 0,
                     }
                 break  # 首个满足的档位即最低要求（原版语义）
             if best_gain is not None:

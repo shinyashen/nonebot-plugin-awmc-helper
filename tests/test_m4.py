@@ -4,6 +4,7 @@ from pathlib import Path
 
 import respx
 import pytest
+from mocks import requires_assets
 from nonebug import App
 
 BASE_DF = "https://www.diving-fish.com/api/maimaidxprober"
@@ -106,6 +107,99 @@ def test_rise_recommend_basic():
     top = rec[0]
     assert top["song"].id == 500
     assert top["gain"] >= 10
+
+
+def test_rise_recommend_old_fields():
+    """推分输出携带旧成绩（推分行卡显示用）：未游玩 0 / 已游玩取 B50 成绩。"""
+    import dataclasses
+
+    from mocks import sample_songs
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    b50 = [
+        extend(
+            Score(
+                id=231,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=100.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=200,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="PENGUIN",
+            level_value=13.2,
+            level_dx_score=2100,
+            dx_star=4,
+            version=25000,
+        )
+    ]
+    candidates = [s for s in sample_songs() if s.id in (231, 500)]
+    rec = rise_recommend(b50, candidates, target=10, latest_version_value=20000)
+    by_song = {r["song"].id: r for r in rec}
+    # 500 未游玩：旧成绩 0（NB RiseResult 默认值语义）
+    assert by_song[500]["old_achievements"] == 0.0
+    assert by_song[500]["old_ra"] == 0
+    # 231 已游玩未入线：旧成绩取 B50 成绩
+    assert by_song[231]["old_achievements"] == 100.0
+    assert by_song[231]["old_ra"] == 200
+
+
+@requires_assets
+def test_draw_rise_card_smoke():
+    """推分推荐行卡（R3）：NB draw_rise 版式，裁剪后 1000×960。"""
+    import io
+    import dataclasses
+
+    from PIL import Image
+    from mocks import sample_songs
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+    from nonebot_plugin_awmc_helper.core.render.score import DrawScore
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    b50 = [
+        extend(
+            Score(
+                id=231,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=100.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=200,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="PENGUIN",
+            level_value=13.2,
+            level_dx_score=2100,
+            dx_star=4,
+            version=25000,
+        )
+    ]
+    rec = rise_recommend(b50, sample_songs(), target=10, latest_version_value=20000)
+    sd = [r for r in rec if r["diff"].type != SongType.DX][:5]
+    dx = [r for r in rec if r["diff"].type == SongType.DX][:5]
+    png = DrawScore(960, service="DivingFish").draw_rise(sd, dx, 960)
+    im = Image.open(io.BytesIO(png))
+    assert im.size == (1000, 960)
 
 
 # ---------------------------------------------------------------------------
