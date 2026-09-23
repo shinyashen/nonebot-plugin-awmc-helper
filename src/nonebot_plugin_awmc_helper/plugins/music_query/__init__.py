@@ -22,7 +22,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import display_song_id
 from ...core.score import UserScoreError, score_service
-from ...core.songs import song_service
+from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart
@@ -40,13 +40,6 @@ _PREFIX_TO_TYPE = {
     "标准": SongType.STANDARD,
     "标": SongType.STANDARD,
 }
-
-
-def _prefer_from_raw_id(raw_id: int) -> SongType | None:
-    """查分器 id 形状 → 卡片主类型：≤4 位 SD、5 位 DX；6 位宴不改变卡片。"""
-    if raw_id > 99999:
-        return None
-    return SongType.DX if raw_id > 9999 else SongType.STANDARD
 
 
 def _type_entries(
@@ -378,7 +371,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             jp_only = cn_song is None
             note = f"\n{JP_ONLY_NOTE}" if jp_only else ""
             png = await _chart_card(
-                cn_song or song, binding, _prefer_from_raw_id(raw_id), jp_only
+                cn_song or song, binding, prefer_type_from_raw_id(raw_id), jp_only
             )
             await (
                 UniMessage.image(raw=png)
@@ -393,7 +386,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         cn_song = await song_service.by_id(song.id)
         jp_only = cn_song is None
         png = await _chart_card(
-            cn_song or song, binding, _prefer_from_raw_id(raw_id), jp_only
+            cn_song or song, binding, prefer_type_from_raw_id(raw_id), jp_only
         )
         msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
@@ -434,7 +427,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     if not song:
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     binding = await _binding_of(session)
-    png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id or 0), jp)
+    png = await _chart_card(song, binding, prefer_type_from_raw_id(raw_id or 0), jp)
     reply = UniMessage.image(raw=png)
     if jp:
         reply = reply.text(f"\n{JP_ONLY_NOTE}")

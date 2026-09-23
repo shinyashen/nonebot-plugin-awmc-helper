@@ -324,3 +324,173 @@ async def test_b50_username_lookup(app: App, db, songs):
             )
             ctx.should_call_send(event, expected, result=None, bot=bot)
             ctx.should_finished()
+
+
+def _score_extend(
+    song_id: int,
+    type_,
+    level_index,
+    *,
+    level: str = "13",
+    level_value: float = 13.2,
+    achievements: float = 100.5,
+    fc=None,
+    fs=None,
+    dx_score: int = 2900,
+    dx_rating: float = 350,
+    rate="sssp",
+):
+    """构造 ScoreExtend（minfo 成绩卡/推分卡用）。"""
+    import dataclasses
+
+    from maimai_py import Score, FCType, FSType, RateType, ScoreExtend
+
+    base = Score(
+        id=song_id,
+        level=level,
+        level_index=level_index,
+        achievements=achievements,
+        fc=FCType(fc) if isinstance(fc, int) else fc,
+        fs=FSType(fs) if isinstance(fs, int) else fs,
+        dx_score=dx_score,
+        dx_rating=dx_rating,
+        play_count=None,
+        play_time=None,
+        rate=RateType[rate.upper()] if isinstance(rate, str) else rate,
+        type=type_,
+    )
+    return ScoreExtend(
+        **dataclasses.asdict(base),
+        title="PENGUIN",
+        level_value=level_value,
+        level_dx_score=3000,
+        dx_star=None,
+        version=25000,
+    )
+
+
+@requires_assets
+def test_minfo_card_layout(db):
+    """minfo 成绩卡（R1）：NB play_info 版式 1200×900，含已玩/未玩灰行。"""
+    import io
+
+    from PIL import Image
+    from maimai_py import FCType, FSType, SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.render import info as info_render
+
+    song = _curve_song()
+    scores = [
+        _score_extend(
+            231,
+            SongType.DX,
+            LevelIndex.MASTER,
+            fc=FCType.AP,
+            fs=FSType.FSD,
+            dx_score=2900,
+            dx_rating=350,
+        ),
+        _score_extend(
+            231,
+            SongType.DX,
+            LevelIndex.BASIC,
+            level="6",
+            level_value=6.0,
+            achievements=97.12,
+            dx_score=900,
+            dx_rating=120,
+            rate="sss",
+        ),
+    ]
+    png = info_render.song_play_data(song, scores, service="divingfish")
+    im = Image.open(io.BytesIO(png))
+    assert im.size == (1200, 900)
+
+
+@requires_assets
+def test_minfo_card_unplayed_all_slots(db):
+    """未绑定（scores 空）时只展示谱面信息：全部槽灰行 + 4 槽曲「没有该难度」。"""
+    import io
+
+    from PIL import Image
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.render import info as info_render
+
+    song = make_song(
+        700,
+        "OLD SONG",
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=li,
+                level="9",
+                level_value=9.0,
+            )
+            for li in (
+                LevelIndex.BASIC,
+                LevelIndex.ADVANCED,
+                LevelIndex.EXPERT,
+                LevelIndex.MASTER,
+            )
+        ],
+    )
+    png = info_render.song_play_data(song, [], prefer_type=SongType.STANDARD)
+    assert Image.open(io.BytesIO(png)).size == (1200, 900)
+
+
+@pytest.mark.asyncio
+async def test_b50_rise_tips(db, songs):
+    """「可进 B50」提示（增强保留）：仅对未入 B50 且 RA 高于入线的成绩提示。"""
+    import respx
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.score_query import _b50_rise_tips
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    song = _curve_song()
+    # B50：231 的 SD EXPERT 槽（ra 312 入线，须命中曲库存在的谱面）；
+    # 候选：DX MASTER 350（应提示）/ DX BASIC 120（低于入线不提示）
+    payload = {
+        "username": "someone",
+        "rating": 312,
+        "charts": {
+            "sd": [
+                {
+                    "song_id": 231,
+                    "level": "10",
+                    "level_index": 2,
+                    "achievements": 100.0,
+                    "fc": None,
+                    "fs": None,
+                    "dxScore": 600,
+                    "rate": "sss",
+                    "ra": 312,
+                }
+            ],
+            "dx": [],
+        },
+    }
+    with respx.mock(assert_all_called=False) as m:
+        m.post(f"{BASE_DF}/query/player").respond(json=payload)
+        tips = await _b50_rise_tips(
+            song,
+            [
+                _score_extend(231, SongType.DX, LevelIndex.MASTER, dx_rating=350),
+                _score_extend(
+                    231,
+                    SongType.DX,
+                    LevelIndex.BASIC,
+                    level="6",
+                    level_value=6.0,
+                    dx_rating=120,
+                    rate="sss",
+                ),
+            ],
+            binding,
+        )
+    assert len(tips) == 1
+    assert "MASTER" in tips[0]
+    assert "+38" in tips[0]

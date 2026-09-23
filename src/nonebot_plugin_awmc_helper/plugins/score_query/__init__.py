@@ -17,10 +17,10 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import COLOR_TO_LEVEL_INDEX, chart_display_id
 from ...core.score import UserScoreError, score_service
-from ...core.songs import song_service
+from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.utils import handle_errors
 from ...core.render import pie as pie_render
-from ...core.render import song as song_render
+from ...core.render import info as info_render
 from ...core.render import best50 as b50_render
 from ...core.render import nb_chart
 from ...core.binding import session_keys, binding_service
@@ -173,37 +173,50 @@ async def _(
     if info is None:
         await UniMessage.text(" 尚未游玩该曲目（或无权限查看）").finish(at_sender=True)
 
-    bests = None
-    if binding is not None:
-        try:
-            bests = await score_service.get_b50(binding)
-        except UserScoreError:
-            bests = None
-    b50_min_ra = (
-        min((s.dx_rating or 0 for s in bests.scores_b35 + bests.scores_b15), default=0)
-        if bests
-        else 0
+    # R1：按基准 info.py 版式渲染真实成绩卡；数字 id 按其形状推断卡片主类型
+    prefer = prefer_type_from_raw_id(int(key)) if key.isdigit() else None
+    png = info_render.song_play_data(
+        song,
+        info.scores,
+        service=binding.service if binding is not None else None,
+        theme=(binding.theme or "prism_plus") if binding is not None else "prism_plus",
+        prefer_type=prefer,
     )
-    b50_keys = {(s.id, s.type, s.level_index) for s in bests.scores} if bests else set()
+    tips = await _b50_rise_tips(song, info.scores, binding)
+    msg = UniMessage.image(raw=png)
+    if tips:
+        msg = msg.image(raw=text_to_image("\n".join(tips), size=22, padding=14))
+    await msg.finish(at_sender=True)
 
-    lines = []
-    for score in info.scores:
-        in_b50 = (score.id, score.type, score.level_index) in b50_keys
+
+async def _b50_rise_tips(song, scores, binding) -> list[str]:
+    """「可进 B50」增强提示（我方独有，基准以谱面卡上分预测区表达）。
+
+    对不在 B50 且 RA 高于入线最低 RA 的成绩，给出替换后总 RA 提升量；
+    B50 拉取失败（未绑定/无权限）时静默跳过。
+    """
+    if binding is None or not scores:
+        return []
+    try:
+        bests = await score_service.get_b50(binding)
+    except UserScoreError:
+        return []
+    min_ra = min(
+        (s.dx_rating or 0 for s in bests.scores_b35 + bests.scores_b15), default=0
+    )
+    b50_keys = {(s.id, s.type, s.level_index) for s in bests.scores}
+    tips = []
+    for score in scores:
         ra = int(score.dx_rating or 0)
-        tip = (
-            f"（可进B50，替换后总 RA +{ra - b50_min_ra}）"
-            if (bests and not in_b50 and ra > b50_min_ra)
-            else ""
+        if (score.id, score.type, score.level_index) in b50_keys or ra <= min_ra:
+            continue
+        type_abbr = "DX" if score.type == SongType.DX else "SD"
+        tips.append(
+            f"{type_abbr} {score.level_index.name}（{score.level_value:.1f}）"
+            f" {score.achievements or 0:.4f}% RA {ra}"
+            f"：可进 B50，替换后总 RA +{ra - min_ra}"
         )
-        lines.append(
-            f"{score.level_index.name} {score.level}（{score.level_value:.1f}）："
-            f"{score.achievements or 0:.4f}%  FC:{score.fc.name if score.fc else '-'}"
-            f"  DX:{score.dx_score or 0}/{score.level_dx_score}  RA {ra}{tip}"
-        )
-    if not info.scores:
-        lines.append("尚未游玩该曲目（或无权限查看）")
-    png = _minfo_image(song, lines)
-    await UniMessage.image(raw=png).finish(at_sender=True)
+    return tips
 
 
 @ginfo.handle()
@@ -256,27 +269,6 @@ def _ginfo_image(
     extras: list[Image.Image] = [Image.open(io.BytesIO(card)).convert("RGBA"), text_img]
     if extra_png:
         extras.append(Image.open(io.BytesIO(extra_png)).convert("RGBA"))
-    total_h = sum(im.size[1] for im in extras) + 8 * (len(extras) - 1)
-    w = max(im.size[0] for im in extras)
-    out = Image.new("RGBA", (w, total_h), "#f2f3f5")
-    y = 0
-    for im in extras:
-        out.paste(im, (0, y))
-        y += im.size[1] + 8
-    return image_to_bytes(out)
-
-
-def _minfo_image(song, lines: list[str], extra_png: bytes | None = None) -> bytes:
-    """谱面信息卡 + 文本行（+ 可选统计图）纵向拼接。"""
-    from PIL import Image
-
-    card = song_render.draw_song_card(song)
-    text_img = text_to_image("\n".join(lines), size=22, padding=14)
-    extras: list[Image.Image] = [card, text_img]
-    if extra_png:
-        from io import BytesIO
-
-        extras.append(Image.open(BytesIO(extra_png)).convert("RGBA"))
     total_h = sum(im.size[1] for im in extras) + 8 * (len(extras) - 1)
     w = max(im.size[0] for im in extras)
     out = Image.new("RGBA", (w, total_h), "#f2f3f5")

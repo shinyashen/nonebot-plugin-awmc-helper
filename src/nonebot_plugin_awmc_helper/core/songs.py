@@ -121,6 +121,17 @@ def song_from_dict(d: dict[str, Any]) -> Song:
     return song
 
 
+def prefer_type_from_raw_id(raw_id: int) -> SongType | None:
+    """查分器 id 形状 → 卡片主类型：≤4 位 SD、5 位 DX；6 位宴不指定偏好。
+
+    数字查询（minfo/id 指令等）按用户输入的 id 形状推断其指向的谱面类型；
+    供 music_query / score_query 共用（原 music_query._prefer_from_raw_id 下沉）。
+    """
+    if raw_id > 99999:
+        return None
+    return SongType.DX if raw_id > 9999 else SongType.STANDARD
+
+
 class SongService:
     """曲库服务单例（见模块级 ``song_service``）。"""
 
