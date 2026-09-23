@@ -81,6 +81,7 @@ async def test_alias_of_song(app: App, songs):
         alias.alias_song,
         "企鹅舞有什么别名",
         "该曲目有以下别名：\nID：231、10231\n企鹅舞",
+        with_session=True,
     )
 
 
@@ -93,6 +94,7 @@ async def test_alias_by_id(app: App, songs):
         alias.alias_song,
         "id 500有什么别名",
         "该曲目有以下别名：\nID：500、10500\n普瑞\n普雷呃伦斯",
+        with_session=True,
     )
 
 
@@ -114,6 +116,7 @@ async def test_alias_dx_only_song_ids(app: App, songs):
         alias.alias_song,
         "敌敌畏有什么别名",
         "该曲目有以下别名：\nID：10603\n敌敌畏",
+        with_session=True,
     )
 
 
@@ -131,6 +134,7 @@ async def test_alias_utage_only_song_ids(app: App, songs):
         alias.alias_song,
         "id 901有什么别名",
         "该曲目有以下别名：\nID：100001\n宴曲",
+        with_session=True,
     )
 
 
@@ -152,7 +156,7 @@ async def test_alias_multi_match_forward(app: App, songs):
     await song_service.reload_alias_index()
 
     event = fake_group_message_event_v11(message="企鹅有什么别名", user_id=12345678)
-    expected = Message(
+    forward = Message(
         [
             MessageSegment.node_custom(
                 1234567890, "Bot", Message("找到2个相同别名的曲目：")
@@ -172,12 +176,53 @@ async def test_alias_multi_match_forward(app: App, songs):
             self_id="1234567890",  # 合并转发节点 user_id 取 self_id，须为数字
         )
         ctx.receive_event(bot, event)
+        # handler 注入 uninfo Session，会实时拉取群/成员信息
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "测试群",
+                "member_count": 10,
+                "max_member_count": 100,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "test",
+            },
+        )
+        # message/messages 双参数（LLOneBot 读 message、NapCat 读 messages）
         ctx.should_call_api(
             "send_group_forward_msg",
-            {"group_id": 87654321, "messages": expected},
+            {"group_id": 87654321, "message": forward, "messages": forward},
             result=None,
         )
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_alias_multi_match_forward_fallback(app: App, songs):
+    """合并转发失败（默认 bot 非数字 self_id 无法构造节点）→ 降级普通消息。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import alias
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await store.add_local_alias(231, "企鹅", "u")
+    await store.add_local_alias(500, "企鹅", "u")
+    await song_service.reload_alias_index()
+
+    msg = (
+        "找到2个相同别名的曲目：\n"
+        "ID：231、10231\n企鹅舞\n企鹅\n======\n"
+        "ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅"
+    )
+    await _assert_reply(app, alias.alias_song, "企鹅有什么别名", msg, with_session=True)
 
 
 @pytest.mark.asyncio
@@ -189,6 +234,7 @@ async def test_alias_not_found(app: App, songs):
         alias.alias_song,
         "不存在的东西有什么别名",
         "未找到此歌曲\n可以使用「添加别名」指令给该乐曲添加别名",
+        with_session=True,
     )
 
 

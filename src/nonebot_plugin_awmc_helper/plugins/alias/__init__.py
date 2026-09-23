@@ -16,28 +16,26 @@ from nonebot import logger, get_bots, on_regex, get_driver, on_command
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Bot, Event, Message
-from nonebot.exception import MatcherException
 from nonebot.permission import SUPERUSER
 from nonebot_plugin_uninfo import ADMIN, Session, SceneType, UniSession
-from nonebot_plugin_alconna.uniseg import Reference, CustomNode, UniMessage
+from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import store
 from ...config import plugin_config
 from ...core.ext import yuzu as yuzu_ext
 from ...core.songs import song_service
 from ...core.utils import paginate, handle_errors
+from ...core.forward import try_send_forward
 from ...core.render.tools import text_to_image, image_to_bytes
 
-try:  # OneBot v11 可用时提供合并转发能力
+try:  # OneBot v11 可用时提供合并转发/群列表能力（构造统一走 core/forward）
     from nonebot.adapters.onebot.v11 import Bot as OB11Bot
     from nonebot.adapters.onebot.v11 import Message as OB11Message
-    from nonebot.adapters.onebot.v11 import MessageSegment as OB11Segment
 
     _OB11 = True
 except ImportError:  # pragma: no cover
     OB11Bot = None
     OB11Message = None
-    OB11Segment = None
     _OB11 = False
 
 PUSH_FEATURE = "alias_push"
@@ -105,30 +103,26 @@ async def _send_song_aliases(song_id: int, hint: str = "") -> None:
     ).finish(at_sender=True)
 
 
-async def _finish_multi_forward(header: str, blocks: list[str], bot: Bot) -> bool:
+async def _finish_multi_forward(
+    header: str, blocks: list[str], bot: Bot, session: Session
+) -> bool:
     """多曲命中时以合并转发发送（首条命中数量，之后每曲一条）。
 
-    仅 OB11 走合并转发（与别名推送同口径）；适配器不支持或协议端发送失败
-    返回 False，由调用方降级为普通消息。
+    仅 OB11 走合并转发（core/forward 统一构造，与别名推送同口径）；
+    适配器不支持或协议端发送失败返回 False，由调用方降级为普通消息。
     """
-    if not (_OB11 and OB11Bot is not None and isinstance(bot, OB11Bot)):
-        return False
-    nodes = [
-        CustomNode(uid=bot.self_id, name="Bot", content=text)
-        for text in (header, *blocks)
-    ]
-    try:
-        await UniMessage(Reference(nodes=nodes)).finish()
-    except MatcherException:
-        raise  # finish 的控制流异常（已发送成功），原样上抛
-    except Exception:
-        logger.warning("别名多曲命中合并转发发送失败，降级为普通消息")
-    return False
+    group_id = _group_id_of(session)
+    return await try_send_forward(
+        bot,
+        [header, *blocks],
+        group_id=group_id,
+        user_id=None if group_id else _user_id_of(session),
+    )
 
 
 @alias_song.handle()
 @handle_errors("查询别名失败，请稍后再试")
-async def _(bot: Bot, groups: tuple = RegexGroup()):
+async def _(bot: Bot, session: Session = UniSession(), groups: tuple = RegexGroup()):
     qid, name = groups
     if qid:
         await _send_song_aliases(int(qid))
@@ -153,7 +147,7 @@ async def _(bot: Bot, groups: tuple = RegexGroup()):
         if hint:
             blocks[-1] += f"\n{hint}"
         header = f"找到{len(songs)}个相同别名的曲目："
-        if not await _finish_multi_forward(header, blocks, bot):
+        if not await _finish_multi_forward(header, blocks, bot, session):
             msg = header + "\n" + "\n======\n".join(blocks)
             await UniMessage.text(msg).finish(at_sender=True)
         return
@@ -346,7 +340,7 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
     text = "\n======\n".join(lines)
 
     default = plugin_config.awmc_alias_push
-    if not _OB11 or OB11Bot is None or OB11Message is None or OB11Segment is None:
+    if not _OB11 or OB11Bot is None or OB11Message is None:
         return
     for bot in list(get_bots().values()):
         if not isinstance(bot, OB11Bot):
@@ -359,18 +353,8 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
             gid = str(g["group_id"])
             if not await store.get_switch(gid, PUSH_FEATURE, default):
                 continue
-            try:
-                forward = OB11Message(
-                    [
-                        OB11Segment.node_custom(
-                            int(bot.self_id), "Bot", OB11Message(text)
-                        )
-                    ]
-                )
-                await bot.call_api(
-                    "send_group_forward_msg", group_id=int(gid), message=forward
-                )
-            except Exception:
+            # 合并转发优先（core/forward 统一构造），失败降级普通消息
+            if not await try_send_forward(bot, [text], group_id=gid):
                 try:
                     await bot.send_group_msg(
                         group_id=int(gid), message=OB11Message(text)
