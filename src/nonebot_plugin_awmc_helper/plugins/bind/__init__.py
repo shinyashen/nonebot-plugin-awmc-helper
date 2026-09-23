@@ -19,8 +19,10 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core.ext import lxns as lxns_ext
 from ...core.utils import handle_errors
 from ...core.binding import (
+    QQ_PLATFORMS,
     SERVICE_LXNS,
     SERVICE_DIVINGFISH,
+    session_keys,
     binding_service,
     pending_bindings,
 )
@@ -36,11 +38,6 @@ __plugin_meta__ = PluginMetadata(
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
 )
-
-
-def _keys(session: Session) -> tuple[str, str]:
-    # 真实事件 platform 为适配器标识（如 "qq"）；部分环境可能为 None，兜底 "unknown"
-    return str(session.platform or "unknown"), str(session.user.id)
 
 
 df_bind = on_command("绑定水鱼", aliases={"绑定df", "dfbind"}, block=True)
@@ -59,9 +56,7 @@ async def _is_pending_lxns_code(bot: Bot, event: Event) -> bool:
     session = await get_session(bot, event)
     if session is None:
         return False
-    if not pending_bindings.is_active(
-        str(session.platform or "unknown"), str(session.user.id), "lxns"
-    ):
+    if not pending_bindings.is_active(*session_keys(session), "lxns"):
         return False
     return lxns_ext.extract_authorization_code(event.get_plaintext()) is not None
 
@@ -78,17 +73,17 @@ async def _(bot: Bot, event: Event):
     assert session is not None
     code = lxns_ext.extract_authorization_code(event.get_plaintext())
     assert code is not None
-    await _complete_lxns(str(session.platform or "unknown"), str(session.user.id), code)
+    await _complete_lxns(*session_keys(session), code)
 
 
 @df_bind.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
     arg = str(message).strip()
     if not arg:
-        if platform == "qq":
+        if platform in QQ_PLATFORMS:
             await binding_service.set_service(binding, SERVICE_DIVINGFISH)
             await UniMessage.text(
                 "已使用 QQ 号作为水鱼公开查询凭据。\n"
@@ -106,7 +101,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @df_token.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     token = str(message).strip()
     if not token:
         await UniMessage.text(
@@ -123,7 +118,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @lx_bind.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     arg = str(message).strip()
     if not arg:
         if lxns_ext.oauth_configured():
@@ -155,7 +150,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @lx_code.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     code = lxns_ext.extract_authorization_code(str(message))
     if code is None:
         await UniMessage.text(" 授权码格式有误，请重新提交").finish(at_sender=True)
@@ -179,7 +174,7 @@ async def _complete_lxns(platform: str, user_id: str, code: str) -> None:
 @unbind.handle()
 @handle_errors("操作失败，请稍后再试")
 async def _(session: Session = UniSession()):
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     if await binding_service.unbind(platform, user_id):
         await UniMessage.text(" 已解除绑定").finish(at_sender=True)
     await UniMessage.text(" 尚未绑定").finish(at_sender=True)
@@ -194,7 +189,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         await UniMessage.text(" 用法：数据源 <0|1>（0 = 水鱼，1 = 落雪）").finish(
             at_sender=True
         )
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
     try:
         await binding_service.set_service(binding, service)
@@ -212,7 +207,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         await UniMessage.text(" 用法：主题 <0|1>（0 = prism_plus，1 = circle）").finish(
             at_sender=True
         )
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.set_theme(binding, "prism_plus" if arg == "0" else "circle")
     await UniMessage.text(" 主题已切换").finish(at_sender=True)
@@ -221,7 +216,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @my_bind.handle()
 @handle_errors("查询失败，请稍后再试")
 async def _(session: Session = UniSession()):
-    platform, user_id = _keys(session)
+    platform, user_id = session_keys(session)
     binding = await binding_service.get(platform, user_id)
     if binding is None:
         await UniMessage.text(" 尚未绑定").finish(at_sender=True)

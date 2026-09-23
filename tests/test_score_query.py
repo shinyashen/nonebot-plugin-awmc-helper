@@ -77,7 +77,7 @@ async def test_b50_unbound_hint(db):
     「尚未绑定」提示仅非 QQ 平台可达，语义覆盖见 test_binding.py。"""
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
-    binding = await binding_service.ensure("unknown", "12345678")
+    binding = await binding_service.ensure("OneBot V11", "12345678")
     assert binding_service.identifier_or_none(binding) is not None
 
 

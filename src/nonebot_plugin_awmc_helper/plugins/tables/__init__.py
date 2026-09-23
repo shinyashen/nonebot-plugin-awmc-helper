@@ -23,7 +23,7 @@ from ...constants import PLATE_CHARS
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import paginate, handle_errors
-from ...core.binding import binding_service
+from ...core.binding import session_keys, binding_service
 from ...core.render.table import completion_grid_bytes
 from ...core.render.tools import text_to_image, image_to_bytes
 
@@ -150,9 +150,7 @@ async def _(groups: tuple = RegexGroup()):
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     level, plan = groups
     checker, plan_name = _plan_checker(plan)
-    binding = await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    binding = await binding_service.ensure(*session_keys(session))
     scores = await score_service.get_scores_all(binding)
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
     items = []
@@ -194,9 +192,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     level, plan, page_raw = groups
     page = int(page_raw) if page_raw else 1
     checker, plan_name = _plan_checker(plan)
-    binding = await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    binding = await binding_service.ensure(*session_keys(session))
     scores = await score_service.get_scores_all(binding)
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
     done_list, remain_list, new_list = [], [], []
@@ -231,9 +227,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 @handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     version, kind, mode, page_raw = groups
-    binding = await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    binding = await binding_service.ensure(*session_keys(session))
     plates = await score_service.get_plates(binding, f"{version}{kind}")
     if mode == "完成表":
         cleared = await plates.get_cleared()
@@ -316,9 +310,7 @@ async def _():
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     ds_raw, page_raw = groups
     page = int(page_raw) if page_raw else 1
-    binding = await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    binding = await binding_service.ensure(*session_keys(session))
     scores = await score_service.get_scores_all(binding)
     if "." in ds_raw:  # 定数
         ds = float(ds_raw)

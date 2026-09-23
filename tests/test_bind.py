@@ -65,7 +65,7 @@ async def test_bind_divingfish_username(app: App, db):
         "已绑定水鱼账号「测试者」（公开查询）。\n"
         "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」",
     )
-    binding = await binding_service.get("unknown", "12345678")
+    binding = await binding_service.get("OneBot V11", "12345678")
     assert binding is not None
     assert binding.divingfish_username == "测试者"
 
@@ -81,7 +81,7 @@ async def test_bind_divingfish_token(app: App, db):
         "绑定水鱼token abc-def-1234567890",
         "已保存水鱼 Import-Token（仅存于本机数据库，用于查询全量成绩）",
     )
-    binding = await binding_service.get("unknown", "12345678")
+    binding = await binding_service.get("OneBot V11", "12345678")
     assert binding is not None
     assert binding.divingfish_import_token == "abc-def-1234567890"
 
@@ -97,7 +97,7 @@ async def test_bind_lxns_direct_and_switch(app: App, db):
         "绑定落雪 123456789",
         "已绑定落雪好友码 123456789（需要部署配置开发者 Token 才能查询）",
     )
-    binding = await binding_service.get("unknown", "12345678")
+    binding = await binding_service.get("OneBot V11", "12345678")
     assert binding is not None
     assert binding.lxns_friend_code == 123456789
 
@@ -121,7 +121,7 @@ async def test_theme_and_mybind_and_unbind(app: App, db):
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     await _assert_reply(app, bind.set_theme, "主题 1", "主题已切换")
-    binding = await binding_service.get("unknown", "12345678")
+    binding = await binding_service.get("OneBot V11", "12345678")
     assert binding is not None
     assert binding.theme == "circle"
 
@@ -137,5 +137,5 @@ async def test_default_service_public_query(app: App, db):
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     await _assert_reply(app, bind.my_bind, "我的绑定", "尚未绑定")
-    binding = await binding_service.ensure("unknown", "12345678")
+    binding = await binding_service.ensure("OneBot V11", "12345678")
     assert binding.service == "divingfish"  # 部署默认

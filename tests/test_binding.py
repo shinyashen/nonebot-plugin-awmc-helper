@@ -83,13 +83,34 @@ async def test_binding_ensure_and_identifier(db):
 
 
 @pytest.mark.asyncio
-async def test_identifier_unknown_platform_is_qq(db):
-    """运行时真实键是 platform="unknown"（OneBot v11 下 uninfo 不填 platform，
-    插件层兜底）：user_id 应照常按 QQ 号装配水鱼凭据，与迁移数据（原 platform=
-    "qq"）同等对待；真正的非 QQ 平台仍不可查。"""
-    from nonebot_plugin_awmc_helper.core.binding import BindingError, binding_service
+async def test_identifier_qq_semantics(db):
+    """OneBot v11 运行时键为适配器标识 "OneBot V11"（uninfo 不填 platform，
+    adapter 名即平台语义，session_keys 统一产出）：user_id 应照常按 QQ 号装配
+    水鱼凭据，与 Hoshino 迁移数据（历史键 "qq"）同等对待；真正的非 QQ 平台
+    仍不可查。"""
+    from nonebot_plugin_uninfo import User, Scene, Session, SceneType
 
-    binding = await binding_service.ensure("unknown", "30003")
+    from nonebot_plugin_awmc_helper.core.binding import (
+        QQ_PLATFORMS,
+        BindingError,
+        session_keys,
+        binding_service,
+    )
+
+    assert QQ_PLATFORMS == {"qq", "OneBot V11"}
+    session = Session(
+        self_id="test",
+        adapter="OneBot V11",
+        scope="qq_client",
+        scene=Scene(id="30003", type=SceneType.PRIVATE),
+        user=User(id="30003"),
+        member=None,
+        operator=None,  # OneBot v11 实际不填 platform
+    )
+    platform, user_id = session_keys(session)
+    assert (platform, user_id) == ("OneBot V11", "30003")
+
+    binding = await binding_service.ensure(platform, user_id)
     ident = binding_service.identifier(binding)
     assert ident.qq == 30003
 

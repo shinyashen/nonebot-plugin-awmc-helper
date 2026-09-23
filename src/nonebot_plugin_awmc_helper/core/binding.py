@@ -6,6 +6,7 @@
 """
 
 import time
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
 from maimai_py import PlayerIdentifier
@@ -14,10 +15,33 @@ from . import store
 from .store import UserBinding
 from ..config import plugin_config
 
+if TYPE_CHECKING:
+    from nonebot_plugin_uninfo import Session
+
 SERVICE_DIVINGFISH = "divingfish"
 SERVICE_LXNS = "lxns"
 
 THEMES = ("prism_plus", "circle")
+
+# user_id 可作 QQ 号的平台：qq 为 Hoshino 迁移数据的历史键；OneBot v11 是
+# uninfo 单平台适配器（Session.platform 恒为 None，适配器标识即平台语义）
+QQ_PLATFORMS = frozenset({"qq", "OneBot V11"})
+
+
+def session_keys(session: "Session") -> tuple[str, str]:
+    """绑定键 (platform, user_id)：platform 优先 uninfo 的 platform（多平台
+    适配器才有值），否则取适配器标识（OneBot v11 → "OneBot V11"）。
+
+    不要用 "unknown" 兜底平台语义：uninfo 的 platform 缺失不代表平台未知，
+    adapter 名才是稳定的单平台标识（对比 NB maimaidx 直接 event.user_id）。
+    """
+    platform = str(
+        getattr(session, "platform", None)
+        or getattr(session, "adapter", None)
+        or "unknown"
+    ).strip()
+    return platform, str(session.user.id)
+
 
 LXNS_PENDING_TTL = 1200  # 落雪授权码回填会话 20 分钟
 
@@ -107,9 +131,7 @@ class BindingService:
 
     def identifier(self, binding: UserBinding) -> PlayerIdentifier:
         """按绑定装配 maimai-py PlayerIdentifier（不可查时抛 BindingError）。"""
-        # uninfo 对 OneBot v11 不填 Session.platform（该字段仅多平台适配器使用），
-        # 插件层统一兜底 "unknown"——与历史迁移数据（platform="qq"）同为 QQ 号语义
-        qq = int(binding.user_id) if binding.platform in ("qq", "unknown") else None
+        qq = int(binding.user_id) if binding.platform in QQ_PLATFORMS else None
         if binding.service == SERVICE_DIVINGFISH:
             ident = PlayerIdentifier(
                 qq=qq,

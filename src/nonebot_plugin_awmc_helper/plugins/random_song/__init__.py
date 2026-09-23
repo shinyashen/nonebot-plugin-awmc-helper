@@ -20,7 +20,7 @@ from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
-from ...core.binding import binding_service
+from ...core.binding import session_keys, binding_service
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.random_song",
@@ -80,9 +80,7 @@ async def _(session: Session = UniSession()):
 
     未绑定 / B50 拉取失败 / 无候选时退化为普通随机曲目（与原版行为一致）。
     """
-    binding = await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    binding = await binding_service.ensure(*session_keys(session))
     song = None
     try:
         bests = await score_service.get_b50(binding)

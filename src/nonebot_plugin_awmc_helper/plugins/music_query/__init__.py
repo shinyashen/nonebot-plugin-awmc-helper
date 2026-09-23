@@ -26,7 +26,7 @@ from ...core.songs import song_service
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart
-from ...core.binding import binding_service
+from ...core.binding import session_keys, binding_service
 
 
 def _reply(text: str) -> UniMessage:
@@ -140,9 +140,7 @@ async def _chart_card(song, binding, prefer_type=None, jp: bool = False) -> byte
 
 
 async def _binding_of(session):
-    return await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    return await binding_service.ensure(*session_keys(session))
 
 
 async def _render_result(songs, page: int, binding=None) -> None:

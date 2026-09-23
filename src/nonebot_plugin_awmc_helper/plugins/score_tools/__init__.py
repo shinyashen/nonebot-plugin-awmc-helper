@@ -24,7 +24,7 @@ from ...core.calc import score_line, rise_recommend
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import paginate, handle_errors
-from ...core.binding import binding_service
+from ...core.binding import session_keys, binding_service
 from ...core.render.tools import text_to_image, image_to_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -110,9 +110,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
     level, target_raw = groups
     target = int(target_raw) if target_raw else 1
-    binding = await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    binding = await binding_service.ensure(*session_keys(session))
     try:
         bests = await score_service.get_b50(binding)
     except UserScoreError as e:
@@ -200,9 +198,7 @@ async def _(message: Message = CommandArg()):
 async def _(session: Session = UniSession()):
     from ...core.binding import SERVICE_DIVINGFISH
 
-    binding = await binding_service.ensure(
-        str(session.platform or "unknown"), str(session.user.id)
-    )
+    binding = await binding_service.ensure(*session_keys(session))
     if binding.service != SERVICE_DIVINGFISH:
         await UniMessage.text(" 水鱼排行榜仅支持水鱼数据源（数据源 0）查询").finish(
             at_sender=True

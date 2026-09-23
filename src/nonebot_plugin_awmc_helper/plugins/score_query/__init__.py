@@ -20,7 +20,7 @@ from ...core.utils import handle_errors
 from ...core.render import pie as pie_render
 from ...core.render import song as song_render
 from ...core.render import best50 as b50_render
-from ...core.binding import binding_service
+from ...core.binding import session_keys, binding_service
 from ...core.render.tools import text_to_image, image_to_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -47,8 +47,9 @@ def _at_target(event: Event | None) -> str | None:
 
 async def _get_binding(session: Session, event: Event | None, *, required: bool = True):
     """取（@目标 或 发送者的）绑定；required 时无可用凭据则提示。"""
+    platform = session_keys(session)[0]
     user_id = _at_target(event) or str(session.user.id)
-    binding = await binding_service.ensure(str(session.platform or "unknown"), user_id)
+    binding = await binding_service.ensure(platform, user_id)
     if required and binding_service.identifier_or_none(binding) is None:
         await UniMessage.text(
             " 尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定"
