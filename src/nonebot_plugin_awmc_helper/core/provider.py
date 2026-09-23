@@ -64,8 +64,9 @@ class AwmcAliasProvider(IAliasProvider):
         """三源合并，返回**去前缀**别名库（维护口径，Q31）。
 
         每条别名经 ``strip_chart_prefix`` 剥离谱面类型前缀（dx/标准/标/宴 +
-        该曲宴谱汉字，经 ``normalize_text`` 简繁归一）后入库并入视图；
-        跨源归一化去重，保序。
+        该曲宴谱汉字裸写与 [汉字] 括号形式，经 ``normalize_text`` 简繁归一）
+        后入库并入视图；后缀不在此剥（数据侧剥后缀会把 iidx 等英文词截断，
+        仅查询侧兜底）；跨源归一化去重，保序。
         """
         merged: dict[int, list[str]] = {}
         seen: dict[int, set[str]] = {}

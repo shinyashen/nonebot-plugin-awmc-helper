@@ -138,11 +138,12 @@ async def _(bot: Bot, groups: tuple = RegexGroup()):
     songs, strip_info = await song_service.by_alias_detail(keyword)
     hint = ""
     if strip_info:
-        # 前缀剥离命中：提醒别名库已合并，无需再加谱面前缀（Q31）
-        stripped, prefix = strip_info
+        # 前缀/后缀剥离命中：提醒别名库已合并，无需再加谱面前后缀（Q31）
+        stripped, matched, kind = strip_info
+        pos = "后缀" if kind == "suffix" else "前缀"
         hint = (
             f"提示：别名库已合并同一歌曲的标准/DX/宴谱面别名，"
-            f"无需添加「{prefix}」前缀，直接搜索「{stripped}」即可。"
+            f"无需添加「{matched}」{pos}，直接搜索「{stripped}」即可。"
         )
     if len(songs) > 1:
         blocks = []

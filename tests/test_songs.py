@@ -60,7 +60,7 @@ async def test_by_alias_chart_prefix_fallback(songs):
     # by_alias_detail 暴露剥离信息（供别名查询提示语）
     detail_songs, strip_info = await song_service.by_alias_detail("dx普瑞")
     assert [s.id for s in detail_songs] == [500]
-    assert strip_info == ("普瑞", "dx")  # (剥离后别名, 命中前缀)
+    assert strip_info == ("普瑞", "dx", "prefix")  # (剥离后别名, 命中词, 位置)
     _, exact_info = await song_service.by_alias_detail("普瑞")
     assert exact_info is None
     # 精确命中优先，不受剥离影响
@@ -69,6 +69,45 @@ async def test_by_alias_chart_prefix_fallback(songs):
     # 完全未命中：剥无可剥 → 空
     assert await song_service.by_alias("不存在的别名") == []
     assert await song_service.by_alias("dx") == []
+
+
+@pytest.mark.asyncio
+async def test_by_alias_chart_suffix_fallback(songs):
+    """精确未命中时剥离谱面类型后缀重查（dx/标准，柚子库实测形态）。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    # 「普瑞dx」库里没有（种子别名只有「普瑞」）→ 剥后缀「普瑞」命中
+    got, info = await song_service.by_alias_detail("普瑞dx")
+    assert [s.id for s in got] == [500]
+    assert info == ("普瑞", "dx", "suffix")
+    got, info = await song_service.by_alias_detail("企鹅舞标准")
+    assert [s.id for s in got] == [231]
+    assert info == ("企鹅舞", "标准", "suffix")
+    # 「标」/汉字后缀实测不存在，不剥：查询原样未命中 → 空
+    assert (await song_service.by_alias_detail("普瑞标"))[0] == []
+    assert (await song_service.by_alias_detail("普瑞宴"))[0] == []
+    # 剥完为空不剥
+    assert (await song_service.by_alias_detail("标准"))[0] == []
+
+
+@pytest.mark.asyncio
+async def test_alias_title_duplicate_filtered(songs):
+    """剥前后缀后与歌名相同的别名不进展示列表（归一化比对）。
+
+    生产链路中 provider 已把「dx翼」剥成「翼」入库，inject 绕过 provider，
+    故直接种入剥后形态模拟。
+    """
+    from mocks import make_song, seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    dup = make_song(456, "翼", aliases=["翼", "ＷＩＮＧ", "小鸟"])
+    await seed_service(song_service, [*list(songs), dup])
+    aliases = await song_service.aliases_of(456)
+    assert aliases == ["ＷＩＮＧ", "小鸟"]  # 「翼」与歌名重复 → 不展示
+    # 查询侧索引仍保留，剥后可正常命中本曲
+    got, _ = await song_service.by_alias_detail("小鸟dx")
+    assert [s.id for s in got] == [456]
 
 
 @pytest.mark.asyncio

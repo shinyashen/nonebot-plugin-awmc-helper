@@ -342,11 +342,11 @@ class SongService:
 
     async def jp_by_alias_detail(
         self, alias: str
-    ) -> tuple[list[Song], tuple[str, str] | None]:
+    ) -> tuple[list[Song], tuple[str, str, str] | None]:
         """日服视图按别名查曲（国服查不到时的 fallback，Q32）。
 
         别名库用 provider 的完整合并视图（含仅日服条目），匹配语义与国服侧
-        一致（归一化 + 单层谱面前缀剥离，宴谱汉字取日服视图自身）。
+        一致（归一化 + 单层谱面前后缀剥离，宴谱汉字取日服视图自身）。
         """
         await self.ensure_loaded()
         jp = await self._jp_songs_map()
@@ -369,7 +369,9 @@ class SongService:
         ids = index.get(key, set())
         strip_info = None
         if not ids:
-            stripped = strip_chart_prefix(alias, extra_prefixes=jp_kanji)
+            stripped = strip_chart_prefix(
+                alias, extra_prefixes=jp_kanji, strip_suffix=True
+            )
             if stripped:
                 ids = index.get(normalize_text(stripped[0]), set())
                 strip_info = stripped
@@ -382,18 +384,22 @@ class SongService:
 
     async def by_alias_detail(
         self, alias: str
-    ) -> tuple[list[Song], tuple[str, str] | None]:
-        """按别名查曲并返回剥离信息：``(曲目, (命中前缀, 剥离后别名) | None)``。
+    ) -> tuple[list[Song], tuple[str, str, str] | None]:
+        """按别名查曲并返回剥离信息。
 
-        精确未命中时剥离**一层**谱面类型前缀（dx/标准/标/宴/该曲宴谱汉字，
-        简繁归一）重查——别名库已去前缀按根 id 合并，带前缀的社区惯用写法
-        （dx圣诞 / 标39 / 协love you）由此兜底命中（Q31）。
+        返回 ``(曲目, (剥离后别名, 命中词, 前缀|"suffix") | None)``。精确未命中时
+        剥离**一层**谱面类型前缀/后缀（前缀 dx/标准/标/宴/该曲宴谱汉字含
+        [汉字] 括号形式，后缀 dx/标准，简繁归一）重查——别名库已去前缀按根 id
+        合并，带前后缀的社区惯用写法（dx圣诞 / 标39 / 协love you / 牛奶猫dx）
+        由此兜底命中（Q31）。
         """
         await self.ensure_loaded()
         key = normalize_text(alias)
         ids = self._alias_index.get(key, set())
         if not ids:
-            stripped = strip_chart_prefix(alias, extra_prefixes=self._utage_kanji)
+            stripped = strip_chart_prefix(
+                alias, extra_prefixes=self._utage_kanji, strip_suffix=True
+            )
             if stripped:
                 ids = self._alias_index.get(normalize_text(stripped[0]), set())
                 if ids:
@@ -500,7 +506,11 @@ class SongService:
         return ids or [song.id]  # 无任何谱面的异常数据兜底，避免展示空 ID
 
     async def aliases_of(self, song_id: int) -> list[str] | None:
-        """某曲目的全部别名（柚子 + 本地）；曲目不存在返回 None。"""
+        """某曲目的全部别名（柚子 + 本地）；曲目不存在返回 None。
+
+        标题本身不计入别名——剥前后缀后与歌名相同的形态同样与歌名重复
+        （如「标准39」剥出的「39」），按归一化比对去除（大小写/全角/简繁）。
+        """
         song = await self.by_id(song_id)
         if song is None:
             return None
@@ -508,8 +518,8 @@ class SongService:
         for la in await store.get_local_aliases():
             if la.song_id == song_id and la.alias not in aliases:
                 aliases.append(la.alias)
-        # 标题本身不计入别名
-        return [a for a in aliases if a.lower() != song.title.lower()]
+        title_key = normalize_text(song.title)
+        return [a for a in aliases if normalize_text(a) != title_key]
 
 
 song_service = SongService()

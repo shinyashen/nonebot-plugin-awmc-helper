@@ -248,7 +248,15 @@ DX_VERSION_CODES: list[int] = [
 # 汉字前缀随曲而异（撫/協/蔵…），由调用方从规范表 song_chart.kanji / 运行时
 # 宴谱对象取该曲的汉字后经 extra_prefixes 传入；匹配经 normalize_text 归一，
 # 简体输入（抚/协/藏）同样命中
-_CHART_PREFIX_RE = re.compile(r"^(dx|标准|标|宴)[\s·・.。:：_-]*", re.IGNORECASE)
+_CHART_TYPE = r"dx|标准|标|宴"
+_CHART_PREFIX_RE = re.compile(rf"^({_CHART_TYPE})[\s·・.。:：_-]*", re.IGNORECASE)
+# [汉字] 括号前缀（柚子别名库实测 67 条：[協]love you / [宴]cycles / [蔵]in chaos）；
+# 静态字的括号形式（[dx]）实测不存在，不支持。半/全角括号均收
+_CHART_BRACKET_RE = re.compile(r"^[\[［]\s*([^\]］\s])\s*[\]］]")
+# 后缀（柚子库 2026-09-23 实测：dx 8 条 / 标准 1 条；「标」与汉字后缀均不存在——
+# 汉字词尾（土星/宵崎奏/夜宴…）是词语本身，绝不可当谱面后缀剥）。
+# dx 前置 ASCII 字母时不剥（iidx 等英文词保护）
+_CHART_SUFFIX_RE = re.compile(r"[\s·・.。:：_-]*(标准|(?<![a-zA-Z])dx)$", re.IGNORECASE)
 
 # zhconv 未覆盖的和制汉字补充映射（2026-09-22 国服宴谱 kanji 全量实测：
 # 蔵/発/両/覚 归一后不变，用户输入 藏/发/两/觉 无法命中）
@@ -270,26 +278,45 @@ def normalize_text(text: str) -> str:
 
 
 def strip_chart_prefix(
-    alias: str, extra_prefixes: "set[str] | frozenset[str] | None" = None
-) -> "tuple[str, str] | None":
-    """剥离别名开头**一层**谱面类型前缀，返回 (剥离后别名, 命中的前缀)。
+    alias: str,
+    extra_prefixes: "set[str] | frozenset[str] | None" = None,
+    strip_suffix: bool = False,
+) -> "tuple[str, str, str] | None":
+    """剥离别名开头**一层**谱面类型前缀/后缀，返回 (剥离后别名, 命中词, 命中位置)。
 
     - 静态前缀：dx / 标准 / 标 / 宴（作者口径穷举；sd/旧 等不会出现）；
-    - ``extra_prefixes``：该曲宴谱的汉字（单字），按归一化比对（简体输入兼容）；
+    - 汉字前缀：该曲宴谱的汉字（单字），裸写与 [汉字] 括号形式均可（柚子别名库
+      实测存在 [協]love you / [宴]cycles 形态），按归一化比对（简体输入兼容）；
+    - 后缀：dx / 标准（2026-09 柚子库实测存在，「标」与汉字后缀不存在）——仅在
+      ``strip_suffix=True``（查询侧）启用：数据侧剥后缀会把 iidx 等英文别名
+      截断入库，库内形态必须原样保留；
     - 只剥一层：叠层前缀（「dx标39」）剥完的「标39」不在去前缀别名库中，
-      自然不命中（作者口径）；无前缀可剥（或剥完为空）返回 None。
+      自然不命中（作者口径）；前缀命中即返回、不再剥后缀；
+      无可剥（或剥完为空）返回 None。
     """
     text = alias.strip()
     match = _CHART_PREFIX_RE.match(text)
     if match:
         stripped = text[match.end() :].strip()
-        return (stripped, match.group(1)) if stripped else None
+        return (stripped, match.group(1), "prefix") if stripped else None
     extra = extra_prefixes or set()
     normalized_extra = {normalize_text(p): p for p in extra if p}
+    bracket = _CHART_BRACKET_RE.match(text)
+    if bracket:
+        key = normalize_text(bracket.group(1))
+        if key in normalized_extra or key == normalize_text("宴"):
+            stripped = text[bracket.end() :].strip()
+            hit = normalized_extra.get(key, "宴")
+            return (stripped, hit, "prefix") if stripped else None
     first = normalize_text(text[:1])
     if text and first in normalized_extra:
         stripped = text[1:].strip()
-        return (stripped, normalized_extra[first]) if stripped else None
+        return (stripped, normalized_extra[first], "prefix") if stripped else None
+    if strip_suffix:
+        match = _CHART_SUFFIX_RE.search(text)
+        if match:
+            stripped = text[: match.start()].strip()
+            return (stripped, match.group(1), "suffix") if stripped else None
     return None
 
 

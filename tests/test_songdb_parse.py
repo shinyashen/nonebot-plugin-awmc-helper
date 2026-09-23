@@ -174,7 +174,7 @@ def test_level_flat_matches_doc_example():
 
 
 def test_normalize_text_and_strip_chart_prefix():
-    """别名归一与谱面前缀剥离（Q31 最终语义：单层、动态 kanji、简繁兼容）。"""
+    """别名归一与谱面前后缀剥离（Q31 最终语义：单层、动态 kanji、简繁兼容）。"""
     from nonebot_plugin_awmc_helper.constants import normalize_text, strip_chart_prefix
 
     # 归一：小写 + 全角 NFKC + 简体化（含 zhconv 未覆盖的和制汉字补充表）
@@ -185,12 +185,12 @@ def test_normalize_text_and_strip_chart_prefix():
     assert normalize_text("蔵") != normalize_text("表")
 
     # 剥离：单层；静态前缀穷举 dx/标准/标/宴
-    assert strip_chart_prefix("dx圣诞") == ("圣诞", "dx")
-    assert strip_chart_prefix("标39") == ("39", "标")
-    assert strip_chart_prefix("标准企鹅") == ("企鹅", "标准")
-    assert strip_chart_prefix("宴Oshama") == ("Oshama", "宴")
+    assert strip_chart_prefix("dx圣诞") == ("圣诞", "dx", "prefix")
+    assert strip_chart_prefix("标39") == ("39", "标", "prefix")
+    assert strip_chart_prefix("标准企鹅") == ("企鹅", "标准", "prefix")
+    assert strip_chart_prefix("宴Oshama") == ("Oshama", "宴", "prefix")
     # 叠层只剥最外层：「dx标39」→「标39」（去前缀库中不存在，自然不命中）
-    assert strip_chart_prefix("dx标39") == ("标39", "dx")
+    assert strip_chart_prefix("dx标39") == ("标39", "dx", "prefix")
     # 纯前缀 / 无前缀
     assert strip_chart_prefix("dx") is None
     assert strip_chart_prefix("圣诞") is None
@@ -198,17 +198,56 @@ def test_normalize_text_and_strip_chart_prefix():
     assert strip_chart_prefix("協love you", extra_prefixes={"協"}) == (
         "love you",
         "協",
+        "prefix",
     )
     # 简体输入「协」命中库内规范形「協」（归一化匹配）
     assert strip_chart_prefix("协love you", extra_prefixes={"協"}) == (
         "love you",
         "協",
+        "prefix",
     )
     assert strip_chart_prefix("蔵Glorious", extra_prefixes={"蔵"}) == (
         "Glorious",
         "蔵",
+        "prefix",
     )
     assert strip_chart_prefix("藏Glorious", extra_prefixes={"蔵"}) == (
         "Glorious",
         "蔵",
+        "prefix",
     )  # 报告的前缀为库内规范形（繁/和制原字），简体输入同样命中
+
+    # [汉字] 括号前缀（柚子库实测形态）+ [宴] 通用括号；[x] 非谱面字不剥
+    assert strip_chart_prefix("[協]love you", extra_prefixes={"協"}) == (
+        "love you",
+        "協",
+        "prefix",
+    )
+    assert strip_chart_prefix("[协]love you", extra_prefixes={"協"}) == (
+        "love you",
+        "協",
+        "prefix",
+    )
+    assert strip_chart_prefix("[宴]cycles") == ("cycles", "宴", "prefix")
+    assert strip_chart_prefix("[x]garakuta", extra_prefixes={"蔵"}) is None
+    assert strip_chart_prefix("[宴]") is None  # 剥完为空
+
+    # 后缀（仅查询侧 strip_suffix=True 启用；2026-09 柚子库实测 dx/标准）
+    assert strip_chart_prefix("牛奶猫dx", strip_suffix=True) == (
+        "牛奶猫",
+        "dx",
+        "suffix",
+    )
+    assert strip_chart_prefix("牛奶猫标准", strip_suffix=True) == (
+        "牛奶猫",
+        "标准",
+        "suffix",
+    )
+    assert strip_chart_prefix("39标准", strip_suffix=True) == ("39", "标准", "suffix")
+    # iidx 等英文词保护：dx 前置 ASCII 字母不剥；数据侧默认不剥后缀
+    assert strip_chart_prefix("iidx", strip_suffix=True) is None
+    assert strip_chart_prefix("牛奶猫dx") is None
+    # 「标」与汉字后缀实测不存在，不纳入：「oshama宴」「39标」不剥
+    assert strip_chart_prefix("oshama宴", strip_suffix=True) is None
+    assert strip_chart_prefix("39标", strip_suffix=True) is None
+    assert strip_chart_prefix("dx", strip_suffix=True) is None  # 剥完为空
