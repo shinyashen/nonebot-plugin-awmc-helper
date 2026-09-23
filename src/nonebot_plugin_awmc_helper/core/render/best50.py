@@ -183,13 +183,13 @@ def get_char_width(o: int) -> int:
     return 1
 
 
-def coloum_width(s: str) -> int:
+def column_width(s: str) -> int:
     return sum(get_char_width(ord(ch)) for ch in s)
 
 
 def truncate_title(s: str, limit: int = 18, keep: int = 17) -> str:
     """标题超宽截断：按显示宽度保留前 keep 列再加省略号（Hoshino 同款规则）。"""
-    if coloum_width(s) <= limit:
+    if column_width(s) <= limit:
         return s
     res, out = 0, []
     for ch in s:

@@ -14,6 +14,8 @@ from nonebot import logger
 from nonebot.adapters import Bot
 from nonebot_plugin_alconna.uniseg import UniMessage, FallbackStrategy
 
+from ..config import plugin_config
+
 try:  # OneBot v11 可用时提供合并转发能力
     from nonebot.adapters.onebot.v11 import Bot as OB11Bot
     from nonebot.adapters.onebot.v11 import Message as OB11Message
@@ -38,8 +40,11 @@ async def try_send_forward(
 
     - ``group_id``：群聊场景；``user_id``：私聊场景（二选一，群优先）；
     - 仅 OneBot v11 支持，其余适配器或协议端发送失败返回 False；
-    - 节点身份为 bot 自身（LLOneBot 不支持自定义身份，见 mystool 实测）。
+    - 节点身份为 bot 自身（LLOneBot 不支持自定义身份，见 mystool 实测）；
+    - ``AWMC_FORWARD=false`` 时直接返回 False（协议端转发实现损坏的部署降级用）。
     """
+    if not plugin_config.awmc_forward:
+        return False
     if not (
         _OB11
         and OB11Bot is not None

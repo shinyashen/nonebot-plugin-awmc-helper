@@ -34,13 +34,14 @@ def session_keys(session: "Session") -> tuple[str, str]:
 
     不要用 "unknown" 兜底平台语义：uninfo 的 platform 缺失不代表平台未知，
     adapter 名才是稳定的单平台标识（对比 NB maimaidx 直接 event.user_id）。
+    适配器取值必须走 ``.value``：Python ≤3.10 的 mixin 枚举 ``str()`` 返回
+    "SupportAdapter.onebot11" 成员形态，3.11+ 才是 "OneBot V11" 值形态。
     """
-    platform = str(
-        getattr(session, "platform", None)
-        or getattr(session, "adapter", None)
-        or "unknown"
-    ).strip()
-    return platform, str(session.user.id)
+    platform = getattr(session, "platform", None)
+    if platform is None:
+        adapter = getattr(session, "adapter", None)
+        platform = getattr(adapter, "value", adapter)
+    return str(platform or "unknown").strip(), str(session.user.id)
 
 
 LXNS_PENDING_TTL = 1200  # 落雪授权码回填会话 20 分钟
