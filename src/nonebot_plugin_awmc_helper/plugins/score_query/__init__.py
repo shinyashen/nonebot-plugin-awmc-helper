@@ -139,7 +139,8 @@ async def _(
 @ap50.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
-    session: Session = UniSession(), event: Event = None  # type: ignore[assignment]
+    session: Session = UniSession(),
+    event: Event = None,  # type: ignore[assignment]
 ):
     """AP50（用户口径）：b50 的升级版——只统计 AP/APP 的 best50，渲染 B50 大图。
 
@@ -164,10 +165,14 @@ async def _(
     latest = current_version.value
     ap_b35 = sorted(
         (s for s in ap_scores if (s.version or 0) < latest),
-        key=lambda s: s.dx_rating or 0, reverse=True)
+        key=lambda s: s.dx_rating or 0,
+        reverse=True,
+    )
     ap_b15 = sorted(
         (s for s in ap_scores if (s.version or 0) >= latest),
-        key=lambda s: s.dx_rating or 0, reverse=True)
+        key=lambda s: s.dx_rating or 0,
+        reverse=True,
+    )
     player = await score_service.get_player(binding)
     png = await b50_render.best50_bytes(
         _display_name(player),

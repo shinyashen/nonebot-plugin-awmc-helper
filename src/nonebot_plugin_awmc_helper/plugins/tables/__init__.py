@@ -155,9 +155,7 @@ async def _(
 
 @score_table_cmd.handle()
 @handle_errors("生成完成表失败", except_with_message=(UserScoreError,))
-async def _(
-    session: Session = UniSession(), groups: tuple = RegexGroup()
-):
+async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     """等级完成表（NB DrawRatingTable 移植）：模板 + 统计头 + 逐谱面盖章。
 
     计划映射：fc/fcp/ap → 连击章模式（NB plan=True）；fs 族 → Sync 章
@@ -286,9 +284,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
 @plate_cmd.handle()
 @handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
-async def _(
-    session: Session = UniSession(), groups: tuple = RegexGroup()
-):
+async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     version, kind, mode, page_raw = groups
     binding = await binding_service.ensure(*session_keys(session))
     page = int(page_raw) if page_raw else 1
@@ -310,15 +306,11 @@ async def _(
         if not entries:
             await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
         scores = await score_service.get_scores_all(binding)
-        png = draw_plate_table(
-            version, kind, scores.scores, entries, page=page
-        )
+        png = draw_plate_table(version, kind, scores.scores, entries, page=page)
         if png is None:
             # 底图缺失：现场按 NB 布局生成（不落盘）后重试
             await table_template.generate_plate_template(version, kind, song_service)
-            png = draw_plate_table(
-                version, kind, scores.scores, entries, page=page
-            )
+            png = draw_plate_table(version, kind, scores.scores, entries, page=page)
             if png is None:
                 await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
                     at_sender=True

@@ -131,10 +131,15 @@ def _rating_grid(
             li = diff.level_index.value
             im.alpha_composite(assets.cover(song.id).resize((75, 75)), (x, y))
             im.alpha_composite(
-                assets.pic(f"border_{_LEVEL_INDEXES[li]}.png"), (x - 5, y - 5))
-            dr.text((x + 56, y + 4), str(song.id),
-                    font=font(13, "Torus SemiBold.otf"),
-                    fill=_DIFF_TEXT_COLOR[li], anchor="mm")
+                assets.pic(f"border_{_LEVEL_INDEXES[li]}.png"), (x - 5, y - 5)
+            )
+            dr.text(
+                (x + 56, y + 4),
+                str(song.id),
+                font=font(13, "Torus SemiBold.otf"),
+                fill=_DIFF_TEXT_COLOR[li],
+                anchor="mm",
+            )
         start_y += (max_row + 1) * GRID_STEP + 30
     return im
 
@@ -162,7 +167,8 @@ def _rating_grid_15(
         if i < count:
             song, diff = entries[i]
             im.alpha_composite(
-                assets.cover(song.id).resize((330, 330)), (x + 10, y + 10))
+                assets.cover(song.id).resize((330, 330)), (x + 10, y + 10)
+            )
             im.alpha_composite(
                 assets.pic("DX.png" if diff.type == SongType.DX else "SD.png"),
                 (x + 200, y + 345),
@@ -217,8 +223,11 @@ def _plate_grid(
     def level_of(song: Song, diff: SongDifficulty) -> str:
         if remaster_entries and song.id in remaster_ids:
             re_m = next(
-                (d for s2, d in remaster_entries if s2.id == song.id
-                 and d.level_index.value == 4),
+                (
+                    d
+                    for s2, d in remaster_entries
+                    if s2.id == song.id and d.level_index.value == 4
+                ),
                 None,
             )
             if re_m is not None:
@@ -228,8 +237,9 @@ def _plate_grid(
     grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
     for song, diff in entries:
         grouped.setdefault(level_of(song, diff), []).append((song, diff))
-    order = sorted(grouped, key=lambda lv: (float(lv.rstrip("+")), lv.endswith("+")),
-                   reverse=True)
+    order = sorted(
+        grouped, key=lambda lv: (float(lv.rstrip("+")), lv.endswith("+")), reverse=True
+    )
     groups = {k: grouped[k] for k in order}
 
     current_y = START_Y
@@ -254,9 +264,7 @@ def _plate_grid(
 
     start_y = START_Y
     for level, charts in groups.items():
-        charts.sort(
-            key=lambda pair: pair[1].level_value, reverse=True
-        )
+        charts.sort(key=lambda pair: pair[1].level_value, reverse=True)
         dr.text(
             (72, start_y + 40),
             level,
@@ -390,9 +398,7 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
                 continue
             flat = [pair for charts in group.values() for pair in charts]
             img = _plate_grid(flat, major, remaster_entries=remaster, pages=pages)
-            await asyncio.to_thread(
-                img.save, out_dir / f"{version}-{pages + 1}.png"
-            )
+            await asyncio.to_thread(img.save, out_dir / f"{version}-{pages + 1}.png")
             total += sum(len(v) for v in group.values())
         return total
     img = _plate_grid(entries, major)
@@ -410,8 +416,11 @@ def _by_level(
         lv = diff.level
         if song.id in remaster_ids:
             re_m = next(
-                (d for s2, d in remaster
-                 if s2.id == song.id and d.level_index.value == 4),
+                (
+                    d
+                    for s2, d in remaster
+                    if s2.id == song.id and d.level_index.value == 4
+                ),
                 None,
             )
             if re_m is not None:
@@ -446,7 +455,7 @@ async def refresh_all_plate_tables(song_service) -> tuple[int, list[str]]:
     async with _template_lock:
         total, failed = 0, []
         for version in PLATE_CHARS:
-            for kind in (PLATE_KINDS if version in ("舞", "霸") else ("将",)):
+            for kind in PLATE_KINDS if version in ("舞", "霸") else ("将",):
                 try:
                     total += await generate_plate_template(version, kind, song_service)
                 except Exception:

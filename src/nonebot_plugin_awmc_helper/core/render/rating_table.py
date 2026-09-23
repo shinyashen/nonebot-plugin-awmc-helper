@@ -17,12 +17,38 @@ from .table_template import FONT_BLUE
 
 # NB constants 同源：统计键序与阈值表
 STATISTICS_KEYS = [
-    "clear", "s", "sp", "ss", "ssp", "sss", "sssp",
-    "sync", "fc", "fcp", "ap", "app", "fs", "fsp", "fsd", "fsdp",
+    "clear",
+    "s",
+    "sp",
+    "ss",
+    "ssp",
+    "sss",
+    "sssp",
+    "sync",
+    "fc",
+    "fcp",
+    "ap",
+    "app",
+    "fs",
+    "fsp",
+    "fsd",
+    "fsdp",
 ]
 RANK_SP = [
-    "d", "c", "b", "bb", "bbb", "a", "aa",
-    "aaa", "s", "sp", "ss", "ssp", "sss", "sssp",
+    "d",
+    "c",
+    "b",
+    "bb",
+    "bbb",
+    "a",
+    "aa",
+    "aaa",
+    "s",
+    "sp",
+    "ss",
+    "ssp",
+    "sss",
+    "sssp",
 ]
 COMBO_SP = ["fc", "fcp", "ap", "app"]
 SYNC_D_SP = ["fs", "fsp", "fsd", "fsdp"]
@@ -108,27 +134,49 @@ def draw_rating_table(
 
     # 标题 + 统计头（普通分支坐标；lv15 由模板自身布局承载，统计同位）
     title_y = 160
-    dr.text((495, title_y), "Level.",
-            font=font(70, "FOT-NewRodin Pro EB.otf"), fill=FONT_BLUE,
-            anchor="ld", stroke_width=8, stroke_fill=(255, 255, 255, 255))
-    dr.text((750, title_y), level,
-            font=font(100, "FOT-NewRodin Pro EB.otf"), fill=FONT_BLUE,
-            anchor="ld", stroke_width=8, stroke_fill=(255, 255, 255, 255))
+    dr.text(
+        (495, title_y),
+        "Level.",
+        font=font(70, "FOT-NewRodin Pro EB.otf"),
+        fill=FONT_BLUE,
+        anchor="ld",
+        stroke_width=8,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    dr.text(
+        (750, title_y),
+        level,
+        font=font(100, "FOT-NewRodin Pro EB.otf"),
+        fill=FONT_BLUE,
+        anchor="ld",
+        stroke_width=8,
+        stroke_fill=(255, 255, 255, 255),
+    )
 
     im.alpha_composite(assets.pic("complete.png"), (251, 190))
-    dr.text((394, 238), f"{stats.data['clear']}/{total_count}",
-            font=font(30, "Torus SemiBold.otf"), fill=(124, 129, 255, 255),
-            anchor="mm", stroke_width=5,
-            stroke_fill=(255, 255, 255, 255))
+    dr.text(
+        (394, 238),
+        f"{stats.data['clear']}/{total_count}",
+        font=font(30, "Torus SemiBold.otf"),
+        fill=(124, 129, 255, 255),
+        anchor="mm",
+        stroke_width=5,
+        stroke_fill=(255, 255, 255, 255),
+    )
     for n, key in enumerate(STATISTICS_KEYS[1:]):
         if n < 6:
             x, y = 534 + (n % 6) * 102, 238
         else:
             x, y = 292 + ((n - 6) % 9) * 102, 323
-        dr.text((x, y), str(stats.data[key]),
-                font=font(30, "Torus SemiBold.otf"),
-                fill=(124, 129, 255, 255), anchor="mm",
-                stroke_width=2, stroke_fill=(255, 255, 255, 255))
+        dr.text(
+            (x, y),
+            str(stats.data[key]),
+            font=font(30, "Torus SemiBold.otf"),
+            fill=(124, 129, 255, 255),
+            anchor="mm",
+            stroke_width=2,
+            stroke_fill=(255, 255, 255, 255),
+        )
 
     # 逐谱面盖章（按模板生成时的分组与排序：_group_by_ds 降序 / lv15 特例）
     qualified: list[float] = []
@@ -137,13 +185,15 @@ def draw_rating_table(
         ach = score.achievements or 0
         qualified.append(ach)
         im.alpha_composite(
-            assets.pic(_COMPLETED_BG if ach >= 100 else _UNFINISHED_BG), (x + 1, y + 1))
+            assets.pic(_COMPLETED_BG if ach >= 100 else _UNFINISHED_BG), (x + 1, y + 1)
+        )
         rate = RATE_FILE[RateType._from_achievement(ach).name]
         p = assets.static_path() / "mai" / "pic" / theme / f"UI_TTR_Rank_{rate}.png"
         if p.exists():
             im.alpha_composite(
                 assets.pic(f"UI_TTR_Rank_{rate}.png", theme).resize((78, 35)),
-                (x, y + 20))
+                (x, y + 20),
+            )
 
     def stamp_combo(x: int, y: int, score) -> None:
         if not score.fc:
@@ -154,7 +204,8 @@ def draw_rating_table(
             assets.pic(
                 f"UI_MSS_MBase_Icon_{_combo_file(score.fc.name.lower())}.png"
             ).resize((50, 50)),
-            (x + 15, y + 13))
+            (x + 15, y + 13),
+        )
 
     def stamp_sync(x: int, y: int, score) -> None:
         if not score.fs or score.fs.name.lower() == "sync":
@@ -165,7 +216,8 @@ def draw_rating_table(
             assets.pic(
                 f"UI_MSS_MBase_Icon_{_sync_file(score.fs.name.lower())}.png"
             ).resize((50, 50)),
-            (x + 15, y + 13))
+            (x + 15, y + 13),
+        )
 
     if level == "15":
         ordered = sorted(entries, key=lambda pair: pair[1].level_value, reverse=True)
@@ -209,8 +261,10 @@ def draw_rating_table(
 
     # 全曲达成徽章（NB _calc_achievements_fc：增量阈值全部满足时挂 Allclear 图）
     thresholds = (
-        list(range(4)) if combo_mode
-        else list(range(len(SYNC_D_SP))) if sync_mode
+        list(range(4))
+        if combo_mode
+        else list(range(len(SYNC_D_SP)))
+        if sync_mode
         else list(range(len(RANK_SP[-6:])))
     )
     if total_count and len(qualified) == total_count:
@@ -228,7 +282,9 @@ def draw_rating_table(
             else:
                 name = RATE_FILE.get(RANK_SP[-6:][r].upper(), "")
             p = (
-                assets.static_path() / "mai" / "pic"
+                assets.static_path()
+                / "mai"
+                / "pic"
                 / f"UI_MSS_Allclear_Icon_{name}.png"
             )
             if p.exists():

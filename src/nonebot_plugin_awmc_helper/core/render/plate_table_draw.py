@@ -20,9 +20,7 @@ GRID_STEP, START_X, START_Y, ROW_COUNT = 96, 180, 490, 12
 _PLAN_KINDS = {"者", "将", "极", "神", "舞舞"}
 
 
-def _qualified(
-    kind: str, score
-) -> bool:
+def _qualified(kind: str, score) -> bool:
     """单谱面是否达成牌子要求（maimai_py 判牌语义同款）。"""
     if score is None:
         return False
@@ -60,7 +58,8 @@ def _plate_icon(kind: str, score):
     name = "FSDp"
     if score.fs is not None:
         name = {"fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FSDp"}.get(
-            score.fs.name.lower(), "FSD")
+            score.fs.name.lower(), "FSD"
+        )
     return assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((60, 60)), (10, 12)
 
 
@@ -127,9 +126,7 @@ def draw_plate_table(
     current_y = START_Y
     for level, songs_slots in played.items():
         for song_id, slots in songs_slots.items():
-            qualified_slots = [
-                i for i, s in enumerate(slots) if _qualified(kind, s)
-            ]
+            qualified_slots = [i for i, s in enumerate(slots) if _qualified(kind, s)]
             qualified_slots_of[song_id] = qualified_slots
             for i, s in enumerate(slots):
                 slot_total[i] += 1
@@ -154,7 +151,8 @@ def draw_plate_table(
                 mark = finished_marks[s_idx]
                 if is_wu and len(slots) == 5:
                     im.alpha_composite(
-                        mark.resize((14, 14)), (x + 1 + 16 * s_idx, y + 64))
+                        mark.resize((14, 14)), (x + 1 + 16 * s_idx, y + 64)
+                    )
                 else:
                     im.alpha_composite(mark, (x + 4 + 19 * s_idx, y + 63))
         current_y += rows * GRID_STEP + 30
@@ -170,22 +168,37 @@ def draw_plate_table(
     if progress:
         big = assets.pic("progress_big.png")
         im.alpha_composite(big.crop((0, 0, int(993 * progress), 92)), (204, 219))
-    dr.text((700, 240), text,
-            font=font(30, "FOT-NewRodin Pro EB.otf"),
-            fill=(124, 129, 255, 255), anchor="mm", stroke_width=3,
-            stroke_fill=(255, 255, 255, 255))
+    dr.text(
+        (700, 240),
+        text,
+        font=font(30, "FOT-NewRodin Pro EB.otf"),
+        fill=(124, 129, 255, 255),
+        anchor="mm",
+        stroke_width=3,
+        stroke_fill=(255, 255, 255, 255),
+    )
     pct = f"{round(progress * 100, 2)}%"
-    dr.text((1190, 240), pct,
-            font=font(30, "FOT-NewRodin Pro EB.otf"),
-            fill=(124, 129, 255, 255), anchor="rm", stroke_width=3,
-            stroke_fill=(255, 255, 255, 255))
+    dr.text(
+        (1190, 240),
+        pct,
+        font=font(30, "FOT-NewRodin Pro EB.otf"),
+        fill=(124, 129, 255, 255),
+        anchor="rm",
+        stroke_width=3,
+        stroke_fill=(255, 255, 255, 255),
+    )
 
     # 各难度分组计数（模板按等级分组；此处按槽位统计，与 NB slot_counts 一致）
     stats_start_y = 300
     stats_gap_x = 253
     stats_start_x = 320
-    id_colors = [(129, 217, 85, 255), (245, 189, 21, 255),
-                 (255, 129, 141, 255), (159, 81, 220, 255), (138, 0, 226, 255)]
+    id_colors = [
+        (129, 217, 85, 255),
+        (245, 189, 21, 255),
+        (255, 129, 141, 255),
+        (159, 81, 220, 255),
+        (138, 0, 226, 255),
+    ]
     for li in range(slot_num):
         x = stats_start_x + li * stats_gap_x
         count, total = slot_counts[li], slot_total[li]
@@ -193,19 +206,35 @@ def draw_plate_table(
         if group_progress:
             small = assets.pic("progress_small.png")
             im.alpha_composite(
-                small.crop((0, 0, int(230 * group_progress), 46)), (x - 115, 326))
-        dr.text((x, stats_start_y), str(count),
-                font=font(40, "FOT-NewRodin Pro EB.otf"),
-                fill=id_colors[li], anchor="mm", stroke_width=4,
-                stroke_fill=(255, 255, 255, 255))
-        dr.text((x + 115, stats_start_y + 20), f"/{total}",
-                font=font(14, "FOT-NewRodin Pro EB.otf"),
-                fill=id_colors[li], anchor="rd", stroke_width=3,
-                stroke_fill=(255, 255, 255, 255))
-        dr.text((x + 115, 343), f"{round(group_progress * 100, 2)}%",
-                font=font(20, "FOT-NewRodin Pro EB.otf"),
-                fill=(124, 129, 255, 255), anchor="rm",
-                stroke_width=2, stroke_fill=(255, 255, 255, 255))
+                small.crop((0, 0, int(230 * group_progress), 46)), (x - 115, 326)
+            )
+        dr.text(
+            (x, stats_start_y),
+            str(count),
+            font=font(40, "FOT-NewRodin Pro EB.otf"),
+            fill=id_colors[li],
+            anchor="mm",
+            stroke_width=4,
+            stroke_fill=(255, 255, 255, 255),
+        )
+        dr.text(
+            (x + 115, stats_start_y + 20),
+            f"/{total}",
+            font=font(14, "FOT-NewRodin Pro EB.otf"),
+            fill=id_colors[li],
+            anchor="rd",
+            stroke_width=3,
+            stroke_fill=(255, 255, 255, 255),
+        )
+        dr.text(
+            (x + 115, 343),
+            f"{round(group_progress * 100, 2)}%",
+            font=font(20, "FOT-NewRodin Pro EB.otf"),
+            fill=(124, 129, 255, 255),
+            anchor="rm",
+            stroke_width=2,
+            stroke_fill=(255, 255, 255, 255),
+        )
 
     im = im.resize(
         (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS

@@ -1,6 +1,7 @@
 """M5：random_song / fortune / guess 测试。"""
 
 import pytest
+from mocks import requires_assets
 from nonebug import App
 from maimai_py import SongType  # maimai_py 不依赖 nonebot 初始化
 
@@ -63,6 +64,7 @@ async def _assert_reply(
 
 
 @pytest.mark.asyncio
+@requires_assets
 async def test_random_chart(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import random_song
     from nonebot_plugin_awmc_helper.core.songs import song_service
@@ -129,7 +131,10 @@ async def test_random_chart_no_match(app: App, songs):
 
     # UniSession 依赖注入在 handler 入口展开（无论是否命中都会触发群信息 API）
     await _assert_reply(
-        app, random_song.random_chart, "随个白14", "没有符合条件的谱面，换一个试试吧",
+        app,
+        random_song.random_chart,
+        "随个白14",
+        "没有符合条件的谱面，换一个试试吧",
         with_session=True,
     )
 
@@ -387,6 +392,7 @@ async def test_pick_rise_song(songs, monkeypatch):
 
 
 @pytest.mark.asyncio
+@requires_assets
 async def test_mai_what_rise_fallback(app: App, songs, monkeypatch):
     """未绑定时 mai什么加分 退化为普通随机（原版行为）。"""
     import base64

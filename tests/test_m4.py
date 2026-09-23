@@ -328,6 +328,7 @@ async def test_score_line_help(app: App):
 
 
 @pytest.mark.asyncio
+@requires_assets
 async def test_ds_table_command(app: App, songs):
     import base64
 
@@ -419,6 +420,7 @@ from maimai_py import SongType, LevelIndex
 
 
 @pytest.mark.asyncio
+@requires_assets
 async def test_table_template_overlay(songs, tmp_path, monkeypatch):
     """NB 体系端到端：生成定数表底图 → DrawRatingTable 盖章 → 出非空 PNG。
 
@@ -699,12 +701,11 @@ def test_rise_recommend_version_filter():
         cand(922, SongType.STANDARD, 25000),  # 当前版本 SD → 排除（旧版本栏语义）
         cand(923, SongType.STANDARD, 24000),  # 旧版本 SD → 保留
     ]
+
     def by_id(song_id, rec):
         return next(r for r in rec if r["song"].id == song_id)
 
-    rec = rise_recommend(
-        b50, candidates, target=1, latest_version_value=25000
-    )
+    rec = rise_recommend(b50, candidates, target=1, latest_version_value=25000)
     # b50 两侧均有成绩（24000 旧版本侧 / 25000 新版本侧）→ 四首候选全部保留，
     # 归栏只看谱面版本
     got = {(r["song"].id, r["side"]) for r in rec}

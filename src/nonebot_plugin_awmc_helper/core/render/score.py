@@ -485,9 +485,7 @@ class DrawScore:
                 f"当前第「{(page - 1) * 80 + 1}-{(page - 1) * 80 + len(newdata)}」个，"
                 f"第「{page} / {end_page}」页"
             )
-            self._footer(
-                pagemsg, design_bg_y=height - 133, text_y=height - 90, size=25
-            )
+            self._footer(pagemsg, design_bg_y=height - 133, text_y=height - 90, size=25)
         else:
             self._section_title(77, "未游玩谱面", size=28)
             self._while_pic(data)

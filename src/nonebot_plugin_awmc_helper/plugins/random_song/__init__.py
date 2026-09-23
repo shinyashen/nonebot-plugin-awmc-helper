@@ -42,9 +42,7 @@ mai_what_rise = on_command(
 
 @random_chart.handle()
 @handle_errors("随机失败，请稍后再试")
-async def _(
-    session: Session = UniSession(), groups: tuple = RegexGroup()
-):
+async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     type_raw, color, level = groups
     song_type = None
     if type_raw:

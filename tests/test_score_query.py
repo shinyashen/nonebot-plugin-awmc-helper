@@ -175,7 +175,8 @@ async def test_ginfo_rich_chart_card(app: App, db, songs):
     seeded = await seed_service(song_service, [_curve_song()])
     song = seeded[0]
     diff = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
-    assert diff is not None and diff.curve is not None
+    assert diff is not None
+    assert diff.curve is not None
 
     # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（R9 统计卡）
     card = nb_chart.song_chart_info(song, False, False, [], "prism_plus", None)
