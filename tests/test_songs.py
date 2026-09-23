@@ -103,11 +103,16 @@ async def test_alias_title_duplicate_filtered(songs):
 
     dup = make_song(456, "翼", aliases=["翼", "ＷＩＮＧ", "小鸟"])
     await seed_service(song_service, [*list(songs), dup])
-    aliases = await song_service.aliases_of(456)
-    assert aliases == ["ＷＩＮＧ", "小鸟"]  # 「翼」与歌名重复 → 不展示
-    # 查询侧索引仍保留，剥后可正常命中本曲
-    got, _ = await song_service.by_alias_detail("小鸟dx")
-    assert [s.id for s in got] == [456]
+    try:
+        aliases = await song_service.aliases_of(456)
+        assert aliases == ["ＷＩＮＧ", "小鸟"]  # 「翼」与歌名重复 → 不展示
+        # 查询侧索引仍保留，剥后可正常命中本曲
+        got, _ = await song_service.by_alias_detail("小鸟dx")
+        assert [s.id for s in got] == [456]
+    finally:
+        # 绕过 fixture 直调 seed 会置位 _ready，必须清理（否则同 worker
+        # 后续依赖「运行时未加载」的测试被污染，如 test_jp_songs_entrypoint）
+        song_service._ready.clear()
 
 
 @pytest.mark.asyncio

@@ -185,6 +185,8 @@ async def test_jp_songs_entrypoint(db):
     from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.core.songs import jp_songs, song_service
 
+    # 前置条件：运行时未加载（xdist 同 worker 先跑的测试可能置位过 _ready）
+    song_service._ready.clear()
     await songdb.rebuild(full_payloads())
     # 运行时未加载（_ready 未置位）也不影响 JP 视图
     assert not song_service.loaded
