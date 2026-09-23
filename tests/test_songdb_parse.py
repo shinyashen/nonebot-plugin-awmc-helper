@@ -232,22 +232,15 @@ def test_normalize_text_and_strip_chart_prefix():
     assert strip_chart_prefix("[x]garakuta", extra_prefixes={"蔵"}) is None
     assert strip_chart_prefix("[宴]") is None  # 剥完为空
 
-    # 后缀（仅查询侧 strip_suffix=True 启用；2026-09 柚子库实测 dx/标准）
-    assert strip_chart_prefix("牛奶猫dx", strip_suffix=True) == (
-        "牛奶猫",
-        "dx",
-        "suffix",
-    )
-    assert strip_chart_prefix("牛奶猫标准", strip_suffix=True) == (
-        "牛奶猫",
-        "标准",
-        "suffix",
-    )
-    assert strip_chart_prefix("39标准", strip_suffix=True) == ("39", "标准", "suffix")
-    # iidx 等英文词保护：dx 前置 ASCII 字母不剥；数据侧默认不剥后缀
-    assert strip_chart_prefix("iidx", strip_suffix=True) is None
-    assert strip_chart_prefix("牛奶猫dx") is None
+    # 后缀（入库与查询共用同一规则；2026-09 柚子库实测 dx/标准）
+    assert strip_chart_prefix("牛奶猫dx") == ("牛奶猫", "dx", "suffix")
+    assert strip_chart_prefix("牛奶猫标准") == ("牛奶猫", "标准", "suffix")
+    assert strip_chart_prefix("39标准") == ("39", "标准", "suffix")
+    # iidx 等英文词保护：dx 前置 ASCII 字母不剥，库内形态原样保留
+    assert strip_chart_prefix("iidx") is None
     # 「标」与汉字后缀实测不存在，不纳入：「oshama宴」「39标」不剥
-    assert strip_chart_prefix("oshama宴", strip_suffix=True) is None
-    assert strip_chart_prefix("39标", strip_suffix=True) is None
-    assert strip_chart_prefix("dx", strip_suffix=True) is None  # 剥完为空
+    assert strip_chart_prefix("oshama宴") is None
+    assert strip_chart_prefix("39标") is None
+    assert strip_chart_prefix("dx") is None  # 剥完为空
+    # 只剥一层：前缀命中即返回，不再剥后缀
+    assert strip_chart_prefix("dx牛奶猫dx") == ("牛奶猫dx", "dx", "prefix")

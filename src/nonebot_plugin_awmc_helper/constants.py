@@ -278,18 +278,18 @@ def normalize_text(text: str) -> str:
 
 
 def strip_chart_prefix(
-    alias: str,
-    extra_prefixes: "set[str] | frozenset[str] | None" = None,
-    strip_suffix: bool = False,
+    alias: str, extra_prefixes: "set[str] | frozenset[str] | None" = None
 ) -> "tuple[str, str, str] | None":
-    """剥离别名开头**一层**谱面类型前缀/后缀，返回 (剥离后别名, 命中词, 命中位置)。
+    """剥离别名**一层**谱面类型前缀/后缀，返回 (剥离后别名, 命中词, 命中位置)。
+
+    入库（合并层去前后缀）与查询（未命中兜底重查）共用本规则。
 
     - 静态前缀：dx / 标准 / 标 / 宴（作者口径穷举；sd/旧 等不会出现）；
     - 汉字前缀：该曲宴谱的汉字（单字），裸写与 [汉字] 括号形式均可（柚子别名库
       实测存在 [協]love you / [宴]cycles 形态），按归一化比对（简体输入兼容）；
-    - 后缀：dx / 标准（2026-09 柚子库实测存在，「标」与汉字后缀不存在）——仅在
-      ``strip_suffix=True``（查询侧）启用：数据侧剥后缀会把 iidx 等英文别名
-      截断入库，库内形态必须原样保留；
+    - 后缀：dx / 标准（2026-09 柚子库实测存在，「标」与汉字后缀不存在——词尾字
+      如 土星/宵崎奏/夜宴 是词语本身，绝不可当谱面后缀剥）；dx 前置 ASCII 字母
+      时不剥（iidx 等英文别名保护，库内形态原样保留）；
     - 只剥一层：叠层前缀（「dx标39」）剥完的「标39」不在去前缀别名库中，
       自然不命中（作者口径）；前缀命中即返回、不再剥后缀；
       无可剥（或剥完为空）返回 None。
@@ -312,11 +312,10 @@ def strip_chart_prefix(
     if text and first in normalized_extra:
         stripped = text[1:].strip()
         return (stripped, normalized_extra[first], "prefix") if stripped else None
-    if strip_suffix:
-        match = _CHART_SUFFIX_RE.search(text)
-        if match:
-            stripped = text[: match.start()].strip()
-            return (stripped, match.group(1), "suffix") if stripped else None
+    match = _CHART_SUFFIX_RE.search(text)
+    if match:
+        stripped = text[: match.start()].strip()
+        return (stripped, match.group(1), "suffix") if stripped else None
     return None
 
 

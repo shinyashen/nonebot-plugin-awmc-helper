@@ -369,9 +369,7 @@ class SongService:
         ids = index.get(key, set())
         strip_info = None
         if not ids:
-            stripped = strip_chart_prefix(
-                alias, extra_prefixes=jp_kanji, strip_suffix=True
-            )
+            stripped = strip_chart_prefix(alias, extra_prefixes=jp_kanji)
             if stripped:
                 ids = index.get(normalize_text(stripped[0]), set())
                 strip_info = stripped
@@ -397,9 +395,7 @@ class SongService:
         key = normalize_text(alias)
         ids = self._alias_index.get(key, set())
         if not ids:
-            stripped = strip_chart_prefix(
-                alias, extra_prefixes=self._utage_kanji, strip_suffix=True
-            )
+            stripped = strip_chart_prefix(alias, extra_prefixes=self._utage_kanji)
             if stripped:
                 ids = self._alias_index.get(normalize_text(stripped[0]), set())
                 if ids:

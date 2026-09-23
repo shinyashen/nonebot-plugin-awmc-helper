@@ -61,12 +61,12 @@ class AwmcAliasProvider(IAliasProvider):
         """最近一次合并的完整别名库（含仅日服曲目条目），日服 fallback 搜索用。"""
 
     async def get_aliases(self, client) -> dict[int, list[str]]:
-        """三源合并，返回**去前缀**别名库（维护口径，Q31）。
+        """三源合并，返回**去前后缀**别名库（维护口径，Q31）。
 
         每条别名经 ``strip_chart_prefix`` 剥离谱面类型前缀（dx/标准/标/宴 +
-        该曲宴谱汉字裸写与 [汉字] 括号形式，经 ``normalize_text`` 简繁归一）
-        后入库并入视图；后缀不在此剥（数据侧剥后缀会把 iidx 等英文词截断，
-        仅查询侧兜底）；跨源归一化去重，保序。
+        该曲宴谱汉字裸写与 [汉字] 括号形式）与后缀（dx/标准，dx 前置 ASCII
+        字母的 iidx 等英文词不剥），经 ``normalize_text`` 简繁归一后入库并入
+        视图；快照保留原始形态（无损，可重放）；跨源归一化去重，保序。
         """
         merged: dict[int, list[str]] = {}
         seen: dict[int, set[str]] = {}
