@@ -56,59 +56,68 @@ def _map_error(e: Exception) -> UserScoreError:
 class ScoreService:
     """成绩查询封装：全部先 ensure_loaded（被动缓存由 maimai-py 保证）。"""
 
-    async def get_player(self, binding: UserBinding):
+    async def _run(self, binding: UserBinding | None, make_coro):
+        """统一执行 maimai-py 查询：异常映射 + 落雪 token 过期自动续期重试。
+
+        ``make_coro`` 是无参协程工厂，重试时重新装配 identifier（token 已刷新）。
+        """
         try:
-            return await client.players(
-                binding_service.identifier(binding),
-                provider=binding_service.provider(binding),
-            )
+            return await make_coro()
         except BindingError as e:
             raise UserScoreError(str(e)) from e
-        except MaimaiPyError as e:
+        except (MaimaiPyError, httpx.RequestError) as e:
+            if binding is not None and await binding_service.refresh_lxns_if_expired(
+                binding, e
+            ):
+                try:
+                    return await make_coro()
+                except (MaimaiPyError, httpx.RequestError) as e2:
+                    raise _map_error(e2) from e2
             raise _map_error(e) from e
-        except httpx.RequestError as e:
-            raise _map_error(e) from e
+
+    async def get_player(self, binding: UserBinding):
+        await song_service.ensure_loaded()
+        return await self._run(
+            binding,
+            lambda: client.players(
+                binding_service.identifier(binding),
+                provider=binding_service.provider(binding),
+            ),
+        )
 
     async def get_b50(self, binding: UserBinding) -> MaimaiScores:
         """B50（b35 + b15 与总 rating）。"""
-        try:
-            return await client.bests(
+        await song_service.ensure_loaded()
+        return await self._run(
+            binding,
+            lambda: client.bests(
                 binding_service.identifier(binding),
                 provider=binding_service.provider(binding),
-            )
-        except BindingError as e:
-            raise UserScoreError(str(e)) from e
-        except MaimaiPyError as e:
-            raise _map_error(e) from e
-        except httpx.RequestError as e:
-            raise _map_error(e) from e
+            ),
+        )
 
     async def get_scores_all(self, binding: UserBinding) -> MaimaiScores:
         """全量成绩（牌子 / ap50 / 表格的基础）。"""
-        try:
-            return await client.scores(
+        await song_service.ensure_loaded()
+        return await self._run(
+            binding,
+            lambda: client.scores(
                 binding_service.identifier(binding),
                 provider=binding_service.provider(binding),
-            )
-        except BindingError as e:
-            raise UserScoreError(str(e)) from e
-        except MaimaiPyError as e:
-            raise _map_error(e) from e
-        except httpx.RequestError as e:
-            raise _map_error(e) from e
+            ),
+        )
 
     async def get_b50_by_username(
         self, username: str
     ) -> tuple["DivingFishPlayer", MaimaiScores]:
         """水鱼公开代查：b50 <水鱼用户名>（无需绑定）。"""
         ident = PlayerIdentifier(username=username)
-        try:
-            player = await client.players(ident, provider=divingfish_provider)
-            bests = await client.bests(ident, provider=divingfish_provider)
-        except MaimaiPyError as e:
-            raise _map_error(e) from e
-        except httpx.RequestError as e:
-            raise _map_error(e) from e
+        player = await self._run(
+            None, lambda: client.players(ident, provider=divingfish_provider)
+        )
+        bests = await self._run(
+            None, lambda: client.bests(ident, provider=divingfish_provider)
+        )
         return player, bests  # type: ignore[return-value]
 
     async def get_minfo(
@@ -117,38 +126,30 @@ class ScoreService:
         """单曲成绩（未绑定时仅谱面信息）。"""
         ident: PlayerIdentifier | None = None
         if binding is not None:
-            try:
-                ident = binding_service.identifier(binding)
-            except BindingError:
-                ident = None
-        try:
-            await song_service.ensure_loaded()
-            return await client.minfo(
+            ident = binding_service.identifier_or_none(binding)
+        await song_service.ensure_loaded()
+        return await self._run(
+            binding,
+            lambda: client.minfo(
                 song,
                 ident,
                 provider=divingfish_provider
                 if ident is None
                 else binding_service.provider(binding),  # type: ignore[arg-type]
-            )
-        except MaimaiPyError as e:
-            raise _map_error(e) from e
-        except httpx.RequestError as e:
-            raise _map_error(e) from e
+            ),
+        )
 
     async def get_plates(self, binding: UserBinding, plate: str) -> MaimaiPlates:
         """牌子进度（判牌语义在 maimai-py 内置）。"""
-        try:
-            return await client.plates(
+        await song_service.ensure_loaded()
+        return await self._run(
+            binding,
+            lambda: client.plates(
                 binding_service.identifier(binding),
                 plate,
                 provider=binding_service.provider(binding),
-            )
-        except BindingError as e:
-            raise UserScoreError(str(e)) from e
-        except MaimaiPyError as e:
-            raise _map_error(e) from e
-        except httpx.RequestError as e:
-            raise _map_error(e) from e
+            ),
+        )
 
 
 score_service = ScoreService()

@@ -228,3 +228,107 @@ async def test_b50_render_smoke(db, songs):
     assert len(png) > 1000
     listing = score_list_bytes("AP50", [sc])
     assert listing.startswith(b"\x89PNG")
+
+
+@pytest.mark.asyncio
+async def test_lxns_token_auto_refresh(db, songs, monkeypatch):
+    """落雪 personal token 401 → refresh_token 自动续期落库 → 重试成功。
+
+    对齐原版 maimaiDX 的 _on_unauthorized：迁移自 Hoshino 的绑定曾因
+    缺刷新流程集体 401（表现为「没有找到这个玩家」），此用例守住修复。
+    """
+    import httpx
+    import respx
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_secret", "sec")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_redirect_uri", "http://localhost/cb")
+
+    binding = await binding_service.ensure("OneBot V11", "30003")
+    await binding_service.bind_lxns(
+        binding, token="old-token", friend_code=979740832727161
+    )
+    binding.lxns_refresh_token = (
+        "rt-old"  # 直绑路径无 refresh_token，OAuth 迁移绑定才有
+    )
+    await store.save_binding(binding)
+
+    score_payload = {
+        "id": 10231,
+        "level": "13",
+        "level_index": 3,
+        "achievements": 100.5,
+        "fc": "ap",
+        "fs": "fsd",
+        "dx_score": 2000,
+        "dx_rating": 300,
+        "rate": "sssp",
+        "type": "dx",
+    }
+    scores_url = "https://maimai.lxns.net/api/v0/user/maimai/player/scores"
+    with respx.mock(assert_all_called=False) as m:
+        m.get(scores_url).side_effect = [
+            httpx.Response(
+                401, json={"code": 401, "success": False, "message": "Unauthorized"}
+            ),
+            httpx.Response(
+                200,
+                json={"code": 0, "success": True, "data": [score_payload]},
+            ),
+        ]
+        m.post("https://maimai.lxns.net/api/v0/oauth/token").respond(
+            json={
+                "code": 0,
+                "success": True,
+                "data": {
+                    "access_token": "new-token",
+                    "refresh_token": "rt-new",
+                    "friend_code": 979740832727161,
+                },
+            }
+        )
+        result = await score_service.get_scores_all(binding)
+
+    assert len(result.scores) == 1
+    # 新 token 与可能轮换的 refresh_token 均已落库 + 内存对象同步
+    assert binding.lxns_token == "new-token"
+    assert binding.lxns_refresh_token == "rt-new"
+    got = await binding_service.get("OneBot V11", "30003")
+    assert got is not None and got.lxns_token == "new-token"
+
+
+@pytest.mark.asyncio
+async def test_lxns_refresh_failure_falls_through(db, songs, monkeypatch):
+    """refresh_token 也失效（如落雪侧轮换废弃）时不再重试，正常映射报错。"""
+    import respx
+
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_secret", "sec")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_redirect_uri", "http://localhost/cb")
+
+    binding = await binding_service.ensure("OneBot V11", "30003")
+    await binding_service.bind_lxns(binding, token="old-token", friend_code=123456)
+    binding.lxns_refresh_token = "rt-dead"
+    from nonebot_plugin_awmc_helper.core import store
+
+    await store.save_binding(binding)
+
+    scores_url = "https://maimai.lxns.net/api/v0/user/maimai/player/scores"
+    with respx.mock(assert_all_called=False) as m:
+        m.get(scores_url).respond(
+            401, json={"code": 401, "success": False, "message": "Unauthorized"}
+        )
+        m.post("https://maimai.lxns.net/api/v0/oauth/token").respond(
+            400, json={"code": 400, "success": False, "message": "invalid grant"}
+        )
+        with pytest.raises(UserScoreError):
+            await score_service.get_scores_all(binding)

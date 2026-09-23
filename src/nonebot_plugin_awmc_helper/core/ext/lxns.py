@@ -93,6 +93,31 @@ async def fetch_token(code: str) -> LxnsToken:
     return LxnsToken(data.get("data", data))
 
 
+async def refresh_token(refresh_token: str) -> LxnsToken:
+    """refresh_token → 新个人 token（落雪 refresh grant，可能轮换 refresh_token）。
+
+    对齐原版 maimaiDX 的自动续期：access_token 过期（401）时调用，
+    成功后由调用方落库，用户无感。
+    """
+    resp = await get_client().post(
+        f"{LXNS_BASE}/api/v0/oauth/token",
+        json={
+            "client_id": plugin_config.awmc_lxns_client_id,
+            "client_secret": plugin_config.awmc_lxns_client_secret,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+    )
+    data = (
+        resp.json()
+        if resp.headers.get("content-type", "").startswith("application/json")
+        else {}
+    )
+    if resp.status_code != 200 or not data.get("success", True):
+        raise ExtError(str(data.get("message", "落雪授权已过期，请重新「绑定落雪」")))
+    return LxnsToken(data.get("data", data))
+
+
 def extract_authorization_code(text: str) -> str | None:
     """从用户输入提取授权码：裸码 / `授权码：xxx` / 回调链接 query。"""
     import re
