@@ -9,7 +9,7 @@ from PIL import Image
 from maimai_py import RateType, SongType
 from maimai_py.models import SongDifficulty
 
-from .fonts import FONT_HAN, FONT_NUM, font
+from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import image_to_bytes, tricolor_gradient_prism_plus
 from .assets import assets
 from ...config import NICKNAME
@@ -486,4 +486,64 @@ class DrawScore:
                 fill=_DEFAULT_TEXT_COLOR,
                 anchor="mm",
             )
+        return image_to_bytes(self._im)
+
+    def draw_score_list(
+        self,
+        rating: str | float,
+        play_result: list,
+        page: int,
+        end_page: int,
+    ) -> bytes:
+        """绘制分数列表（80/页，每 20 条一段，NB draw_score_list 同布局）。"""
+        from PIL import ImageDraw
+
+        dr = ImageDraw.Draw(self._im)
+        start_offset = (page - 1) * 80
+        current_page_result = play_result[start_offset : page * 80]
+
+        section_height = 140 + 4 * 114
+        for num in range(0, len(current_page_result), 20):
+            idx = num // 20
+            result = current_page_result[num : num + 20]
+            base_y = idx * section_height
+            self._im.alpha_composite(self._title_lengthen_bg, (475, base_y + 20))
+
+            no_start = start_offset + num + 1
+            no_end = start_offset + num + len(result)
+            dr.text(
+                (700, base_y + 67),
+                f"No.{no_start}- No.{no_end}",
+                font=font(28, FONT_RODIN),
+                fill=_DEFAULT_TEXT_COLOR,
+                anchor="mm",
+            )
+            self.whiledraw(result, base_y + 140)
+
+        height = self._im.size[1]
+        self._im.alpha_composite(
+            assets.pic("design.png", self._theme), (200, height - 153)
+        )
+        footer_text = (
+            f"「{rating}」共计「{len(play_result)}」个成绩，"
+            f"当前第「{start_offset + 1}-"
+            f"{start_offset + len(current_page_result)}」个，"
+            f"第「{page} / {end_page}」页"
+        )
+        dr.text(
+            (700, height - 110),
+            footer_text,
+            font=font(25, FONT_HAN),
+            fill=_DEFAULT_TEXT_COLOR,
+            anchor="mm",
+        )
+        dr.text(
+            (700, height - 35),
+            self._design_text(),
+            font=font(25, FONT_HAN),
+            fill=_DEFAULT_TEXT_COLOR,
+            anchor="mm",
+            stroke_width=2,
+            stroke_fill=(255, 255, 255, 255),
+        )
         return image_to_bytes(self._im)

@@ -360,6 +360,7 @@ async def _():
 @score_list_cmd.handle()
 @handle_errors("查询失败", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+    """分数列表（R5，NB DrawScore.draw_score_list 行卡版式，80/页）。"""
     ds_raw, page_raw = groups
     page = int(page_raw) if page_raw else 1
     binding = await binding_service.ensure(*session_keys(session))
@@ -367,16 +368,27 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     if "." in ds_raw:  # 定数
         ds = float(ds_raw)
         matched = [s for s in scores.scores if abs(s.level_value - ds) < 0.05]
-        title = f"定数 {ds_raw} 分数列表"
+        title = ds_raw
     else:
         matched = [s for s in scores.scores if s.level == ds_raw]
-        title = f"{ds_raw} 分数列表"
+        title = ds_raw
     matched.sort(key=lambda s: s.achievements or 0, reverse=True)
     if not matched:
         await UniMessage.text("  没有找到符合条件的成绩").finish(at_sender=True)
-    from ...core.render.best50 import score_list_bytes
-
-    png = score_list_bytes(title, matched, page)
+    end_page = max(1, -(-len(matched) // 80))
+    real = min(max(page, 1), end_page)
+    # NB 高度公式：非末页整 80 条 4 段；末页按实际条数算行数与段数
+    to_page = 80 if real < end_page else (len(matched) % 80 or 80)
+    line = (to_page + 4) // 5
+    if real < end_page:
+        plc = line * 109 + 130 * 4
+    else:
+        multiplier = (to_page + 19) // 20
+        actual_line = 4 if to_page <= 20 else line
+        plc = actual_line * 109 + 130 * multiplier
+    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+    card = DrawScore(280 + plc, service=service)
+    png = card.draw_score_list(title, matched, real, end_page)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

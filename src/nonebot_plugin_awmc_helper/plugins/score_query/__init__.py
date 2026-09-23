@@ -15,7 +15,7 @@ from nonebot.adapters import Event, Message
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from ...constants import COLOR_TO_LEVEL_INDEX, chart_display_id
+from ...constants import SERVICE_DISPLAY, COLOR_TO_LEVEL_INDEX, chart_display_id
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.utils import handle_errors
@@ -24,6 +24,7 @@ from ...core.render import info as info_render
 from ...core.render import best50 as b50_render
 from ...core.render import nb_chart
 from ...core.binding import session_keys, binding_service
+from ...core.render.score import DrawScore
 from ...core.render.tools import text_to_image, image_to_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -139,6 +140,10 @@ async def _(
 @ap50.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), event: Event = None):  # type: ignore[assignment]
+    """AP50（本地过滤实现）：R5 起复用 DrawScore 行卡列表（与分数列表同版式）。
+
+    灌 b50 大图模板的视觉对齐不做（数据源本为本地过滤决策，见 render-parity R6）。
+    """
     binding = await _get_binding(session, event)
     scores = await score_service.get_scores_all(binding)
     # 本地过滤 AP/APP 成绩，按 RA 排序取前 50
@@ -153,7 +158,12 @@ async def _(session: Session = UniSession(), event: Event = None):  # type: igno
     ap_scores = ap_scores[:50]
     if not ap_scores:
         await UniMessage.text("  没有查到 AP/APP 成绩").finish(at_sender=True)
-    png = b50_render.score_list_bytes("AP50", ap_scores)
+    # 高度公式同 tables 分数列表（50 条 → 3 段）
+    line = (len(ap_scores) + 4) // 5
+    plc = line * 109 + 130 * ((len(ap_scores) + 19) // 20)
+    service = SERVICE_DISPLAY.get(binding.service, binding.service) if binding else None
+    card = DrawScore(280 + plc, service=service)
+    png = card.draw_score_list("AP50", ap_scores, 1, 1)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
