@@ -100,7 +100,7 @@ async def test_b50_username_lookup(app: App, db, songs):
     payload = {
         "username": "someone",
         "rating": 350,
-        "nickname": "someone",
+        "nickname": "昵称酱",  # 卡片显示昵称而非账号用户名（原版 df_to_player 同款）
         "plate": "彩将",
         "additional_rating": 1,
         "charts": {
@@ -125,7 +125,7 @@ async def test_b50_username_lookup(app: App, db, songs):
         # 与 handler 相同的调用路径 → 相同数据 → 相同渲染
         player, bests = await score_service.get_b50_by_username("someone")
         expected_png = await best50_bytes(
-            player.name,
+            score_query._display_name(player),
             bests.rating,
             bests.rating_b35,
             bests.rating_b15,

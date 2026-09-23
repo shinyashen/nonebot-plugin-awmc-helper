@@ -88,6 +88,12 @@ async def _resolve_song(key: str):
     return songs[0]
 
 
+def _display_name(player) -> str:
+    """卡片显示名：水鱼 Player.name 是账号用户名，展示用昵称（原版 df_to_player
+    同款）；落雪 Player 无 nickname 字段，回退 name。"""
+    return getattr(player, "nickname", None) or player.name
+
+
 @b50.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
@@ -99,7 +105,7 @@ async def _(
     if username:  # 水鱼公开代查：b50 <水鱼用户名>
         player, bests = await score_service.get_b50_by_username(username)
         png = await b50_render.best50_bytes(
-            player_name=player.name,
+            player_name=_display_name(player),
             rating=bests.rating,
             rating_b35=bests.rating_b35,
             rating_b15=bests.rating_b15,
@@ -113,7 +119,7 @@ async def _(
         player = await score_service.get_player(binding)
         bests = await score_service.get_b50(binding)
         png = await b50_render.best50_bytes(
-            player_name=player.name,
+            player_name=_display_name(player),
             rating=bests.rating,
             rating_b35=bests.rating_b35,
             rating_b15=bests.rating_b15,
