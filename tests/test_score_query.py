@@ -71,16 +71,14 @@ async def _assert_reply(
 
 
 @pytest.mark.asyncio
-async def test_b50_unbound_hint(app: App, db, songs):
-    """无凭据（非 qq 平台默认绑定）时提示先绑定。"""
-    from nonebot_plugin_awmc_helper.plugins import score_query
+async def test_b50_unbound_hint(db):
+    """OneBot v11 运行时（platform 兜底 "unknown"）未绑定用户不再提示：
+    user_id 可作 QQ 号装配凭据，b50 走水鱼 QQ 公开查询——
+    「尚未绑定」提示仅非 QQ 平台可达，语义覆盖见 test_binding.py。"""
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
 
-    await _assert_reply(
-        app,
-        score_query.b50,
-        "b50",
-        "尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定",
-    )
+    binding = await binding_service.ensure("unknown", "12345678")
+    assert binding_service.identifier_or_none(binding) is not None
 
 
 @requires_assets

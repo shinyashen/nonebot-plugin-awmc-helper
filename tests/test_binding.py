@@ -83,6 +83,22 @@ async def test_binding_ensure_and_identifier(db):
 
 
 @pytest.mark.asyncio
+async def test_identifier_unknown_platform_is_qq(db):
+    """运行时真实键是 platform="unknown"（OneBot v11 下 uninfo 不填 platform，
+    插件层兜底）：user_id 应照常按 QQ 号装配水鱼凭据，与迁移数据（原 platform=
+    "qq"）同等对待；真正的非 QQ 平台仍不可查。"""
+    from nonebot_plugin_awmc_helper.core.binding import BindingError, binding_service
+
+    binding = await binding_service.ensure("unknown", "30003")
+    ident = binding_service.identifier(binding)
+    assert ident.qq == 30003
+
+    other = await binding_service.ensure("telegram", "40004")
+    with pytest.raises(BindingError):
+        binding_service.identifier(other)
+
+
+@pytest.mark.asyncio
 async def test_pending_bindings():
     from nonebot_plugin_awmc_helper.core.binding import pending_bindings
 

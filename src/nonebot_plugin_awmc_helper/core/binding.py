@@ -107,7 +107,9 @@ class BindingService:
 
     def identifier(self, binding: UserBinding) -> PlayerIdentifier:
         """按绑定装配 maimai-py PlayerIdentifier（不可查时抛 BindingError）。"""
-        qq = int(binding.user_id) if binding.platform == "qq" else None
+        # uninfo 对 OneBot v11 不填 Session.platform（该字段仅多平台适配器使用），
+        # 插件层统一兜底 "unknown"——与历史迁移数据（platform="qq"）同为 QQ 号语义
+        qq = int(binding.user_id) if binding.platform in ("qq", "unknown") else None
         if binding.service == SERVICE_DIVINGFISH:
             ident = PlayerIdentifier(
                 qq=qq,

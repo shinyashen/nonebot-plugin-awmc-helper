@@ -276,18 +276,6 @@ async def test_ds_table_command(app: App, songs):
 
 
 @pytest.mark.asyncio
-async def test_score_list_unbound(app: App, db, songs):
-    from nonebot_plugin_awmc_helper.plugins import tables
-
-    await _assert_reply(
-        app,
-        tables.score_list_cmd,
-        "13.7分数列表",
-        "尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定",
-    )
-
-
-@pytest.mark.asyncio
 async def test_plate_help(app: App):
     import base64
 
