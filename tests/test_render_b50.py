@@ -7,7 +7,7 @@ import dataclasses
 
 
 def _score(song_id: int, type_):
-    from maimai_py import LevelIndex, RateType, Score, ScoreExtend
+    from maimai_py import Score, RateType, LevelIndex, ScoreExtend
 
     base = Score(
         id=song_id,
@@ -96,6 +96,10 @@ def test_ra_badge_num_thresholds():
     assert ra_badge_num(14500) == "10"
     assert ra_badge_num(15500) == "11"
     assert ra_badge_num(20000) == "11"
+    # circle 主题 16000–16999 用 12 号牌，其余与 prism 相同
+    assert ra_badge_num(15999, "circle") == "11"
+    assert ra_badge_num(16500, "circle") == "12"
+    assert ra_badge_num(17000, "circle") == "11"
 
 
 def test_ra_star_num_matches_hoshino():
@@ -110,7 +114,7 @@ def test_combo_sync_icon_files_cover_all_enum_members():
     """FC/FS 全枚举有素材映射，含落雪 sync → Sync。"""
     from maimai_py import FCType, FSType
 
-    from nonebot_plugin_awmc_helper.constants import COMBO_FILE, SYNC_FILE
+    from nonebot_plugin_awmc_helper.constants import SYNC_FILE, COMBO_FILE
 
     assert set(COMBO_FILE) == {fc.name for fc in FCType}
     assert set(SYNC_FILE) == {fs.name for fs in FSType}

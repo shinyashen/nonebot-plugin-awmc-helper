@@ -204,12 +204,17 @@ def dani_plate_num(course_rank: int) -> str:
     return f"{course_rank if course_rank <= 10 else course_rank + 1:02d}"
 
 
-def ra_badge_num(rating: int) -> str:
-    num = "11"
+def ra_badge_num(rating: int, theme: str = "prism_plus") -> str:
+    """DXRating 段位牌号：≥15000 归 11 号；circle 主题 16000–16999 用 12 号。"""
     for limit, n in RA_THRESHOLD:
         if rating < limit:
             return n
-    return num
+    if theme == "circle":
+        if rating < 16000:
+            return "11"
+        if rating < 17000:
+            return "12"
+    return "11"
 
 
 def ra_star_num(rating: int) -> str:
@@ -366,7 +371,7 @@ async def _draw_header(
         )
         num_x, num_y, num_gap, num_size = 515, 82, 13, (14, 17)
     im.alpha_composite(
-        Image.open(pic / theme / f"UI_CMN_DXRating_{ra_badge_num(rating)}.png")
+        Image.open(pic / theme / f"UI_CMN_DXRating_{ra_badge_num(rating, theme)}.png")
         .convert("RGBA")
         .resize(badge_size),
         (435, 72),
