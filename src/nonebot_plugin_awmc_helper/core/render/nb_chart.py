@@ -415,12 +415,15 @@ def song_chart_info(
     return image_to_bytes(im)
 
 
-def song_chart_banquet_info(song: Song) -> bytes:
+def song_chart_banquet_info(song: Song, utage_diffs=None) -> bytes:
     """宴会场谱面卡（Hoshino/NB chart.py::song_chart_banquet_info 1:1 移植）。
 
     底图 ``chart_info_enkaijou.png``（1200×1200）：左侧曲绘与 utg 玩家牌、
     右侧标题/曲师/BPM/ID/分类（白字紫描边），下方 kanji 牌 + 等级 + 六列
     notes（total/tap/hold/slide/touch/brak）。
+
+    ``utage_diffs``：要画的宴谱列表。一个 diff_id 对应一张宴谱——id 召唤
+    时只画命中的那一张；缺省画宿主曲全部宴谱（多张时分行）。
     """
     from PIL import ImageDraw
 
@@ -430,7 +433,11 @@ def song_chart_banquet_info(song: Song) -> bytes:
     stroke = (210, 57, 174, 255)
     white = (255, 255, 255, 255)
 
-    utage_diffs = song.get_difficulties(SongType.UTAGE)
+    utage_diffs = list(
+        utage_diffs
+        if utage_diffs is not None
+        else song.get_difficulties(SongType.UTAGE)
+    )
     first = next(iter(utage_diffs), None)
     is_buddy = bool(getattr(first, "is_buddy", False))
 
@@ -446,7 +453,13 @@ def song_chart_banquet_info(song: Song) -> bytes:
         )
         player_path = base / "utg_2p.png"
     else:
-        p_y, base_y, step_y = 785, 890, 0
+        # NB 原版非双人宴 step_y=0：多张宴谱会全部叠在一行（id100227 实测）。
+        # 多张时首行落到底图数据条下方（y=930），行距 62、字号 22，
+        # 避让底图自带表头（y≈838）与底部版权行（y≈1083 上缘）
+        n_rows = len(utage_diffs)
+        step_y = 62 if n_rows > 1 else 0
+        base_y = 930
+        p_y = 785
         player_path = base / "utg_1p.png"
     im.alpha_composite(Image.open(player_path).convert("RGBA"), (98, p_y))
 

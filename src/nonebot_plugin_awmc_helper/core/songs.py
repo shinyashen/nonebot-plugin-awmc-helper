@@ -391,24 +391,35 @@ class SongService:
         jp = await self._jp_songs_map()
         return jp.get(song_id % 10000)
 
-    async def by_utage_id(self, diff_id: int) -> Song | None:
-        """按宴谱 6 位机台内部 id（diff_id，100363 形状）定位宿主曲。
+    async def by_utage_id(
+        self, diff_id: int
+    ) -> "tuple[Song, SongDifficultyUtage] | None":
+        """按宴谱 6 位机台内部 id（diff_id，100363 形状）定位**该张**宴谱。
 
-        maimai_py ``by_id`` 对任意 id 取模 10000，6 位宴 id 会被错误匹配到
-        同号根 id 的普通曲——宴 id 必须按 diff_id 在曲库 utage 谱面中定位。
-        宴曲绝大多数为日服限定（version_cn=NULL 不在 CN 运行时视图），
-        CN 视图未命中时回退 JP 视图。
+        一个 diff_id 对应一张宴谱；宿主曲可能挂多张宴谱（复刻活动），
+        渲染宴会卡时应只画命中的这一张。maimai_py ``by_id`` 对任意 id
+        取模 10000，6 位宴 id 会被错误匹配到同号根 id 的普通曲——宴 id
+        必须按 diff_id 在曲库 utage 谱面中定位。宴曲绝大多数为日服限定
+        （version_cn=NULL 不在 CN 运行时视图），CN 视图未命中时回退
+        JP 视图。
+
+        返回 ``(宿主曲, 宴谱)``；未命中返回 None。
         """
+        from maimai_py.models import SongDifficultyUtage
+
         await self.ensure_loaded()
-        for song in await self.get_all():
-            for diff in song.get_difficulties(SongType.UTAGE):
-                if getattr(diff, "diff_id", None) == diff_id:
-                    return song
-        for song in (await self._jp_songs_map()).values():
-            for diff in song.get_difficulties(SongType.UTAGE):
-                if getattr(diff, "diff_id", None) == diff_id:
-                    return song
-        return None
+
+        def match(songs):
+            for song in songs:
+                for diff in song.get_difficulties(SongType.UTAGE):
+                    if getattr(diff, "diff_id", None) == diff_id:
+                        assert isinstance(diff, SongDifficultyUtage)
+                        return song, diff
+            return None
+
+        return match(await self.get_all()) or match(
+            (await self._jp_songs_map()).values()
+        )
 
     async def utage_by_keyword(self, keyword: str) -> list[Song]:
         """在含宴谱的曲中按标题/别名模糊匹配（「宴XX」召唤宴谱用）。

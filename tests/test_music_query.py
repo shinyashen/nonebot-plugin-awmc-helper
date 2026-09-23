@@ -315,9 +315,12 @@ async def test_by_utage_id_and_keyword(db):
     host = _utage_host_song()
     await seed_service(song_service, [host])
 
-    got = await song_service.by_utage_id(100363)
-    assert got is not None
-    assert got.id == 363
+    hit = await song_service.by_utage_id(100363)
+    assert hit is not None
+    host_got, utage_diff = hit
+    # 一个 diff_id 对应一张宴谱：返回宿主曲与命中的那张谱
+    assert host_got.id == 363
+    assert utage_diff.diff_id == 100363
     assert await song_service.by_utage_id(999999) is None
 
     ut_songs = await song_service.utage_by_keyword("牛奶")
@@ -389,9 +392,11 @@ async def test_by_utage_id_jp_view_fallback(db, monkeypatch):
 
     monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
 
-    got = await song_service.by_utage_id(100363)
-    assert got is not None
-    assert got.id == 363
+    hit = await song_service.by_utage_id(100363)
+    assert hit is not None
+    host_got, utage_diff = hit
+    assert host_got.id == 363
+    assert utage_diff.diff_id == 100363
     ut_songs = await song_service.utage_by_keyword("牛奶")
     assert [s.id for s in ut_songs] == [363]
 
