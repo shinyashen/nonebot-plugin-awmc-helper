@@ -118,7 +118,7 @@ def rise_recommend(
     }
     ignored_ids = {s.id for s in scores if (s.achievements or 0) >= 100.5}
 
-    # 两侧入线基准 = 该侧 B50 末位 RA（旧版本侧 / 新版本侧，升序取末位）
+    # 两侧入线基准 = 该侧 B50 末位（最低）RA：升序排列后取首位
     sides: dict[str, list[ScoreExtend]] = {
         "old": sorted(
             (s for s in scores if s.version < latest_version_value),
@@ -141,7 +141,7 @@ def rise_recommend(
             side_scores = sides[side]
             if not side_scores:
                 continue
-            base_ra = side_scores[-1].dx_rating or 0
+            base_ra = side_scores[0].dx_rating or 0
             if level is not None and diff.level != level:
                 continue
 

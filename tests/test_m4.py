@@ -700,6 +700,9 @@ def test_rise_recommend_version_filter():
         cand(922, SongType.STANDARD, 25000),  # 当前版本 SD → 排除（旧版本栏语义）
         cand(923, SongType.STANDARD, 24000),  # 旧版本 SD → 保留
     ]
+    def by_id(song_id, rec):
+        return next(r for r in rec if r["song"].id == song_id)
+
     rec = rise_recommend(
         b50, candidates, target=1, latest_version_value=25000
     )
@@ -712,6 +715,13 @@ def test_rise_recommend_version_filter():
         (922, "new"),
         (923, "old"),
     }
+    # 入线基准方向：每栏取该侧**最低** RA（升序首位，NB play_result[-1] 语义）
+    from nonebot_plugin_awmc_helper.core.calc import compute_rating
+
+    expected_new_gain = compute_rating(13.0, 99.0) - 220  # 新版本侧最低 RA=911 的 220
+    assert by_id(921, rec)["gain"] == expected_new_gain
+    expected_old_gain = compute_rating(13.0, 99.0) - 200  # 旧版本侧最低 RA=900 的 200
+    assert by_id(923, rec)["gain"] == expected_old_gain
 
 
 def test_rise_recommend_default_latest_follows_library():
