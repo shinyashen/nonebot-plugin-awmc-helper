@@ -446,3 +446,119 @@ async def test_table_template_overlay(songs):
     )
     assert png is not None
     assert png.startswith(b"\x89PNG\r\n")
+
+
+def _progress_scores():
+    """构造进度行卡成绩（13 级 DX 谱：已完成 2 / 未完成 1）。"""
+    import dataclasses
+
+    from maimai_py import Score, FCType, RateType, SongType, LevelIndex, ScoreExtend
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    return [
+        extend(
+            Score(
+                id=231,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=100.5,
+                fc=FCType.AP,
+                fs=None,
+                dx_score=2900,
+                dx_rating=350,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSSP,
+                type=SongType.DX,
+            ),
+            title="PENGUIN",
+            level_value=13.2,
+            level_dx_score=3000,
+            dx_star=5,
+            version=25000,
+        ),
+        extend(
+            Score(
+                id=500,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=99.12,
+                fc=None,
+                fs=None,
+                dx_score=2500,
+                dx_rating=300,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="Preferences",
+            level_value=13.7,
+            level_dx_score=3000,
+            dx_star=4,
+            version=25000,
+        ),
+        extend(
+            Score(
+                id=545,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=95.43,
+                fc=None,
+                fs=None,
+                dx_score=1200,
+                dx_rating=250,
+                play_count=None,
+                play_time=None,
+                rate=RateType.S,
+                type=SongType.DX,
+            ),
+            title="DdxPDX",
+            level_value=13.5,
+            level_dx_score=3000,
+            dx_star=None,
+            version=25000,
+        ),
+    ]
+
+
+@requires_assets
+def test_draw_plan_and_category_smoke():
+    """等级进度卡（R4）：三段总览与分类页渲染尺寸符合预期。"""
+    import io
+    import dataclasses
+
+    from PIL import Image
+    from maimai_py import (
+        ScoreExtend,
+    )
+
+    from nonebot_plugin_awmc_helper.core.render.score import DrawScore
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    scores = _progress_scores()
+    notplayed = [(700, 3, 13.4), (701, 3, 13.1)]
+
+    # 三段总览（NB 高度公式）
+    c_y = max(4, -(-len(scores[:30]) // 5)) * 109 + 140
+    u_y = max(4, -(-0 // 5)) * 109 + 140
+    n_y = max(4, -(-len(notplayed[:100]) // 20)) * 65 + 140
+    card = DrawScore(150 + c_y + u_y + n_y, service="DivingFish")
+    png = card.draw_plan("13", scores, c_y, [], u_y, notplayed, "fc", 30)
+    assert Image.open(io.BytesIO(png)).size == (1400, 150 + c_y + u_y + n_y)
+
+    # 分类页
+    height = 240 + max(4, -(-len(scores) // 5)) * 109 + 120
+    card = DrawScore(height)
+    png = card.draw_category("completed", scores, 1, 1)
+    assert Image.open(io.BytesIO(png)).size == (1400, height)
+
+    # 未游玩网格
+    nh = max(240 + max(4, -(-len(notplayed) // 20)) * 65 + 120, 600)
+    card = DrawScore(nh)
+    png = card.draw_category("notplayed", notplayed)
+    assert Image.open(io.BytesIO(png)).size == (1400, nh)

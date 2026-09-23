@@ -19,11 +19,12 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...config import plugin_config
-from ...constants import PLATE_CHARS
+from ...constants import PLATE_CHARS, SERVICE_DISPLAY
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import paginate, handle_errors
 from ...core.binding import session_keys, binding_service
+from ...core.render.score import DrawScore
 from ...core.render.table import completion_grid_bytes
 from ...core.render.tools import text_to_image, image_to_bytes
 
@@ -81,7 +82,10 @@ PLAN_RE = r"(sssp|sss|ssp|ss|spp|sp|s|ap|fcp|fc|fsp|fs|fdx)"
 
 ds_table_cmd = on_regex(rf"^{LEVEL_RE}定数表$", block=True)
 score_table_cmd = on_regex(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$", block=True)
-progress_cmd = on_regex(rf"^{LEVEL_RE}{PLAN_RE}\+?进度\s?([0-9]+)?$", block=True)
+progress_cmd = on_regex(
+    rf"^{LEVEL_RE}{PLAN_RE}\+?(已完成|未完成|未开始|未游玩)?进度\s?([0-9]+)?$",
+    block=True,
+)
 plate_cmd = on_regex(
     rf"^([{PLATE_CHARS}])({PLATE_KINDS})(完成表|进度)\s?([0-9]+)?$",
     block=True,
@@ -189,37 +193,85 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 @progress_cmd.handle()
 @handle_errors("生成进度失败", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
-    level, plan, page_raw = groups
+    """等级进度（R4，NB DrawScore.draw_plan/draw_category 版式）。
+
+    - `13fc进度`：三段总览（已完成 30/未完成 30/未游玩 100 网格）；
+    - `13fc已完成进度 [页]` / `未完成进度 [页]`：80/页成绩行卡；
+    - `13fc未游玩进度`：未游玩封面网格。
+    """
+    level, plan, category, page_raw = groups
     page = int(page_raw) if page_raw else 1
-    checker, plan_name = _plan_checker(plan)
+    checker, _plan_name = _plan_checker(plan)
     binding = await binding_service.ensure(*session_keys(session))
     scores = await score_service.get_scores_all(binding)
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
-    done_list, remain_list, new_list = [], [], []
+
+    completed: list = []
+    unfinished: list = []
+    notplayed: list[tuple[int, int, float]] = []
     for song in await song_service.get_all():
         for d in song.get_difficulties():
-            if d.type == SongType.UTAGE or d.type != SongType.DX or d.level != level:
+            if d.type != SongType.DX or d.level != level:
                 continue
             sc = score_map.get((song.id, d.type, d.level_index))
-            done = checker(
-                sc.achievements if sc else None,
-                sc.fc if sc else None,
-                sc.fs if sc else None,
-            )
-            (done_list if done else (remain_list if sc else new_list)).append(song)
-    total = len(done_list) + len(remain_list) + len(new_list)
+            if sc is None:
+                notplayed.append((song.id, d.level_index.value, d.level_value))
+            elif checker(sc.achievements, sc.fc, sc.fs):
+                completed.append(sc)
+            else:
+                unfinished.append(sc)
+    total = len(completed) + len(unfinished) + len(notplayed)
     if total == 0:
         await UniMessage.text(f"  没有找到等级为「{level}」的 DX 谱面").finish(
             at_sender=True
         )
-    page_data, total_pages = paginate(remain_list or new_list, page, 80)
-    lines = [
-        f"{level} {plan_name} 进度：{len(done_list)}/{total}",
-        f"未完成 {len(remain_list)}（未游玩 {len(new_list)}），"
-        f"第 {min(max(page, 1), total_pages)}/{total_pages} 页",
-    ]
-    lines += [f"「{s.id}」{s.title}" for s in page_data]
-    png = image_to_bytes(text_to_image("\n".join(lines), size=20))
+
+    # NB 排序：按计划类型取值降序（fc/fs 枚举值越大越好，rate 按达成率）
+    kind = PLANS[plan].split(":")[0]
+
+    def _sort_key(sc):
+        if kind == "rate":
+            return sc.achievements or 0
+        if kind == "fc":
+            return sc.fc.value if sc.fc else -1
+        return sc.fs.value if sc.fs else -1
+
+    completed.sort(key=_sort_key, reverse=True)
+    unfinished.sort(key=_sort_key, reverse=True)
+    notplayed.sort(key=lambda x: x[2], reverse=True)
+
+    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+
+    def played_rows(count: int) -> int:
+        return max(4, -(-count // 5))
+
+    if category is None:
+        # 三段总览（comp_limit 语义对齐 NB：仅完成时放宽到 60）
+        comp_limit = 60 if not unfinished and not notplayed else 30
+        c_y = played_rows(len(completed[:comp_limit])) * 109 + 140
+        u_y = played_rows(len(unfinished[:30])) * 109 + 140
+        n_y = max(4, -(-len(notplayed[:100]) // 20)) * 65 + 140
+        card = DrawScore(150 + c_y + u_y + n_y, service=service)
+        png = card.draw_plan(
+            level, completed, c_y, unfinished, u_y, notplayed, plan, comp_limit
+        )
+    elif category in ("已完成", "未完成"):
+        data = completed if category == "已完成" else unfinished
+        total_pages = max(1, -(-(len(data)) // 80))
+        real = min(max(page, 1), total_pages)
+        display = data[(real - 1) * 80 : real * 80]
+        y_size = played_rows(len(display)) * 109
+        card = DrawScore(240 + y_size + 120, service=service)
+        png = card.draw_category(
+            "completed" if category == "已完成" else "unfinished",
+            data,
+            real,
+            total_pages,
+        )
+    else:
+        y_size = max(4, -(-len(notplayed) // 20)) * 65
+        card = DrawScore(max(240 + y_size + 120, 600), service=service)
+        png = card.draw_category("notplayed", notplayed)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

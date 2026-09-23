@@ -14,7 +14,7 @@ from .tools import image_to_bytes, tricolor_gradient_prism_plus
 from .assets import assets
 from ...config import NICKNAME
 from .nb_chart import truncate_by_width
-from ...constants import RATE_FILE
+from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 类属性同源）
 _DIFF_TEXT_COLOR = [
@@ -228,3 +228,262 @@ class DrawScore:
             stroke_fill=(255, 255, 255, 255),
         )
         return image_to_bytes(self._im.crop((200, 0, 1200, total_height)))
+
+    # -- 等级进度卡（R4，NB whiledraw / _while_pic / draw_plan / draw_category）
+
+    def whiledraw(self, scores: list, list_y: int = 0) -> None:
+        """绘制成绩行卡（5 列 × N 行，b50_score_* 难度底）。
+
+        ``scores``：ScoreExtend 列表；DX 星直接取 ``score.dx_star``（库已算）。
+        """
+        from PIL import ImageDraw
+
+        dr = ImageDraw.Draw(self._im)
+        gap, col_step, start_x = 114, 276, 16
+        for num, score in enumerate(scores):
+            row, col = divmod(num, 5)
+            x = start_x + col * col_step
+            y = list_y + row * gap
+            li = score.level_index.value
+
+            self._im.alpha_composite(
+                assets.pic(f"b50_score_{_LEVEL_INDEXES[li]}.png"), (x, y)
+            )
+            self._im.alpha_composite(
+                assets.cover(score.id % 10000).resize((75, 75)), (x + 12, y + 12)
+            )
+            type_abbr = "DX" if score.type == SongType.DX else "SD"
+            type_path = self._base / f"{type_abbr}.png"
+            if type_path.exists():
+                self._im.alpha_composite(
+                    Image.open(type_path).convert("RGBA").resize((37, 14)),
+                    (x + 51, y + 91),
+                )
+            if score.rate is not None:
+                rate_path = (
+                    self._base
+                    / self._theme
+                    / (f"UI_TTR_Rank_{RATE_FILE[score.rate.name]}.png")
+                )
+                if rate_path.exists():
+                    self._im.alpha_composite(
+                        Image.open(rate_path).convert("RGBA").resize((63, 28)),
+                        (x + 92, y + 78),
+                    )
+            if score.fc:
+                self._im.alpha_composite(
+                    assets.pic(
+                        f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name]}.png"
+                    ).resize((34, 34)),
+                    (x + 154, y + 77),
+                )
+            if score.fs:
+                self._im.alpha_composite(
+                    assets.pic(
+                        f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name]}.png"
+                    ).resize((34, 34)),
+                    (x + 185, y + 77),
+                )
+            if score.dx_star:
+                star_path = (
+                    self._base / f"UI_GAM_Gauge_DXScoreIcon_0{score.dx_star}.png"
+                )
+                if star_path.exists():
+                    self._im.alpha_composite(
+                        Image.open(star_path).convert("RGBA").resize((47, 26)),
+                        (x + 217, y + 80),
+                    )
+
+            dr.text(
+                (x + 26, y + 98),
+                str(score.id % 10000),
+                font=font(13, FONT_NUM),
+                fill=_ID_TEXT_COLOR[li],
+                anchor="mm",
+            )
+            dr.text(
+                (x + 93, y + 14),
+                truncate_by_width(score.title, 18),
+                font=font(14, FONT_HAN),
+                fill=_DIFF_TEXT_COLOR[li],
+                anchor="lm",
+            )
+            dr.text(
+                (x + 93, y + 38),
+                f"{score.achievements or 0:.4f}%",
+                font=font(30, FONT_NUM),
+                fill=_DIFF_TEXT_COLOR[li],
+                anchor="lm",
+            )
+            dr.text(
+                (x + 219, y + 65),
+                f"{score.dx_score or 0}/{score.level_dx_score}",
+                font=font(15, FONT_NUM),
+                fill=_DIFF_TEXT_COLOR[li],
+                anchor="mm",
+            )
+            dr.text(
+                (x + 93, y + 65),
+                f"{score.level_value} -> {int(score.dx_rating or 0)}",
+                font=font(15, FONT_NUM),
+                fill=_DIFF_TEXT_COLOR[li],
+                anchor="lm",
+            )
+
+    def _while_pic(
+        self, items: list[tuple[int, int, float]], start_y: int = 200
+    ) -> None:
+        """绘制未游玩谱面小卡（20 列 × N 行，border_progress_* 难度框）。
+
+        ``items``：(song_id, level_index, level_value)。
+        """
+        from PIL import ImageDraw
+
+        dr = ImageDraw.Draw(self._im)
+        step, start_x = 65, 55
+        for num, (song_id, li, _lv) in enumerate(items):
+            row, col = divmod(num, 20)
+            x = start_x + col * step
+            y = start_y + row * step
+            self._im.alpha_composite(
+                assets.pic(f"border_progress_{_LEVEL_INDEXES[li]}.png"), (x - 4, y - 4)
+            )
+            self._im.alpha_composite(assets.cover(song_id).resize((55, 55)), (x, y))
+            dr.text(
+                (x + 36, y + 3),
+                str(song_id),
+                font=font(12, FONT_NUM),
+                fill=_DIFF_TEXT_COLOR[li],
+                anchor="mm",
+            )
+
+    def _section_title(self, y: int, text: str, hint: str | None = None) -> None:
+        """段落标题条（title_lengthen 底图 + 大字 + 可选右侧提示）。"""
+        from PIL import ImageDraw
+
+        dr = ImageDraw.Draw(self._im)
+        self._im.alpha_composite(self._title_lengthen_bg, (475, y - 47))
+        dr.text(
+            (700, y),
+            text,
+            font=font(25, FONT_HAN),
+            fill=_DEFAULT_TEXT_COLOR,
+            anchor="mm",
+        )
+        if hint:
+            dr.multiline_text(
+                (1300, y),
+                hint,
+                font=font(20, FONT_HAN),
+                fill=_DEFAULT_TEXT_COLOR,
+                anchor="rm",
+                stroke_width=2,
+                stroke_fill=(255, 255, 255, 255),
+            )
+
+    def _footer(self, text: str, *, design_bg_y: int, text_y: int) -> None:
+        from PIL import ImageDraw
+
+        dr = ImageDraw.Draw(self._im)
+        self._im.alpha_composite(
+            assets.pic("design.png", self._theme), (200, design_bg_y)
+        )
+        dr.text(
+            (700, text_y),
+            text,
+            font=font(22, FONT_HAN),
+            fill=_DEFAULT_TEXT_COLOR,
+            anchor="mm",
+        )
+        dr.text(
+            (700, self._im.size[1] - 30),
+            self._design_text(),
+            font=font(25, FONT_HAN),
+            fill=_DEFAULT_TEXT_COLOR,
+            anchor="mm",
+            stroke_width=2,
+            stroke_fill=(255, 255, 255, 255),
+        )
+
+    def draw_plan(
+        self,
+        level: str,
+        completed: list,
+        completed_y: int,
+        unfinished: list,
+        unfinished_y: int,
+        notstarted: list[tuple[int, int, float]],
+        plan: str,
+        completed_len: int,
+    ) -> bytes:
+        """绘制三段进度总览（已完成 / 未完成 / 未游玩，NB draw_plan 同布局）。
+
+        ``completed_y``/``unfinished_y``：调用方按 NB 公式预算的段落高度。
+        """
+        self._section_title(
+            77,
+            f"已完成谱面「{len(completed)}」个",
+            f"可使用「{level}{plan.upper()}已完成进度」\n指令查询详细列表",
+        )
+        self._section_title(
+            77 + completed_y,
+            f"未完成谱面「{len(unfinished)}」个",
+            f"可使用「{level}{plan.upper()}未完成进度」\n指令查询详细列表",
+        )
+        self._section_title(
+            77 + completed_y + unfinished_y, f"未游玩谱面「{len(notstarted)}」个"
+        )
+
+        self.whiledraw(completed[:completed_len], 140)
+        self.whiledraw(unfinished[:30], 140 + completed_y)
+        self._while_pic(notstarted[:100], 140 + completed_y + unfinished_y)
+
+        height = self._im.size[1]
+        max_count = len(completed) + len(unfinished) + len(notstarted)
+        pagemsg = (
+            f"「{level}」共计「{max_count}」个谱面，"
+            f"剩余「{len(unfinished) + len(notstarted)}」个谱面未完成「{plan.upper()}」"
+        )
+        self._footer(pagemsg, design_bg_y=height - 133, text_y=height - 90)
+        return image_to_bytes(self._im)
+
+    def draw_category(
+        self,
+        category: str,
+        data: list,
+        page: int = 1,
+        end_page: int = 1,
+    ) -> bytes:
+        """绘制指定分类进度（80/页成绩行卡或未游玩网格）。
+
+        ``category``：``completed`` / ``unfinished`` / ``notplayed``。
+        """
+        if category in ("completed", "unfinished"):
+            txt = "已完成" if category == "completed" else "未完成"
+            newdata = data[(page - 1) * 80 : page * 80]
+            self._section_title(77, f"{txt}谱面")
+            self.whiledraw(newdata, 140)
+            height = self._im.size[1]
+            pagemsg = (
+                f"{txt}谱面共计「{len(data)}」个，"
+                f"当前第「{(page - 1) * 80 + 1}-{(page - 1) * 80 + len(newdata)}」个，"
+                f"第「{page} / {end_page}」页"
+            )
+            self._footer(pagemsg, design_bg_y=height - 133, text_y=height - 90)
+        else:
+            self._section_title(77, "未游玩谱面")
+            self._while_pic(data)
+            height = self._im.size[1]
+            self._im.alpha_composite(
+                assets.pic("design.png", self._theme), (200, height - 113)
+            )
+            from PIL import ImageDraw
+
+            ImageDraw.Draw(self._im).text(
+                (700, height - 70),
+                f"未游玩谱面共计「{len(data)}」个",
+                font=font(25, FONT_HAN),
+                fill=_DEFAULT_TEXT_COLOR,
+                anchor="mm",
+            )
+        return image_to_bytes(self._im)
