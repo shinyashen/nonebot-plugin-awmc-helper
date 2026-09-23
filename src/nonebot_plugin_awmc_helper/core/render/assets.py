@@ -82,11 +82,16 @@ class Assets:
 
     @classmethod
     def plate_version(cls, version: str, kind: str) -> Image.Image | None:
-        """牌子表头素材（``{版本}{牌种}.png``）。"""
-        for name in (
-            f"{version}{kind}.png",
-            f"{version}{kind.replace('舞舞', '舞舞')}舞舞.png",
-        ):
+        """牌子表头素材（``{版本}{牌种}.png``）。
+
+        素材包文件名为繁体（牌种「極」、版本字 暁/櫻/菫/輝/華），先按繁体名
+        查找再回退原始输入；舞舞牌「舞舞舞」、霸者「霸者」自然命中。
+        """
+        kind_t = kind.translate(str.maketrans({"极": "極"}))
+        version_t = version.translate(
+            str.maketrans({"晓": "暁", "樱": "櫻", "堇": "菫", "辉": "輝", "华": "華"})
+        )
+        for name in (f"{version_t}{kind_t}.png", f"{version}{kind}.png"):
             path = cls.static_path() / "mai" / "plate_version" / name
             if path.exists():
                 return cls.get(path)

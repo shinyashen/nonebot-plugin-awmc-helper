@@ -562,3 +562,36 @@ def test_draw_plan_and_category_smoke():
     card = DrawScore(nh)
     png = card.draw_category("notplayed", notplayed)
     assert Image.open(io.BytesIO(png)).size == (1400, nh)
+
+
+@requires_assets
+def test_plate_progress_card_smoke():
+    """牌子进度总览（R7）：倒序槽节 + 进度条 + 封面网格，牌名繁体回退命中素材。"""
+    import io
+    from pathlib import Path
+
+    from PIL import Image
+
+    from nonebot_plugin_awmc_helper.core.render.plate_progress import (
+        plate_progress_bytes,
+    )
+
+    def slot(li, cleared, total, n_items):
+        items = [(231 + (i * 37) % 700, li, 13.0 - i * 0.1) for i in range(n_items)]
+        return {"level_index": li, "cleared": cleared, "total": total, "items": items}
+
+    slots = [slot(li, 40 - li * 5, 52 - li * 4, 3 + li * 5) for li in (3, 2, 1, 0)]
+    png = plate_progress_bytes(
+        "樱",
+        "极",
+        service="DivingFish",
+        slots=slots,
+        total_count=52,
+        completed_count=28,
+    )
+    im = Image.open(io.BytesIO(png))
+    assert im.size[0] == 1400
+    assert im.size[1] > 900
+
+    # 牌名繁体映射：樱极 → 櫻極.png 存在于素材包
+    assert Path("static/mai/plate_version/櫻極.png").exists()

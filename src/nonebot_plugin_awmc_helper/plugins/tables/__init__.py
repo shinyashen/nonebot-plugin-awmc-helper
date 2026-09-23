@@ -19,14 +19,15 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...config import plugin_config
-from ...constants import PLATE_CHARS, SERVICE_DISPLAY
+from ...constants import LEVEL_LIST, PLATE_CHARS, SERVICE_DISPLAY
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
-from ...core.utils import paginate, handle_errors
+from ...core.utils import handle_errors
 from ...core.binding import session_keys, binding_service
 from ...core.render.score import DrawScore
 from ...core.render.table import completion_grid_bytes
 from ...core.render.tools import text_to_image, image_to_bytes
+from ...core.render.plate_progress import plate_progress_bytes
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.tables",
@@ -323,25 +324,88 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             f"{version}{kind} 完成表（{cleared_levels}/{total_levels}）", items
         )
         await UniMessage.image(raw=png).finish(at_sender=True)
-    # 进度
-    total_levels = await plates.count_all()
-    cleared_levels = await plates.count_cleared()
-    remained = await plates.get_remained()
-    lines = [
-        f"{version}{kind} 进度：{cleared_levels}/{total_levels}"
-        f"（{cleared_levels / total_levels * 100:.1f}%）"
-        if total_levels
-        else "暂无谱面",
-    ]
+    # 进度（R7：NB DrawPlateProgress 版式总览图）
     page = int(page_raw) if page_raw else 1
-    remain_flat = [
-        (p.song, li) for p in remained for li in sorted(p.levels, key=lambda x: x.value)
+    cleared_plates = await plates.get_cleared()
+    remained = await plates.get_remained()
+
+    # song_id → (song, 剩余槽集, 达成槽集)；remained ∪ cleared = 牌子范围内全部曲
+    info: dict[int, tuple] = {}
+    for p in remained:
+        info[p.song.id] = (p.song, set(p.levels), set())
+    for p in cleared_plates:
+        if p.song.id in info:
+            info[p.song.id][2].update(p.levels)
+        else:
+            info[p.song.id] = (p.song, set(), set(p.levels))
+
+    is_wu = version in ("舞", "霸")
+    slot_count = 5 if is_wu else 4
+    slot_total = [0] * slot_count
+    slot_cleared = [0] * slot_count
+    remained_by_slot: list[list[tuple[int, int, float, str]]] = [
+        [] for _ in range(slot_count)
     ]
-    page_data, total_pages = paginate(remain_flat, page, 60)
-    real = min(max(page, 1), total_pages)
-    lines.append(f"未达成 {len(remain_flat)} 个，第 {real}/{total_pages} 页：")
-    lines += [f"「{s.id}」{s.title} {li.name}" for s, li in page_data]
-    png = image_to_bytes(text_to_image("\n".join(lines), size=20))
+    completed_count = 0
+    for song, remaining, cleared_l in info.values():
+        if not remaining:
+            completed_count += 1
+        for li in remaining | cleared_l:
+            if li.value < slot_count:
+                slot_total[li.value] += 1
+        for li in cleared_l:
+            if li.value < slot_count:
+                slot_cleared[li.value] += 1
+        for li in remaining:
+            d = next(
+                (
+                    x
+                    for x in song.get_difficulties()
+                    if x.level_index == li and x.type != SongType.UTAGE
+                ),
+                None,
+            )
+            if d is not None:
+                remained_by_slot[li.value].append(
+                    (song.id, li.value, d.level_value, d.level)
+                )
+    for slot in remained_by_slot:
+        slot.sort(key=lambda x: -x[2])
+
+    # 槽节倒序（Re:MASTER → Basic，NB 同款）；舞/霸按等级 13 分界分页（NB 同款）
+    boundary = LEVEL_LIST.index("13")
+    slots = []
+    for li in range(slot_count):
+        items_full = remained_by_slot[li]
+        if is_wu:
+            if page <= 1:
+                items = [
+                    it[:3] for it in items_full if LEVEL_LIST.index(it[3]) >= boundary
+                ]
+            else:
+                items = [
+                    it[:3] for it in items_full if LEVEL_LIST.index(it[3]) < boundary
+                ]
+        else:
+            items = [it[:3] for it in items_full]
+        slots.append(
+            {
+                "level_index": li,
+                "cleared": slot_cleared[li],
+                "total": slot_total[li],
+                "items": items,
+            }
+        )
+    slots = slots[::-1]
+    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+    png = plate_progress_bytes(
+        version,
+        kind,
+        service=service,
+        slots=slots,
+        total_count=len(info),
+        completed_count=completed_count,
+    )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
