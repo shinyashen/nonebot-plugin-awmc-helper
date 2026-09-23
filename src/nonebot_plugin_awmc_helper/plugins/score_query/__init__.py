@@ -5,6 +5,8 @@
 - ap50 为本地过滤实现（maimai-py 无 AP50 端点）：全量成绩中取 FC=AP/APP 的 RA 前 50。
 """
 
+import io
+
 from nonebot import on_regex, on_command
 from maimai_py import SongType, LevelIndex
 from nonebot.params import CommandArg, RegexGroup
@@ -13,13 +15,14 @@ from nonebot.adapters import Event, Message
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from ...constants import COLOR_TO_LEVEL_INDEX
+from ...constants import COLOR_TO_LEVEL_INDEX, chart_display_id
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import handle_errors
 from ...core.render import pie as pie_render
 from ...core.render import song as song_render
 from ...core.render import best50 as b50_render
+from ...core.render import nb_chart
 from ...core.binding import session_keys, binding_service
 from ...core.render.tools import text_to_image, image_to_bytes
 
@@ -220,9 +223,13 @@ async def _(groups: tuple = RegexGroup()):
         await UniMessage.text(
             "暂无该谱面的游玩统计（需部署配置水鱼开发者 Token 以启用曲线数据）"
         ).finish(at_sender=True)
+    # R2：与查歌同源富谱面卡（渲染器在 core/render，无跨插件问题）；
+    # 卡片主类型跟随所选谱面（选 SD 色谱显示 SD 卡）
+    prefer = SongType.STANDARD if diff.type == SongType.STANDARD else None
+    card = nb_chart.song_chart_info(song, False, False, [], "prism_plus", prefer)
     type_abbr = "DX" if diff.type == SongType.DX else "SD"
     lines = [
-        f"「{song.id}」{song.title}",
+        f"「{chart_display_id(song, diff)}」{song.title}",
         f"谱面：{type_abbr} {diff.level}（{diff.level_value:.1f}）",
         f"样本数：{curve.sample_size}",
         f"拟合定数：{curve.fit_level_value:.1f}",
@@ -235,8 +242,28 @@ async def _(groups: tuple = RegexGroup()):
         key=lambda x: -x[1],
     )
     pie_png = pie_render.pie_bytes(f"{song.title} [{diff.level}] 评级分布", rate_data)
-    png = _minfo_image(song, lines, extra_png=pie_png)
+    png = _ginfo_image(card, lines, extra_png=pie_png)
     await UniMessage.image(raw=png).finish(at_sender=True)
+
+
+def _ginfo_image(
+    card: bytes, lines: list[str], extra_png: bytes | None = None
+) -> bytes:
+    """富谱面卡 + 统计文本行（+ 可选分布图）纵向拼接。"""
+    from PIL import Image
+
+    text_img = text_to_image("\n".join(lines), size=22, padding=14)
+    extras: list[Image.Image] = [Image.open(io.BytesIO(card)).convert("RGBA"), text_img]
+    if extra_png:
+        extras.append(Image.open(io.BytesIO(extra_png)).convert("RGBA"))
+    total_h = sum(im.size[1] for im in extras) + 8 * (len(extras) - 1)
+    w = max(im.size[0] for im in extras)
+    out = Image.new("RGBA", (w, total_h), "#f2f3f5")
+    y = 0
+    for im in extras:
+        out.paste(im, (0, y))
+        y += im.size[1] + 8
+    return image_to_bytes(out)
 
 
 def _minfo_image(song, lines: list[str], extra_png: bytes | None = None) -> bytes:
