@@ -301,6 +301,12 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             ut_only = [e for e in entries if e[2] is None]
             if ut_only:
                 entries = ut_only
+            else:
+                # 剥「宴」后命中的曲无宴谱：按关键词在含宴谱的曲中再查
+                # （如「宴牛奶」的牛奶是宴曲别名而非普通曲别名）
+                ut_songs = await song_service.utage_by_keyword(strip_info[0])
+                if ut_songs:
+                    entries = [e for e in _type_entries(ut_songs) if e[2] is None]
     # 逐条目判定日服限定：国服也有的曲回取国服对象（定数口径/封面/B50 一致），
     # 仅日服曲保留日服对象（日服卡渲染）
     cn_songs = {s.id: await song_service.by_id(s.id) for _, s, _ in entries}
@@ -331,20 +337,36 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     # 纯数字 → ID（查分器 id 形状推断谱面类型：≤4 位 SD、5 位 DX、6 位宴）
     if name.isdigit():
         raw_id = int(name)
-        song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
-        if song:
-            # raw_id 可能是 DX 展示 id：按解析出的根 id 回查国服视图定标注
-            cn_song = await song_service.by_id(song.id)
-            jp_only = cn_song is None
-            note = f"\n{JP_ONLY_NOTE}" if jp_only else ""
-            png = await _chart_card(
-                cn_song or song, binding, prefer_type_from_raw_id(raw_id), jp_only
+        if raw_id > 99999:
+            # 6 位宴谱机台 id：按 diff_id 定位宿主曲（取模会错配同号普通曲）
+            ut_song = await song_service.by_utage_id(raw_id)
+            if ut_song:
+                png = await _chart_card(ut_song, binding)
+                await (
+                    UniMessage.image(raw=png)
+                    .text("\n您要找的是不是这首？")
+                    .finish(at_sender=True)
+                )
+        else:
+            song = await song_service.by_id(raw_id) or await song_service.jp_by_id(
+                raw_id
             )
-            await (
-                UniMessage.image(raw=png)
-                .text(f"\n您要找的是不是这首？{note}")
-                .finish(at_sender=True)
-            )
+            if song:
+                # raw_id 可能是 DX 展示 id：按解析出的根 id 回查国服视图定标注
+                cn_song = await song_service.by_id(song.id)
+                jp_only = cn_song is None
+                note = f"\n{JP_ONLY_NOTE}" if jp_only else ""
+                png = await _chart_card(
+                    cn_song or song,
+                    binding,
+                    prefer_type_from_raw_id(raw_id),
+                    jp_only,
+                )
+                await (
+                    UniMessage.image(raw=png)
+                    .text(f"\n您要找的是不是这首？{note}")
+                    .finish(at_sender=True)
+                )
     if idm := re.match(r"^id([0-9]+)$", name, re.IGNORECASE):
         raw_id = int(idm.group(1))
         song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)

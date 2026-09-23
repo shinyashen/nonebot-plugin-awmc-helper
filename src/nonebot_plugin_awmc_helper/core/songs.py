@@ -391,6 +391,33 @@ class SongService:
         jp = await self._jp_songs_map()
         return jp.get(song_id % 10000)
 
+    async def by_utage_id(self, diff_id: int) -> Song | None:
+        """按宴谱 6 位机台内部 id（diff_id，100363 形状）定位宿主曲。
+
+        maimai_py ``by_id`` 对任意 id 取模 10000，6 位宴 id 会被错误匹配到
+        同号根 id 的普通曲——宴 id 必须按 diff_id 在曲库 utage 谱面中定位。
+        """
+        await self.ensure_loaded()
+        for song in await self.get_all():
+            for diff in song.get_difficulties(SongType.UTAGE):
+                if getattr(diff, "diff_id", None) == diff_id:
+                    return song
+        return None
+
+    async def utage_by_keyword(self, keyword: str) -> list[Song]:
+        """在含宴谱的曲中按标题/别名模糊匹配（「宴XX」召唤宴谱用）。"""
+        await self.ensure_loaded()
+        kw = normalize_text(keyword)
+        result: list[Song] = []
+        for song in await self.get_all():
+            if not song.get_difficulties(SongType.UTAGE):
+                continue
+            if kw in normalize_text(song.title) or any(
+                kw in normalize_text(a) for a in (song.aliases or [])
+            ):
+                result.append(song)
+        return result
+
     async def by_alias_detail(
         self, alias: str
     ) -> tuple[list[Song], tuple[str, str, str] | None]:

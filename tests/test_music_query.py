@@ -8,6 +8,16 @@ from nonebug import App
 
 
 @pytest.fixture
+async def db(tmp_path):
+    from nonebot_plugin_awmc_helper.core import store
+
+    store.set_db_file(tmp_path / "awmc.db")
+    await store.init_db()
+    yield
+    store.set_db_file(None)
+
+
+@pytest.fixture
 async def songs(tmp_path):
     """注入样例曲库 + 独立临时数据库。"""
     from mocks import make_song, sample_songs, seed_service
@@ -278,3 +288,81 @@ async def test_render_smoke(songs):
     listing = song_list_bytes(await song_service.get_all(), 1)
     assert listing.startswith(b"\x89PNG")
     assert len(listing) > 1000
+
+
+def _utage_host_song():
+    """纯宴曲宿主：title/别名含「牛奶」，宴谱 diff_id=100363。"""
+    from mocks import make_song, make_utage
+    from maimai_py import Genre
+
+    return make_song(
+        363,
+        "Milky Beat",
+        genre=Genre.宴会場,
+        aliases=["牛奶"],
+        diffs=[],
+        utage=[make_utage(diff_id=100363, kanji="牛", description="牛奶宴会")],
+    )
+
+
+@pytest.mark.asyncio
+async def test_by_utage_id_and_keyword(db):
+    """宴谱 6 位 id 与「宴XX」关键词定位宿主曲（diff_id 不被根 id 取模吞掉）。"""
+    from mocks import seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    host = _utage_host_song()
+    await seed_service(song_service, [host])
+
+    got = await song_service.by_utage_id(100363)
+    assert got is not None
+    assert got.id == 363
+    assert await song_service.by_utage_id(999999) is None
+
+    ut_songs = await song_service.utage_by_keyword("牛奶")
+    assert [s.id for s in ut_songs] == [363]
+    # 宿主曲无 DX 谱面（纯宴曲）
+    assert not host.difficulties.dx
+    assert host.difficulties.utage
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_utage_id_command_draws_banquet_card(app: App, db):
+    """id 100363（宴谱机台 id）→ 宴会场卡而非同号普通曲 DX 卡。"""
+    from mocks import seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import nb_chart
+
+    host = _utage_host_song()
+    await seed_service(song_service, [host])
+    await _assert_image_reply(
+        app,
+        "query_chart",
+        "id100363",
+        lambda: nb_chart.song_chart_banquet_info(host),
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_utage_alias_keyword_draws_banquet_card(app: App, db):
+    """「宴牛奶是什么歌」：别名命中普通曲无宴谱时，回退按关键词搜宴曲。"""
+    from mocks import make_song, seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import nb_chart
+
+    host = _utage_host_song()
+    normal = make_song(364, "Milky Normal", aliases=["牛奶"])
+    await seed_service(song_service, [host, normal])
+    # 「宴牛奶」精确未命中 → 剥「宴」命中普通曲 364（无宴谱）→ 回退宴曲搜索
+    await _assert_image_reply(
+        app,
+        "search_alias_song",
+        "宴牛奶是什么歌",
+        lambda: nb_chart.song_chart_banquet_info(host),
+        suffix="您要找的是不是这首？",
+    )
