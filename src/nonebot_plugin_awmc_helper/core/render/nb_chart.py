@@ -470,6 +470,8 @@ def song_chart_banquet_info(song: Song) -> bytes:
         )
 
     def t(pos, text, size, *, anchor="mm", sw=0, fill=white):
+        # NB DrawText 默认 stroke_fill=(0,0,0,0)：描边为透明黑（QQ 渲染为
+        # 黑边、字形清晰），不能用白描边——白字白边会糊成一团发白
         mr.text(
             pos,
             text,
@@ -477,7 +479,7 @@ def song_chart_banquet_info(song: Song) -> bytes:
             fill=fill,
             anchor=anchor,
             stroke_width=sw,
-            stroke_fill=white if sw else None,
+            stroke_fill=(0, 0, 0, 0) if sw else None,
         )
 
     # kanji（玩家牌上方）
