@@ -212,6 +212,16 @@ async def test_daily_songdb_pipeline(db, monkeypatch):
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
     from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    # boom 分支的 runtime 刷新必须 fake：真实 load() 会对本用例的半空 DB 走一次
+    # maimai_py 缓存写入（ids=[] + provider 指纹哈希），污染同 worker 后续用相同
+    # fixture（指纹相同）的用例——client.songs() 命中缓存跳过重建读到空 ids；
+    # 且别名拉取未 mock，是一次真实网络请求
+    async def fake_runtime_refresh():
+        return True
+
+    monkeypatch.setattr(song_service, "refresh", fake_runtime_refresh)
 
     calls = {"refresh": [], "templates": 0}
 

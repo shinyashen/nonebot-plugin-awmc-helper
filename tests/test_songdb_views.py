@@ -243,6 +243,11 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
                 await session.exec(delete(table))
             await session.commit()
         assert await songdb.is_empty()
+        # 直写 DELETE 不经 rebuild/外部源合并路径，不会同步指纹；生产写库路径
+        # （_refresh_standard_json）必同步，这里补齐同款语义强制下次 load 重建
+        # 缓存——否则同指纹命中缓存旧 ids，加载成败取决于同 worker 先前用例
+        # 留下的缓存状态，断言天然不确定
+        monkeypatch.setattr(songdb, "CURRENT_FINGERPRINT", "cleared-for-refetch")
         # 已就绪状态下加载失败：保留旧运行时（不降级、也不清空）
         assert not await song_service.load()
         assert await song_service.by_id(8) is not None  # 旧运行时仍在
