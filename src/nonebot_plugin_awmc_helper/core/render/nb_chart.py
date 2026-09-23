@@ -242,7 +242,7 @@ def song_chart_info(
     im.alpha_composite(
         Image.open(base / theme / "logo.png").resize((249, 120)), (65, 25)
     )
-    prefer_sd = prefer_type == SongType.STANDARD and song.difficulties.standard
+    prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
     type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
     chart_version = _chart_version(song, prefer_sd)
     # 日服视图与国服新曲标无关：统一不渲染「新曲だよ!」徽章
@@ -257,8 +257,8 @@ def song_chart_info(
     if version_img is not None:
         logo = _fit_version_logo(version_img)
         im.alpha_composite(
-        logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
-    )
+            logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
+        )
     type_path = base / f"{type_abbr}.png"
     if type_path.exists():
         im.alpha_composite(Image.open(type_path).resize((80, 30)), (295, 410))
