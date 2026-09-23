@@ -703,13 +703,15 @@ async def _on_cn_update(
         )
 
 
-async def _daily_songdb() -> None:
-    """每日 4 点歌曲库全量（§7.1 ⑥⑦⑧）：日侧源 + CN 回填 + 外部源 + 底图兜底。"""
+async def full_refresh() -> dict:
+    """歌曲库全量管线（每日任务与 SUPERUSER 手动刷新共用）：四源重建 →
+    外部源底图 → 兜底 → 运行时刷新。返回重建统计；失败返回 {}（已记日志）。"""
     extra: dict = {}
+    result: dict = {}
     try:
         result = await songdb.refresh_all(include_cn=True, include_jp=True)
         logger.info(
-            f"歌曲库每日刷新完成：{result['songs']} 曲 / {result['groups']} 组 / "
+            f"歌曲库全量刷新完成：{result['songs']} 曲 / {result['groups']} 组 / "
             f"{result['charts']} 谱面 / {result['level_points']} 定数变化点，"
             f"删除 {result['removed']} 曲，国服当前版本 {result['cn_current_version']}"
         )
@@ -717,7 +719,7 @@ async def _daily_songdb() -> None:
             logger.warning(f"songdb: {warning}")
         extra = result.get("extra") or {}
     except Exception:
-        logger.exception("歌曲库每日全量刷新失败（不影响曲库运行时）")
+        logger.exception("歌曲库全量刷新失败（不影响曲库运行时）")
     if extra.get("changed"):
         # 外部源已在 refresh_all 内应用（含新曲创建），此处只负责底图重建
         logger.info(f"外部补充源有变化，重建底图（{extra}）")
@@ -728,6 +730,12 @@ async def _daily_songdb() -> None:
     await _ensure_templates()
     # 规范表已可能变化：指纹较上次加载不同时 maimai_py 自动重建运行时缓存
     await song_service.refresh()
+    return result
+
+
+async def _daily_songdb() -> None:
+    """每日 4 点歌曲库全量（§7.1 ⑥⑦⑧）：日侧源 + CN 回填 + 外部源 + 底图兜底。"""
+    await full_refresh()
 
 
 scheduler.add_job(_daily_songdb, "cron", hour=4, minute=5)
