@@ -46,7 +46,9 @@ async def test_forward_send_error_returns_false(monkeypatch):
     bot = Bot(adapter=adapter, self_id="1234567890")
 
     async def rejected(*args, **kwargs):
-        raise ActionFailed({"status": "failed", "retcode": 1404})
+        # ActionFailed 只收 **kwargs；误传位置字典会先抛 TypeError，
+        # 被降级的 except Exception 吞掉，测试将因错误原因而假绿
+        raise ActionFailed(status="failed", retcode=1404)
 
     monkeypatch.setattr(bot, "call_api", rejected)
     assert await forward_mod.try_send_forward(bot, ["hi"], group_id=123) is False
