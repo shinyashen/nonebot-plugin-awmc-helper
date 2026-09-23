@@ -66,3 +66,17 @@ def test_fit_trims_faint_glow_margin():
     plain = _fit_version_logo(_make_logo(790, 447))
     glowy = _fit_version_logo(_make_logo(790, 447, glow=True))
     assert plain.size == glowy.size
+
+
+def test_jp_logo_name_batch_codes_fall_back_to_base():
+    """日服追加批次码（基础码+批内序号）回落基础码，旧框批次码走通用路径。"""
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import (
+        _jp_version_logo_name,
+    )
+
+    assert _jp_version_logo_name(26500) == "CiRCLE PLUS"
+    assert _jp_version_logo_name(26513) == "CiRCLE PLUS"  # 終幕の傀儡等追加批
+    assert _jp_version_logo_name(27000) == "MAGiCAL"
+    assert _jp_version_logo_name(20506) == "DX PLUS"
+    assert _jp_version_logo_name(25518) == "PRiSM PLUS"
+    assert _jp_version_logo_name(19999) is None  # FiNALE 批次码：中日 logo 相同

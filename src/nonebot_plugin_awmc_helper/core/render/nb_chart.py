@@ -151,11 +151,21 @@ def _is_new(song: Song) -> bool:
     return song.version >= current_version.value
 
 
+def _jp_version_logo_name(version: int) -> str | None:
+    """日服版本码 → 日服 logo 文件名；追加批次码回落基础码。
+
+    追加批次码 = 基础版本码（500 的倍数）+ 批内序号（如 26513 = CiRCLE PLUS + 13），
+    精确匹配落空时按 500 取整回基础码；旧框（<20000）中日 logo 相同，交由通用路径。
+    """
+    if name := JP_VERSION_IMAGE.get(version):
+        return name
+    return JP_VERSION_IMAGE.get(version // 500 * 500) if version >= 20000 else None
+
+
 def _version_image(song: Song, jp: bool = False) -> Image.Image | None:
     if jp:
-        # 日服视图：DX 世代用日服 logo（pic/jp/，按版本码精确匹配，MAGiCAL 等
-        # 超枚举版本同样命中）；旧框中日 logo 相同，回落通用路径
-        jp_name = JP_VERSION_IMAGE.get(song.version)
+        # 日服视图：DX 世代用日服 logo（pic/jp/，含 MAGiCAL 等超枚举版本）
+        jp_name = _jp_version_logo_name(song.version)
         if jp_name:
             path = assets.static_path() / "mai" / "pic" / "jp" / f"{jp_name}.png"
             if path.exists():
