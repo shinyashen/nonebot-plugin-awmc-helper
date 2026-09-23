@@ -196,10 +196,8 @@ async def test_b50_render_smoke(db, songs):
 
     from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
 
-    from nonebot_plugin_awmc_helper.core.render.best50 import (
-        best50_bytes,
-        score_list_bytes,
-    )
+    from nonebot_plugin_awmc_helper.core.render.score import DrawScore
+    from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
 
     base = Score(
         id=1,
@@ -226,7 +224,9 @@ async def test_b50_render_smoke(db, songs):
     png = await best50_bytes("tester", 250, 250, 0, [sc], [])
     assert png.startswith(b"\x89PNG")
     assert len(png) > 1000
-    listing = score_list_bytes("AP50", [sc])
+    listing = DrawScore(280 + 4 * 109 + 130, service=None).draw_score_list(
+        "13", [sc], 1, 1
+    )
     assert listing.startswith(b"\x89PNG")
 
 
