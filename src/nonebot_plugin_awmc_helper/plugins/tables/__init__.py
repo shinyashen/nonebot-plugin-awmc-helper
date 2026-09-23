@@ -30,7 +30,6 @@ from ...core.songs import song_service
 from ...core.utils import handle_errors
 from ...core.binding import session_keys, binding_service
 from ...core.render.score import DrawScore
-from ...core.render.table import completion_grid_bytes
 from ...core.render.tools import text_to_image, image_to_bytes
 from ...core.render.plate_progress import plate_progress_bytes
 
@@ -150,49 +149,49 @@ async def _(
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
         )
-    entries.sort(key=lambda x: -x[1].level_value)
-    png = table_template.rating_table_level_text(level, entries)
+    png = table_template.rating_table_text_bytes(level, entries)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @score_table_cmd.handle()
 @handle_errors("生成完成表失败", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(), groups: tuple = RegexGroup()
+):
+    """等级完成表（NB DrawRatingTable 移植）：模板 + 统计头 + 逐谱面盖章。
+
+    计划映射：fc/fcp/ap → 连击章模式（NB plan=True）；fs 族 → Sync 章
+    （NB 未支持，按连击章模式扩展）；达成率计划/无计划 → 评级章模式
+    （NB plan=False，盖章为各谱面实际评级）。
+    """
+    from ...core.render import table_template
+    from ...core.render.rating_table import draw_rating_table
+
     level, plan = groups
-    checker, plan_name = _plan_checker(plan)
     binding = await binding_service.ensure(*session_keys(session))
-    scores = await score_service.get_scores_all(binding)
-    score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
-    items = []
-    for song in await song_service.get_all():
-        for d in song.get_difficulties():
-            if d.type == SongType.UTAGE or d.level != level:
-                continue
-            sc = score_map.get((song.id, d.type, d.level_index))
-            done = checker(
-                sc.achievements if sc else None,
-                sc.fc if sc else None,
-                sc.fs if sc else None,
-            )
-            state = "done" if done else ("played" if sc else "new")
-            items.append((song, d, state))
-    if not items:
+    songs = await song_service.get_all()
+    entries = [
+        (song, d)
+        for song in songs
+        for d in song.get_difficulties()
+        if d.type != SongType.UTAGE and d.level == level
+    ]
+    if not entries:
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
         )
-    done_count = sum(1 for _, _, st in items if st == "done")
+    scores = await score_service.get_scores_all(binding)
 
-    # Q7 NB 方案：底图存在则叠加印章，否则回退实时网格
-    from ...core.render import table_template
-
-    state_list = [(song, d, st == "done") for song, d, st in items]
-    png = await table_template.overlay_rating(
-        level, plan_name, state_list, page=1, per_page=len(state_list)
-    )
+    theme = binding.theme or "prism_plus"
+    png = draw_rating_table(level, plan, scores.scores, entries, theme=theme)
     if png is None:
-        png = completion_grid_bytes(
-            f"{level} {plan_name} 完成表（{done_count}/{len(items)}）", items
-        )
+        # 底图缺失：现场按 NB 布局生成（不落盘）后重试
+        await table_template.generate_rating_template(level, song_service)
+        png = draw_rating_table(level, plan, scores.scores, entries, theme=theme)
+        if png is None:
+            await UniMessage.text(" 定数表底图生成失败，请稍后再试").finish(
+                at_sender=True
+            )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
@@ -287,51 +286,43 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
 @plate_cmd.handle()
 @handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(), groups: tuple = RegexGroup()
+):
     version, kind, mode, page_raw = groups
     binding = await binding_service.ensure(*session_keys(session))
+    page = int(page_raw) if page_raw else 1
     plates = await score_service.get_plates(binding, f"{version}{kind}")
     if mode == "完成表":
-        cleared = await plates.get_cleared()
-        cleared_keys = set()
-        for plate in cleared:
-            for level_index in plate.levels:
-                cleared_keys.add((plate.song.id, SongType.STANDARD, level_index))
-                cleared_keys.add((plate.song.id, SongType.DX, level_index))
-        total_levels = await plates.count_all()
-        cleared_levels = await plates.count_cleared()
-
-        # Q7 NB 方案：底图存在则叠加印章
+        # NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条
         from ...core.render import table_template
+        from ...core.render.plate_table_draw import draw_plate_table
 
-        all_items = []
-        for song in await song_service.get_all():
-            for d in song.get_difficulties():
-                if d.type == SongType.UTAGE:
-                    continue
-                all_items.append((song, d))
-        png = await table_template.overlay_plate(
-            version, kind, cleared_keys, all_items, cleared_levels
+        major = table_template._major_type_of_plate(version)
+        rng = table_template._plate_version_range(version)
+        entries = []
+        if rng is not None:
+            lo, hi = rng
+            for song in await song_service.get_all():
+                for d in song.get_difficulties():
+                    if table_template._in_plate_scope(song, d, lo, hi, major):
+                        entries.append((song, d))
+        if not entries:
+            await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
+        scores = await score_service.get_scores_all(binding)
+        png = draw_plate_table(
+            version, kind, scores.scores, entries, page=page
         )
-        if png is not None:
-            await UniMessage.image(raw=png).finish(at_sender=True)
-        # 回退：实时网格（仅达成项展示）
-        items = []
-        for plate in cleared:
-            for level_index in sorted(plate.levels, key=lambda x: x.value):
-                d = next(
-                    (
-                        x
-                        for x in plate.song.get_difficulties()
-                        if x.level_index == level_index
-                    ),
-                    None,
+        if png is None:
+            # 底图缺失：现场按 NB 布局生成（不落盘）后重试
+            await table_template.generate_plate_template(version, kind, song_service)
+            png = draw_plate_table(
+                version, kind, scores.scores, entries, page=page
+            )
+            if png is None:
+                await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
+                    at_sender=True
                 )
-                if d is not None:
-                    items.append((plate.song, d, "done"))
-        png = completion_grid_bytes(
-            f"{version}{kind} 完成表（{cleared_levels}/{total_levels}）", items
-        )
         await UniMessage.image(raw=png).finish(at_sender=True)
     # 进度（R7：NB DrawPlateProgress 版式总览图）
     page = int(page_raw) if page_raw else 1

@@ -335,8 +335,8 @@ async def test_ds_table_command(app: App, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import table_template
 
-    # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（R8 网格版式）；
-    # 先清掉真实目录可能残留的预渲染底图，固定走实时网格分支（xdist 下
+    # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（NB 版式网格）；
+    # 先清掉真实目录可能残留的预渲染底图，固定走实时生成分支（xdist 下
     # 期望图与 handler 渲染必须基于同一磁盘状态）
     (table_template.rating_table_dir() / "13+.png").unlink(missing_ok=True)
     entries = []
@@ -344,8 +344,7 @@ async def test_ds_table_command(app: App, songs):
         for d in song.get_difficulties():
             if d.type != SongType.UTAGE and d.level == "13+":
                 entries.append((song, d))
-    entries.sort(key=lambda x: -x[1].level_value)
-    png = table_template.rating_table_level_text("13+", entries)
+    png = table_template.rating_table_text_bytes("13+", entries)
 
     import nonebot
     from fake import fake_group_message_event_v11
@@ -421,31 +420,31 @@ from maimai_py import SongType, LevelIndex
 
 @pytest.mark.asyncio
 async def test_table_template_overlay(songs, tmp_path, monkeypatch):
-    """Q7 端到端：生成定数表底图 → 叠加印章 → 出非空 PNG；无底图时返回 None。
+    """NB 体系端到端：生成定数表底图 → DrawRatingTable 盖章 → 出非空 PNG。
 
     底图目录隔离到 tmp：xdist 并行下真实目录的底图写入会与
     test_ds_table_command 的期望渲染竞争（同图期望依赖稳定的磁盘状态）。
     """
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.render.rating_table import draw_rating_table
 
     monkeypatch.setattr(
         table_template, "rating_table_dir", lambda: tmp_path / "rating_table"
     )
-    assert await table_template.overlay_rating("13+", "Full Combo", [], 1, 80) is None
+    entries = []
+    for song in await song_service.get_all():
+        for d in song.get_difficulties():
+            if d.type != SongType.UTAGE and d.level == "13+":
+                entries.append((song, d))
+    assert entries
 
     total = await table_template.generate_rating_template("13+", song_service)
     assert total > 0
-    path = table_template.rating_table_dir() / "13+.png"
-    assert path.exists()
+    assert (table_template.rating_table_dir() / "13+.png").exists()
 
-    song231 = await song_service.by_id(231)
-    assert song231 is not None
-    diff = song231.get_difficulties()[0]
-    state_list = [(song231, diff, True)]
-    png = await table_template.overlay_rating(
-        "13+", "Full Combo", state_list, 1, per_page=80
-    )
+    # 无成绩 → 空盖章但统计头正常；出非空 PNG
+    png = draw_rating_table("13+", None, [], entries)
     assert png is not None
     assert png.startswith(b"\x89PNG\r\n")
 

@@ -79,12 +79,15 @@ async def test_random_chart(app: App, songs):
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
-    from nonebot_plugin_awmc_helper.core.render import song as song_render
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     picked = await song_service.random(song_type=SongType.DX, level="13+")
     assert picked is not None
-    song, diff = picked
-    png = song_render.random_song_bytes(song, diff)
+    song, _diff = picked
+    # 未绑定用户：binding.ensure 装配 QQ 公开凭据后 B50 拉取失败 → 纯谱面卡
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    png = await chart_card_bytes(song, binding)
     event = fake_group_message_event_v11(message="随个dx13+")
     expected = Message(
         [
@@ -95,6 +98,27 @@ async def test_random_chart(app: App, songs):
     async with app.test_matcher(random_song.random_chart) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
+        # 绑定解析触发群信息 API
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
 
@@ -103,8 +127,10 @@ async def test_random_chart(app: App, songs):
 async def test_random_chart_no_match(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import random_song
 
+    # UniSession 依赖注入在 handler 入口展开（无论是否命中都会触发群信息 API）
     await _assert_reply(
-        app, random_song.random_chart, "随个白14", "没有符合条件的谱面，换一个试试吧"
+        app, random_song.random_chart, "随个白14", "没有符合条件的谱面，换一个试试吧",
+        with_session=True,
     )
 
 
@@ -372,7 +398,8 @@ async def test_mai_what_rise_fallback(app: App, songs, monkeypatch):
 
     from nonebot_plugin_awmc_helper.plugins import random_song
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.render import song as song_render
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     async def fake_random(*a, **kw):
         all_songs = await song_service.get_all()
@@ -382,7 +409,9 @@ async def test_mai_what_rise_fallback(app: App, songs, monkeypatch):
     picked = await song_service.random(exclude_utage=True)
     assert picked is not None
     song, _diff = picked
-    png = song_render.song_card_bytes(song)
+    # 退化路径同样渲染谱面卡（未绑定 → B50 拉取失败 → 纯谱面卡）
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    png = await chart_card_bytes(song, binding)
 
     event = fake_group_message_event_v11(message="mai什么加分")
     expected = Message(
