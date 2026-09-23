@@ -27,6 +27,7 @@ from .tools import (
     tricolor_gradient_prism_plus,
 )
 from .assets import assets
+from ...constants import chart_display_id
 
 FONT_BLUE = (114, 188, 254, 255)
 _LEVEL_INDEXES = ("basic", "advanced", "expert", "master", "remaster")
@@ -275,7 +276,7 @@ def _plate_grid(
             stroke_fill=(255, 255, 255, 255),
         )
         max_row = 0
-        for num, (song, _diff) in enumerate(charts):
+        for num, (song, diff) in enumerate(charts):
             row, col = divmod(num, 12)
             max_row = max(max_row, row)
             x = START_X + col * GRID_STEP
@@ -290,7 +291,7 @@ def _plate_grid(
             )
             dr.text(
                 (x + 56, y + 4),
-                str(song.id),
+                str(chart_display_id(song, diff)),
                 font=font(16, "Torus SemiBold.otf"),
                 fill=(138, 0, 226, 255) if is_rem else (255, 255, 255, 255),
                 anchor="mm",

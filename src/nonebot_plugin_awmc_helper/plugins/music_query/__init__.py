@@ -24,6 +24,7 @@ from ...constants import display_song_id
 from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
+from ...core.render import jp_cover, nb_chart
 from ...core.binding import session_keys, binding_service
 from ...core.chart_card import chart_card_bytes
 
@@ -99,6 +100,14 @@ def _is_float(value: str) -> bool:
 async def _chart_card(song, binding, prefer_type=None, jp: bool = False) -> bytes:
     """谱面卡（实现下沉 core/chart_card，查歌/随机等子插件共用）。"""
     return await chart_card_bytes(song, binding, prefer_type, jp)
+
+
+async def _banquet_card(song) -> bytes:
+    """宴谱条目卡：宿主曲可能同时有普通谱（is_banquet 判定不成立），
+    但条目 id ≥ 100000 时必须渲染宴会场卡（Hoshino 按 song_id ≥ 100000
+    路由同语义）；日服宴曲封面在线兜底。"""
+    await jp_cover.ensure(song.id)
+    return nb_chart.song_chart_banquet_info(song)
 
 
 async def _binding_of(session):
@@ -314,7 +323,11 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
         song = cn_songs[song.id] or song
-        png = await _chart_card(song, binding, card_prefer, flags[0])
+        if _entry_id >= 100000:
+            # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡
+            png = await _banquet_card(song)
+        else:
+            png = await _chart_card(song, binding, card_prefer, flags[0])
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
         msg = _reply(JP_ONLY_NOTE) if flags[0] else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
@@ -341,7 +354,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             # 6 位宴谱机台 id：按 diff_id 定位宿主曲（取模会错配同号普通曲）
             ut_song = await song_service.by_utage_id(raw_id)
             if ut_song:
-                png = await _chart_card(ut_song, binding)
+                png = await _banquet_card(ut_song)
                 await (
                     UniMessage.image(raw=png)
                     .text("\n您要找的是不是这首？")
@@ -405,18 +418,33 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
     _id = match.group(1)
     raw_id = int(_id) if _id.isdigit() else None
-    song = await song_service.by_id(raw_id) if raw_id else None
+    song = None
     jp = False
-    if song is None and raw_id:
-        song = await song_service.jp_by_id(raw_id)  # 国服 miss → 日服 fallback
-        if song is not None:
-            # raw_id 可能是 DX 展示 id（根 id 国服有）：回取国服对象与标注
-            cn_song = await song_service.by_id(song.id)
-            song, jp = cn_song or song, cn_song is None
+    card_prefer = None
+    is_utage_entry = False
+    if raw_id:
+        if raw_id > 99999:
+            # 6 位宴谱机台 id（diff_id）：必须按 diff_id 定位宿主曲——
+            # by_id 会取模 10000 错误匹配同号普通曲；且宿主曲即便有普通
+            # 谱也渲染宴会场卡（Hoshino 按 song_id ≥ 100000 路由）
+            song = await song_service.by_utage_id(raw_id)
+            is_utage_entry = song is not None
+        else:
+            song = await song_service.by_id(raw_id)
+            if song is None:
+                song = await song_service.jp_by_id(raw_id)  # 国服 miss → 日服
+                if song is not None:
+                    # raw_id 可能是 DX 展示 id：回查国服对象与标注
+                    cn_song = await song_service.by_id(song.id)
+                    song, jp = cn_song or song, cn_song is None
+            card_prefer = prefer_type_from_raw_id(raw_id)
     if not song:
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     binding = await _binding_of(session)
-    png = await _chart_card(song, binding, prefer_type_from_raw_id(raw_id or 0), jp)
+    if is_utage_entry:
+        png = await _banquet_card(song)
+    else:
+        png = await _chart_card(song, binding, card_prefer, jp)
     reply = UniMessage.image(raw=png)
     if jp:
         reply = reply.text(f"\n{JP_ONLY_NOTE}")

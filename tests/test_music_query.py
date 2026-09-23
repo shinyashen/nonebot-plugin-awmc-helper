@@ -366,3 +366,65 @@ async def test_utage_alias_keyword_draws_banquet_card(app: App, db):
         lambda: nb_chart.song_chart_banquet_info(host),
         suffix="您要找的是不是这首？",
     )
+
+
+@pytest.mark.asyncio
+async def test_by_utage_id_jp_view_fallback(db, monkeypatch):
+    """日服宴曲不在 CN 视图：by_utage_id / utage_by_keyword 走 JP 视图兜底。"""
+    from mocks import make_song, make_utage, seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    host = make_song(
+        363,
+        "Milky Beat JP",
+        aliases=["牛奶"],
+        diffs=[],
+        utage=[make_utage(diff_id=100363)],
+    )
+    await seed_service(song_service, [])  # CN 运行时视图为空
+
+    async def fake_jp_map():
+        return {363: host}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+
+    got = await song_service.by_utage_id(100363)
+    assert got is not None
+    assert got.id == 363
+    ut_songs = await song_service.utage_by_keyword("牛奶")
+    assert [s.id for s in ut_songs] == [363]
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_utage_id_on_mixed_host_draws_banquet_card(app: App, db):
+    """宴谱挂在普通曲上（宿主有 DX 谱）：id100363 也必须出宴会卡而非 DX 卡。"""
+    from mocks import make_diff, make_song, make_utage, seed_service
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import nb_chart
+
+    host = make_song(
+        363,
+        "Milky Beat Mixed",
+        aliases=["牛奶"],
+        utage=[make_utage(diff_id=100363)],
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.5,
+            )
+        ],
+    )
+    await seed_service(song_service, [host])
+    # 回归锚点：宿主有 DX 谱，is_banquet 为 False（修复前误出 DX 卡）
+    await _assert_image_reply(
+        app,
+        "query_chart",
+        "id100363",
+        lambda: nb_chart.song_chart_banquet_info(host),
+    )

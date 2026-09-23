@@ -24,6 +24,10 @@ async def chart_card_bytes(
     ——谱面与定数可能不同，混算无意义）。
     """
     if nb_chart.is_banquet(song):
+        # 宴曲多为日服限定：封面按需在线拉取（已有本地封面时静默跳过）
+        from .render import jp_cover
+
+        await jp_cover.ensure(song.id)
         return nb_chart.song_chart_banquet_info(song)
     if jp:
         # 日服限定曲本地无素材：按需在线拉取官方曲绘（代理优先，落盘缓存）

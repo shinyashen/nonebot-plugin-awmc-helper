@@ -396,26 +396,42 @@ class SongService:
 
         maimai_py ``by_id`` 对任意 id 取模 10000，6 位宴 id 会被错误匹配到
         同号根 id 的普通曲——宴 id 必须按 diff_id 在曲库 utage 谱面中定位。
+        宴曲绝大多数为日服限定（version_cn=NULL 不在 CN 运行时视图），
+        CN 视图未命中时回退 JP 视图。
         """
         await self.ensure_loaded()
         for song in await self.get_all():
             for diff in song.get_difficulties(SongType.UTAGE):
                 if getattr(diff, "diff_id", None) == diff_id:
                     return song
+        for song in (await self._jp_songs_map()).values():
+            for diff in song.get_difficulties(SongType.UTAGE):
+                if getattr(diff, "diff_id", None) == diff_id:
+                    return song
         return None
 
     async def utage_by_keyword(self, keyword: str) -> list[Song]:
-        """在含宴谱的曲中按标题/别名模糊匹配（「宴XX」召唤宴谱用）。"""
+        """在含宴谱的曲中按标题/别名模糊匹配（「宴XX」召唤宴谱用）。
+
+        CN 运行时视图与 JP 视图均参与匹配（宴曲多为日服限定）。
+        """
         await self.ensure_loaded()
         kw = normalize_text(keyword)
         result: list[Song] = []
-        for song in await self.get_all():
-            if not song.get_difficulties(SongType.UTAGE):
-                continue
-            if kw in normalize_text(song.title) or any(
-                kw in normalize_text(a) for a in (song.aliases or [])
-            ):
-                result.append(song)
+        seen: set[int] = set()
+
+        def match(songs) -> None:
+            for song in songs:
+                if song.id in seen or not song.get_difficulties(SongType.UTAGE):
+                    continue
+                if kw in normalize_text(song.title) or any(
+                    kw in normalize_text(a) for a in (song.aliases or [])
+                ):
+                    result.append(song)
+                    seen.add(song.id)
+
+        match(await self.get_all())
+        match((await self._jp_songs_map()).values())
         return result
 
     async def by_alias_detail(
