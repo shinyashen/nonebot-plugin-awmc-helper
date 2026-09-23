@@ -81,6 +81,8 @@ __plugin_meta__ = PluginMetadata(
 )
 
 NOT_FOUND = "没有找到这样的乐曲。\n※ 如果是别名请使用「XXX是什么歌」指令进行查询哦。"
+JP_ONLY_NOTE = "此歌曲为日服限定"
+"""单结果命中的日服限定标注；多结果列表用 _list_jp_note 的列表级措辞。"""
 
 search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
 search_alias_song = on_regex(r"(.+)是(?:什么|啥)歌[？?]?([0-9]+)?$", block=True)
@@ -189,7 +191,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             # 国服定数未命中 → 日服定数口径 fallback（Q32）
             songs = await song_service.jp_by_level_value(min(ds1, ds2), max(ds1, ds2))
             if songs:
-                await _render_jp_result(songs, page)
+                await _render_jp_result(songs, page, binding)
         await _render_result(songs, page, binding)
     elif cmd == "bpm":
         page = 1
@@ -210,7 +212,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             # 国服 BPM 未命中 → 日服视图 fallback（Q32）
             songs = await song_service.jp_by_bpm(min(b1, b2), max(b1, b2))
             if songs:
-                await _render_jp_result(songs, page)
+                await _render_jp_result(songs, page, binding)
         await _render_result(songs, page, binding)
     elif cmd == "曲师":
         if not a_list:
@@ -221,7 +223,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             # 国服曲师未命中 → 日服视图 fallback（Q32）
             songs = await song_service.jp_by_artist(name)
             if songs:
-                await _render_jp_result(songs, page)
+                await _render_jp_result(songs, page, binding)
         await _render_result(songs, page, binding)
     elif cmd == "谱师":
         if not a_list:
@@ -232,7 +234,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             # 国服谱师未命中 → 日服视图 fallback（Q32）
             songs = await song_service.jp_by_note_designer(name)
             if songs:
-                await _render_jp_result(songs, page)
+                await _render_jp_result(songs, page, binding)
         await _render_result(songs, page, binding)
     else:
         if not a_list:
@@ -243,18 +245,42 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             # 国服标题未命中 → 日服视图 fallback（Q32，与别名 fallback 同口径）
             songs = await song_service.jp_by_title_fuzzy(title)
             if songs:
-                await _render_jp_result(songs, page)
+                await _render_jp_result(songs, page, binding)
         await _render_result(songs, page, binding)
 
 
-async def _render_jp_result(songs, page: int) -> None:
-    """日服 fallback 结果：单首出日服卡（封面按需在线拉取），多首文本/列表图。"""
-    note = "此歌曲为日服限定"
+def _list_jp_note(flags: list[bool]) -> str:
+    """多结果列表的日服限定说明：混合列表与全日服列表措辞不同。"""
+    if not any(flags):
+        return ""
+    return "列表中曲目均为日服限定歌曲" if all(flags) else "列表中包含日服限定歌曲"
+
+
+async def _jp_flags(songs: "list[Song]") -> list[bool]:
+    """逐曲判定是否仅日服可用（国服运行时视图无此曲）。"""
+    return [await song_service.by_id(s.id) is None for s in songs]
+
+
+async def _render_jp_result(songs, page: int, binding=None) -> None:
+    """日服 fallback 结果：逐曲判定日服限定，混合列表只标注限定曲。
+
+    日服视图含国服也有的曲（标题子串、日服定数口径变更等场景可命中）：
+    整列表国服都有时按普通结果渲染，混合时国服曲回取国服对象。
+    """
+    flags = await _jp_flags(songs)
+    if not any(flags):
+        songs = [(await song_service.by_id(s.id)) or s for s in songs]
+        await _render_result(songs, page, binding)
+        return
+    note = _list_jp_note(flags)
     if len(songs) == 1:
         png = await _chart_card(songs[0], None, None, True)
-        await _reply(note).image(raw=png).finish(at_sender=True)
+        await _reply(JP_ONLY_NOTE).image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
-        text = "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in songs)
+        text = "".join(
+            f"「{display_song_id(s)}」 {s.title}{'（日服限定）' if f else ''}\n"
+            for s, f in zip(songs, flags)
+        )
         await _reply(text.rstrip("\n") + "\n" + note).finish(at_sender=True)
     await (
         UniMessage.image(raw=song_render.song_list_bytes(songs, page))
@@ -296,16 +322,14 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     # 双条目语义）——同根 id 的标准/DX/宴条目共享别名，搜索应全部列出供选择；
     # 带谱面前缀（dx/标准/标）时自动定位到对应类型条目，无前缀不设偏好
     songs, strip_info = await song_service.by_alias_detail(name)
-    jp_mode = False
     if not songs:
         # 国服视图未命中 → 日服视图 fallback（Q32：日服作为国服查歌的兜底）
         songs, strip_info = await song_service.jp_by_alias_detail(name)
-        jp_mode = bool(songs)
     if not songs:
         # 别名全网未命中：输入本身可能就是曲目名（如新曲尚无人录别名），
-        # 日服标题兜底（国服侧标题按设计走「查歌」指令）
+        # 日服标题兜底（国服侧标题按设计走「查歌」指令）——日服视图含国服
+        # 也有的曲（标题子串命中，如实测 ROND），混合列表按逐曲标注区分
         songs = await song_service.jp_by_title_fuzzy(name)
-        jp_mode = bool(songs)
     prefer_type = _PREFIX_TO_TYPE.get(strip_info[1]) if strip_info else None
     entries = _type_entries(songs)
     if strip_info:
@@ -317,19 +341,26 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             ut_only = [e for e in entries if e[2] is None]
             if ut_only:
                 entries = ut_only
-    jp_note = "此歌曲为日服限定" if jp_mode else ""
+    # 逐条目判定日服限定：国服也有的曲回取国服对象（定数口径/封面/B50 一致），
+    # 仅日服曲保留日服对象（日服卡渲染）
+    cn_songs = {s.id: await song_service.by_id(s.id) for _, s, _ in entries}
+    flags = [cn_songs[s.id] is None for _, s, _ in entries]
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
-        png = await _chart_card(song, binding, card_prefer, jp_mode)
+        song = cn_songs[song.id] or song
+        png = await _chart_card(song, binding, card_prefer, flags[0])
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
-        msg = _reply(jp_note) if jp_mode else UniMessage()
+        msg = _reply(JP_ONLY_NOTE) if flags[0] else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
     if entries:
         msg = f"找到{len(entries)}个谱面：\n"
-        msg += "".join(f"{eid}：{song.title}\n" for eid, song, _ in entries)
+        msg += "".join(
+            f"{eid}：{s.title}{'（日服限定）' if f else ''}\n"
+            for (eid, s, _), f in zip(entries, flags)
+        )
         msg += "※ 请使用「id xxxxx」查询指定谱面"
-        if jp_mode:
-            msg += f"\n{jp_note}"
+        if list_note := _list_jp_note(flags):
+            msg += f"\n{list_note}"
         await _reply(msg.rstrip("\n")).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
@@ -342,9 +373,13 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         raw_id = int(name)
         song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
         if song:
-            jp_hit = not await song_service.by_id(raw_id)
-            note = "\n此歌曲为日服限定" if jp_hit else ""
-            png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id), jp_hit)
+            # raw_id 可能是 DX 展示 id：按解析出的根 id 回查国服视图定标注
+            cn_song = await song_service.by_id(song.id)
+            jp_only = cn_song is None
+            note = f"\n{JP_ONLY_NOTE}" if jp_only else ""
+            png = await _chart_card(
+                cn_song or song, binding, _prefer_from_raw_id(raw_id), jp_only
+            )
             await (
                 UniMessage.image(raw=png)
                 .text(f"\n您要找的是不是这首？{note}")
@@ -355,10 +390,12 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
         if not song:
             await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
-        jp_hit = not await song_service.by_id(raw_id)
-        note = "此歌曲为日服限定" if jp_hit else ""
-        png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id), jp_hit)
-        msg = _reply(note) if jp_hit else UniMessage()
+        cn_song = await song_service.by_id(song.id)
+        jp_only = cn_song is None
+        png = await _chart_card(
+            cn_song or song, binding, _prefer_from_raw_id(raw_id), jp_only
+        )
+        msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
 
     # 标题关键词兜底
@@ -390,12 +427,15 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     jp = False
     if song is None and raw_id:
         song = await song_service.jp_by_id(raw_id)  # 国服 miss → 日服 fallback
-        jp = song is not None
+        if song is not None:
+            # raw_id 可能是 DX 展示 id（根 id 国服有）：回取国服对象与标注
+            cn_song = await song_service.by_id(song.id)
+            song, jp = cn_song or song, cn_song is None
     if not song:
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     binding = await _binding_of(session)
     png = await _chart_card(song, binding, _prefer_from_raw_id(raw_id or 0), jp)
     reply = UniMessage.image(raw=png)
     if jp:
-        reply = reply.text("\n此歌曲为日服限定")
+        reply = reply.text(f"\n{JP_ONLY_NOTE}")
     await reply.finish(at_sender=True)

@@ -365,3 +365,106 @@ async def test_jp_fallback_handler(db, monkeypatch, app):
         )
     finally:
         song_service._ready.clear()
+
+
+async def _rebuild_load(monkeypatch) -> None:
+    """重建样例曲库并加载运行时（日服 fallback 列表系列测试共用）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.client import lxns_provider, yuzu_provider
+
+    async def fake_aliases(client):
+        return {}
+
+    monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
+    monkeypatch.setattr(lxns_provider, "get_aliases", fake_aliases)
+    await songdb.rebuild(full_payloads())
+    assert await song_service.load()
+
+
+@pytest.mark.asyncio
+async def test_jp_fallback_mixed_list(db, monkeypatch, app):
+    """日服标题兜底命中国服也有的曲（实测 ROND）：混合列表只标注日服限定曲，
+    列表级说明用「包含」而非「此歌曲为」。"""
+    from test_music_query import _assert_reply
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await _rebuild_load(monkeypatch)
+    try:
+        # 标题子串 song 同时命中：国服有的 8/21 + 仅日服的 555/777
+        assert [s.id for s in await song_service.jp_by_title_fuzzy("song")] == [
+            8,
+            21,
+            555,
+            777,
+        ]
+        await _assert_reply(
+            app,
+            "search_alias_song",
+            "song是什么歌",
+            "找到4个谱面："
+            "\n8：Test Song SD"
+            "\n10021：Test Song DX"
+            "\n10555：JP Only Song（日服限定）"
+            "\n10777：Increment Song（日服限定）"
+            "\n※ 请使用「id xxxxx」查询指定谱面"
+            "\n列表中包含日服限定歌曲",
+        )
+    finally:
+        song_service._ready.clear()
+
+
+@pytest.mark.asyncio
+async def test_jp_fallback_all_jp_list(db, monkeypatch, app):
+    """日服 fallback 整列表均为日服限定：逐条标注 + 列表级说明用「均为」。"""
+    from test_music_query import _assert_reply
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await _rebuild_load(monkeypatch)
+    try:
+        # 国服定数 [9.8, 10.4] 为空，日服口径命中 555/777（均仅日服）
+        assert not await song_service.by_level_value(9.8, 10.4)
+        assert [s.id for s in await song_service.jp_by_level_value(9.8, 10.4)] == [
+            555,
+            777,
+        ]
+        await _assert_reply(
+            app,
+            "search",
+            "定数查歌 9.8 10.4",
+            "「10555」 JP Only Song（日服限定）"
+            "\n「10777」 Increment Song（日服限定）"
+            "\n列表中曲目均为日服限定歌曲",
+        )
+    finally:
+        song_service._ready.clear()
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_jp_fallback_all_cn_delegates(db, monkeypatch, app):
+    """日服 fallback 整列表国服都有（日服定数口径变更命中）：按普通结果渲染。"""
+    from test_music_query import _assert_image_reply
+
+    from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    # 断开自动绑定（QQ 号直查水鱼）的 B50 嵌入，渲染不依赖外部成绩
+    monkeypatch.setattr(binding_service, "identifier_or_none", lambda b: None)
+    await _rebuild_load(monkeypatch)
+    try:
+        # 国服定数 [12.4, 12.6] 为空，日服口径命中 21（日服 CiRCLE 变 12.5，国服 12.3）
+        assert not await song_service.by_level_value(12.4, 12.6)
+        song = await song_service.by_id(21)
+        assert song is not None
+        await _assert_image_reply(
+            app,
+            "search",
+            "定数查歌 12.4 12.6",
+            lambda: music_query._chart_card(song, None),
+        )
+    finally:
+        song_service._ready.clear()
