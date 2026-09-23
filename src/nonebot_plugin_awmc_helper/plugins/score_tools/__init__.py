@@ -106,8 +106,6 @@ async def _(message: Message = CommandArg()):
 @rise_score.handle()
 @handle_errors("推分推荐失败，请稍后再试")
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
-    from maimai_py import SongType as _SongType
-
     from ...constants import SERVICE_DISPLAY
     from ...core.render.score import DrawScore
 
@@ -141,12 +139,13 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         await UniMessage.text(" 没有找到可以提升 RA 的曲目，换一个目标试试吧").finish(
             at_sender=True
         )
-    # R3：NB DrawScore 行卡版式——左栏旧版本（SD）右栏新版本（DX），各取前 5
-    sd_rec = [r for r in rec if r["diff"].type != _SongType.DX][:5]
-    dx_rec = [r for r in rec if r["diff"].type == _SongType.DX][:5]
+    # R3：NB DrawScore 行卡版式——双栏按版本划分（用户口径）：旧版本 =
+    # 当前版本以前全部谱面（b35 侧），新版本 = 当前版本谱面（b15 侧）
+    old_rec = [r for r in rec if r["side"] == "old"]
+    new_rec = [r for r in rec if r["side"] == "new"]
     service = SERVICE_DISPLAY.get(binding.service, binding.service)
     card = DrawScore(960, service=service)
-    png = card.draw_rise(sd_rec, dx_rec, 960)
+    png = card.draw_rise(old_rec, new_rec, 960)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

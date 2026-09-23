@@ -146,13 +146,13 @@ def test_rise_recommend_old_fields():
     ]
     candidates = [s for s in sample_songs() if s.id in (231, 500)]
     rec = rise_recommend(b50, candidates, target=10, latest_version_value=20000)
-    by_song = {r["song"].id: r for r in rec}
+    by_chart = {(r["song"].id, r["diff"].type): r for r in rec}
     # 500 未游玩：旧成绩 0（NB RiseResult 默认值语义）
-    assert by_song[500]["old_achievements"] == 0.0
-    assert by_song[500]["old_ra"] == 0
+    assert by_chart[(500, SongType.DX)]["old_achievements"] == 0.0
+    assert by_chart[(500, SongType.DX)]["old_ra"] == 0
     # 231 已游玩未入线：旧成绩取 B50 成绩
-    assert by_song[231]["old_achievements"] == 100.0
-    assert by_song[231]["old_ra"] == 200
+    assert by_chart[(231, SongType.DX)]["old_achievements"] == 100.0
+    assert by_chart[(231, SongType.DX)]["old_ra"] == 200
 
 
 @requires_assets
@@ -335,7 +335,10 @@ async def test_ds_table_command(app: App, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import table_template
 
-    # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（R8 网格版式）
+    # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（R8 网格版式）；
+    # 先清掉真实目录可能残留的预渲染底图，固定走实时网格分支（xdist 下
+    # 期望图与 handler 渲染必须基于同一磁盘状态）
+    (table_template.rating_table_dir() / "13+.png").unlink(missing_ok=True)
     entries = []
     for song in await song_service.get_all():
         for d in song.get_difficulties():
@@ -417,13 +420,18 @@ from maimai_py import SongType, LevelIndex
 
 
 @pytest.mark.asyncio
-async def test_table_template_overlay(songs):
-    """Q7 端到端：生成定数表底图 → 叠加印章 → 出非空 PNG；无底图时返回 None。"""
+async def test_table_template_overlay(songs, tmp_path, monkeypatch):
+    """Q7 端到端：生成定数表底图 → 叠加印章 → 出非空 PNG；无底图时返回 None。
+
+    底图目录隔离到 tmp：xdist 并行下真实目录的底图写入会与
+    test_ds_table_command 的期望渲染竞争（同图期望依赖稳定的磁盘状态）。
+    """
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import table_template
 
-    # 无底图 → 叠加返回 None（先清理可能的残留）
-    (table_template.rating_table_dir() / "13+.png").unlink(missing_ok=True)
+    monkeypatch.setattr(
+        table_template, "rating_table_dir", lambda: tmp_path / "rating_table"
+    )
     assert await table_template.overlay_rating("13+", "Full Combo", [], 1, 80) is None
 
     total = await table_template.generate_rating_template("13+", song_service)
@@ -592,8 +600,9 @@ def test_plate_progress_card_smoke():
 
 
 def test_rise_recommend_version_filter():
-    """推分双栏版本语义（NB）：DX 只推当前版本、SD 只推旧版本——
-    当前版本 SD 曲属于新版本侧，不得进入「旧版本谱面推荐」栏。"""
+    """推分双栏按版本划分（用户口径，NB 旧/新版本谱面推荐）：旧版本 =
+    当前版本以前全部谱面（b35 侧）、新版本 = 当前版本谱面（b15 侧），
+    SD/DX 均可入任一栏，side 由谱面版本决定而非类型。"""
     import dataclasses
 
     from mocks import make_diff, make_song
@@ -647,6 +656,27 @@ def test_rise_recommend_version_filter():
             dx_star=4,
             version=24000,
         ),
+        extend(
+            Score(
+                id=911,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=99.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=220,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="newDX",
+            level_value=13.0,
+            level_dx_score=2100,
+            dx_star=4,
+            version=25000,
+        ),
     ]
 
     def cand(song_id, type_, version):
@@ -673,8 +703,15 @@ def test_rise_recommend_version_filter():
     rec = rise_recommend(
         b50, candidates, target=1, latest_version_value=25000
     )
-    got = {r["song"].id for r in rec}
-    assert got == {921, 923}
+    # b50 两侧均有成绩（24000 旧版本侧 / 25000 新版本侧）→ 四首候选全部保留，
+    # 归栏只看谱面版本
+    got = {(r["song"].id, r["side"]) for r in rec}
+    assert got == {
+        (921, "new"),
+        (920, "old"),
+        (922, "new"),
+        (923, "old"),
+    }
 
 
 def test_rise_recommend_default_latest_follows_library():

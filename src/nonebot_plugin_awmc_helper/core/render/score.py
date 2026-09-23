@@ -183,11 +183,15 @@ class DrawScore:
 
     def draw_rise(
         self,
-        sd: list[dict],
-        dx: list[dict],
+        old: list[dict],
+        new: list[dict],
         total_height: int,
     ) -> bytes:
-        """绘制上分推荐表（左栏旧版本谱面 / 右栏新版本谱面，各 5 行）。"""
+        """绘制上分推荐表（左栏旧版本谱面 / 右栏新版本谱面，各 5 行）。
+
+        双栏按版本划分：旧版本 = 当前版本以前全部谱面（b35 侧）、
+        新版本 = 当前版本谱面（b15 侧），数据为 rise_recommend 输出 dict。
+        """
         from PIL import ImageDraw
 
         dr = ImageDraw.Draw(self._im)
@@ -200,7 +204,7 @@ class DrawScore:
             fill=_DEFAULT_TEXT_COLOR,
             anchor="mm",
         )
-        self._while_rise_pic(sd, 200)
+        self._while_rise_pic(old, 200)
         self._im.alpha_composite(title_bg, (814, 30))
         dr.text(
             (950, 68),
@@ -209,7 +213,7 @@ class DrawScore:
             fill=_DEFAULT_TEXT_COLOR,
             anchor="mm",
         )
-        self._while_rise_pic(dx, 700)
+        self._while_rise_pic(new, 700)
 
         height = self._im.size[1]
         dr.text(

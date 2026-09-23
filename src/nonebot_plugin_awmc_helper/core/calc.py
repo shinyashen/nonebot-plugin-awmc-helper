@@ -89,20 +89,25 @@ def rise_recommend(
     *,
     level: str | None = None,
     target: int = 1,
-    max_count: int = 15,
+    per_side: int = 5,
     latest_version_value: int | None = None,
 ) -> list[dict]:
-    """推分推荐（对齐原版 get_rise_score_list 语义）。
+    """推分推荐（对齐原版 get_rise_score_list 的双栏语义）。
 
-    - ``scores``：玩家当前 B50 成绩（ScoreExtend，含 dx_rating）；
+    双栏按**版本**划分（用户确认口径，即 NB 旧版本/新版本谱面推荐）：
+    - ``old`` 旧版本谱面推荐 = 当前版本以前的全部谱面（进入 b35 的一侧），
+      SD/DX 均可；
+    - ``new`` 新版本谱面推荐 = 当前版本谱面（进入 b15 的一侧），SD/DX 均可。
+
+    每栏以该侧 B50 末位 RA 为入线基准（低于基准的新成绩无法入栏替换），
+    返回按定数降序、每侧至多 ``per_side`` 条的推荐列表
+    （song/diff/side/达成率/新 RA/提升/旧成绩）。
+
+    - ``scores``：玩家当前 B50 成绩（ScoreExtend，含 dx_rating 与 version）；
     - ``songs``：候选曲库（通常为按等级或定数过滤后的子集）；
     - ``level``：指定等级时按等级选谱，否则按 B50 末位 RA 反推定数区间；
     - ``latest_version_value``：当前版本码；缺省取 maimai_py ``current_version``
-      （硬编码 25000 会在新版本时代漏推当前版本 DX 曲）；
-    - 版本语义对齐原版双栏（旧版本谱面推荐 / 新版本谱面推荐）：
-      DX 谱只推当前版本（b15 侧），SD 谱只推旧版本（b35 侧）——当前版本
-      SD 曲属于新版本侧，绝不可进入「旧版本」栏；
-    - 返回按定数降序的推荐列表（song/diff/达成率/新 RA/提升）。
+      （硬编码会在新版本时代漏推当前版本曲）。
     """
     if latest_version_value is None:
         from maimai_py import current_version
@@ -113,16 +118,16 @@ def rise_recommend(
     }
     ignored_ids = {s.id for s in scores if (s.achievements or 0) >= 100.5}
 
-    sd_side = sorted(
-        (s for s in scores if s.type == SongType.STANDARD),
-        key=lambda s: s.dx_rating or 0,
-    )
-    dx_side = sorted(
-        (s for s in scores if s.type == SongType.DX), key=lambda s: s.dx_rating or 0
-    )
-    lowest = {
-        "sd": sd_side[-1] if sd_side else None,
-        "dx": dx_side[-1] if dx_side else None,
+    # 两侧入线基准 = 该侧 B50 末位 RA（旧版本侧 / 新版本侧，升序取末位）
+    sides: dict[str, list[ScoreExtend]] = {
+        "old": sorted(
+            (s for s in scores if s.version < latest_version_value),
+            key=lambda s: s.dx_rating or 0,
+        ),
+        "new": sorted(
+            (s for s in scores if s.version >= latest_version_value),
+            key=lambda s: s.dx_rating or 0,
+        ),
     }
 
     results: list[dict] = []
@@ -132,28 +137,21 @@ def rise_recommend(
         for diff in song.get_difficulties():
             if diff.type == SongType.UTAGE:
                 continue
-            side = "sd" if diff.type == SongType.STANDARD else "dx"
-            base = lowest[side]
-            if base is None:
+            side = "old" if diff.version < latest_version_value else "new"
+            side_scores = sides[side]
+            if not side_scores:
                 continue
+            base_ra = side_scores[-1].dx_rating or 0
             if level is not None and diff.level != level:
-                continue
-            # 双栏版本语义：DX 只推当前版本，SD 只推旧版本
-            if diff.type == SongType.DX:
-                if diff.version < latest_version_value:
-                    continue
-            elif diff.version >= latest_version_value:
                 continue
 
             key = (song.id, diff.type, diff.level_index)
             old = by_key.get(key)
-            base_ra = base.dx_rating or 0
             old_ra = max(old.dx_rating or 0, base_ra) if old else 0
 
             best_gain: dict | None = None
             for ach in RISE_ACHIEVEMENTS:
                 new_ra = compute_rating(diff.level_value, ach)
-                base_ra = base.dx_rating or 0
                 if old is None:
                     if new_ra <= base_ra:
                         continue
@@ -166,6 +164,7 @@ def rise_recommend(
                     best_gain = {
                         "song": song,
                         "diff": diff,
+                        "side": side,
                         "achievements": ach,
                         "rate": rate_of(ach),
                         "new_ra": new_ra,
@@ -180,8 +179,20 @@ def rise_recommend(
             if best_gain is not None:
                 results.append(best_gain)
 
-    results.sort(key=lambda r: r["diff"].level_value, reverse=True)
-    return results[:max_count]
+    # 每侧按定数降序取前 per_side 条
+    old_side = sorted(
+        (r for r in results if r["side"] == "old"),
+        key=lambda r: r["diff"].level_value,
+        reverse=True,
+    )[:per_side]
+    new_side = sorted(
+        (r for r in results if r["side"] == "new"),
+        key=lambda r: r["diff"].level_value,
+        reverse=True,
+    )[:per_side]
+    return sorted(
+        old_side + new_side, key=lambda r: r["diff"].level_value, reverse=True
+    )
 
 
 def level_index_name(level_index: LevelIndex) -> str:
