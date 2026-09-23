@@ -80,3 +80,66 @@ def test_jp_logo_name_batch_codes_fall_back_to_base():
     assert _jp_version_logo_name(20506) == "DX PLUS"
     assert _jp_version_logo_name(25518) == "PRiSM PLUS"
     assert _jp_version_logo_name(19999) is None  # FiNALE 批次码：中日 logo 相同
+
+
+# ---------------------------------------------------------------------------
+# 卡片版本跟随主类型谱面组（老曲补 DX：835 Believe the Rainbow / 10835）
+# ---------------------------------------------------------------------------
+
+
+def _make_song(standard_ver: int | None, dx_ver: int | None, song_version: int):
+    from maimai_py.enums import Genre, SongType, LevelIndex
+    from maimai_py.models import Song, SongDifficulty, SongDifficulties
+
+    def diff(ver: int | None, type_: SongType):
+        return SongDifficulty(
+            type=type_,
+            level="14",
+            level_value=14.0,
+            level_index=LevelIndex(3),
+            note_designer="-",
+            version=ver or 0,
+            tap_num=1,
+            hold_num=0,
+            slide_num=0,
+            touch_num=0,
+            break_num=0,
+            curve=None,
+        )
+
+    return Song(
+        id=835,
+        title="Believe the Rainbow",
+        artist="-",
+        genre=Genre.maimai,
+        bpm=180,
+        map=None,
+        version=song_version,
+        rights=None,
+        aliases=None,
+        disabled=False,
+        difficulties=SongDifficulties(
+            standard=[diff(standard_ver, SongType.STANDARD)] if standard_ver else [],
+            dx=[diff(dx_ver, SongType.DX)] if dx_ver else [],
+            utage=[],
+        ),
+    )
+
+
+def test_chart_version_follows_main_type_for_old_song_new_dx():
+    """老曲补 DX：卡片版本取主类型谱面组的登场版本，而非曲级最小值。"""
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import _chart_version
+
+    # 835 实库形态：SD 19999（FiNALE）、DX 25504（PRiSM PLUS）、曲级 = min
+    song = _make_song(19999, 25504, 19999)
+    assert _chart_version(song, prefer_sd=False) == 25504  # 默认卡（有 DX 用 DX）
+    assert _chart_version(song, prefer_sd=True) == 19999  # 「标准」前缀卡
+
+
+def test_chart_version_falls_back_to_song_version():
+    """无谱面或谱面版本缺失（0）时回落曲级 version。"""
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import _chart_version
+
+    assert _chart_version(_make_song(19999, 25504, 19999), prefer_sd=False) == 25504
+    assert _chart_version(_make_song(0, 0, 19999), prefer_sd=False) == 19999
+    assert _chart_version(_make_song(None, None, 20000), prefer_sd=False) == 20000

@@ -144,11 +144,24 @@ def _major_diffs(song: Song, prefer_type: SongType | None = None) -> list:
     return sorted(diffs, key=lambda d: d.level_index.value)
 
 
-def _is_new(song: Song) -> bool:
+def _is_new(version: int) -> bool:
     """当前版本曲目标「新曲」（NB isnew 语义，以 maimai-py 当前版本为准）。"""
     from maimai_py import current_version
 
-    return song.version >= current_version.value
+    return version >= current_version.value
+
+
+def _chart_version(song: Song, prefer_sd: bool) -> int:
+    """卡片主类型谱面组的登场版本（组内谱面版本一致，取首谱面，§2.3）。
+
+    SD/DX 同曲不同版本（老曲补 DX，如 835/10835）时显示版本跟随卡片主类型
+    而非曲级最小值——对齐 maimaiDX 基准的 per-type 条目语义
+    （``song.version_int = base.version``）；无谱面或版本缺失回落曲级 version。
+    """
+    diffs = song.difficulties.standard if prefer_sd else song.difficulties.dx
+    if not diffs:
+        diffs = song.difficulties.standard or song.difficulties.dx
+    return diffs[0].version if diffs and diffs[0].version else song.version
 
 
 def _jp_version_logo_name(version: int) -> str | None:
@@ -162,18 +175,18 @@ def _jp_version_logo_name(version: int) -> str | None:
     return JP_VERSION_IMAGE.get(version // 500 * 500) if version >= 20000 else None
 
 
-def _version_image(song: Song, jp: bool = False) -> Image.Image | None:
+def _version_image(version: int, jp: bool = False) -> Image.Image | None:
     if jp:
         # 日服视图：DX 世代用日服 logo（pic/jp/，含 MAGiCAL 等超枚举版本）
-        jp_name = _jp_version_logo_name(song.version)
+        jp_name = _jp_version_logo_name(version)
         if jp_name:
             path = assets.static_path() / "mai" / "pic" / "jp" / f"{jp_name}.png"
             if path.exists():
                 return Image.open(path).convert("RGBA")
-    ver = Version.from_value(song.version)
+    ver = Version.from_value(version)
     if ver is None:
         return None
-    name = VERSION_IMAGE.get(ver) or version_zh(song.version)
+    name = VERSION_IMAGE.get(ver) or version_zh(version)
     path = assets.static_path() / "mai" / "pic" / f"{name}.png"
     if path.exists():
         return Image.open(path).convert("RGBA")
@@ -229,22 +242,23 @@ def song_chart_info(
     im.alpha_composite(
         Image.open(base / theme / "logo.png").resize((249, 120)), (65, 25)
     )
+    prefer_sd = prefer_type == SongType.STANDARD and song.difficulties.standard
+    type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
+    chart_version = _chart_version(song, prefer_sd)
     # 日服视图与国服新曲标无关：统一不渲染「新曲だよ!」徽章
-    if _is_new(song) and not jp:
+    if _is_new(chart_version) and not jp:
         im.alpha_composite(
             Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (842, 100),
         )
     cover = assets.cover(song.id).resize((242, 242))
     im.alpha_composite(cover, (133, 197))
-    version_img = _version_image(song, jp)
+    version_img = _version_image(chart_version, jp)
     if version_img is not None:
         logo = _fit_version_logo(version_img)
         im.alpha_composite(
-            logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
-        )
-    prefer_sd = prefer_type == SongType.STANDARD and song.difficulties.standard
-    type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
+        logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
+    )
     type_path = base / f"{type_abbr}.png"
     if type_path.exists():
         im.alpha_composite(Image.open(type_path).resize((80, 30)), (295, 410))
