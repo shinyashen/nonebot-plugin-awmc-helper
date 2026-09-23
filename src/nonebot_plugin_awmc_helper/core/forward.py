@@ -14,7 +14,7 @@ from nonebot import logger
 from nonebot.adapters import Bot
 from nonebot_plugin_alconna.uniseg import UniMessage, FallbackStrategy
 
-from ..config import plugin_config
+from ..config import NICKNAME
 
 try:  # OneBot v11 可用时提供合并转发能力
     from nonebot.adapters.onebot.v11 import Bot as OB11Bot
@@ -28,6 +28,10 @@ except ImportError:  # pragma: no cover
     OB11Segment = None
     _OB11 = False
 
+# 转发节点发送者昵称：取 .env 变量列表的 NICKNAME（部署时配置的 bot 名），
+# 未配置回退 "Bot"（LLOneBot 源码 senderName: name ?? nickname ?? selfInfo.nick）
+NODE_NICKNAME = NICKNAME or "Bot"
+
 
 async def try_send_forward(
     bot: Bot,
@@ -40,11 +44,9 @@ async def try_send_forward(
 
     - ``group_id``：群聊场景；``user_id``：私聊场景（二选一，群优先）；
     - 仅 OneBot v11 支持，其余适配器或协议端发送失败返回 False；
-    - 节点身份为 bot 自身（LLOneBot 不支持自定义身份，见 mystool 实测）；
-    - ``AWMC_FORWARD=false`` 时直接返回 False（协议端转发实现损坏的部署降级用）。
+    - 节点发送者昵称取 ``.env`` 的 ``NICKNAME``（未配置回退 "Bot"），身份为
+      bot 自身。
     """
-    if not plugin_config.awmc_forward:
-        return False
     if not (
         _OB11
         and OB11Bot is not None
@@ -63,7 +65,9 @@ async def try_send_forward(
                 bot, fallback=FallbackStrategy.forbid
             )
             nodes.append(
-                OB11Segment.node_custom(int(bot.self_id), "Bot", OB11Message(exported))
+                OB11Segment.node_custom(
+                    int(bot.self_id), NODE_NICKNAME, OB11Message(exported)
+                )
             )
         forward = OB11Message(nodes)
         if group_id is not None:

@@ -35,9 +35,6 @@ class Config(BaseModel):
     awmc_foreign_hosts: list[str] = []
     # 别名推送默认态（兼 SSE 常驻连接的启动开关）
     awmc_alias_push: bool = True
-    # 合并转发开关（多曲别名等场景）：协议端转发实现损坏时（如 LLOneBot 8.1.x
-    # 群聊 MultiMsg 上传不可读）置 false，一律降级为普通消息
-    awmc_forward: bool = True
     # icon/plate 素材在线获取
     awmc_assets_online: bool = True
     # 素材常驻内存（小内存部署可关）
