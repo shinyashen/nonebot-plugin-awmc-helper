@@ -130,6 +130,9 @@ def song_play_data(
     by_slot = {s.level_index: s for s in play_result if s.type == major_type}
     slots = [d.level_index for d in diffs]
     step_y = 100
+    # 难度槽定数小字：五档统一 21pt 并垂直居中于 d_N 色条（70×30 @ (650,235)）。
+    # NB 原版已玩 20pt / 未玩 25pt 两档且 y 略偏上（用户要求统一并居中）
+    level_y = 251
     for num, level_index in enumerate(slots):
         y = step_y * num
         im.alpha_composite(
@@ -138,11 +141,11 @@ def song_play_data(
         score = by_slot.get(level_index)
         diff = next(d for d in diffs if d.level_index == level_index)
         if score is None:
-            # NB：难度槽小字为白色定数（DrawText 默认色），「未游玩」才是主题色
+            # 定数小字为白色（NB DrawText 默认色），「未游玩」才是主题色
             dr.text(
-                (685, 248 + y),
+                (685, level_y + y),
                 f"{diff.level_value}",
-                font=font(25, FONT_RODIN),
+                font=font(21, FONT_RODIN),
                 fill=(255, 255, 255, 255),
                 anchor="mm",
             )
@@ -202,9 +205,9 @@ def song_play_data(
             anchor="lm",
         )
         dr.text(
-            (685, 248 + y),
+            (685, level_y + y),
             f"{diff.level_value}",
-            font=font(20, FONT_RODIN),
+            font=font(21, FONT_RODIN),
             fill=(255, 255, 255, 255),
             anchor="mm",
         )
