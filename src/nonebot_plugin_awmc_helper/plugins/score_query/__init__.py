@@ -98,18 +98,32 @@ async def _(
     username = str(message).strip()
     if username:  # 水鱼公开代查：b50 <水鱼用户名>
         player, bests = await score_service.get_b50_by_username(username)
+        png = await b50_render.best50_bytes(
+            player_name=player.name,
+            rating=bests.rating,
+            rating_b35=bests.rating_b35,
+            rating_b15=bests.rating_b15,
+            scores_b35=bests.scores_b35,
+            scores_b15=bests.scores_b15,
+            player=player,
+            service="divingfish",
+        )
     else:
         binding = await _get_binding(session, event)
         player = await score_service.get_player(binding)
         bests = await score_service.get_b50(binding)
-    png = b50_render.best50_bytes(
-        player_name=player.name,
-        rating=bests.rating,
-        rating_b35=bests.rating_b35,
-        rating_b15=bests.rating_b15,
-        scores_b35=bests.scores_b35,
-        scores_b15=bests.scores_b15,
-    )
+        png = await b50_render.best50_bytes(
+            player_name=player.name,
+            rating=bests.rating,
+            rating_b35=bests.rating_b35,
+            rating_b15=bests.rating_b15,
+            scores_b35=bests.scores_b35,
+            scores_b15=bests.scores_b15,
+            player=player,
+            qqid=binding_service.qq_of(binding),
+            service=binding.service,
+            theme=binding.theme or "prism_plus",
+        )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

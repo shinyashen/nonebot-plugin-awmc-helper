@@ -124,13 +124,15 @@ async def test_b50_username_lookup(app: App, db, songs):
         m.post(f"{BASE_DF}/query/player").respond(json=payload)
         # 与 handler 相同的调用路径 → 相同数据 → 相同渲染
         player, bests = await score_service.get_b50_by_username("someone")
-        expected_png = best50_bytes(
+        expected_png = await best50_bytes(
             player.name,
             bests.rating,
             bests.rating_b35,
             bests.rating_b15,
             bests.scores_b35,
             bests.scores_b15,
+            player=player,
+            service="divingfish",
         )
 
         event = fake_group_message_event_v11(message="b50 someone")

@@ -1,19 +1,41 @@
-"""B50 成绩图（NB 版视觉移植：nonebot-plugin-maimaidx core/image/best50.py + base.py）。
+"""B50 成绩图（视觉对齐 Hoshino 版 maimaiDX：core/image/best50.py + base.py）。
 
 - 主题底图 ``{theme}/b50.png``（1400×1600），prism_plus/circle 双主题；
-- 头部：logo、牌子（水鱼 plate 字符串 → plate_version 素材；无则默认 550101）、
-  DXRating 段位徽章、Drating 数字图、玩家名、B35/B15 统计称号条；
-- 成绩行：b35 35 条 + b15 15 条，5 列布局，行卡 ``b50_score_{难度}.png``，
-  含曲绘/类型/评级徽章/FC-FS 图标/DX 星/定数→RA。
+- 头部落雪名片：logo、名牌（落雪 name_plate → 在线 UI_Plate_XXXXXX；
+  水鱼 plate 字符串 → plate_version；缺省 UI_Plate_550101）、头像
+  （落雪 icon → 在线 UI_Icon_XXXXXX → QQ 头像 → 缺省 UI_Icon_509506）、
+  DXRating 段位徽章（circle 高 rating 用带星版式）、Drating 数字图、
+  段位认定牌（course_rank）与 でらっクラス徽章（class_rank）、称号条
+  （无称号回退 B35/B15 统计条）、署名行（含数据来源）；
+- 成绩行：b35 35 条 + b15 15 条，5 列布局，行卡 ``b50_score_{难度}.png``；
+  标题/达成率/RA/DX 分按难度配色（白，Re:Master 紫），曲目 ID 按难度配色，
+  数字一律 Torus（等宽字体过宽会与右侧 DX 分重叠）；曲目 ID 展示游戏内
+  全 ID（落雪成绩缺 10000 位，水鱼已是全 id），标题超宽省略号截断。
 """
 
-from PIL import Image, ImageDraw
-from maimai_py import FCType, FSType, RateType, LevelIndex, ScoreExtend
+import asyncio
+from io import BytesIO
+from bisect import bisect_right
+from pathlib import Path
 
-from .fonts import FONT_HAN, FONT_NUM, FONT_MONO, font
+import httpx
+from PIL import Image, ImageDraw
+from nonebot import logger
+from maimai_py import (
+    FCType,
+    FSType,
+    Player,
+    RateType,
+    SongType,
+    LevelIndex,
+    ScoreExtend,
+)
+
+from ..http import build_smart_transport
+from .fonts import FONT_HAN, FONT_NUM, font
 from .tools import image_to_bytes
-from .assets import assets
-from ...config import NICKNAME
+from .assets import assets, online_item_cache_dir
+from ...config import NICKNAME, plugin_config
 from ...constants import SYNC_FILE, COMBO_FILE
 
 RA_THRESHOLD = [
@@ -28,6 +50,23 @@ RA_THRESHOLD = [
     (14500, "09"),
     (15000, "10"),
 ]
+
+# circle 主题 DXRating ≥14000 的星级（Hoshino _ra_pic_star 同款阈值）
+RA_STAR_THRESHOLDS = [
+    14000,
+    14250,
+    14500,
+    14750,
+    15000,
+    15250,
+    15500,
+    15750,
+    16000,
+    16250,
+    16500,
+    16750,
+]
+RA_STAR_NUMS = [1, 2, 1, 2, 1, 2, 3, 4, 1, 2, 3, 4]
 
 DX_STAR_FILE = "UI_GAM_Gauge_DXScoreIcon_0{num}.png"
 
@@ -56,39 +95,199 @@ DIFF_BG = {
     LevelIndex.ReMASTER: "b50_score_remaster.png",
 }
 
+# 行文字按难度配色（Hoshino AssetsImage）：标题/达成率/RA/DX 分，Re:Master 紫、其余白
+DIFF_TEXT_COLORS = [
+    (255, 255, 255, 255),
+    (255, 255, 255, 255),
+    (255, 255, 255, 255),
+    (255, 255, 255, 255),
+    (138, 0, 226, 255),
+]
+# 曲目 ID 配色：绿 / 黄 / 粉 / 紫 / 紫
+ID_TEXT_COLORS = [
+    (129, 217, 85, 255),
+    (245, 189, 21, 255),
+    (255, 129, 141, 255),
+    (159, 81, 220, 255),
+    (138, 0, 226, 255),
+]
 
-def _dx_star(dx_score: int | None, level_dx_score: int) -> int:
-    """DX 百分比 → 星数 0-5（maimai-py 同款阈值）。"""
-    if not dx_score or level_dx_score <= 0:
+FOOTER_COLORS = {
+    "prism_plus": (124, 129, 255, 255),
+    "circle": (249, 62, 172, 255),
+}
+
+SERVICE_NAMES = {"lxns": "Lxns-Network", "divingfish": "Diving-Fish"}
+
+_ITEM_HOST = "https://www.yuzuchan.moe/assets/maimaidx"
+"""收藏品（牌子/头像）在线素材站，与 Hoshino 版同源。"""
+
+_inflight: dict[Path, asyncio.Task] = {}
+"""在线素材下载去重表（同文件并发只发一次请求）。"""
+
+
+def game_song_id(score: ScoreExtend) -> int:
+    """游戏内曲目 ID：落雪成绩的 DX 谱 id 缺 10000 位（水鱼已是全 id），展示时补全。"""
+    if score.type == SongType.DX and score.id < 10000:
+        return score.id + 10000
+    return score.id
+
+
+def get_char_width(o: int) -> int:
+    """字符显示宽度（0/1/2，东亚宽度近似，Hoshino base.py 同款表）。"""
+    widths = [
+        (126, 1),
+        (159, 0),
+        (687, 1),
+        (710, 0),
+        (711, 1),
+        (727, 0),
+        (733, 1),
+        (879, 0),
+        (1154, 1),
+        (1161, 0),
+        (4347, 1),
+        (4447, 2),
+        (7467, 1),
+        (7521, 0),
+        (8369, 1),
+        (8426, 0),
+        (9000, 1),
+        (9002, 2),
+        (11021, 1),
+        (12350, 2),
+        (12351, 1),
+        (12438, 2),
+        (12442, 0),
+        (19893, 2),
+        (19967, 1),
+        (55203, 2),
+        (63743, 1),
+        (64106, 2),
+        (65039, 1),
+        (65059, 0),
+        (65131, 2),
+        (65279, 1),
+        (65376, 2),
+        (65500, 1),
+        (65510, 2),
+        (120831, 1),
+        (262141, 2),
+        (1114109, 1),
+    ]
+    if o == 0xE or o == 0xF:
         return 0
-    pct = dx_score / level_dx_score * 100
-    if pct <= 85:
-        return 0
-    if pct <= 90:
-        return 1
-    if pct <= 93:
-        return 2
-    if pct <= 95:
-        return 3
-    if pct <= 97:
-        return 4
-    return 5
+    for num, wid in widths:
+        if o <= num:
+            return wid
+    return 1
 
 
-def _ra_badge(theme: str, rating: int) -> Image.Image:
-    """按 Rating 取 DXRating 段位徽章。"""
+def coloum_width(s: str) -> int:
+    return sum(get_char_width(ord(ch)) for ch in s)
+
+
+def truncate_title(s: str, limit: int = 18, keep: int = 17) -> str:
+    """标题超宽截断：按显示宽度保留前 keep 列再加省略号（Hoshino 同款规则）。"""
+    if coloum_width(s) <= limit:
+        return s
+    res, out = 0, []
+    for ch in s:
+        res += get_char_width(ord(ch))
+        if res <= keep:
+            out.append(ch)
+    return "".join(out) + "..."
+
+
+def dani_plate_num(course_rank: int) -> str:
+    """段位认定牌文件序号：>10 段文件号跳一位（Hoshino 同款）。"""
+    return f"{course_rank if course_rank <= 10 else course_rank + 1:02d}"
+
+
+def ra_badge_num(rating: int) -> str:
     num = "11"
     for limit, n in RA_THRESHOLD:
         if rating < limit:
-            num = n
-            break
-    path = assets.static_path() / "mai" / "pic" / theme / f"UI_CMN_DXRating_{num}.png"
+            return n
+    return num
+
+
+def ra_star_num(rating: int) -> str:
+    idx = bisect_right(RA_STAR_THRESHOLDS, rating) - 1
+    return f"0{RA_STAR_NUMS[idx]}"
+
+
+async def _download_item(url: str, path: Path) -> bool:
+    transport = build_smart_transport()
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
+            follow_redirects=True,
+            transport=transport,
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            content = resp.content
+
+        def _write() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+        await asyncio.to_thread(_write)
+        return True
+    except Exception as e:
+        logger.warning(f"b50：在线素材拉取失败 {url}（{e}）")
+        return False
+
+
+async def fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
+    """收藏品原图（kind: plate/icon）：本地缓存 → yuzuchan 在线（可关）。
+
+    失败返回 None，由调用方走回退链；下载按目标路径去重。
+    """
+    path = online_item_cache_dir(kind) / f"UI_{kind.capitalize()}_{item_id:06d}.png"
+    if path.exists():
+        return Image.open(path).convert("RGBA")
+    if not plugin_config.awmc_assets_online:
+        return None
+    task = _inflight.get(path)
+    if task is None:
+        url = f"{_ITEM_HOST}/{kind}/{path.name}"
+        task = asyncio.create_task(_download_item(url, path))
+        _inflight[path] = task
+    if await task:
+        return Image.open(path).convert("RGBA")
+    return None
+
+
+async def _qq_avatar(qqid: int) -> Image.Image | None:
+    """QQ 头像（无落雪头像时的回退）。"""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://q1.qlogo.cn/g",
+                params={"b": "qq", "nk": str(qqid), "s": 100},
+            )
+            resp.raise_for_status()
+            return Image.open(BytesIO(resp.content)).convert("RGBA")
+    except Exception as e:
+        logger.warning(f"b50：QQ 头像获取失败（{e}）")
+        return None
+
+
+def _dx_star_badge(theme: str, star: int) -> Image.Image | None:
+    if star <= 0:
+        return None
+    pic = assets.static_path() / "mai" / "pic"
+    path = pic / theme / DX_STAR_FILE.format(num=star)
+    if not path.exists():
+        path = pic / DX_STAR_FILE.format(num=star)
+    if not path.exists():
+        return None
     return Image.open(path).convert("RGBA")
 
 
-def _rate_badge(theme: str, rate: RateType | None) -> Image.Image | None:
-    if rate is None:
-        return None
+def _rate_badge(theme: str, rate: RateType) -> Image.Image | None:
     name = RATE_FILE.get(rate.name, rate.name)
     path = assets.static_path() / "mai" / "pic" / theme / f"UI_TTR_Rank_{name}.png"
     if not path.exists():
@@ -112,15 +311,123 @@ def _sync_icon(fs: FSType | None) -> Image.Image | None:
     return Image.open(path).convert("RGBA") if path.exists() else None
 
 
-def _dx_star_badge(theme: str, star: int) -> Image.Image | None:
-    if star <= 0:
-        return None
-    path = assets.static_path() / "mai" / "pic" / theme / DX_STAR_FILE.format(num=star)
-    if not path.exists():
-        path = assets.static_path() / "mai" / "pic" / DX_STAR_FILE.format(num=star)
-    if not path.exists():
-        return None
-    return Image.open(path).convert("RGBA")
+async def _draw_header(
+    im: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    *,
+    player_name: str,
+    player: Player | None,
+    qqid: int | None,
+    rating: int,
+    rating_b35: int,
+    rating_b15: int,
+    theme: str,
+) -> None:
+    """头部落雪名片，元素与层级顺序照搬 Hoshino PlayerBest50.draw。"""
+    pic = assets.static_path() / "mai" / "pic"
+    im.alpha_composite(
+        Image.open(pic / theme / "logo.png").convert("RGBA").resize((249, 120)),
+        (14, 60),
+    )
+
+    # 名牌：水鱼版本牌字符串 → plate_version；落雪收藏牌 → 在线素材；缺省 550101
+    plate_item = getattr(player, "name_plate", None)
+    plate_img: Image.Image | None = None
+    if isinstance(plate_item, str):
+        candidate = assets.static_path() / "mai" / "plate_version" / f"{plate_item}.png"
+        if candidate.exists():
+            plate_img = Image.open(candidate).convert("RGBA")
+    elif plate_item is not None:
+        plate_img = await fetch_item_image("plate", plate_item.id)
+    if plate_img is None:
+        plate_img = Image.open(pic / "UI_Plate_550101.png").convert("RGBA")
+    im.alpha_composite(plate_img.resize((800, 130)), (300, 60))
+
+    # 头像：落雪 icon → QQ 头像 → 缺省 509506
+    icon_img = None
+    icon_item = getattr(player, "icon", None)
+    if icon_item is not None:
+        icon_img = await fetch_item_image("icon", icon_item.id)
+    if icon_img is None and qqid is not None:
+        icon_img = await _qq_avatar(qqid)
+    if icon_img is None:
+        icon_img = Image.open(pic / "UI_Icon_509506.png").convert("RGBA")
+    im.alpha_composite(icon_img.resize((120, 120)), (305, 65))
+
+    # DXRating 段位徽章 + rating 数字（circle 高 rating 用带星版式）
+    badge_size, star_img = (186, 35), None
+    num_x, num_y, num_gap, num_size = 520, 80, 15, (17, 20)
+    if theme == "circle" and rating >= 14000:
+        badge_size = (170, 35)
+        star_img = (
+            Image.open(pic / theme / f"UI_CMN_DXRating_Star_{ra_star_num(rating)}.png")
+            .convert("RGBA")
+            .resize((21, 35))
+        )
+        num_x, num_y, num_gap, num_size = 515, 82, 13, (14, 17)
+    im.alpha_composite(
+        Image.open(pic / theme / f"UI_CMN_DXRating_{ra_badge_num(rating)}.png")
+        .convert("RGBA")
+        .resize(badge_size),
+        (435, 72),
+    )
+    if star_img is not None:
+        im.alpha_composite(star_img, (590, 72))
+    for n, digit in enumerate(f"{rating:05d}"):
+        im.alpha_composite(
+            Image.open(pic / f"UI_NUM_Drating_{digit}.png")
+            .convert("RGBA")
+            .resize(num_size),
+            (num_x + num_gap * n, num_y),
+        )
+
+    im.alpha_composite(Image.open(pic / "Name.png").convert("RGBA"), (435, 115))
+
+    # 段位认定牌（水鱼无该字段时回退 additional_rating，再回退 0）
+    course_rank = getattr(player, "course_rank", None)
+    if course_rank is None:
+        course_rank = getattr(player, "additional_rating", 0) or 0
+    im.alpha_composite(
+        Image.open(pic / f"UI_DNM_DaniPlate_{dani_plate_num(course_rank)}.png")
+        .convert("RGBA")
+        .resize((80, 32)),
+        (625, 120),
+    )
+    class_rank = getattr(player, "class_rank", 0) or 0
+    im.alpha_composite(
+        Image.open(pic / f"UI_FBR_Class_{class_rank:02d}.png")
+        .convert("RGBA")
+        .resize((90, 54)),
+        (620, 60),
+    )
+
+    # 称号条：有称号用对应色底 + 称号名；无则彩虹底 + B35/B15 统计
+    trophy = getattr(player, "trophy", None)
+    shougou_dir = assets.static_path() / "mai" / "shougou"
+    if trophy is not None:
+        color = trophy.color if trophy.color else "Normal"
+        if not (shougou_dir / f"UI_CMN_Shougou_{color}.png").exists():
+            color = "Normal"
+        shougou = Image.open(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
+            (270, 27)
+        )
+        trophy_text, trophy_font = trophy.name, font(14, FONT_HAN)
+    else:
+        shougou = Image.open(shougou_dir / "UI_CMN_Shougou_Rainbow.png").resize(
+            (270, 27)
+        )
+        trophy_text = f"B35: {rating_b35} + B15: {rating_b15} = {rating}"
+        trophy_font = font(14, FONT_NUM)
+    im.alpha_composite(shougou, (435, 160))
+    draw.text((570, 172), trophy_text, font=trophy_font, fill="#000000", anchor="mm")
+
+    draw.text(
+        (445, 135),
+        player_name,
+        font=font(20, FONT_HAN),
+        fill="#000000",
+        anchor="lm",
+    )
 
 
 def _draw_row(
@@ -131,16 +438,16 @@ def _draw_row(
     score: ScoreExtend,
     theme: str,
 ) -> None:
+    diff = score.level_index.value  # LevelIndex.value 恰为 DIFF_*_COLORS 下标 0-4
+    pic = assets.static_path() / "mai" / "pic"
     im.alpha_composite(
-        Image.open(
-            assets.static_path() / "mai" / "pic" / DIFF_BG[score.level_index]
-        ).convert("RGBA"),
+        Image.open(pic / DIFF_BG[score.level_index]).convert("RGBA"),
         (x, y),
     )
     cover = assets.cover(score.id % 10000).resize((75, 75))
     im.alpha_composite(cover, (x + 12, y + 12))
     type_abbr = "DX" if score.type.name == "DX" else "SD"
-    type_path = assets.static_path() / "mai" / "pic" / f"{type_abbr}.png"
+    type_path = pic / f"{type_abbr}.png"
     if type_path.exists():
         im.alpha_composite(
             Image.open(type_path).convert("RGBA").resize((37, 14)), (x + 51, y + 91)
@@ -154,107 +461,78 @@ def _draw_row(
     fs = _sync_icon(score.fs)
     if fs is not None:
         im.alpha_composite(fs.resize((34, 34)), (x + 185, y + 77))
-    star = _dx_star_badge(theme, _dx_star(score.dx_score, score.level_dx_score))
+    star = _dx_star_badge(theme, score.dx_star or 0)
     if star is not None:
         im.alpha_composite(star.resize((47, 26)), (x + 217, y + 80))
 
     draw.text(
         (x + 26, y + 98),
-        str(score.id),
-        font=font(13, FONT_MONO),
-        fill="#3c3c3c",
+        str(game_song_id(score)),
+        font=font(13, FONT_NUM),
+        fill=ID_TEXT_COLORS[diff],
         anchor="mm",
     )
     draw.text(
         (x + 93, y + 14),
-        score.title[:24],
+        truncate_title(score.title),
         font=font(14, FONT_HAN),
-        fill="#4a4a4a",
+        fill=DIFF_TEXT_COLORS[diff],
         anchor="lm",
     )
     draw.text(
         (x + 93, y + 38),
         f"{score.achievements or 0:.4f}%",
         font=font(30, FONT_NUM),
-        fill="#4a4a4a",
+        fill=DIFF_TEXT_COLORS[diff],
         anchor="lm",
     )
     draw.text(
         (x + 219, y + 65),
         f"{score.dx_score or 0}/{score.level_dx_score}",
-        font=font(15, FONT_MONO),
-        fill="#4a4a4a",
+        font=font(15, FONT_NUM),
+        fill=DIFF_TEXT_COLORS[diff],
         anchor="mm",
     )
     draw.text(
         (x + 93, y + 65),
-        f"{score.level_value:.1f} → {int(score.dx_rating or 0)}",
-        font=font(15, FONT_MONO),
-        fill="#4a4a4a",
+        f"{score.level_value} -> {int(score.dx_rating or 0)}",
+        font=font(15, FONT_NUM),
+        fill=DIFF_TEXT_COLORS[diff],
         anchor="lm",
     )
 
 
-def draw_b50_nb(
+async def draw_b50_nb(
     player_name: str,
     rating: int,
     rating_b35: int,
     rating_b15: int,
     scores_b35: list[ScoreExtend],
     scores_b15: list[ScoreExtend],
+    *,
+    player: Player | None = None,
+    qqid: int | None = None,
+    service: str | None = None,
     theme: str = "prism_plus",
-    plate: str | None = None,
 ) -> Image.Image:
-    """NB 版 B50 大图。"""
+    """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。"""
     pic = assets.static_path() / "mai" / "pic"
     im = Image.open(pic / theme / "b50.png").convert("RGBA")
     draw = ImageDraw.Draw(im)
 
-    im.alpha_composite(
-        Image.open(pic / theme / "logo.png").convert("RGBA").resize((249, 120)),
-        (14, 60),
-    )
-    plate_path = None
-    if plate:
-        candidate = assets.static_path() / "mai" / "plate_version" / f"{plate}.png"
-        if candidate.exists():
-            plate_path = candidate
-    if plate_path is None:
-        plate_path = pic / "UI_Plate_550101.png"
-    im.alpha_composite(
-        Image.open(plate_path).convert("RGBA").resize((800, 130)), (300, 60)
-    )
-    im.alpha_composite(_ra_badge(theme, rating).resize((186, 35)), (435, 72))
-    for n, digit in enumerate(f"{rating:05d}"):
-        digit_path = pic / f"UI_NUM_Drating_{digit}.png"
-        im.alpha_composite(
-            Image.open(digit_path).convert("RGBA").resize((17, 20)),
-            (520 + 15 * n, 80),
-        )
-    name_path = pic / "Name.png"
-    if name_path.exists():
-        im.alpha_composite(Image.open(name_path).convert("RGBA"), (435, 115))
-    draw.text(
-        (445, 135),
-        player_name[:16],
-        font=font(20, FONT_HAN),
-        fill="#000000",
-        anchor="lm",
-    )
-    shougou = assets.static_path() / "mai" / "shougou" / "UI_CMN_Shougou_Rainbow.png"
-    if shougou.exists():
-        im.alpha_composite(
-            Image.open(shougou).convert("RGBA").resize((270, 27)), (435, 160)
-        )
-    draw.text(
-        (570, 172),
-        f"B35: {rating_b35} + B15: {rating_b15} = {rating}",
-        font=font(14, FONT_MONO),
-        fill="#000000",
-        anchor="mm",
+    await _draw_header(
+        im,
+        draw,
+        player_name=player_name,
+        player=player,
+        qqid=qqid,
+        rating=rating,
+        rating_b35=rating_b35,
+        rating_b15=rating_b15,
+        theme=theme,
     )
 
-    # 成绩行：b35 从 y=235、b15 从 y=1085，均 5 列、行距 114（NB 版布局）
+    # 成绩行：b35 从 y=235、b15 从 y=1085，均 5 列、行距 114（Hoshino 布局）
     for data, initial_y in ((scores_b35, 235), (scores_b15, 1085)):
         for num, score in enumerate(data):
             row, col = divmod(num, 5)
@@ -262,37 +540,47 @@ def draw_b50_nb(
             y = initial_y + row * 114
             _draw_row(im, draw, x, y, score, theme)
 
+    service_name = SERVICE_NAMES.get(service or "", "")
+    data_from = f"Data from {service_name}. " if service_name else ""
+    footer_color = FOOTER_COLORS.get(theme, FOOTER_COLORS["prism_plus"])
     draw.text(
         (700, 1570),
         "Designed by Yuri-YuzuChaN & BlueDeer233. "
-        f"Generated by {NICKNAME or 'awmc-helper'} BOT",
+        f"{data_from}Generated by {NICKNAME or 'awmc-helper'} BOT",
         font=font(22, FONT_HAN),
-        fill="#888888",
+        fill=footer_color,
         anchor="mm",
+        stroke_width=5,
+        stroke_fill=(255, 255, 255, 255),
     )
     return im
 
 
-def best50_bytes(
+async def best50_bytes(
     player_name: str,
     rating: int,
     rating_b35: int,
     rating_b15: int,
     scores_b35: list[ScoreExtend],
     scores_b15: list[ScoreExtend],
+    *,
+    player: Player | None = None,
+    qqid: int | None = None,
+    service: str | None = None,
     theme: str = "prism_plus",
-    plate: str | None = None,
 ) -> bytes:
     return image_to_bytes(
-        draw_b50_nb(
+        await draw_b50_nb(
             player_name,
             rating,
             rating_b35,
             rating_b15,
             scores_b35,
             scores_b15,
-            theme,
-            plate,
+            player=player,
+            qqid=qqid,
+            service=service,
+            theme=theme,
         )
     )
 
@@ -314,7 +602,7 @@ def score_list_bytes(
     draw.text(
         (20, 18), f"{title}（第 {real}/{total} 页）", font=font(26), fill="#333333"
     )
-    f_small = font(17, FONT_MONO)
+    f_small = font(17, FONT_NUM)
     f_title = font(20)
     for i, score in enumerate(page_data):
         y = header_h + i * row_h
@@ -334,7 +622,7 @@ def score_list_bytes(
             fill="#999999",
         )
         ach = f"{score.achievements or 0:.4f}%"
-        draw.text((w - 320, y + 11), ach, font=font(18, FONT_MONO), fill="#555555")
+        draw.text((w - 320, y + 11), ach, font=font(18, FONT_NUM), fill="#555555")
         draw.text(
             (w - 150, y + 12),
             f"RA {int(score.dx_rating or 0)}",

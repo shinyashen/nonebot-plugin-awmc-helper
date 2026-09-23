@@ -22,6 +22,11 @@ def jp_cache_dir() -> Path:
     return get_data_dir("nonebot_plugin_awmc_helper") / "jp_covers"
 
 
+def online_item_cache_dir(kind: str) -> Path:
+    """收藏品（牌子/头像）在线素材缓存目录（localstore 数据区，按类分子目录）。"""
+    return get_data_dir("nonebot_plugin_awmc_helper") / "online_items" / kind
+
+
 class Assets:
     """素材访问入口（类级缓存，``awmc_save_in_memory=false`` 时不缓存）。"""
 

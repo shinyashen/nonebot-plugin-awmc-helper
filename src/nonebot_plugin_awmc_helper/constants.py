@@ -392,7 +392,7 @@ RATE_FILE = {
 
 # FCType/FSType 枚举名 → UI_MSS_MBase_Icon_*.png 文件名后缀
 COMBO_FILE = {"FC": "FC", "FCP": "FCp", "AP": "AP", "APP": "APp"}
-SYNC_FILE = {"FS": "FS", "FSP": "FSp", "FSD": "FSD", "FSDP": "FSDp"}
+SYNC_FILE = {"FS": "FS", "FSP": "FSp", "FSD": "FSD", "FSDP": "FSDp", "SYNC": "Sync"}
 
 # 日服 DX 世代版本码 → 日服 logo 文件名（static/mai/pic/jp/ 下）。
 # 现有素材库的 DX 代 logo 为国服特有版本，日服视图渲染时改用本表；

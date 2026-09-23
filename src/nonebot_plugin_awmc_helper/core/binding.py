@@ -129,9 +129,15 @@ class BindingService:
         binding.theme = theme
         await store.save_binding(binding)
 
+    def qq_of(self, binding: UserBinding) -> int | None:
+        """QQ 号（头像回退等展示用途）：仅 QQ 系平台的 user_id 可作 QQ 号。"""
+        if binding.platform in QQ_PLATFORMS and binding.user_id.isdigit():
+            return int(binding.user_id)
+        return None
+
     def identifier(self, binding: UserBinding) -> PlayerIdentifier:
         """按绑定装配 maimai-py PlayerIdentifier（不可查时抛 BindingError）。"""
-        qq = int(binding.user_id) if binding.platform in QQ_PLATFORMS else None
+        qq = self.qq_of(binding)
         if binding.service == SERVICE_DIVINGFISH:
             ident = PlayerIdentifier(
                 qq=qq,
