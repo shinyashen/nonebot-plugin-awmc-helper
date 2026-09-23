@@ -8,6 +8,7 @@ NapCat 等实现读 ``messages``、LLOneBot 部分版本只读 ``message``，两
 返回 False 由调用方降级为普通消息。
 """
 
+import asyncio
 from collections.abc import Sequence
 
 from nonebot import logger
@@ -32,6 +33,12 @@ except ImportError:  # pragma: no cover
 # 未配置回退 "Bot"（LLOneBot 源码 senderName: name ?? nickname ?? selfInfo.nick）
 NODE_NICKNAME = NICKNAME or "Bot"
 
+# 协议端发送黑洞兜底：LLBot 实测出现过收到 send_group_forward_msg 后不回包、
+# 不报错、消息也未落地的挂起（NTQQ 瞬时卡死，同载荷重试即恢复正常）。
+# OneBot v11 适配器对动作响应不设超时，无限等待会让调用方永远走不到降级，
+# 故给单次转发发送设上限，超时按失败处理。
+FORWARD_SEND_TIMEOUT = 10.0
+
 
 async def try_send_forward(
     bot: Bot,
@@ -43,7 +50,8 @@ async def try_send_forward(
     """以合并转发发送多条消息（每条一节点，可为文本或含图片的 UniMessage）。
 
     - ``group_id``：群聊场景；``user_id``：私聊场景（二选一，群优先）；
-    - 仅 OneBot v11 支持，其余适配器或协议端发送失败返回 False；
+    - 仅 OneBot v11 支持，其余适配器、协议端发送失败或超过 ``FORWARD_SEND_TIMEOUT``
+      无响应均返回 False，由调用方降级为普通消息；
     - 节点发送者昵称取 ``.env`` 的 ``NICKNAME``（未配置回退 "Bot"），身份为
       bot 自身。
     """
@@ -71,22 +79,28 @@ async def try_send_forward(
             )
         forward = OB11Message(nodes)
         if group_id is not None:
-            await bot.call_api(
-                "send_group_forward_msg",
-                group_id=int(group_id),
-                message=forward,
-                messages=forward,
+            await asyncio.wait_for(
+                bot.call_api(
+                    "send_group_forward_msg",
+                    group_id=int(group_id),
+                    message=forward,
+                    messages=forward,
+                ),
+                timeout=FORWARD_SEND_TIMEOUT,
             )
         elif user_id is not None:
-            await bot.call_api(
-                "send_private_forward_msg",
-                user_id=int(user_id),
-                message=forward,
-                messages=forward,
+            await asyncio.wait_for(
+                bot.call_api(
+                    "send_private_forward_msg",
+                    user_id=int(user_id),
+                    message=forward,
+                    messages=forward,
+                ),
+                timeout=FORWARD_SEND_TIMEOUT,
             )
         else:
             return False
         return True
     except Exception:
-        logger.debug("合并转发发送失败（由调用方降级为普通消息）", exc_info=True)
+        logger.warning("合并转发发送失败或超时（降级为普通消息）", exc_info=True)
         return False
