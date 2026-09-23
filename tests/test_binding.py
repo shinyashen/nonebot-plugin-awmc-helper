@@ -223,7 +223,7 @@ async def test_b50_render_smoke(db, songs):
         dx_star=4,
         version=25000,
     )
-    png = best50_bytes("tester", 250, 250, 0, [sc], [])
+    png = await best50_bytes("tester", 250, 250, 0, [sc], [])
     assert png.startswith(b"\x89PNG")
     assert len(png) > 1000
     listing = score_list_bytes("AP50", [sc])
@@ -299,7 +299,8 @@ async def test_lxns_token_auto_refresh(db, songs, monkeypatch):
     assert binding.lxns_token == "new-token"
     assert binding.lxns_refresh_token == "rt-new"
     got = await binding_service.get("OneBot V11", "30003")
-    assert got is not None and got.lxns_token == "new-token"
+    assert got is not None
+    assert got.lxns_token == "new-token"
 
 
 @pytest.mark.asyncio
