@@ -21,6 +21,7 @@ from ...constants import (
     JP_VERSION_IMAGE,
     version_zh,
     display_song_id,
+    chart_display_id,
 )
 
 # NB base.py 的东亚字宽判定（截断用）
@@ -164,6 +165,18 @@ def _chart_version(song: Song, prefer_sd: bool) -> int:
     return diffs[0].version if diffs and diffs[0].version else song.version
 
 
+def _display_card_id(song: Song, prefer_sd: bool) -> int:
+    """卡片展示 id 跟随主类型谱面组（与 :func:`_chart_version` 同口径）。
+
+    老曲补 DX（如 835/10835）：DX 卡显示查分器 id = 根 id + 10000，SD 卡显示
+    根 id；无谱面回落曲级 :func:`display_song_id`。
+    """
+    diffs = song.difficulties.standard if prefer_sd else song.difficulties.dx
+    if not diffs:
+        diffs = song.difficulties.standard or song.difficulties.dx
+    return chart_display_id(song, diffs[0]) if diffs else display_song_id(song)
+
+
 def _jp_version_logo_name(version: int) -> str | None:
     """日服版本码 → 日服 logo 文件名；追加批次码回落基础码。
 
@@ -286,7 +299,7 @@ def song_chart_info(
     )
     mr.text(
         (405, 435),
-        f"ID {display_song_id(song)}",
+        f"ID {_display_card_id(song, prefer_sd)}",
         font=font(22, FONT_RODIN),
         fill=text_color,
         anchor="lm",

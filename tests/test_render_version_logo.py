@@ -143,3 +143,64 @@ def test_chart_version_falls_back_to_song_version():
     assert _chart_version(_make_song(19999, 25504, 19999), prefer_sd=False) == 25504
     assert _chart_version(_make_song(0, 0, 19999), prefer_sd=False) == 19999
     assert _chart_version(_make_song(None, None, 20000), prefer_sd=False) == 20000
+
+
+def test_card_display_id_follows_main_type():
+    """卡片展示 id 跟随主类型：DX 卡 = 根 id + 10000（10835），SD 卡 = 根 id。"""
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import _display_card_id
+
+    song = _make_song(19999, 25504, 19999)
+    assert _display_card_id(song, prefer_sd=False) == 10835
+    assert _display_card_id(song, prefer_sd=True) == 835
+    # 单一谱面组：DX 专用曲显示 +10000，SD 曲显示根 id
+    assert _display_card_id(_make_song(None, 25504, 25504), prefer_sd=False) == 10835
+    assert _display_card_id(_make_song(19999, None, 19999), prefer_sd=False) == 835
+
+
+def test_chart_display_id_mapping():
+    """谱面级查分器 id 映射：SD = 根 id、DX = 根 id + 10000、宴 = diff_id。"""
+    from maimai_py.enums import SongType, LevelIndex
+    from maimai_py.models import SongDifficulty, SongDifficultyUtage
+
+    from nonebot_plugin_awmc_helper.constants import chart_display_id
+
+    song = _make_song(19999, 25504, 19999)
+
+    def mk(type_: SongType):
+        return SongDifficulty(
+            type=type_,
+            level="14",
+            level_value=14.0,
+            level_index=LevelIndex(3),
+            note_designer="-",
+            version=25504,
+            tap_num=1,
+            hold_num=0,
+            slide_num=0,
+            touch_num=0,
+            break_num=0,
+            curve=None,
+        )
+
+    assert chart_display_id(song, mk(SongType.DX)) == 10835
+    assert chart_display_id(song, mk(SongType.STANDARD)) == 835
+    utage = SongDifficultyUtage(
+        type=SongType.UTAGE,
+        level="?",
+        level_value=0.0,
+        level_index=LevelIndex(0),
+        note_designer="-",
+        version=26001,
+        tap_num=0,
+        hold_num=0,
+        slide_num=0,
+        touch_num=0,
+        break_num=0,
+        curve=None,
+        kanji="宴",
+        description="",
+        diff_id=119670,
+        is_buddy=False,
+        buddy_notes=None,
+    )
+    assert chart_display_id(song, utage) == 119670

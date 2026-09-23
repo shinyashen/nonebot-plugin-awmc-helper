@@ -444,3 +444,18 @@ def display_song_id(song) -> int:
     if song.difficulties.dx:
         return song.id + 10000
     return song.id
+
+
+def chart_display_id(song, diff) -> int:
+    """谱面级展示 id（查分器 id 形状，NB per-type 条目语义）。
+
+    SD = 根 id；DX = 根 id + 10000（机台内部 id 规则，如 835 → 10835）；
+    宴 = 6 位机台内部 diff_id。卡片代表**具体谱面**时用本函数；
+    曲级展示（搜索列表等）用 :func:`display_song_id`。
+    """
+    from maimai_py.enums import SongType
+    from maimai_py.models import SongDifficultyUtage
+
+    if isinstance(diff, SongDifficultyUtage):
+        return diff.diff_id
+    return song.id + 10000 if diff.type == SongType.DX else song.id

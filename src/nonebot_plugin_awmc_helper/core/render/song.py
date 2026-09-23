@@ -7,7 +7,7 @@ from .fonts import FONT_MONO, font
 from .tools import fit_text, text_size, rounded_mask, image_to_bytes
 from ..utils import paginate
 from .assets import assets
-from ...constants import GENRE_TO_ZH, version_zh
+from ...constants import GENRE_TO_ZH, version_zh, chart_display_id
 
 LEVEL_COLORS = {
     LevelIndex.BASIC: "#22bb5b",
@@ -21,8 +21,12 @@ CARD_BG = "#f2f3f5"
 CARD_W = 720
 
 
-def draw_song_card(song: Song) -> Image.Image:
-    """绘制谱面信息卡：曲绘 + 基本信息 + 各难度谱面数据。"""
+def draw_song_card(song: Song, id_override: int | None = None) -> Image.Image:
+    """绘制谱面信息卡：曲绘 + 基本信息 + 各难度谱面数据。
+
+    ``id_override``：谱面级展示 id（查分器 id 形状）。曲级卡不传，显示根 id；
+    代表具体谱面的卡（随机谱面等）应传 :func:`chart_display_id` 的结果。
+    """
     diffs = [
         d for d in song.get_difficulties() if d.type in (SongType.STANDARD, SongType.DX)
     ]
@@ -50,7 +54,12 @@ def draw_song_card(song: Song) -> Image.Image:
     f_small = font(20)
     x = cover_size + 40
     y = 26
-    draw.text((x, y), f"{song.id}", font=font(26, FONT_MONO), fill="#8a8f99")
+    draw.text(
+        (x, y),
+        f"{song.id if id_override is None else id_override}",
+        font=font(26, FONT_MONO),
+        fill="#8a8f99",
+    )
     y += 40
     draw.text(
         (x, y),
@@ -152,11 +161,11 @@ def song_list_bytes(songs: list[Song], page: int = 1, per_page: int = 25) -> byt
 
 
 def random_song_bytes(song: Song, diff: SongDifficulty) -> bytes:
-    """随机谱面结果图：难度徽章 + 谱面信息卡。"""
+    """随机谱面结果图：难度徽章 + 谱面信息卡（id 为该谱面的查分器 id）。"""
     from PIL import ImageDraw
 
     badge_h = 74
-    card = draw_song_card(song)
+    card = draw_song_card(song, id_override=chart_display_id(song, diff))
     img = Image.new("RGBA", (CARD_W, badge_h + card.size[1]), CARD_BG)
     draw = ImageDraw.Draw(img)
     color = LEVEL_COLORS.get(diff.level_index, "#c79b5f")
