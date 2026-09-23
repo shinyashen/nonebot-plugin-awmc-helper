@@ -12,9 +12,10 @@ from maimai_py.models import SongDifficulty
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import image_to_bytes, tricolor_gradient_prism_plus
 from .assets import assets
+from .best50 import game_song_id
 from ...config import NICKNAME
 from .nb_chart import truncate_by_width
-from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
+from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE, chart_display_id
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 类属性同源）
 _DIFF_TEXT_COLOR = [
@@ -132,7 +133,7 @@ class DrawScore:
             )
             dr.text(
                 (x + 145, y + 124),
-                f"ID: {song.id}",
+                f"ID: {chart_display_id(song, diff)}",
                 font=font(18, FONT_NUM),
                 fill=id_color,
                 anchor="lm",
@@ -296,7 +297,7 @@ class DrawScore:
 
             dr.text(
                 (x + 26, y + 98),
-                str(score.id % 10000),
+                str(game_song_id(score)),
                 font=font(13, FONT_NUM),
                 fill=_ID_TEXT_COLOR[li],
                 anchor="mm",
@@ -335,7 +336,8 @@ class DrawScore:
     ) -> None:
         """绘制未游玩谱面小卡（20 列 × N 行，border_progress_* 难度框）。
 
-        ``items``：(song_id, level_index, level_value)。
+        ``items``：**(游戏内谱面 id, level_index, level_value)**——NB 显示
+        per-type id（DX 曲 10231 形状）；曲绘按根 id（% 10000）回退链取。
         """
         from PIL import ImageDraw
 
@@ -348,7 +350,9 @@ class DrawScore:
             self._im.alpha_composite(
                 assets.pic(f"border_progress_{_LEVEL_INDEXES[li]}.png"), (x - 4, y - 4)
             )
-            self._im.alpha_composite(assets.cover(song_id).resize((55, 55)), (x, y))
+            self._im.alpha_composite(
+                assets.cover(song_id % 10000).resize((55, 55)), (x, y)
+            )
             dr.text(
                 (x + 36, y + 3),
                 str(song_id),
@@ -357,8 +361,13 @@ class DrawScore:
                 anchor="mm",
             )
 
-    def _section_title(self, y: int, text: str, hint: str | None = None) -> None:
-        """段落标题条（title_lengthen 底图 + 大字 + 可选右侧提示）。"""
+    def _section_title(
+        self, y: int, text: str, hint: str | None = None, *, size: int = 25
+    ) -> None:
+        """段落标题条（title_lengthen 底图 + 大字 + 可选右侧提示）。
+
+        NB 字号：draw_plan 段落 25pt，draw_category 标题 28pt。
+        """
         from PIL import ImageDraw
 
         dr = ImageDraw.Draw(self._im)
@@ -366,7 +375,7 @@ class DrawScore:
         dr.text(
             (700, y),
             text,
-            font=font(25, FONT_HAN),
+            font=font(size, FONT_HAN),
             fill=_DEFAULT_TEXT_COLOR,
             anchor="mm",
         )
@@ -381,7 +390,9 @@ class DrawScore:
                 stroke_fill=(255, 255, 255, 255),
             )
 
-    def _footer(self, text: str, *, design_bg_y: int, text_y: int) -> None:
+    def _footer(
+        self, text: str, *, design_bg_y: int, text_y: int, size: int = 22
+    ) -> None:
         from PIL import ImageDraw
 
         dr = ImageDraw.Draw(self._im)
@@ -391,7 +402,7 @@ class DrawScore:
         dr.text(
             (700, text_y),
             text,
-            font=font(22, FONT_HAN),
+            font=font(size, FONT_HAN),
             fill=_DEFAULT_TEXT_COLOR,
             anchor="mm",
         )
@@ -461,7 +472,8 @@ class DrawScore:
         if category in ("completed", "unfinished"):
             txt = "已完成" if category == "completed" else "未完成"
             newdata = data[(page - 1) * 80 : page * 80]
-            self._section_title(77, f"{txt}谱面")
+            # NB draw_category 标题与页脚均为 28/25pt（draw_plan 段落为 25/22pt）
+            self._section_title(77, f"{txt}谱面", size=28)
             self.whiledraw(newdata, 140)
             height = self._im.size[1]
             pagemsg = (
@@ -469,9 +481,11 @@ class DrawScore:
                 f"当前第「{(page - 1) * 80 + 1}-{(page - 1) * 80 + len(newdata)}」个，"
                 f"第「{page} / {end_page}」页"
             )
-            self._footer(pagemsg, design_bg_y=height - 133, text_y=height - 90)
+            self._footer(
+                pagemsg, design_bg_y=height - 133, text_y=height - 90, size=25
+            )
         else:
-            self._section_title(77, "未游玩谱面")
+            self._section_title(77, "未游玩谱面", size=28)
             self._while_pic(data)
             height = self._im.size[1]
             self._im.alpha_composite(

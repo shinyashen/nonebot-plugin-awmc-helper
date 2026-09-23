@@ -589,3 +589,102 @@ def test_plate_progress_card_smoke():
 
     # 牌名繁体映射：樱极 → 櫻極.png 存在于素材包
     assert Path("static/mai/plate_version/櫻極.png").exists()
+
+
+def test_rise_recommend_version_filter():
+    """推分双栏版本语义（NB）：DX 只推当前版本、SD 只推旧版本——
+    当前版本 SD 曲属于新版本侧，不得进入「旧版本谱面推荐」栏。"""
+    import dataclasses
+
+    from mocks import make_diff, make_song
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    b50 = [
+        extend(
+            Score(
+                id=900,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=99.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=200,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.STANDARD,
+            ),
+            title="oldSD",
+            level_value=13.0,
+            level_dx_score=2100,
+            dx_star=4,
+            version=24000,
+        ),
+        extend(
+            Score(
+                id=910,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=99.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=210,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="oldDX",
+            level_value=13.0,
+            level_dx_score=2100,
+            dx_star=4,
+            version=24000,
+        ),
+    ]
+
+    def cand(song_id, type_, version):
+        return make_song(
+            song_id,
+            f"s{song_id}",
+            diffs=[
+                make_diff(
+                    type=type_,
+                    level_index=LevelIndex.MASTER,
+                    level="13",
+                    level_value=13.0,
+                    version=version,
+                )
+            ],
+        )
+
+    candidates = [
+        cand(921, SongType.DX, 25000),  # 当前版本 DX → 保留
+        cand(920, SongType.DX, 24000),  # 旧版本 DX → 排除（新版本栏只推当前版本）
+        cand(922, SongType.STANDARD, 25000),  # 当前版本 SD → 排除（旧版本栏语义）
+        cand(923, SongType.STANDARD, 24000),  # 旧版本 SD → 保留
+    ]
+    rec = rise_recommend(
+        b50, candidates, target=1, latest_version_value=25000
+    )
+    got = {r["song"].id for r in rec}
+    assert got == {921, 923}
+
+
+def test_rise_recommend_default_latest_follows_library():
+    """latest_version_value 缺省跟随 maimai_py current_version（硬编码会过期）。"""
+    import inspect
+
+    from maimai_py import current_version
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+
+    sig = inspect.signature(rise_recommend)
+    assert sig.parameters["latest_version_value"].default is None
+    assert current_version.value > 25000  # CiRCLE 时代：默认值不能停在 PRiSM

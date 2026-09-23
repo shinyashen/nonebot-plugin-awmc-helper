@@ -19,7 +19,12 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...config import plugin_config
-from ...constants import LEVEL_LIST, PLATE_CHARS, SERVICE_DISPLAY
+from ...constants import (
+    LEVEL_LIST,
+    PLATE_CHARS,
+    SERVICE_DISPLAY,
+    chart_display_id,
+)
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import handle_errors
@@ -212,18 +217,22 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     notplayed: list[tuple[int, int, float]] = []
     for song in await song_service.get_all():
         for d in song.get_difficulties():
-            if d.type != SongType.DX or d.level != level:
+            # NB by_plan 含 SD+DX 全部谱面（与本插件完成表口径一致），宴谱除外
+            if d.type == SongType.UTAGE or d.level != level:
                 continue
             sc = score_map.get((song.id, d.type, d.level_index))
             if sc is None:
-                notplayed.append((song.id, d.level_index.value, d.level_value))
+                # 未游玩网格显示游戏内 per-type id（DX 曲 10231 形状，NB 同款）
+                notplayed.append(
+                    (chart_display_id(song, d), d.level_index.value, d.level_value)
+                )
             elif checker(sc.achievements, sc.fc, sc.fs):
                 completed.append(sc)
             else:
                 unfinished.append(sc)
     total = len(completed) + len(unfinished) + len(notplayed)
     if total == 0:
-        await UniMessage.text(f"  没有找到等级为「{level}」的 DX 谱面").finish(
+        await UniMessage.text(f"  没有找到等级为「{level}」的谱面").finish(
             at_sender=True
         )
 
@@ -341,6 +350,17 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
     is_wu = version in ("舞", "霸")
     slot_count = 5 if is_wu else 4
+    # 牌子主类型（maimai_py MaimaiPlates._major_type 同语义）：DX 世代牌推 DX 谱，
+    # 旧作牌（含舞/霸）推 SD 谱——决定未达成网格的 per-type 游戏 id 与定数取哪侧谱面
+    from maimai_py import plate_to_version
+
+    if is_wu:
+        major_type = SongType.STANDARD
+    else:
+        pv = plate_to_version.get(version)
+        major_type = (
+            SongType.DX if pv is not None and pv.value >= 20000 else SongType.STANDARD
+        )
     slot_total = [0] * slot_count
     slot_cleared = [0] * slot_count
     remained_by_slot: list[list[tuple[int, int, float, str]]] = [
@@ -361,13 +381,13 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
                 (
                     x
                     for x in song.get_difficulties()
-                    if x.level_index == li and x.type != SongType.UTAGE
+                    if x.level_index == li and x.type == major_type
                 ),
                 None,
             )
             if d is not None:
                 remained_by_slot[li.value].append(
-                    (song.id, li.value, d.level_value, d.level)
+                    (chart_display_id(song, d), li.value, d.level_value, d.level)
                 )
     for slot in remained_by_slot:
         slot.sort(key=lambda x: -x[2])

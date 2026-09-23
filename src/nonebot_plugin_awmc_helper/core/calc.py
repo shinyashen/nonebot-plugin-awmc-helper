@@ -90,15 +90,24 @@ def rise_recommend(
     level: str | None = None,
     target: int = 1,
     max_count: int = 15,
-    latest_version_value: int = 25000,
+    latest_version_value: int | None = None,
 ) -> list[dict]:
     """推分推荐（对齐原版 get_rise_score_list 语义）。
 
     - ``scores``：玩家当前 B50 成绩（ScoreExtend，含 dx_rating）；
     - ``songs``：候选曲库（通常为按等级或定数过滤后的子集）；
     - ``level``：指定等级时按等级选谱，否则按 B50 末位 RA 反推定数区间；
+    - ``latest_version_value``：当前版本码；缺省取 maimai_py ``current_version``
+      （硬编码 25000 会在新版本时代漏推当前版本 DX 曲）；
+    - 版本语义对齐原版双栏（旧版本谱面推荐 / 新版本谱面推荐）：
+      DX 谱只推当前版本（b15 侧），SD 谱只推旧版本（b35 侧）——当前版本
+      SD 曲属于新版本侧，绝不可进入「旧版本」栏；
     - 返回按定数降序的推荐列表（song/diff/达成率/新 RA/提升）。
     """
+    if latest_version_value is None:
+        from maimai_py import current_version
+
+        latest_version_value = current_version.value
     by_key: dict[tuple, ScoreExtend] = {
         (s.id, s.type, s.level_index): s for s in scores
     }
@@ -129,8 +138,11 @@ def rise_recommend(
                 continue
             if level is not None and diff.level != level:
                 continue
-            # DX 只推最新版本曲目（原版语义）
-            if diff.type == SongType.DX and diff.version < latest_version_value:
+            # 双栏版本语义：DX 只推当前版本，SD 只推旧版本
+            if diff.type == SongType.DX:
+                if diff.version < latest_version_value:
+                    continue
+            elif diff.version >= latest_version_value:
                 continue
 
             key = (song.id, diff.type, diff.level_index)

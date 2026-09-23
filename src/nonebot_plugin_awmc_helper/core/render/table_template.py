@@ -193,22 +193,25 @@ def rating_table_level_text(
 ) -> bytes:
     """`<等级>定数表`（R8，NB DrawRatingTable(level_text=True) 版式）。
 
-    预渲染底图存在时直接叠加「Level. {level}」大字（素材包无字底图的替代：
-    我方底图顶部预留不足，大字按底图宽自适应），否则实时绘制网格并预留
-    标题区；最终按 NB 同款 0.8 缩放输出。
+    顶部预留 240px 标题区 + 「Level. {level}」大字 + 0.8 缩放（NB 同款视觉）。
+    预渲染底图存在时合成到标题画布复用（我方底图无 NB 的大片顶部留白，
+    直接叠加会压住首行格子）；缺失时实时绘制网格。字号按 NB 1400 宽底图
+    等比映射到我方 862 宽底图。
     """
-    from PIL import ImageDraw
+    from PIL import Image, ImageDraw
 
     path = rating_table_dir() / f"{level}.png"
+    header = 240
     if path.exists():
-        im = _open_template(path)
+        base = _open_template(path)
+        im = Image.new("RGBA", (base.size[0], base.size[1] + header), "#f2f3f5")
+        im.paste(base, (0, header))
     else:
-        im = _draw_grid_base(entries, top_offset=240)
-    width = im.size[0]
-    scale = width / 1400  # NB 底图 1400 宽的等比映射
+        im = _draw_grid_base(entries, top_offset=header)
+    scale = im.size[0] / 1400  # NB 底图 1400 宽的等比映射
     dr = ImageDraw.Draw(im)
     x = round(495 * scale)
-    y = round(220 * scale) if path.exists() else 220
+    y = 220
     dr.text(
         (x, y),
         "Level.",

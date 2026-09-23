@@ -138,11 +138,12 @@ def song_play_data(
         score = by_slot.get(level_index)
         diff = next(d for d in diffs if d.level_index == level_index)
         if score is None:
+            # NB：难度槽小字为白色定数（DrawText 默认色），「未游玩」才是主题色
             dr.text(
                 (685, 248 + y),
-                diff.level,
+                f"{diff.level_value}",
                 font=font(25, FONT_RODIN),
-                fill=color,
+                fill=(255, 255, 255, 255),
                 anchor="mm",
             )
             dr.text(
@@ -202,9 +203,9 @@ def song_play_data(
         )
         dr.text(
             (685, 248 + y),
-            diff.level,
+            f"{diff.level_value}",
             font=font(20, FONT_RODIN),
-            fill=color,
+            fill=(255, 255, 255, 255),
             anchor="mm",
         )
         dr.text(
