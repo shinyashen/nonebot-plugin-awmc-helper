@@ -118,8 +118,13 @@ def new_best_score(
     best_list: list[ScoreExtend],
     song_type: SongType,
 ) -> int:
-    """NB new_best_score：已在 B50 → 打到此 ra 的净提升；未入 B50 → 相对入线线。"""
-    lowest = int(best_list[-1].dx_rating or 0) if best_list else 0
+    """NB new_best_score：已在 B50 → 打到此 ra 的净提升；未入 B50 → 相对入线线。
+
+    入线线取 best_list 的**最低** RA（NB 传入的 b50 列表按 ra 降序、[-1] 即
+    末位；我方调用方不保证有序，故显式取 min），调用方须保证结果 > 0 才显示
+    「↑N」（负提升不应展示）。
+    """
+    lowest = min((int(v.dx_rating or 0) for v in best_list), default=0)
     for v in best_list:
         if (
             v.id == song_id
@@ -336,7 +341,7 @@ def song_chart_info(
         mr.text(
             (310, 590 + spacing),
             truncate_by_width(diff.note_designer, 19),
-            font=f_han,
+            font=font(20, FONT_HAN),
             fill=text_color,
             anchor="mm",
         )
@@ -377,7 +382,8 @@ def song_chart_info(
                     new = new_best_score(
                         song.id, diff.level_index.value, value, best_list, diff.type
                     )
-                    if new == 0:
+                    # ≤0 的加分为无意义信息，直接显示 RA 本身（用户口径）
+                    if new <= 0:
                         rating = str(value)
                     else:
                         size = 17
@@ -410,78 +416,90 @@ def song_chart_info(
 
 
 def song_chart_banquet_info(song: Song) -> bytes:
-    """宴会场谱面卡（底图 chart_info_enkaijou.png）。"""
+    """宴会场谱面卡（Hoshino/NB chart.py::song_chart_banquet_info 1:1 移植）。
+
+    底图 ``chart_info_enkaijou.png``（1200×1200）：左侧曲绘与 utg 玩家牌、
+    右侧标题/曲师/BPM/ID/分类（白字紫描边），下方 kanji 牌 + 等级 + 六列
+    notes（total/tap/hold/slide/touch/brak）。
+    """
     from PIL import ImageDraw
 
     base = assets.static_path() / "mai" / "pic"
     im = Image.open(base / "chart_info_enkaijou.png").convert("RGBA")
     mr = ImageDraw.Draw(im)
-    f_han = font(24, FONT_HAN)
-    f_rodin = font(28, FONT_RODIN)
-    text_color = (124, 129, 255, 255)
+    stroke = (210, 57, 174, 255)
+    white = (255, 255, 255, 255)
 
-    cover = assets.cover(song.id).resize((242, 242))
-    im.alpha_composite(cover, (133, 197))
-    mr.text(
-        (405, 220),
-        truncate_by_width(song.title, 40),
-        font=f_rodin,
-        fill=text_color,
-        anchor="lm",
-    )
-    mr.text(
-        (407, 265),
-        truncate_by_width(song.artist, 50),
-        font=font(20, FONT_RODIN),
-        fill=text_color,
-        anchor="lm",
-    )
-    mr.text(
-        (460, 345),
-        str(song.bpm),
-        font=font(24, FONT_RODIN),
-        fill=text_color,
-        anchor="lm",
-    )
-    utage_id = next(
-        (getattr(d, "diff_id", None) for d in song.get_difficulties(SongType.UTAGE)),
-        None,
-    )
-    mr.text(
-        (405, 435),
-        f"ID {utage_id if utage_id is not None else song.id}",
-        font=font(22, FONT_RODIN),
-        fill=text_color,
-        anchor="lm",
-    )
+    utage_diffs = song.get_difficulties(SongType.UTAGE)
+    first = next(iter(utage_diffs), None)
+    is_buddy = bool(getattr(first, "is_buddy", False))
 
-    y = 560
-    for diff in song.get_difficulties(SongType.UTAGE):
-        kanji = getattr(diff, "kanji", "")
-        desc = truncate_by_width(getattr(diff, "description", ""), 46)
-        mr.text(
-            (120, y),
-            f"{diff.level}({diff.level_value:.1f})",
-            font=font(22, FONT_RODIN),
-            fill=text_color,
-            anchor="mm",
+    # kanji 牌底、双人宴标记与玩家牌
+    im.alpha_composite(Image.open(base / "utg_kanji.png").convert("RGBA"),
+                       (140, 660 if is_buddy else 730))
+    if is_buddy:
+        p_y, base_y, step_y = 715, 820, 100
+        im.alpha_composite(
+            Image.open(base / "utg_buddy.png").convert("RGBA"), (255, 660))
+        player_path = base / "utg_2p.png"
+    else:
+        p_y, base_y, step_y = 785, 890, 0
+        player_path = base / "utg_1p.png"
+    im.alpha_composite(Image.open(player_path).convert("RGBA"), (98, p_y))
+
+    # logo / 新曲标
+    im.alpha_composite(
+        Image.open(base / "prism_plus" / "logo.png").resize((249, 120)), (10, 35))
+    if _is_new(song.version):
+        im.alpha_composite(
+            Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
+            (950, 165))
+
+    # 曲绘 / 版本
+    im.alpha_composite(assets.cover(song.id).resize((242, 242)), (133, 246))
+    version_img = _version_image(song.version)
+    if version_img is not None:
+        logo = _fit_version_logo(version_img)
+        im.alpha_composite(
+            logo, (800 + (182 - logo.width) // 2, 415 + (90 - logo.height) // 2))
+
+    def t(pos, text, size, *, anchor="mm", sw=0, fill=white):
+        mr.text(pos, text, font=font(size, FONT_RODIN), fill=fill, anchor=anchor,
+                stroke_width=sw, stroke_fill=white if sw else None)
+
+    # kanji（玩家牌上方）
+    kanji = getattr(first, "kanji", "") if first else ""
+    t((216, p_y - 28), kanji, 18)
+    # 标题 / 曲师 / BPM / ID / 分类（白字紫描边）
+    t((405, 265), truncate_by_width(song.title, 36), 28, anchor="lm", sw=3)
+    t((407, 320), truncate_by_width(song.artist, 50), 20, anchor="lm", sw=3)
+    t((460, 393), str(song.bpm), 24, anchor="lm", sw=3)
+    utage_id = next((getattr(d, "diff_id", None) for d in utage_diffs), None)
+    card_id = utage_id if utage_id is not None else song.id
+    t((405, 475), f"ID {card_id}", 22, anchor="lm", sw=3)
+    from ...constants import GENRE_TO_ZH
+
+    t((680, 475), GENRE_TO_ZH.get(song.genre, song.genre.value), 22, sw=3)
+    # 描述
+    t((595, 595), truncate_by_width(getattr(first, "description", ""), 46), 25)
+    # 等级（玩家牌内）
+    t((180, p_y + 28), f"Lv. {first.level if first else '?'}", 24, sw=3)
+    # 六列 notes（total/tap/hold/slide/touch/brak）
+    for index, diff in enumerate(utage_diffs):
+        notes = (
+            diff.tap_num + diff.hold_num + diff.slide_num
+            + diff.touch_num + diff.break_num,
+            diff.tap_num, diff.hold_num, diff.slide_num, diff.touch_num, diff.break_num,
         )
-        mr.text((340, y), f"[{kanji}] {desc}", font=f_han, fill=text_color, anchor="mm")
-        y += 70
-    # 底部版权行（对齐 NB 原版宴会场卡）
+        for n, value in enumerate(notes):
+            t((330 + 140 * n, base_y + step_y * index), str(value), 25, sw=3)
+
     credit = (
         "Designed by Yuri-YuzuChaN & BlueDeer233. "
         f"Generated by {NICKNAME or 'awmc-helper'} BOT"
     )
-    mr.text(
-        (600, 1100),
-        credit,
-        font=font(25, FONT_RODIN),
-        fill=text_color,
-        anchor="mm",
-        stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
-    )
+    mr.text((600, 1100), credit, font=font(25, FONT_RODIN), fill=stroke, anchor="mm",
+            stroke_width=3, stroke_fill=white)
     return image_to_bytes(im)
 
 

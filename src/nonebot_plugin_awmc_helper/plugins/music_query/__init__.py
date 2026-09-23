@@ -21,12 +21,11 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import display_song_id
-from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
-from ...core.render import jp_cover, nb_chart
 from ...core.binding import session_keys, binding_service
+from ...core.chart_card import chart_card_bytes
 
 
 def _reply(text: str) -> UniMessage:
@@ -98,40 +97,8 @@ def _is_float(value: str) -> bool:
 
 
 async def _chart_card(song, binding, prefer_type=None, jp: bool = False) -> bytes:
-    """谱面卡：绑定时拉 B50 嵌成绩与加分预测（Q3 选项 B，对齐 NB 版）。
-
-    ``prefer_type``：别名带谱面前缀（标准/标 → SD，dx → DX）时指定卡片主类型。
-    ``jp=True``：日服视图渲染（日服 logo；不嵌国服 B50——谱面与定数可能不同，
-    混算无意义）。
-    """
-    from maimai_py import SongType
-
-    if nb_chart.is_banquet(song):
-        return nb_chart.song_chart_banquet_info(song)
-    if jp:
-        # 日服限定曲本地无素材：按需在线拉取官方曲绘（代理优先，落盘缓存）
-        await jp_cover.ensure(song.id)
-    calc, is_full, best_list = False, False, []
-    theme = "prism_plus"
-    if binding is not None and not jp:
-        ident = binding_service.identifier_or_none(binding)
-        if ident is not None:
-            try:
-                bests = await score_service.get_b50(binding)
-                prefer_dx = (
-                    prefer_type == SongType.STANDARD and not song.difficulties.standard
-                ) or prefer_type != SongType.STANDARD
-                major_dx = prefer_dx and bool(song.difficulties.dx)
-                side_type = SongType.DX if major_dx else SongType.STANDARD
-                best_list = [s for s in bests.scores if s.type == side_type]
-                is_full = len(best_list) >= (15 if major_dx else 35)
-                calc = True
-                theme = binding.theme or "prism_plus"
-            except UserScoreError:
-                pass
-    return nb_chart.song_chart_info(
-        song, calc, is_full, best_list, theme, prefer_type, jp
-    )
+    """谱面卡（实现下沉 core/chart_card，查歌/随机等子插件共用）。"""
+    return await chart_card_bytes(song, binding, prefer_type, jp)
 
 
 async def _binding_of(session):

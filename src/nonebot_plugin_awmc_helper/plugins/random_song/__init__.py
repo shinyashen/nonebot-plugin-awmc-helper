@@ -19,8 +19,8 @@ from ...constants import COLOR_TO_LEVEL_INDEX
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import handle_errors
-from ...core.render import song as song_render
 from ...core.binding import session_keys, binding_service
+from ...core.chart_card import chart_card_bytes
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.random_song",
@@ -42,7 +42,9 @@ mai_what_rise = on_command(
 
 @random_chart.handle()
 @handle_errors("随机失败，请稍后再试")
-async def _(groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(), groups: tuple = RegexGroup()
+):
     type_raw, color, level = groups
     song_type = None
     if type_raw:
@@ -57,20 +59,26 @@ async def _(groups: tuple = RegexGroup()):
         await UniMessage.text(" 没有符合条件的谱面，换一个试试吧").finish(
             at_sender=True
         )
-    song, diff = got
-    await UniMessage.image(raw=song_render.random_song_bytes(song, diff)).finish(
+    song, _diff = got
+    # Hoshino/NB 同设计：随机结果渲染通常的谱面卡（draw_chart_info 语义）
+    binding = await binding_service.ensure(*session_keys(session))
+    await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
         at_sender=True
     )
 
 
 @mai_what.handle()
 @handle_errors("随机失败，请稍后再试")
-async def _():
+async def _(session: Session = UniSession()):
     got = await song_service.random(exclude_utage=True)
     if got is None:
         await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
     song, _diff = got
-    await UniMessage.image(raw=song_render.song_card_bytes(song)).finish(at_sender=True)
+    # Hoshino/NB 同设计：mai什么 同样渲染通常的谱面卡
+    binding = await binding_service.ensure(*session_keys(session))
+    await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
+        at_sender=True
+    )
 
 
 @mai_what_rise.handle()
@@ -92,7 +100,10 @@ async def _(session: Session = UniSession()):
         if got is None:
             await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
         song, _diff = got
-    await UniMessage.image(raw=song_render.song_card_bytes(song)).finish(at_sender=True)
+    binding = await binding_service.ensure(*session_keys(session))
+    await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
+        at_sender=True
+    )
 
 
 async def _pick_rise_song(scores: list[ScoreExtend]):
