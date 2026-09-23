@@ -388,7 +388,8 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
         for pages, group in enumerate(page_groups):
             if not any(group.values()):
                 continue
-            img = _plate_grid(group, major, remaster_entries=remaster, pages=pages)
+            flat = [pair for charts in group.values() for pair in charts]
+            img = _plate_grid(flat, major, remaster_entries=remaster, pages=pages)
             await asyncio.to_thread(
                 img.save, out_dir / f"{version}-{pages + 1}.png"
             )
@@ -399,8 +400,11 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
     return len(entries)
 
 
-def _by_level(entries, remaster):
-    grouped: dict[str, list] = {}
+def _by_level(
+    entries: Sequence[tuple[Song, SongDifficulty]],
+    remaster: Sequence[tuple[Song, SongDifficulty]],
+) -> dict[str, list[tuple[Song, SongDifficulty]]]:
+    grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
     remaster_ids = {s.id for s, _d in remaster}
     for song, diff in entries:
         lv = diff.level

@@ -212,7 +212,8 @@ async def _(
     tips = await _b50_rise_tips(song, info.scores, binding)
     msg = UniMessage.image(raw=png)
     if tips:
-        msg = msg.image(raw=text_to_image("\n".join(tips), size=22, padding=14))
+        tips_img = text_to_image("\n".join(tips), size=22, padding=14)
+        msg = msg.image(raw=image_to_bytes(tips_img))
     await msg.finish(at_sender=True)
 
 
