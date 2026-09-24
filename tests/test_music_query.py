@@ -172,6 +172,7 @@ async def test_search_not_found(app: App, songs):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_search_list_image(app: App, songs):
     """5 条以上走列表图：PENGUIN 族 3 首 + Preferences + 宴会曲相关……用「n」命中。"""
@@ -274,9 +275,10 @@ async def test_query_chart_card(app: App, songs):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_render_smoke(songs):
-    """绘图冒烟：卡片与列表图渲染出非空 PNG。"""
+    """绘图冒烟：卡片与列表图渲染出非空 PNG（新列表版式依赖素材包）。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render.song import (
         song_card_bytes,
