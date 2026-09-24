@@ -469,13 +469,6 @@ _template_lock = asyncio.Lock()
 """预渲染串行锁：CPU 密集，手动指令与自动触发共用同一把。"""
 
 
-def ensure_dirs() -> None:
-    if not assets.static_path().exists():
-        return
-    rating_table_dir().mkdir(parents=True, exist_ok=True)
-    plate_table_dir().mkdir(parents=True, exist_ok=True)
-
-
 # ---------------------------------------------------------------------------
 # 用户查询渲染
 # ---------------------------------------------------------------------------

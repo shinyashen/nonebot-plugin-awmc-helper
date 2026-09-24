@@ -45,8 +45,6 @@ _RATE_COLORS = {
     "D": "#d9d9d9",
 }
 
-_DIFF_NAMES = DIFF_NAMES
-
 
 def _ring(im: Image.Image, cx: int, cy: int, r_in: int, r_out: int, data: list) -> None:
     """环形分段（data: [(label, count, color)]，占比自动）。"""
@@ -79,7 +77,7 @@ def song_global_data(song: Song, diff: SongDifficulty) -> bytes:
     li = diff.level_index.value
     dr.text(
         (W // 2, 42),
-        f"{chart_display_id(song, diff)} {song.title} 「{_DIFF_NAMES[li]}」",
+        f"{chart_display_id(song, diff)} {song.title} 「{DIFF_NAMES[li]}」",
         font=font(30, FONT_RODIN),
         fill=TITLE_COLOR,
         anchor="mm",

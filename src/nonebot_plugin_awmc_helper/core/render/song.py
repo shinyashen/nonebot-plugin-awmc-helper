@@ -1,13 +1,13 @@
 """曲目相关绘图：谱面信息卡、搜索结果列表、随机谱面结果。"""
 
 from PIL import Image, ImageDraw
-from maimai_py import Song, SongType, LevelIndex, SongDifficulty
+from maimai_py import Song, SongType, LevelIndex
 
 from .fonts import FONT_MONO, font
 from .tools import fit_text, text_size, rounded_mask, image_to_bytes
 from ..utils import paginate
 from .assets import assets
-from ...constants import GENRE_TO_ZH, version_zh, chart_display_id
+from ...constants import GENRE_TO_ZH, version_zh
 
 LEVEL_COLORS = {
     LevelIndex.BASIC: "#22bb5b",
@@ -158,26 +158,3 @@ def song_card_bytes(song: Song) -> bytes:
 
 def song_list_bytes(songs: list[Song], page: int = 1, per_page: int = 25) -> bytes:
     return image_to_bytes(draw_song_list(songs, page, per_page))
-
-
-def random_song_bytes(song: Song, diff: SongDifficulty) -> bytes:
-    """随机谱面结果图：难度徽章 + 谱面信息卡（id 为该谱面的查分器 id）。"""
-    from PIL import ImageDraw
-
-    badge_h = 74
-    card = draw_song_card(song, id_override=chart_display_id(song, diff))
-    img = Image.new("RGBA", (CARD_W, badge_h + card.size[1]), CARD_BG)
-    draw = ImageDraw.Draw(img)
-    color = LEVEL_COLORS.get(diff.level_index, "#c79b5f")
-    draw.rounded_rectangle((20, 10, 170, 64), 10, fill=color)
-    f = font(28, FONT_MONO)
-    label = (
-        f"宴 {diff.level}"
-        if diff.type == SongType.UTAGE
-        else f"{'DX' if diff.type == SongType.DX else 'SD'} {diff.level}"
-    )
-    tw = text_size(label, f)[0]
-    draw.text((20 + (150 - tw) // 2, 19), label, font=f, fill="#fff")
-    card_partial = card.crop((0, 0, CARD_W, card.size[1]))
-    img.paste(card_partial, (0, badge_h))
-    return image_to_bytes(img)

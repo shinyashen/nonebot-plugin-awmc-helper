@@ -66,18 +66,6 @@ def text_to_image(
     return img
 
 
-def draw_rounded_rect(
-    draw: ImageDraw.ImageDraw,
-    box: tuple[int, int, int, int],
-    radius: int,
-    fill: str | tuple | None = None,
-    outline: str | tuple | None = None,
-    width: int = 1,
-) -> None:
-    """圆角矩形。"""
-    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
-
-
 def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
     """圆角蒙版（贴图裁圆角用）。"""
     mask = Image.new("L", size, 0)
@@ -85,17 +73,6 @@ def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
         (0, 0, size[0] - 1, size[1] - 1), radius, fill=255
     )
     return mask
-
-
-def vertical_gradient(size: tuple[int, int], top: str, bottom: str) -> Image.Image:
-    """纵向渐变背景。"""
-    import numpy as np
-
-    t = [int(top[i : i + 2], 16) for i in (1, 3, 5)]
-    b = [int(bottom[i : i + 2], 16) for i in (1, 3, 5)]
-    rows = np.linspace(t, b, size[1]).astype("uint8")
-    arr = np.repeat(rows[:, None, :], size[0], axis=1)
-    return Image.fromarray(arr, "RGB").convert("RGBA")
 
 
 def tricolor_gradient_prism_plus(width: int, height: int) -> Image.Image:

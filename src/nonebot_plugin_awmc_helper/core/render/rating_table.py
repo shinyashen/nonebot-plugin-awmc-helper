@@ -55,9 +55,6 @@ SYNC_D_SP = ["fs", "fsp", "fsd", "fsdp"]
 
 _COMPLETED_BG = "complete_1.png"
 _UNFINISHED_BG = "unfinished_1.png"
-_COMPLETE_BG = "complete_2.png"
-
-_DIFF_NAMES = ["Basic", "Advanced", "Expert", "Master", "Re:Master"]
 
 
 def _rate_only(ds: float, ach: float) -> str:
@@ -305,11 +302,6 @@ def _combo_file(key: str) -> str:
 
 def _sync_file(key: str) -> str:
     return {"fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FSDp"}[key]
-
-
-def _combo_allclear(key: str) -> str:
-    # UI_MSS_Allclear_Icon_：FC/FCp/AP/APp
-    return _combo_file(key)
 
 
 def _sync_allclear(key: str) -> str:

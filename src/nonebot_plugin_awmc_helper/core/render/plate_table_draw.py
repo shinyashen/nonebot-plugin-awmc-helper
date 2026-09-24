@@ -16,9 +16,6 @@ from .table_template import _major_type_of_plate
 
 GRID_STEP, START_X, START_Y, ROW_COUNT = 96, 180, 490, 12
 
-# 牌种 → 达成判定（NB PlateTable.PLAN_CRITERIA 同语义）
-_PLAN_KINDS = {"者", "将", "极", "神", "舞舞"}
-
 
 def _qualified(kind: str, score) -> bool:
     """单谱面是否达成牌子要求（maimai_py 判牌语义同款）。"""

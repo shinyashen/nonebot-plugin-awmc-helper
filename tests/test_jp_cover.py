@@ -58,7 +58,7 @@ async def test_ensure_downloads_and_caches(jp_env, mock):
 
     assert await jp_cover.ensure(2019, cache_dir=cache) is True
     assert (cache / "2019.png").read_bytes() == PNG
-    assert assets.cover_path(2019) == cache / "2019.png"
+    assert (cache / "2019.png") in assets.cover_candidates(2019)
 
 
 @pytest.mark.asyncio
@@ -86,8 +86,10 @@ async def test_ensure_silent_on_fetch_failure(jp_env, mock):
 
     assert await jp_cover.ensure(2019, cache_dir=cache) is False
     assert not (cache / "2019.png").exists()
-    got = assets.cover_path(2019)
-    assert got is None or got.name == "0.png"
+    # 渲染候选链仍然可用（全缺时落到占位 0.png 或空）
+    assert all(
+        not p.exists() or p.name == "0.png" for p in assets.cover_candidates(2019)
+    )
 
 
 @pytest.mark.asyncio

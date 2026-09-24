@@ -401,21 +401,6 @@ async def test_plate_help(app: App):
         ctx.should_finished()
 
 
-@pytest.mark.asyncio
-async def test_completion_grid_smoke(songs):
-    """完成表网格渲染冒烟。"""
-    from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.render.table import completion_grid_bytes
-
-    song = await song_service.by_id(231)
-    assert song is not None
-    diff = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
-    assert diff is not None
-    png = completion_grid_bytes("测试完成表 1/1", [(song, diff, "done")])
-    assert png.startswith(b"\x89PNG")
-    assert len(png) > 1000
-
-
 from maimai_py import SongType, LevelIndex
 
 

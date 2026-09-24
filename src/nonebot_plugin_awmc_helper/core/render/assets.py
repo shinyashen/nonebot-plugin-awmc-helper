@@ -6,7 +6,6 @@
 
 from typing import ClassVar
 from pathlib import Path
-from functools import cache
 
 from PIL import Image
 from nonebot_plugin_localstore import get_data_dir
@@ -73,14 +72,6 @@ class Assets:
         return Image.new("RGBA", (400, 400), "#666666")
 
     @classmethod
-    def cover_path(cls, song_id: int) -> Path | None:
-        """曲绘文件路径（按候选链取第一个存在的；全缺返回 None）。"""
-        for path in cls.cover_candidates(song_id):
-            if path.exists():
-                return path
-        return None
-
-    @classmethod
     def plate_version(cls, version: str, kind: str) -> Image.Image | None:
         """牌子表头素材（``{版本}{牌种}.png``）。
 
@@ -100,21 +91,3 @@ class Assets:
 
 assets = Assets()
 """模块级素材访问单例。"""
-
-
-@cache
-def _warn_missing_static() -> None:
-    from nonebot import logger
-
-    logger.warning(
-        f"素材目录 {plugin_config.awmc_static_path} 不存在，"
-        "绘图功能不可用；请按 README 下载素材包并配置 awmc_static_path"
-    )
-
-
-def ensure_static_exists() -> bool:
-    """素材目录存在性检查（不存在时只告警一次）。"""
-    if not Path(plugin_config.awmc_static_path).is_dir():
-        _warn_missing_static()
-        return False
-    return True
