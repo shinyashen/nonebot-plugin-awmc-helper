@@ -44,7 +44,9 @@ def _qualified(kind: str, score) -> bool:
     if kind == "神":
         return score.fc is not None and score.fc.value <= FCType.AP.value
     if kind == "舞舞":
-        return score.fs is not None and score.fs.value <= FSType.FSD.value
+        # 舞舞要求 FSD/FSDp：FSType 枚举 SYNC<FS<FSP<FSD<FSDP，取高端两档
+        # （曾写成 <= FSD，把 Sync/FS/FSP 全误判达标、FSDp 反而漏判）
+        return score.fs is not None and score.fs.value >= FSType.FSD.value
     return False
 
 

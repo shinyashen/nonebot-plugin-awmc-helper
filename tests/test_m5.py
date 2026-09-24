@@ -491,3 +491,52 @@ async def test_mai_what_rise_fallback(app: App, songs, monkeypatch):
         )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_plate_qualified_kinds(songs):
+    """各牌种达标判定边界：舞舞须 FSD/FSDp（曾把方向写反漏 FSDp、误纳 Sync/FS/FSP）。"""
+    from maimai_py import FCType, FSType, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.render.plate_table_draw import _qualified
+
+    def score(fs=None, fc=None, ach=100.0):
+        return ScoreExtend(
+            id=1,
+            level="13+",
+            level_index=LevelIndex.MASTER,
+            achievements=ach,
+            fc=fc,
+            fs=fs,
+            dx_score=None,
+            dx_rating=250.0,
+            play_count=1,
+            play_time=None,
+            rate=RateType.SSSP,
+            type=SongType.STANDARD,
+            title="t",
+            level_value=13.0,
+            level_dx_score=0,
+            dx_star=None,
+            version=15000,
+        )
+
+    # 舞舞：仅 FSD/FSDp 达标
+    assert _qualified("舞舞", score(fs=FSType.FSD))
+    assert _qualified("舞舞", score(fs=FSType.FSDP))
+    for fs in (FSType.SYNC, FSType.FS, FSType.FSP):
+        assert not _qualified("舞舞", score(fs=fs))
+    assert not _qualified("舞舞", score(fs=None))
+    # 极/神：枚举值越小越强
+    assert _qualified("极", score(fc=FCType.FC))
+    assert _qualified("极", score(fc=FCType.APP))
+    assert not _qualified("极", score())
+    assert _qualified("神", score(fc=FCType.AP))
+    assert _qualified("神", score(fc=FCType.APP))
+    assert not _qualified("神", score(fc=FCType.FC))
+    # 者/将：达成率阈值
+    assert _qualified("者", score(ach=80.0))
+    assert not _qualified("者", score(ach=79.9))
+    assert _qualified("将", score(ach=100.0))
+    assert not _qualified("将", score(ach=99.9))
+    assert not _qualified("将", None)
