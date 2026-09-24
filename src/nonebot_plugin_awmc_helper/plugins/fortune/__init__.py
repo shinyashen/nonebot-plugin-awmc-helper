@@ -5,6 +5,7 @@ qqhash 人品值 + 宜/忌（FORTUNE 13 项中 11 项参与判定）+ 每日随�
 """
 
 import time
+import zlib
 import random
 
 from nonebot import on_command
@@ -55,7 +56,11 @@ def qqhash(qq: int) -> int:
 @handle_errors("查询失败，请稍后再试")
 async def _(session: Session = UniSession()):
     user_id = str(session.user.id)
-    seed = int(user_id) if user_id.isdigit() else abs(hash(user_id)) % (10**8)
+    # 非数字 user_id 用 crc32（内建 hash 受 PYTHONHASHSEED 盐化，重启即变，
+    # 与「同人同日结果稳定」矛盾）
+    seed = (
+        int(user_id) if user_id.isdigit() else zlib.crc32(user_id.encode()) % (10**8)
+    )
     fortune_hash = qqhash(seed)
     daily_random = random.Random(fortune_hash)
 

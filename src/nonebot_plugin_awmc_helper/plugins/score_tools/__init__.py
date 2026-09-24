@@ -155,19 +155,16 @@ async def _(message: Message = CommandArg()):
     args = str(message).strip()
     users = await df_ext.rating_ranking()
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    if args and not args.isdigit():  # 用户名查询
-        found = next(
-            (
-                (i + 1, u)
-                for i, u in enumerate(users)
-                if u.username.lower() == args.lower()
-            ),
-            None,
-        )
-        if found is None:
-            await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(
-                at_sender=True
-            )
+    # 精确用户名优先于页码（水鱼用户名可以是纯数字；榜单已在手，判定零开销）
+    found = next(
+        (
+            (i + 1, u)
+            for i, u in enumerate(users)
+            if args and u.username.lower() == args.lower()
+        ),
+        None,
+    )
+    if found is not None:
         rank, u = found
         msg = (
             f"截止至「{now}」玩家「{u.username}」\n"
@@ -175,6 +172,10 @@ async def _(message: Message = CommandArg()):
         )
         png = image_to_bytes(text_to_image(msg))
         await UniMessage.image(raw=png).finish(at_sender=True)
+    if args and not args.isdigit():
+        await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(
+            at_sender=True
+        )
     page = int(args) if args.isdigit() else 1
     page_data, total = paginate(users, page, 50)
     if not page_data:

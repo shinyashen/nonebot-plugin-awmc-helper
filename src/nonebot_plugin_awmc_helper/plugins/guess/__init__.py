@@ -18,7 +18,8 @@ from nonebot.rule import Rule
 from nonebot.params import RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Bot, Event
-from nonebot_plugin_uninfo import Session, SceneType, UniSession
+from nonebot.permission import SUPERUSER
+from nonebot_plugin_uninfo import ADMIN, Session, SceneType, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import store
@@ -311,10 +312,17 @@ async def _(session: Session = UniSession()):
 
 @guess_switch.handle()
 @handle_errors()
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    bot: Bot,
+    event: Event,
+    session: Session = UniSession(),
+    groups: tuple = RegexGroup(),
+):
     group_id = _group_of(session)
     if group_id is None:
         await UniMessage.text(" 猜歌开关仅群聊可用").finish(at_sender=True)
+    if not (await SUPERUSER(bot, event) or await ADMIN()(bot, event)):
+        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
     enabled = groups[0] == "开启"
     await store.set_group_switch(group_id, GUESS_FEATURE, enabled)
     if not enabled:

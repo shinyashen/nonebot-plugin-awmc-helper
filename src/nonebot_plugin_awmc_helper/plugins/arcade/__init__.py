@@ -13,10 +13,11 @@
 - 每日 4 点：同步华立官方机厅数据并清零排卡人数
 """
 
+import re
 from datetime import datetime
 
 from nonebot import logger, on_regex, on_command, on_fullmatch
-from nonebot.params import CommandArg, RegexGroup
+from nonebot.params import Command, CommandArg, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Bot, Event, Message
 from nonebot.permission import SUPERUSER
@@ -81,8 +82,12 @@ PERSON_SUFFIXES = (
     "jr",
     "几卡",
 )
-DECREASE_OPS = ("减少", "降低", "减", "－", "-")
 SET_OPS = ("设置", "设定", "＝", "=")
+INCREASE_OPS = ("增加", "添加", "加", "＋", "+")
+DECREASE_OPS = ("减少", "降低", "减", "－", "-")
+# 操作符单一来源：正则交替由操作符表派生（增/减两表的长词均先于短词，
+# 与原手写正则等价），漏改 regex 导致「减」落成「加」的问题不再可能
+_ARCADE_OP_RE = "|".join(re.escape(op) for op in SET_OPS + INCREASE_OPS + DECREASE_OPS)
 
 arcade_help = on_fullmatch(("帮助maimaiDX排卡", "帮助maimaidx排卡"), block=True)
 arcade_add = on_command(
@@ -99,7 +104,7 @@ arcade_search = on_command(
     SEARCH_PREFIXES[0], aliases=set(SEARCH_PREFIXES[1:]), block=True
 )
 arcade_add_person = on_regex(
-    r"^(.+)?\s?(设置|设定|＝|=|增加|添加|加|＋|\+|减少|降低|减|－|-)\s?([0-9]+|＋|\+|－|-)(人|卡)?$",
+    rf"^(.+)?\s?({_ARCADE_OP_RE})\s?([0-9]+|＋|\+|－|-)(人|卡)?$",
     block=True,
     priority=3,
 )
@@ -248,6 +253,7 @@ async def _(
     event: Event,
     session: Session = UniSession(),
     message: Message = CommandArg(),
+    command: tuple = Command(),
 ):
     group_id = _group_of(session)
     if group_id is None:
@@ -255,11 +261,10 @@ async def _(
     if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
         await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
     keyword = str(message).strip()
-    raw_text = event.get_plaintext()
     arcade = await _find_arcade(keyword) if keyword else None
     if arcade is None:
         await UniMessage.text(" 没有这样的机厅哦").finish(at_sender=True)
-    if "取消" in raw_text:
+    if "取消" in "".join(command):  # 命中的指令/别名（明文包含会被参数误触）
         await store.unsubscribe(group_id, arcade.id)
         await UniMessage.text(f" 已取消订阅「{arcade.name}」").finish(at_sender=True)
     await store.subscribe(group_id, arcade.id)
@@ -319,7 +324,7 @@ async def _(
         await UniMessage.text(" 排卡操作仅群聊可用").finish(at_sender=True)
     if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
         await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
-    name_raw, op, amount_raw, _unit = groups
+    name_raw, op, amount_raw, unit = groups
     if not name_raw:
         await UniMessage.text(" 格式：<店名|别称>设置/=/+/- <人数>").finish(
             at_sender=True
@@ -348,25 +353,36 @@ async def _(
         amount = int(amount_raw)
     else:
         await UniMessage.text(" 请输入正确的数字").finish(at_sender=True)
-    if op in SET_OPS:
-        new_person = amount
-    elif op in DECREASE_OPS:
-        new_person = max(arcade.person - amount, 0)
+    if unit == "卡":
+        # 「+N卡」改机台数，不动排卡人数（原来单位被吞、卡数按人数入账）
+        if op in SET_OPS:
+            new_machines = amount
+        elif op in DECREASE_OPS:
+            new_machines = max(arcade.machines - amount, 0)
+        else:
+            new_machines = arcade.machines + amount
+        delta = 0
+        arcade.machines = new_machines
+        reply = f" 「{arcade.name}」当前机台 {new_machines} 卡"
     else:
-        new_person = arcade.person + amount
-    delta = new_person - arcade.person
+        if op in SET_OPS:
+            new_person = amount
+        elif op in DECREASE_OPS:
+            new_person = max(arcade.person - amount, 0)
+        else:
+            new_person = arcade.person + amount
+        delta = new_person - arcade.person
+        arcade.person = new_person
+        reply = f" 「{arcade.name}」当前排卡 {new_person} 人"
     if abs(delta) > plugin_config.awmc_arcade_max_delta:
         await UniMessage.text(
             f"单次变更不能超过 {plugin_config.awmc_arcade_max_delta} 人"
         ).finish(at_sender=True)
-    arcade.person = new_person
     arcade.updated_by = _user_of(session)
     arcade.updated_at = datetime.now()
     await store.save_arcade(arcade)
     await store.add_count_log(arcade.id, delta, arcade.machines, _user_of(session))
-    await UniMessage.text(f" 「{arcade.name}」当前排卡 {new_person} 人").finish(
-        at_sender=True
-    )
+    await UniMessage.text(reply).finish(at_sender=True)
 
 
 @arcade_person_num.handle()

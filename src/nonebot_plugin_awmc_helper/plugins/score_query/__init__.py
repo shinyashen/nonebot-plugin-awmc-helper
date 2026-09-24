@@ -6,6 +6,7 @@
 """
 
 import io
+import asyncio
 
 from nonebot import on_regex, on_command
 from nonebot.params import CommandArg, RegexGroup
@@ -65,7 +66,7 @@ ap50 = on_command("ap50", aliases={"AP50"}, block=True)
 minfo = on_command(
     "minfo", aliases={"Minfo", "MINFO", "info", "Info", "INFO"}, block=True
 )
-ginfo = on_regex(r"^[gG]info\s?([绿黄红紫白]?)(.+)$", block=True)
+ginfo = on_regex(r"^[gG]info\s?(?:([绿黄红紫白])(?=\s|\d))?(.+)$", block=True)
 
 
 async def _resolve_song(key: str):
@@ -158,25 +159,25 @@ async def _(
         and s.fc.value in AP_FC_VALUES
         and s.achievements is not None
     ]
-    ap_scores.sort(key=lambda s: s.dx_rating or 0, reverse=True)
-    ap_scores = ap_scores[:50]
     if not ap_scores:
         await UniMessage.text("  没有查到 AP/APP 成绩").finish(at_sender=True)
+    # 两侧各自取满（旧 35 / 新 15）：先全局截 50 再切分会把一侧掏空、
+    # 总 RA 与模板 35/15 行数布局对不上
     latest = current_version.value
     ap_b35 = sorted(
         (s for s in ap_scores if (s.version or 0) < latest),
         key=lambda s: s.dx_rating or 0,
         reverse=True,
-    )
+    )[:35]
     ap_b15 = sorted(
         (s for s in ap_scores if (s.version or 0) >= latest),
         key=lambda s: s.dx_rating or 0,
         reverse=True,
-    )
+    )[:15]
     player = await score_service.get_player(binding)
     png = await b50_render.best50_bytes(
         _display_name(player),
-        sum(int(s.dx_rating or 0) for s in ap_scores),
+        sum(int(s.dx_rating or 0) for s in ap_b35 + ap_b15),
         sum(int(s.dx_rating or 0) for s in ap_b35),
         sum(int(s.dx_rating or 0) for s in ap_b15),
         ap_b35,
@@ -201,7 +202,19 @@ async def _(
         await UniMessage.text(" 用法：minfo <曲目ID|曲名|别名>").finish(at_sender=True)
     song = await _resolve_song(key)
     binding = await _get_binding(session, event, required=False)
-    info = await score_service.get_minfo(song, binding)
+
+    async def _safe_b50():
+        # B50 拉取失败（未绑定/无权限）不阻断成绩卡，仅省略上分提示
+        if binding is None:
+            return None
+        try:
+            return await score_service.get_b50(binding)
+        except UserScoreError:
+            return None
+
+    info, bests = await asyncio.gather(
+        score_service.get_minfo(song, binding), _safe_b50()
+    )
     if info is None:
         await UniMessage.text(" 尚未游玩该曲目（或无权限查看）").finish(at_sender=True)
 
@@ -214,7 +227,7 @@ async def _(
         theme=(binding.theme or "prism_plus") if binding is not None else "prism_plus",
         prefer_type=prefer,
     )
-    tips = await _b50_rise_tips(info.scores, binding)
+    tips = await _b50_rise_tips(info.scores, binding, bests=bests)
     msg = UniMessage.image(raw=png)
     if tips:
         tips_img = text_to_image("\n".join(tips), size=22, padding=14)
@@ -222,18 +235,20 @@ async def _(
     await msg.finish(at_sender=True)
 
 
-async def _b50_rise_tips(scores, binding) -> list[str]:
+async def _b50_rise_tips(scores, binding, bests=None) -> list[str]:
     """「可进 B50」增强提示（我方独有，基准以谱面卡上分预测区表达）。
 
     对不在 B50 且 RA 高于入线最低 RA 的成绩，给出替换后总 RA 提升量；
-    B50 拉取失败（未绑定/无权限）时静默跳过。
+    ``bests`` 传入调用方已取的 B50（minfo 同请求并发拉取，避免二次远端），
+    缺省时自查；拉取失败（未绑定/无权限）静默跳过。
     """
     if binding is None or not scores:
         return []
-    try:
-        bests = await score_service.get_b50(binding)
-    except UserScoreError:
-        return []
+    if bests is None:
+        try:
+            bests = await score_service.get_b50(binding)
+        except UserScoreError:
+            return []
     min_ra = min(
         (s.dx_rating or 0 for s in bests.scores_b35 + bests.scores_b15), default=0
     )

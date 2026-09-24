@@ -80,8 +80,11 @@ async def _(bot: Bot, event: Event):
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     platform, user_id = session_keys(session)
-    binding = await binding_service.ensure(platform, user_id)
     arg = str(message).strip()
+    if not arg and platform not in QQ_PLATFORMS:
+        # 无参且无凭据可用：先回用法，不 ensure（否则查一次用法就落一行库）
+        await UniMessage.text(" 用法：绑定水鱼 <水鱼用户名>").finish(at_sender=True)
+    binding = await binding_service.ensure(platform, user_id)
     if not arg:
         if platform in QQ_PLATFORMS:
             await binding_service.set_service(binding, SERVICE_DIVINGFISH)

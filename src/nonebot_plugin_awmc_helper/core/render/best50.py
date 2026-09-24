@@ -206,7 +206,13 @@ async def fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
         url = f"{_ITEM_HOST}/{kind}/{path.name}"
         task = asyncio.create_task(_download_item(url, path))
         _inflight[path] = task
-    if await task:
+    try:
+        ok = await task
+    finally:
+        # 失败任务也要出表：滞留会让该素材进程内永不重试且 dict 无界增长
+        if _inflight.get(path) is task:
+            _inflight.pop(path, None)
+    if ok:
         return Image.open(path).convert("RGBA")
     return None
 
