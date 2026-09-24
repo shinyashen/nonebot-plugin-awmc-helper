@@ -15,6 +15,7 @@ from .tools import (
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     credit_text,
+    column_width,
     image_to_bytes,
     generate_prism_bg,
 )
@@ -86,14 +87,15 @@ class DrawScore:
                     Image.open(type_path).convert("RGBA").resize((60, 22)),
                     (x + 240, y + 114),
                 )
-            # 旧成绩评级（未游玩按 D 显示，对齐 NB 默认值）
+            # 旧成绩评级（Hoshino：无旧成绩不画旧章；未游玩推荐行不显示 D）
             old_ach = row.get("old_achievements") or 0
-            self._im.alpha_composite(
-                assets.pic(
-                    f"UI_TTR_Rank_{_rate_file_of(old_ach)}.png", self._theme
-                ).resize((63, 28)),
-                (x + 145, y + 82),
-            )
+            if old_ach:
+                self._im.alpha_composite(
+                    assets.pic(
+                        f"UI_TTR_Rank_{_rate_file_of(old_ach)}.png", self._theme
+                    ).resize((63, 28)),
+                    (x + 145, y + 82),
+                )
             self._im.alpha_composite(
                 assets.pic(
                     f"UI_TTR_Rank_{_rate_file_of(row['achievements'])}.png",
@@ -105,7 +107,10 @@ class DrawScore:
             diff_color = DIFF_TEXT_COLORS[li]
             id_color = ID_TEXT_COLORS[li]
 
-            title = truncate_by_width(song.title, 26)
+            # Hoshino 截断规则：宽 >26 才截，截后保留 ≤25 列再加省略号
+            title = song.title
+            if column_width(title) > 26:
+                title = truncate_by_width(title, 25)
             dr.text(
                 (x + 142, y + 44),
                 title,
@@ -151,7 +156,7 @@ class DrawScore:
             dr.text(
                 (x + 315, y + 124),
                 f"ds:{diff.level_value}",
-                font=font(17, FONT_NUM),
+                font=font(18, FONT_NUM),
                 fill=id_color,
                 anchor="lm",
             )
@@ -249,11 +254,12 @@ class DrawScore:
             row, col = divmod(num, 20)
             x = start_x + col * step
             y = start_y + row * step
-            self._im.alpha_composite(
-                assets.pic(f"border_progress_{_LEVEL_INDEXES[li]}.png"), (x - 4, y - 4)
-            )
+            # Hoshino 图层序：先曲绘后难度框（框缘压住曲绘边一像素）
             self._im.alpha_composite(
                 assets.cover(song_id % 10000).resize((55, 55)), (x, y)
+            )
+            self._im.alpha_composite(
+                assets.pic(f"border_progress_{_LEVEL_INDEXES[li]}.png"), (x - 4, y - 4)
             )
             dr.text(
                 (x + 36, y + 3),
