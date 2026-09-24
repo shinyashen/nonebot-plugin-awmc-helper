@@ -279,16 +279,27 @@ def song_chart_info(
     if type_path.exists():
         im.alpha_composite(Image.open(type_path).resize((80, 30)), (295, 410))
 
+    # Hoshino 截断规则：宽 >L 才截、截后保留 ≤L-1 列再加省略号（下同）
+    title = (
+        song.title
+        if column_width(song.title) <= 40
+        else truncate_by_width(song.title, 39)
+    )
     mr.text(
         (405, 220),
-        truncate_by_width(song.title, 40),
+        title,
         font=f_rodin,
         fill=text_color,
         anchor="lm",
     )
+    artist = (
+        song.artist
+        if column_width(song.artist) <= 50
+        else truncate_by_width(song.artist, 49)
+    )
     mr.text(
         (407, 265),
-        truncate_by_width(song.artist, 50),
+        artist,
         font=font(20, FONT_RODIN),
         fill=text_color,
         anchor="lm",
@@ -336,9 +347,14 @@ def song_chart_info(
             fill=color,
             anchor="mm",
         )
+        designer = (
+            diff.note_designer
+            if column_width(diff.note_designer) <= 19
+            else truncate_by_width(diff.note_designer, 18)
+        )
         mr.text(
             (310, 590 + spacing),
-            truncate_by_width(diff.note_designer, 19),
+            designer,
             font=font(20, FONT_HAN),
             fill=text_color,
             anchor="mm",
@@ -487,8 +503,8 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
         )
 
     def t(pos, text, size, *, anchor="mm", sw=0, fill=white, han=False):
-        # 描边用不透明黑色（用户拍板）：NB 源码字面为 (0,0,0,0) 透明镂空，
-        # 但 QQ 渲染透明区域颜色不可控，直接画黑色描边观感一致且稳定；
+        # 描边色对齐 Hoshino/NB 现行源码（紫 210,57,174,255）：曾按 NB 旧版
+        # (0,0,0,0) 透明字面拍板黑描边，二库现行均为紫描边，按权威改回；
         # 简体字样（分类中文名等）走中文字体——FOT-NewRodin 为日文字体，
         # 缺部分简体字形（与 song_chart_info 的分类行同口径）
         mr.text(
@@ -498,15 +514,24 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
             fill=fill,
             anchor=anchor,
             stroke_width=sw,
-            stroke_fill=(0, 0, 0, 255) if sw else None,
+            stroke_fill=(210, 57, 174, 255) if sw else None,
         )
 
-    # kanji（玩家牌上方）
+    # 标题 / 曲师 / BPM / ID / 分类（白字紫描边；截断规则同 song_chart_info）
     kanji = getattr(first, "kanji", "") if first else ""
     t((216, p_y - 28), kanji, 18)
-    # 标题 / 曲师 / BPM / ID / 分类（白字紫描边）
-    t((405, 265), truncate_by_width(song.title, 36), 28, anchor="lm", sw=3)
-    t((407, 320), truncate_by_width(song.artist, 50), 20, anchor="lm", sw=3)
+    ban_title = (
+        song.title
+        if column_width(song.title) <= 36
+        else truncate_by_width(song.title, 35)
+    )
+    t((405, 265), ban_title, 28, anchor="lm", sw=3)
+    ban_artist = (
+        song.artist
+        if column_width(song.artist) <= 50
+        else truncate_by_width(song.artist, 49)
+    )
+    t((407, 320), ban_artist, 20, anchor="lm", sw=3)
     t((460, 393), str(song.bpm), 24, anchor="lm", sw=3)
     utage_id = next((getattr(d, "diff_id", None) for d in utage_diffs), None)
     card_id = utage_id if utage_id is not None else song.id
@@ -514,8 +539,8 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     from ...constants import GENRE_TO_ZH
 
     t((680, 475), GENRE_TO_ZH.get(song.genre, song.genre.value), 22, sw=3, han=True)
-    # 描述
-    t((595, 595), truncate_by_width(getattr(first, "description", ""), 46), 25)
+    # 描述（Hoshino 原版不截断，直接绘制）
+    t((595, 595), getattr(first, "description", ""), 25)
     # 等级（玩家牌内）
     t((180, p_y + 28), f"Lv. {first.level if first else '?'}", 24, sw=3)
     # 六列 notes（total/tap/hold/slide/touch/brak）：卡片只画一张宴谱；
