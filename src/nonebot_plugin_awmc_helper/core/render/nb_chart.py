@@ -454,13 +454,17 @@ def song_chart_banquet_info(song: Song, utage_diffs=None) -> bytes:
         player_path = base / "utg_2p.png"
     else:
         # NB 原版非双人宴 step_y=0：多张宴谱会全部叠在一行（id100227 实测）。
-        # 多张时首行落到底图数据条下方（y=930），行距 62、字号 22，
-        # 避让底图自带表头（y≈838）与底部版权行（y≈1083 上缘）
+        # 单张保持底图数据行原位（y=890）；多张时首行落到底图数据条下方
+        # （y=930），行距 62、字号 22，避让底图表头（y≈838）与版权行
         n_rows = len(utage_diffs)
-        step_y = 62 if n_rows > 1 else 0
-        base_y = 930
         p_y = 785
         player_path = base / "utg_1p.png"
+        if n_rows > 1:
+            step_y = 62
+            base_y = 930
+        else:
+            step_y = 0
+            base_y = 890
     im.alpha_composite(Image.open(player_path).convert("RGBA"), (98, p_y))
 
     # logo / 新曲标
