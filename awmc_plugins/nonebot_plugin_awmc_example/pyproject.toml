@@ -1,0 +1,22 @@
+[project]
+name = "nonebot-plugin-awmc-example"
+version = "0.1.0"
+description = "nonebot-plugin-awmc-helper 第三方扩展示例：演示独立插件如何复用其 core 公开接口"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "nonebot2>=2.4.3,<3.0.0",
+  # 主插件：clone 部署（awmc_plugins/）与本地开发无需 pip 安装，
+  # 走 pip/PyPI 路线才真正解析；0.1.0 上架前可改 path 依赖
+  "nonebot-plugin-awmc-helper>=0.1.0",
+  "nonebot-plugin-alconna>=0.60.0,<1.0.0",
+  "nonebot-plugin-uninfo>=0.10.0,<1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/shinyashen/nonebot-plugin-awmc-helper"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
