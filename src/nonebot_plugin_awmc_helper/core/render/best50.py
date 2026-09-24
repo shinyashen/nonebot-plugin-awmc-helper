@@ -17,9 +17,11 @@ import asyncio
 import colorsys
 from io import BytesIO
 from bisect import bisect_right
+from typing import cast
 from pathlib import Path
 from functools import lru_cache
 from collections import Counter
+from collections.abc import Iterator
 
 import httpx
 from PIL import Image, ImageDraw
@@ -93,9 +95,11 @@ def _utage_score_bg() -> Image.Image:
     ).convert("RGBA")
     alpha = src.getchannel("A")
     hsv = src.convert("RGB").convert("HSV")
-    # 源主色：高饱和像素的众数（避开白色留白与抗锯齿边缘）
+    # getdata() 返回 core.ImagingCore（桩类型不透明），按 HSV 三元组迭代取像素；
+    # 源主色取高饱和像素的众数（避开白色留白与抗锯齿边缘）
+    pixels = cast(Iterator[tuple[int, int, int]], hsv.getdata())
     dominant = Counter(
-        px for px in hsv.getdata() if px[1] >= 128 and px[2] >= 128
+        px for px in pixels if px[1] >= 128 and px[2] >= 128
     ).most_common(1)[0][0]
     th, ts, tv = colorsys.rgb_to_hsv(
         UTAGE_BAND_COLOR[0] / 255, UTAGE_BAND_COLOR[1] / 255, UTAGE_BAND_COLOR[2] / 255
@@ -105,15 +109,29 @@ def _utage_score_bg() -> Image.Image:
     kv = tv * 255 / dominant[2]
     h_ch, s_ch, v_ch = hsv.split()
 
+    # Pillow 12 的 point() 重载会让内联 lambda 的参数类型推断跑偏，
+    # 一律用具名 int 签名函数（Callable[[int], float] 的精确匹配）
+    def _shift_h(x: int) -> int:
+        return (x + dh) % 256
+
+    def _scale_s(x: int) -> int:
+        return min(255, round(x * ks))
+
+    def _scale_v(x: int) -> int:
+        return min(255, round(x * kv))
+
     # 同一 H/S 染色下，V 缩放与不缩放各出一份，按「有彩度」掩码逐像素取用
-    def _hs_chans(scale_v: bool):
+    def _hs_chans(scale_v: bool) -> tuple[Image.Image, Image.Image, Image.Image]:
         return (
-            h_ch.point(lambda x: (x + dh) % 256),
-            s_ch.point(lambda x: min(255, round(x * ks))),
-            v_ch.point(lambda x: min(255, round(x * kv))) if scale_v else v_ch,
+            h_ch.point(_shift_h),
+            s_ch.point(_scale_s),
+            v_ch.point(_scale_v) if scale_v else v_ch,
         )
 
-    mask = s_ch.point(lambda x: 255 if x >= 24 else 0)
+    def _has_chroma(x: int) -> int:
+        return 255 if x >= 24 else 0
+
+    mask = s_ch.point(_has_chroma)
     tinted = Image.composite(
         Image.merge("HSV", _hs_chans(True)).convert("RGB"),
         Image.merge("HSV", _hs_chans(False)).convert("RGB"),
