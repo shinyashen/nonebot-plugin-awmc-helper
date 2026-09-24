@@ -336,6 +336,51 @@ async def test_guess_answer_flow(app: App, songs, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_guess_reveal_idempotent(songs, monkeypatch):
+    """揭晓幂等：答对与超时并发时 _reveal 只生效一次，且取消提示循环 task。"""
+    import asyncio
+
+    from nonebot_plugin_awmc_helper.plugins import guess as guess_plugin
+
+    sends: list[str] = []
+
+    class _FakeUniMsg:
+        def __init__(self, parts: list[str]):
+            self.parts = parts
+
+        @staticmethod
+        def text(t: str) -> "_FakeUniMsg":
+            return _FakeUniMsg([t])
+
+        def image(self, **kw):
+            return self
+
+        async def send(self, *a, **kw):
+            sends.append("".join(self.parts))
+
+    monkeypatch.setattr(guess_plugin, "UniMessage", _FakeUniMsg)
+
+    song = await guess_plugin._pick_song()
+    assert song is not None
+    game = guess_plugin.GuessGame(
+        song, pic_mode=True, group_id="g9", bot=None, event=None
+    )
+    game.task = asyncio.create_task(asyncio.sleep(60))
+    guess_plugin._games["g9"] = game
+    try:
+        await guess_plugin._reveal(game, "时间到！")
+        await guess_plugin._reveal(game, "时间到！")  # 第二次应被 settled 挡掉
+        assert len(sends) == 1
+        assert "时间到" in sends[0]
+        assert guess_plugin._game_of("g9") is None
+        await asyncio.sleep(0)  # 让循环 task 处理 cancel
+        assert game.task.cancelled()
+    finally:
+        if not game.task.done():
+            game.task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_pick_rise_song(songs, monkeypatch):
     """Q8：mai什么加分算法——定数窗口与 SSS+ 排除语义（NB get_mai_what）。"""
     import dataclasses
