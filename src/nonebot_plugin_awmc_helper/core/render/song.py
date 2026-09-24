@@ -1,13 +1,31 @@
-"""曲目相关绘图：谱面信息卡、搜索结果列表、随机谱面结果。"""
+"""曲目相关绘图：谱面信息卡、搜索结果列表、随机谱面结果。
+
+搜索列表图为 Hoshino core/image/song.py::song_list 版式移植：PRiSM 装饰底 +
+毛玻璃卡 + 两列曲卡网格（``song_card.png`` 底、80×80 曲绘、版本 logo、
+SD/DX 徽章、难度条定数、BPM/分类行）。每页条数沿用本项目 25/页口径
+（Hoshino PAGE_SIZE=14 属其翻页 UX，非坐标），网格几何随条数自适应。
+"""
 
 from PIL import Image, ImageDraw
 from maimai_py import Song, SongType, LevelIndex
 
-from .fonts import FONT_MONO, font
-from .tools import fit_text, text_size, rounded_mask, image_to_bytes
+from .fonts import FONT_HAN, FONT_MONO, FONT_RODIN, font
+from .tools import (
+    TEXT_BLUE,
+    fit_text,
+    text_size,
+    credit_text,
+    column_width,
+    rounded_mask,
+    image_to_bytes,
+    truncate_by_width,
+    generate_frosted_card,
+    tricolor_gradient_prism_plus,
+)
 from ..utils import paginate
 from .assets import assets
-from ...constants import GENRE_TO_ZH, version_zh
+from .nb_chart import version_image, fit_version_logo
+from ...constants import GENRE_TO_ZH, version_zh, display_song_id
 
 LEVEL_COLORS = {
     LevelIndex.BASIC: "#22bb5b",
@@ -113,43 +131,175 @@ def draw_song_card(song: Song, id_override: int | None = None) -> Image.Image:
 
 
 def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Image.Image:
-    """搜索结果列表图（默认 25 条/页）。"""
+    """搜索结果列表图（Hoshino song_list 版式，默认 25 条/页）。"""
     page_data, total = paginate(songs, page, per_page)
+    if not page_data:  # 页码越界回落末页（Hoshino clamp 同语义）
+        page = total
+        page_data = songs[(page - 1) * per_page : page * per_page]
 
-    row_h = 44
-    header_h = 64
-    w = 860
-    h = header_h + row_h * max(len(page_data), 1) + 48
-    img = Image.new("RGBA", (w, h), CARD_BG)
-    draw = ImageDraw.Draw(img)
-    draw.text(
-        (20, 18),
-        f"共 {len(songs)} 个结果，第 {page}/{total} 页",
-        font=font(26),
-        fill="#333",
+    lines = -(-len(page_data) // 2)  # 两列行数（Hoshino sum(divmod(n,2)) 同值）
+    height = 200 + lines * 145 + 200
+
+    im = tricolor_gradient_prism_plus(1000, height)
+    im.alpha_composite(assets.pic("aurora.png").resize((1000, 174)))
+    im.alpha_composite(assets.pic("bg_shines.png").resize((1000, 442)))
+    pattern = assets.pic("pattern.png").resize((1000, 256))
+    for h in range(height // 256 + 1):
+        im.alpha_composite(pattern, (0, (256 + 6) * h))
+    im.alpha_composite(
+        assets.pic("rainbow.png").resize((550, 288)), (225, height - 435)
+    )
+    im.alpha_composite(
+        assets.pic("rainbow_bottom.png").resize((786, 164)), (107, height - 260)
     )
 
-    f_id = font(24, FONT_MONO)
-    f_title = font(26)
-    f_artist = font(20)
-    y = header_h
-    for song in page_data:
-        draw.rounded_rectangle((20, y, w - 20, y + row_h - 8), 8, fill="#ffffff")
-        draw.text((36, y + 7), str(song.id), font=f_id, fill="#e2641f")
-        draw.text(
-            (110, y + 5),
-            fit_text(song.title, f_title, w - 480),
-            font=f_title,
-            fill="#333",
+    im = generate_frosted_card(im, (50, 150, 950, 150 + lines * 145 + 100), alpha=0.2)
+    im.alpha_composite(
+        assets.pic("chara_left.png", "prism_plus").resize((156, 187)), (800, 0)
+    )
+    im.alpha_composite(assets.pic("moon.png").resize((120, 120)), (60, 20))
+    logo_path = (
+        assets.static_path() / "mai" / "pic" / "maimai でらっくす PRiSM PLUS.png"
+    )
+    if logo_path.exists():
+        im.alpha_composite(
+            Image.open(logo_path).convert("RGBA").resize((210, 101)), (15, 20)
+        )
+    draw = ImageDraw.Draw(im)
+
+    x_gap, y_gap, start_x, start_y = 450, 145, 70, 200
+    for num, song in enumerate(page_data):
+        row, col = divmod(num, 2)
+        x = start_x + col * x_gap
+        y = start_y + row * y_gap
+
+        im.alpha_composite(assets.pic("song_card.png"), (x, y))
+        im.alpha_composite(assets.cover(song.id).resize((80, 80)), (x + 10, y + 10))
+        version_img = version_image(song.version)
+        if version_img is not None:
+            logo = fit_version_logo(version_img, (104, 50))
+            im.alpha_composite(
+                logo,
+                (
+                    x + 315 + (104 - logo.width) // 2,
+                    y - 30 + (50 - logo.height) // 2,
+                ),
+            )
+        utage = song.get_difficulties(SongType.UTAGE)
+        is_utage = bool(utage) and not (
+            song.difficulties.standard or song.difficulties.dx
+        )
+        if not is_utage:
+            type_abbr = "DX" if song.difficulties.dx else "SD"
+            type_path = assets.static_path() / "mai" / "pic" / f"{type_abbr}.png"
+            if type_path.exists():
+                im.alpha_composite(
+                    Image.open(type_path).convert("RGBA").resize((40, 15)),
+                    (x + 50, y + 75),
+                )
+        im.alpha_composite(
+            assets.pic("sl_diff_utg.png" if is_utage else "sl_diff.png"),
+            (x + 100, y + 95),
         )
         draw.text(
-            (w - 350, y + 10),
-            fit_text(song.artist, f_artist, 320),
-            font=f_artist,
-            fill="#888",
+            (x + 50, y + 105),
+            str(display_song_id(song)),
+            font=font(15, FONT_RODIN),
+            fill=TEXT_BLUE,
+            anchor="mm",
         )
-        y += row_h
-    return img
+        title = (
+            song.title
+            if column_width(song.title) <= 20
+            else truncate_by_width(song.title, 19)
+        )
+        draw.text(
+            (x + 100, y + 25),
+            title,
+            font=font(20, FONT_RODIN),
+            fill=TEXT_BLUE,
+            anchor="lm",
+        )
+        artist = (
+            song.artist
+            if column_width(song.artist) <= 26
+            else truncate_by_width(song.artist, 25)
+        )
+        draw.text(
+            (x + 100, y + 50),
+            artist,
+            font=font(12, FONT_RODIN),
+            fill=TEXT_BLUE,
+            anchor="lm",
+        )
+        draw.text(
+            (x + 100, y + 80),
+            f"BPM: {song.bpm}",
+            font=font(15, FONT_RODIN),
+            fill=TEXT_BLUE,
+            anchor="lm",
+        )
+        draw.text(
+            (x + 230, y + 80),
+            GENRE_TO_ZH.get(song.genre, song.genre.value),
+            font=font(12, FONT_HAN),
+            fill=TEXT_BLUE,
+            anchor="lm",
+        )
+        if is_utage:
+            draw.text(
+                (x + 125, y + 105),
+                f"{utage[0].level_value}",
+                font=font(15, FONT_RODIN),
+                fill=(255, 255, 255, 255),
+                anchor="mm",
+            )
+        else:
+            major = SongType.DX if song.difficulties.dx else SongType.STANDARD
+            for diff in song.get_difficulties():
+                if diff.type != major or diff.type == SongType.UTAGE:
+                    continue
+                color = (
+                    (138, 0, 226, 255)
+                    if diff.level_index == LevelIndex.ReMASTER
+                    else (255, 255, 255, 255)
+                )
+                draw.text(
+                    (x + 125 + 50 * diff.level_index.value, y + 105),
+                    f"{diff.level_value}",
+                    font=font(15, FONT_RODIN),
+                    fill=color,
+                    anchor="mm",
+                )
+
+    draw.text(
+        (500, 70),
+        "曲目列表",
+        font=font(55, FONT_RODIN),
+        fill=TEXT_BLUE,
+        anchor="mm",
+        stroke_width=3,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    draw.text(
+        (500, height - 100),
+        f"Page {page}/{total}",
+        font=font(35, FONT_RODIN),
+        fill=TEXT_BLUE,
+        anchor="mm",
+        stroke_width=3,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    draw.text(
+        (500, height - 30),
+        credit_text(),
+        font=font(18, FONT_RODIN),
+        fill=TEXT_BLUE,
+        anchor="mm",
+        stroke_width=3,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    return im
 
 
 def song_card_bytes(song: Song) -> bytes:
