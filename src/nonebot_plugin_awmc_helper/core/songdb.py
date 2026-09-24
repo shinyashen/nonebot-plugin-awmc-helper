@@ -24,7 +24,7 @@ from dataclasses import field, dataclass
 
 from nonebot import logger
 from sqlmodel import col, delete, select
-from maimai_py import current_version
+from maimai_py import Version, current_version
 from maimai_py.enums import Genre, SongType, LevelIndex, divingfish_to_version
 from maimai_py.models import (
     Song,
@@ -38,7 +38,6 @@ from . import store
 from .http import build_smart_transport
 from ..constants import (
     DX_VERSION_CODES,
-    EXTRA_VERSION_NAMES,
     SOURCE_NAME_TO_VERSION,
     level_from_value,
 )
@@ -1294,14 +1293,16 @@ def _points_from_flat(
 
     对位规则：登场版本（组 version，旧框取 DX 初代）在轴上有位则从该位起；
     长度与登场版本不一致或未知时，按「列表末位 = 轴末位（DX 14 版）」端对齐。
-    列表长于 14（文档收录了 MAGiCAL 等新版本）时轴先补 EXTRA 已知码、再按
+    列表长于 14（文档收录了 MAGiCAL 等新版本）时轴先补枚举已知码、再按
     +500 递推。连续相同值合并为变化点。
     """
     n = len(values)
     if n == 0:
         return []
     axis = list(DX_VERSION_CODES)
-    extras = sorted(EXTRA_VERSION_NAMES)
+    # 枚举已收录、DX 轴尚未收录的新版本码（如 MAGiCAL 27000；FUTURE 占位不计）
+    top = max(DX_VERSION_CODES)
+    extras = [v.value for v in Version if top < v.value < 30000]
     while len(axis) < n:  # 扩展轴：先已知新版本码，再 +500 递推
         axis.append(
             extras[len(axis) - len(DX_VERSION_CODES)]

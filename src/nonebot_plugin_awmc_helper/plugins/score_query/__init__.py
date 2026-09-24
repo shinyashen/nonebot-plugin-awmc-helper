@@ -8,7 +8,7 @@
 import io
 
 from nonebot import on_regex, on_command
-from maimai_py import SongType, LevelIndex
+from maimai_py import FCType, SongType, LevelIndex
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Event, Message
@@ -34,7 +34,7 @@ __plugin_meta__ = PluginMetadata(
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
 )
 
-AP_FC_VALUES = (1, 0)  # FCType.AP / FCType.APP 的枚举值（越小越好）
+AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
 
 def _at_target(event: Event | None) -> str | None:

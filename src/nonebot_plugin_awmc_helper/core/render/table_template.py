@@ -330,7 +330,12 @@ def _plate_version_range(version: str) -> tuple[int, int] | None:
     if pv is None:
         return None
     nxt = [v.value for v in plate_to_version.values() if v.value > pv.value]
-    hi = (min(nxt) - 1) if nxt else 27000
+    # 末段上界 = 当前最新版本码（FUTURE 30000 为未实装占位，不计）
+    hi = (
+        (min(nxt) - 1)
+        if nxt
+        else max(v.value for v in plate_to_version.values() if v.value < 30000)
+    )
     return (pv.value, hi)
 
 

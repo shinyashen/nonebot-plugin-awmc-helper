@@ -8,12 +8,17 @@ from typing import ClassVar
 from pathlib import Path
 
 from PIL import Image
+from maimai_py.enums import plate_aliases as _LIB_PLATE_ALIASES
 from nonebot_plugin_localstore import get_data_dir
 
 from ...config import plugin_config
 
 THEMES = ("prism_plus", "circle")
 DEFAULT_THEME = "prism_plus"
+
+# 牌头素材文件名为繁体（暁/櫻/菫/輝/華/極…），简繁差异集与 maimai_py
+# plate_aliases（繁→简）同源；查不到繁体名时回退原始输入
+_S2T = str.maketrans({v: k for k, v in _LIB_PLATE_ALIASES.items()})
 
 
 def jp_cache_dir() -> Path:
@@ -78,10 +83,8 @@ class Assets:
         素材包文件名为繁体（牌种「極」、版本字 暁/櫻/菫/輝/華），先按繁体名
         查找再回退原始输入；舞舞牌「舞舞舞」、霸者「霸者」自然命中。
         """
-        kind_t = kind.translate(str.maketrans({"极": "極"}))
-        version_t = version.translate(
-            str.maketrans({"晓": "暁", "樱": "櫻", "堇": "菫", "辉": "輝", "华": "華"})
-        )
+        kind_t = kind.translate(_S2T)
+        version_t = version.translate(_S2T)
         for name in (f"{version_t}{kind_t}.png", f"{version}{kind}.png"):
             path = cls.static_path() / "mai" / "plate_version" / name
             if path.exists():

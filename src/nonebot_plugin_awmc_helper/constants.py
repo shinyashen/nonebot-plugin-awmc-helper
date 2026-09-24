@@ -7,6 +7,8 @@ maimai-py 的 `Genre` 枚举值是日文分类，库未公开导出中文映射�
 import re
 
 from maimai_py import Genre, Version, RateType, LevelIndex
+from maimai_py.enums import name_to_genre as _LIB_NAME_TO_GENRE
+from maimai_py.utils.coefficient import SCORE_COEFFICIENT_TABLE
 
 # ---------------------------------------------------------------------------
 # 分类（Genre）：枚举 → 中文显示名
@@ -21,15 +23,9 @@ GENRE_TO_ZH: dict[Genre, str] = {
     Genre.宴会場: "宴会场",
 }
 
-# 中文（及日文原名）→ 枚举，用于「随个流行」等分类过滤
-ZH_TO_GENRE: dict[str, Genre] = {zh: genre for genre, zh in GENRE_TO_ZH.items()} | {
-    # 常见日文/别名入口
-    "POPSアニメ": Genre.POPSアニメ,
-    "niconicoボーカロイド": Genre.niconicoボーカロイド,
-    "東方Project": Genre.東方Project,
-    "ゲームバラエティ": Genre.ゲームバラエティ,
-    "オンゲキCHUNITHM": Genre.オンゲキCHUNITHM,
-    "宴会場": Genre.宴会場,
+# 中文（及日文原名）→ 枚举，用于「随个流行」等分类过滤。
+# 官方名（中/日）直接取库内 name_to_genre，本地只补常见别名入口
+ZH_TO_GENRE: dict[str, Genre] = dict(_LIB_NAME_TO_GENRE) | {
     "流行": Genre.POPSアニメ,
     "动漫": Genre.POPSアニメ,
     "niconico": Genre.niconicoボーカロイド,
@@ -112,39 +108,8 @@ VERSION_TO_ZH: dict[Version, str] = {
     Version.MAIMAI_DX_PRISM_PLUS: "舞萌DX PRiSM PLUS",
     Version.MAIMAI_DX_CIRCLE: "舞萌DX CiRCLE",
     Version.MAIMAI_DX_CIRCLE_PLUS: "舞萌DX CiRCLE PLUS",
+    Version.MAIMAI_DX_MAGICAL: "MAGiCAL",
     Version.MAIMAI_DX_FUTURE: "舞萌DX FUTURE",
-}
-
-# 牌子版本单字 → 中文显示名（牌种判定交给 maimai-py）
-PLATE_VERSION_ZH: dict[str, str] = {
-    "初": "maimai",
-    "真": "maimai PLUS",
-    "超": "maimai GreeN",
-    "檄": "maimai GreeN PLUS",
-    "橙": "maimai ORANGE",
-    "晓": "maimai ORANGE PLUS",
-    "桃": "maimai PiNK",
-    "樱": "maimai PiNK PLUS",
-    "紫": "maimai MURASAKi",
-    "堇": "maimai MURASAKi PLUS",
-    "白": "maimai MiLK",
-    "雪": "maimai MiLK PLUS",
-    "辉": "maimai FiNALE",
-    "熊": "舞萌DX",
-    "华": "舞萌DX PLUS",
-    "爽": "舞萌DX SPLASH",
-    "煌": "舞萌DX SPLASH PLUS",
-    "星": "舞萌DX UNiVERSE",
-    "宙": "舞萌DX UNiVERSE PLUS",
-    "祭": "舞萌DX FESTiVAL",
-    "祝": "舞萌DX FESTiVAL PLUS",
-    "双": "舞萌DX BUDDiES",
-    "宴": "舞萌DX BUDDiES PLUS",
-    "镜": "舞萌DX PRiSM",
-    "彩": "舞萌DX PRiSM PLUS",
-    "丸": "舞萌DX CiRCLE",
-    "舞": "旧作全集（舞）",
-    "霸": "旧作全集（霸）",
 }
 
 # 牌种达成条件说明（牌子条件 指令用）
@@ -156,8 +121,9 @@ PLATE_KIND_ZH: dict[str, str] = {
     "舞舞": "全曲目 Full Sync DX（FSD）",
 }
 
-# 完成表预渲染枚举（SUPERUSER 指令与国服更新自动触发共用，song-db-design §7.3）
-PLATE_CHARS = "舞霸真超檄橙晓桃樱紫堇白雪辉熊华爽煌星宙祭祝双宴镜彩丸"
+# 完成表预渲染枚举（SUPERUSER 指令与国服更新自动触发共用，song-db-design §7.3）。
+# 牌字与版本的对应以 maimai_py plate_to_version 为准（「回」= CiRCLE PLUS）
+PLATE_CHARS = "舞霸真超檄橙晓桃樱紫堇白雪辉熊华爽煌星宙祭祝双宴镜彩丸回"
 PLATE_KINDS = ("将", "者", "极", "神", "舞舞")
 
 # ---------------------------------------------------------------------------
@@ -211,13 +177,6 @@ SOURCE_NAME_TO_VERSION: dict[str, int] = {
     "maimai でらっくす PRiSM PLUS": 25500,
     "maimai でらっくす CiRCLE": 26000,
     "maimai でらっくす CiRCLE PLUS": 26500,
-}
-
-# 版本码 → 显示名兜底（maimai_py 枚举之外的已知新版本；数据源 otoge-db/DXRating 已收录。
-# 库跟进新版本枚举后，此处条目自然失效，version_name() 会优先命中枚举）
-EXTRA_VERSION_NAMES: dict[int, str] = {
-    # 2026-09-17 日服上线；maimai_py 1.5.2 尚未收录（song-db-design §7.4）
-    27000: "MAGiCAL",
 }
 
 # DX 时代版本轴（穷举自 Version 枚举 MAIMAI_DX..MAIMAI_DX_CIRCLE_PLUS，勿凭记忆增删）：
@@ -319,19 +278,6 @@ def strip_chart_prefix(
     return None
 
 
-def version_name(version: int) -> str:
-    """版本码 → 显示名：① maimai_py 枚举精确成员 → ② 数据源版本表 → ③ 原码字符串。
-
-    禁止用 ``Version.from_value`` 判未知码（其语义为「≤ 值的最近枚举」，27000 会被
-    错误钳成 CiRCLE PLUS，song-db-design §7.4）。
-    """
-    try:
-        ver = Version(version)
-    except ValueError:
-        return EXTRA_VERSION_NAMES.get(version, str(version))
-    return VERSION_TO_ZH.get(ver, ver.name)
-
-
 def level_from_value(level_value: float) -> str:
     """定数 → 标级串（otoge-db 全量验证：x.0–x.5 → 无+，x.6–x.9 → +，0 冲突）。"""
     base = int(level_value)
@@ -342,8 +288,13 @@ def level_from_value(level_value: float) -> str:
 # NB 版绘图移植用的映射表（core/render/nb_chart.py、best50.py 使用）
 # ---------------------------------------------------------------------------
 
-# 达成率系数表阈值（与 maimai-py ScoreCoefficient 一致，升序）
-ACHIEVEMENT_LIST = [50, 60, 70, 75, 80, 90, 94, 97, 98, 99, 99.5, 100, 100.5]
+# 达成率系数表阈值（升序）：自 maimai_py SCORE_COEFFICIENT_TABLE 推导，
+# 剔除 <50 细分段与 79.9999 等区间哨兵行（round 抹平浮点尾差）
+ACHIEVEMENT_LIST = [
+    t
+    for t in (row[0] for row in SCORE_COEFFICIENT_TABLE)
+    if t >= 50 and round(t * 10000) % 10 != 9
+]
 
 # 全部谱面等级（lv1-15，定数表底图生成用）
 LEVEL_LIST = [
@@ -452,13 +403,14 @@ def display_song_id(song) -> int:
 def chart_display_id(song, diff) -> int:
     """谱面级展示 id（查分器 id 形状，NB per-type 条目语义）。
 
-    SD = 根 id；DX = 根 id + 10000（机台内部 id 规则，如 835 → 10835）；
-    宴 = 6 位机台内部 diff_id。卡片代表**具体谱面**时用本函数；
-    曲级展示（搜索列表等）用 :func:`display_song_id`。
+    SD = 根 id；DX = 根 id + 10000（机台内部 id 规则，如 835 → 10835），
+    该规则单一来源为 maimai_py ``Song.get_divingfish_id``；
+    宴 = 6 位机台内部 diff_id（直接读谱面对象，不要求已挂到 song）。
+    卡片代表**具体谱面**时用本函数；曲级展示（搜索列表等）用
+    :func:`display_song_id`。
     """
-    from maimai_py.enums import SongType
     from maimai_py.models import SongDifficultyUtage
 
     if isinstance(diff, SongDifficultyUtage):
         return diff.diff_id
-    return song.id + 10000 if diff.type == SongType.DX else song.id
+    return song.get_divingfish_id(diff.type, diff.level_index)
