@@ -31,12 +31,17 @@ async def _():
     # force：显式重载必须真重放——重建以基础源覆写过外部字段时，文件哈希虽未变
     # 也得把校正写回去，按"哈希未变"跳过是错的
     summary = await songdb.apply_external_sources(force=True)
-    if summary.get("changed"):
+    # gamerch wiki 运行时补充与文件源同序（fill：只补缺口谱面）
+    from ...core.ext import gamerch
+
+    g_applied, g_changed = await gamerch.apply_fill()
+    if summary.get("changed") or g_changed:
         from ...core.songs import prerender_templates
 
         await prerender_templates()  # 与自动管线共用：变化即重建底图（§7.5-C）
+        wiki_msg = f"，wiki 补充 {g_applied} 处" if g_applied else ""
         await UniMessage.text(
-            f"补充数据已重载并重建底图（源 {summary['sources']} 个）。"
+            f"补充数据已重载并重建底图（源 {summary['sources']} 个{wiki_msg}）。"
         ).finish(at_sender=True)
     await UniMessage.text(
         f"补充数据无变化（源 {summary['sources']} 个，"

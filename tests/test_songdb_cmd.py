@@ -31,6 +31,13 @@ async def test_reload_extra_continues_after_progress(app: App, monkeypatch):
         return "定数表 1 谱面次（失败 0）"
 
     monkeypatch.setattr(songdb, "apply_external_sources", fake_apply)
+
+    async def fake_gamerch_fill() -> tuple[int, bool]:
+        return 0, False
+
+    from nonebot_plugin_awmc_helper.core.ext import gamerch
+
+    monkeypatch.setattr(gamerch, "apply_fill", fake_gamerch_fill)
     monkeypatch.setattr(songs_mod, "prerender_templates", fake_prerender)
 
     event = fake_private_message_event_v11(message="重载补充数据", user_id=12345678)
