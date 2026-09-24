@@ -20,12 +20,13 @@ from .table_layout import (
     PLATE_START_Y,
     PLATE_COL_STEP,
     PLATE_ROW_STEP,
+    PLATE_GROUP_GAP,
 )
 from .plate_progress import progress_header
 
 # 完成表网格几何：单一事实来源 table_layout
 COL_STEP = PLATE_COL_STEP  # 横向列距 96
-ROW_STEP = PLATE_ROW_STEP  # 纵向行距 85（紧凑版）
+ROW_STEP = PLATE_ROW_STEP  # 纵向行距 96
 START_X = PLATE_START_X
 START_Y = PLATE_START_Y
 ROW_COUNT = PLATE_COLS
@@ -227,7 +228,7 @@ def draw_plate_table(
                     )
                 else:
                     im.alpha_composite(mark, (x + 4 + 19 * s_idx, y + 63))
-        current_y += rows * ROW_STEP + 30
+        current_y += rows * ROW_STEP + PLATE_GROUP_GAP
 
     # 头部计数与进度条（与进度总览同源组件）
     progress_header(im, dr, qualified_count, len(song_level))
