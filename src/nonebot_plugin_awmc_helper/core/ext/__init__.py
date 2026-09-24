@@ -8,6 +8,8 @@
 每个模块独立客户端、独立 respx 测试；统一超时与异常语义。
 """
 
+from typing import Any
+
 import httpx
 
 from ..http import build_smart_transport
@@ -34,3 +36,17 @@ def get_client() -> httpx.AsyncClient:
             transport=build_smart_transport(),
         )
     return _client
+
+
+async def fetch_json(url: str, *, name: str, timeout: float = 60) -> Any:
+    """GET JSON 公共封装：网络异常包装 ExtNetworkError，非 200 抛 ExtError。
+
+    ``name`` 用于错误文案（如 ``"maimaiinfo all_data.json"``）。
+    """
+    try:
+        resp = await get_client().get(url, timeout=timeout)
+    except httpx.RequestError as e:
+        raise ExtNetworkError(f"{name} 网络异常") from e
+    if resp.status_code != 200:
+        raise ExtError(f"{name} 拉取失败（HTTP {resp.status_code}）")
+    return resp.json()

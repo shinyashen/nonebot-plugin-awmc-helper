@@ -542,15 +542,27 @@ def cn_level_value(history: list[tuple[int, float]], cn_current: int) -> float |
 # ---------------------------------------------------------------------------
 
 
+def _fill_song_basics(state: State, song_id: int, entry) -> store.SongRow:
+    """行级字段「列从空变满」回填（apply_jp/apply_cn 共用）。"""
+    row = state.song(song_id)
+    row.title = row.title or entry.title
+    row.artist = row.artist or entry.artist
+    row.genre = row.genre or entry.genre
+    row.bpm = row.bpm or entry.bpm
+    return row
+
+
+def _fill_utage_fields(target: store.SongChart, chart) -> None:
+    """宴谱 kanji/is_buddy「列从空变满」回填（apply_jp/apply_cn 共用）。"""
+    target.kanji = target.kanji or chart.kanji
+    target.is_buddy = target.is_buddy or chart.is_buddy
+
+
 def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> None:
     """日侧骨架与充实：maimaiinfo（骨架/历史）+ otoge-db（title join 充实）。"""
     unmatched = 0
     for song_id, entry in jp.items():
-        row = state.song(song_id)
-        row.title = row.title or entry.title
-        row.artist = row.artist or entry.artist
-        row.genre = row.genre or entry.genre
-        row.bpm = row.bpm or entry.bpm
+        row = _fill_song_basics(state, song_id, entry)
         otoge_items = _otoge_match(entry, otoge) if otoge else []
         if not row.genre:
             # maimaiinfo 不含分类：日服限定曲的分类从 otoge-db catcode 映射补齐
@@ -577,8 +589,7 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
                     )
                     target.notes_break = chart.notes[4]
                 if kind == "utage":
-                    target.kanji = target.kanji or chart.kanji
-                    target.is_buddy = target.is_buddy or chart.is_buddy
+                    _fill_utage_fields(target, chart)
                 state.set_history(song_id, kind, level_id, chart.history)
                 # otoge 逐谱面 join：宴标题带前缀、与基曲不同，不能用歌级匹配结果
                 chart_items = (
@@ -754,11 +765,7 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
     ]
     cn_current = max(all_versions) if all_versions else state.cn_current_version()
     for song_id, entry in cn.items():
-        row = state.song(song_id)
-        row.title = row.title or entry.title
-        row.artist = row.artist or entry.artist
-        row.genre = row.genre or entry.genre
-        row.bpm = row.bpm or entry.bpm
+        row = _fill_song_basics(state, song_id, entry)
         for kind, charts in entry.charts.items():
             if not charts:
                 continue
@@ -803,8 +810,7 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                     )
                     target.notes_break = chart.notes[4]
                 if kind == "utage":
-                    target.kanji = target.kanji or chart.kanji
-                    target.is_buddy = target.is_buddy or chart.is_buddy
+                    _fill_utage_fields(target, chart)
                     if chart.left is not None and target.notes_left is None:
                         target.notes_left = json.dumps(chart.left)
                         target.notes_right = json.dumps(chart.right or [])
@@ -839,11 +845,7 @@ def _crosscheck_df(
             continue
         group = state.groups.get((song_id, kind))
         from_name = (item.get("basic_info") or {}).get("from")
-        df_version = (
-            divingfish_to_version[from_name].value
-            if from_name in divingfish_to_version
-            else None
-        )
+        df_version = _source_version(from_name)
         if group and group.version_cn and df_version and group.version_cn != df_version:
             state.warn(
                 f"「{entry.title}」{kind} version_cn 两源不一致："
@@ -1034,58 +1036,31 @@ async def rebuild(
 async def _archive_raw(payloads: dict[str, Any]) -> None:
     """源始留档：成功拉取的源逐条重写 ``song_source_raw``（otoge-db 以 title 为键）。"""
     rows: list[store.SongSourceRaw] = []
-    if payloads.get("lxns") is not None:
-        rows += [
-            store.SongSourceRaw(
-                source="lxns",
-                song_id=str(item["id"]),
-                payload=json.dumps(item, ensure_ascii=False),
-            )
-            for item in payloads["lxns"].get("songs", [])
-        ]
-    if payloads.get("divingfish") is not None:
-        rows += [
-            store.SongSourceRaw(
-                source="divingfish",
-                song_id=str(item["id"]),
-                payload=json.dumps(item, ensure_ascii=False),
-            )
-            for item in payloads["divingfish"]
-        ]
-    if payloads.get("maimaiinfo") is not None:
-        rows += [
-            store.SongSourceRaw(
-                source="maimaiinfo",
-                song_id=str(key),
-                payload=json.dumps(item, ensure_ascii=False),
-            )
-            for key, item in payloads["maimaiinfo"].items()
-        ]
-    if payloads.get("dschange") is not None:
-        rows.append(
-            store.SongSourceRaw(
-                source="dschange",
-                song_id="__all__",
-                payload=json.dumps(payloads["dschange"], ensure_ascii=False),
-            )
+
+    def _dump(source: str, song_id: str, payload: Any) -> store.SongSourceRaw:
+        return store.SongSourceRaw(
+            source=source,
+            song_id=song_id,
+            payload=json.dumps(payload, ensure_ascii=False),
         )
-    if payloads.get("otoge_db") is not None:
+
+    if (lxns_doc := payloads.get("lxns")) is not None:
         rows += [
-            store.SongSourceRaw(
-                source="otoge-db",
-                song_id=f"title:{item.get('title', '')}",
-                payload=json.dumps(item, ensure_ascii=False),
-            )
-            for item in payloads["otoge_db"]
+            _dump("lxns", str(item["id"]), item) for item in lxns_doc.get("songs", [])
         ]
-    if payloads.get("otoge_deleted") is not None:
-        rows.append(
-            store.SongSourceRaw(
-                source="otoge-db",
-                song_id="__deleted__",
-                payload=json.dumps(payloads["otoge_deleted"], ensure_ascii=False),
-            )
-        )
+    if (df_doc := payloads.get("divingfish")) is not None:
+        rows += [_dump("divingfish", str(item["id"]), item) for item in df_doc]
+    if (info_doc := payloads.get("maimaiinfo")) is not None:
+        rows += [_dump("maimaiinfo", str(key), item) for key, item in info_doc.items()]
+    if (ds_doc := payloads.get("dschange")) is not None:
+        rows.append(_dump("dschange", "__all__", ds_doc))
+    if (otoge_doc := payloads.get("otoge_db")) is not None:
+        rows += [
+            _dump("otoge-db", f"title:{item.get('title', '')}", item)
+            for item in otoge_doc
+        ]
+    if (deleted_doc := payloads.get("otoge_deleted")) is not None:
+        rows.append(_dump("otoge-db", "__deleted__", deleted_doc))
     async with store.session() as session:
         await session.exec(delete(store.SongSourceRaw))
         # 同名多义（如 otoge-db 的 'Link'×2）会生成重复键：追加序号去重

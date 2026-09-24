@@ -10,21 +10,15 @@
 
 from typing import Any
 
-import httpx
-
-from . import ExtError, ExtNetworkError, get_client
+from . import fetch_json
 
 RAW_BASE = "https://raw.githubusercontent.com/Dale2003/maimaiinfo/main/static"
 
 
 async def _fetch_json(name: str) -> Any:
-    try:
-        resp = await get_client().get(f"{RAW_BASE}/{name}", timeout=120)
-    except httpx.RequestError as e:
-        raise ExtNetworkError(f"maimaiinfo {name} 网络异常") from e
-    if resp.status_code != 200:
-        raise ExtError(f"maimaiinfo {name} 拉取失败（HTTP {resp.status_code}）")
-    return resp.json()
+    return await fetch_json(
+        f"{RAW_BASE}/{name}", name=f"maimaiinfo {name}", timeout=120
+    )
 
 
 async def fetch_all_data() -> dict[str, dict]:

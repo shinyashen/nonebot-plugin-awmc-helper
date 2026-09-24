@@ -21,6 +21,7 @@ from nonebot_plugin_apscheduler import scheduler
 
 from . import store, songdb
 from .client import client, lxns_provider, yuzu_provider
+from .songdb import Scope
 from ..config import plugin_config
 from .provider import AwmcSongProvider, AwmcAliasProvider
 from ..constants import normalize_text, strip_chart_prefix
@@ -274,14 +275,20 @@ class SongService:
         songs = await (await self.ensure_loaded()).get_all()
         return [s for s in songs if include_disabled or not s.disabled]
 
+    async def _songs_of_scope(self, scope: Scope) -> list[Song]:
+        """scope 视图曲目集：CN 排除 disabled；JP 为完整日服视图（缓存）。"""
+        if scope == "jp":
+            return list((await self._jp_songs_map()).values())
+        return await self.get_all()
+
     async def by_id(self, song_id: int) -> Song | None:
         return await (await self.ensure_loaded()).by_id(song_id)
 
-    async def by_title_fuzzy(self, title: str) -> list[Song]:
+    async def by_title_fuzzy(self, title: str, scope: Scope = "cn") -> list[Song]:
         """标题子串匹配（大小写不敏感），按 id 升序。"""
         kw = title.lower()
         return sorted(
-            (s for s in await self.get_all() if kw in s.title.lower()),
+            (s for s in await self._songs_of_scope(scope) if kw in s.title.lower()),
             key=lambda s: s.id,
         )
 
@@ -301,45 +308,24 @@ class SongService:
         return self._jp_view
 
     async def jp_by_title_fuzzy(self, title: str) -> list[Song]:
-        """日服视图标题子串匹配（国服查歌 fallback，大小写不敏感，按 id 升序）。"""
-        jp = await self._jp_songs_map()
-        kw = title.lower()
-        return sorted(
-            (s for s in jp.values() if kw in s.title.lower()),
-            key=lambda s: s.id,
-        )
+        """日服视图标题子串匹配（国服查歌 fallback）。"""
+        return await self.by_title_fuzzy(title, "jp")
 
     async def jp_by_artist(self, artist: str) -> list[Song]:
-        """日服视图曲师查歌（大小写不敏感精确匹配）。"""
-        kw = artist.lower()
-        return [
-            s for s in (await self._jp_songs_map()).values() if s.artist.lower() == kw
-        ]
+        """日服视图曲师查歌。"""
+        return await self.by_artist(artist, "jp")
 
     async def jp_by_bpm(self, minimum: float, maximum: float) -> list[Song]:
         """日服视图 BPM 查歌（闭区间）。"""
-        return [
-            s
-            for s in (await self._jp_songs_map()).values()
-            if s.bpm is not None and minimum <= float(s.bpm) <= maximum
-        ]
+        return await self.by_bpm(minimum, maximum, "jp")
 
     async def jp_by_level_value(self, min_ds: float, max_ds: float) -> list[Song]:
-        """日服视图定数查歌（日服定数口径，任意谱面落在 [min, max] 闭区间）。"""
-        return [
-            s
-            for s in (await self._jp_songs_map()).values()
-            if any(min_ds <= d.level_value <= max_ds for d in s.get_difficulties())
-        ]
+        """日服视图定数查歌（日服定数口径）。"""
+        return await self.by_level_value(min_ds, max_ds, "jp")
 
     async def jp_by_note_designer(self, designer: str) -> list[Song]:
-        """日服视图谱师查歌（任意谱面谱师名匹配，大小写不敏感）。"""
-        kw = designer.lower()
-        return [
-            s
-            for s in (await self._jp_songs_map()).values()
-            if any(d.note_designer.lower() == kw for d in s.get_difficulties())
-        ]
+        """日服视图谱师查歌。"""
+        return await self.by_note_designer(designer, "jp")
 
     async def jp_by_alias_detail(
         self, alias: str
@@ -471,29 +457,37 @@ class SongService:
                 result.append(song)
         return result
 
-    async def by_artist(self, artist: str) -> list[Song]:
-        """曲师查歌（库实现区分大小写，这里归一为大小写不敏感）。"""
+    async def by_artist(self, artist: str, scope: Scope = "cn") -> list[Song]:
+        """曲师查歌（大小写不敏感精确匹配）。"""
         kw = artist.lower()
-        return [s for s in await self.get_all() if s.artist.lower() == kw]
+        return [s for s in await self._songs_of_scope(scope) if s.artist.lower() == kw]
 
-    async def by_bpm(self, minimum: float, maximum: float) -> list[Song]:
-        result = await (await self.ensure_loaded()).by_bpm(int(minimum), int(maximum))
-        return [s for s in result if not s.disabled]
+    async def by_bpm(
+        self, minimum: float, maximum: float, scope: Scope = "cn"
+    ) -> list[Song]:
+        """BPM 查歌（闭区间）。"""
+        return [
+            s
+            for s in await self._songs_of_scope(scope)
+            if s.bpm is not None and minimum <= float(s.bpm) <= maximum
+        ]
 
-    async def by_level_value(self, min_ds: float, max_ds: float) -> list[Song]:
+    async def by_level_value(
+        self, min_ds: float, max_ds: float, scope: Scope = "cn"
+    ) -> list[Song]:
         """定数查歌：任意谱面定数落在 [min, max] 闭区间。"""
         return [
             s
-            for s in await self.get_all()
+            for s in await self._songs_of_scope(scope)
             if any(min_ds <= d.level_value <= max_ds for d in s.get_difficulties())
         ]
 
-    async def by_note_designer(self, designer: str) -> list[Song]:
+    async def by_note_designer(self, designer: str, scope: Scope = "cn") -> list[Song]:
         """谱师查歌（任意谱面谱师名匹配，大小写不敏感）。"""
         kw = designer.lower()
         return [
             s
-            for s in await self.get_all()
+            for s in await self._songs_of_scope(scope)
             if any(d.note_designer.lower() == kw for d in s.get_difficulties())
         ]
 
@@ -614,12 +608,12 @@ _load_task: asyncio.Task | None = None
 
 
 async def jp_songs() -> list[Song]:
-    """JP 视图：规范表日侧字段 → maimai_py 对象（§5.2，后续日服功能的数据入口）。
+    """JP 视图曲目列表（§5.2）。
 
-    与 CN 视图互不干扰（不写 ``songs`` 缓存命名空间）；规范表为空返回 []。
+    经 SongService 的指纹缓存取（与国服查歌的日服 fallback 同一份物化），
+    规范表为空返回 []。
     """
-    state = await songdb.State.load()
-    return songdb.all_songs(state, "jp")
+    return list((await song_service._jp_songs_map()).values())
 
 
 async def _notify_superusers(text: str) -> None:

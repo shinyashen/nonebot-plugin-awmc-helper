@@ -3,7 +3,9 @@
 端点与字段对齐原版 maimaiDX 的 LXNS OAuth2 实现。
 """
 
-from . import ExtError, get_client
+import httpx
+
+from . import ExtError, ExtNetworkError, get_client
 from ...config import plugin_config
 
 LXNS_BASE = "https://maimai.lxns.net"
@@ -22,11 +24,14 @@ async def fetch_song_list(notes: bool = True) -> dict:
         if plugin_config.awmc_lxns_developer_token
         else {}
     )
-    resp = await get_client().get(
-        f"{LXNS_BASE}/api/v0/maimai/song/list?notes={'true' if notes else 'false'}",
-        headers=headers,
-        timeout=60,
-    )
+    try:
+        resp = await get_client().get(
+            f"{LXNS_BASE}/api/v0/maimai/song/list?notes={'true' if notes else 'false'}",
+            headers=headers,
+            timeout=60,
+        )
+    except httpx.RequestError as e:
+        raise ExtNetworkError("落雪曲库列表网络异常") from e
     if resp.status_code != 200:
         raise ExtError(f"落雪曲库列表拉取失败（HTTP {resp.status_code}）")
     data = resp.json()
@@ -71,26 +76,31 @@ def build_authorize_url() -> str:
     return f"{LXNS_BASE}/oauth/authorize?{query}"
 
 
-async def fetch_token(code: str) -> LxnsToken:
-    """授权码 → 个人 token（含 friend_code）。"""
-    resp = await get_client().post(
-        f"{LXNS_BASE}/api/v0/oauth/token",
-        json={
-            "client_id": plugin_config.awmc_lxns_client_id,
-            "client_secret": plugin_config.awmc_lxns_client_secret,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": plugin_config.awmc_lxns_redirect_uri,
-        },
-    )
+async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
+    """POST oauth/token 公共封装（两 grant 同端点同响应解析）。"""
+    resp = await get_client().post(f"{LXNS_BASE}/api/v0/oauth/token", json=payload)
     data = (
         resp.json()
         if resp.headers.get("content-type", "").startswith("application/json")
         else {}
     )
     if resp.status_code != 200 or not data.get("success", True):
-        raise ExtError(str(data.get("message", "落雪授权失败，请确认授权码是否有效")))
+        raise ExtError(str(data.get("message", error_default)))
     return LxnsToken(data.get("data", data))
+
+
+async def fetch_token(code: str) -> LxnsToken:
+    """授权码 → 个人 token（含 friend_code）。"""
+    return await _token_grant(
+        {
+            "client_id": plugin_config.awmc_lxns_client_id,
+            "client_secret": plugin_config.awmc_lxns_client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": plugin_config.awmc_lxns_redirect_uri,
+        },
+        "落雪授权失败，请确认授权码是否有效",
+    )
 
 
 async def refresh_token(refresh_token: str) -> LxnsToken:
@@ -99,23 +109,15 @@ async def refresh_token(refresh_token: str) -> LxnsToken:
     对齐原版 maimaiDX 的自动续期：access_token 过期（401）时调用，
     成功后由调用方落库，用户无感。
     """
-    resp = await get_client().post(
-        f"{LXNS_BASE}/api/v0/oauth/token",
-        json={
+    return await _token_grant(
+        {
             "client_id": plugin_config.awmc_lxns_client_id,
             "client_secret": plugin_config.awmc_lxns_client_secret,
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         },
+        "落雪授权已过期，请重新「绑定落雪」",
     )
-    data = (
-        resp.json()
-        if resp.headers.get("content-type", "").startswith("application/json")
-        else {}
-    )
-    if resp.status_code != 200 or not data.get("success", True):
-        raise ExtError(str(data.get("message", "落雪授权已过期，请重新「绑定落雪」")))
-    return LxnsToken(data.get("data", data))
 
 
 def extract_authorization_code(text: str) -> str | None:
