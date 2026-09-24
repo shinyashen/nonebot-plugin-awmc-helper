@@ -63,14 +63,6 @@ def _plate_icon(kind: str, score):
     return assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((60, 60)), (10, 12)
 
 
-def _plate_background(version: str, kind: str) -> Image.Image | None:
-    name = f"{version}{'極' if kind == '极' else kind}.png"
-    p = assets.static_path() / "mai" / "plate_version" / name
-    if not p.exists():
-        return None
-    return Image.open(p).convert("RGBA")
-
-
 def draw_plate_table(
     version: str,
     kind: str,
@@ -117,7 +109,9 @@ def draw_plate_table(
     dr = ImageDraw.Draw(im)
     progress_bg = assets.pic("progress_bg.png")
     im.alpha_composite(progress_bg, (175, 20))
-    bg = _plate_background(version, kind)
+    # 牌头走 Assets.plate_version（含简→繁转换与缓存；本地手拼文件名
+    # 不做版本字转换，晓/樱/堇/辉/华 及一切「极」牌的繁体文件名永远打不开）
+    bg = assets.plate_version(version, kind)
     if bg is not None:
         im.alpha_composite(bg.resize((1000, 161)), (200, 45))
 
