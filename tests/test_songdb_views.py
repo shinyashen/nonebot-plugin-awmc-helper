@@ -295,7 +295,9 @@ def test_search_prefix_to_type_mapping():
     """前缀 → 卡片主类型映射：dx→DX，标准/标→SD，宴/kanji 不改变卡片。"""
     from maimai_py import SongType
 
-    from nonebot_plugin_awmc_helper.plugins.music_query import _PREFIX_TO_TYPE
+    from nonebot_plugin_awmc_helper.constants import (
+        CHART_TYPE_BY_PREFIX as _PREFIX_TO_TYPE,
+    )
 
     assert _PREFIX_TO_TYPE["dx"] == SongType.DX
     assert _PREFIX_TO_TYPE["标准"] == SongType.STANDARD

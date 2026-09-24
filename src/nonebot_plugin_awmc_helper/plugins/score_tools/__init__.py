@@ -19,7 +19,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.ext import divingfish as df_ext
 from ...constants import LEVEL_INDEX_ZH, COLOR_TO_LEVEL_INDEX
-from ...core.calc import score_line, rise_recommend
+from ...core.calc import score_line, min_ds_of_ra, rise_recommend
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import SongType

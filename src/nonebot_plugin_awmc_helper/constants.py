@@ -6,7 +6,7 @@ maimai-py 的 `Genre` 枚举值是日文分类，库未公开导出中文映射�
 
 import re
 
-from maimai_py import Genre, Version, RateType, LevelIndex
+from maimai_py import Genre, Version, RateType, SongType, LevelIndex
 from maimai_py.enums import name_to_genre as _LIB_NAME_TO_GENRE
 from maimai_py.utils.coefficient import SCORE_COEFFICIENT_TABLE
 
@@ -200,6 +200,14 @@ DX_VERSION_CODES: list[int] = [
     26500,  # maimai でらっくす CiRCLE PLUS
 ]
 
+
+# 谱面类型前缀 → 卡片主类型（键与 strip_chart_prefix 的静态前缀同源；
+# 宴/汉字前缀无普通谱偏好，由调用方单独分支；命中词大小写归一后查表）
+CHART_TYPE_BY_PREFIX: dict[str, SongType] = {
+    "dx": SongType.DX,
+    "标准": SongType.STANDARD,
+    "标": SongType.STANDARD,
+}
 
 # 渲染主题（素材包 pic/<theme>/ 子目录名；bind 指令 0/1 映射）
 THEMES = ("prism_plus", "circle")

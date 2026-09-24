@@ -22,6 +22,7 @@ from maimai_py import Song, SongType, SongDifficulty
 
 from .fonts import FONT_NUM, FONT_RODIN, font
 from .tools import (
+    TITLE_BLUE,
     credit_text,
     image_to_bytes,
     generate_prism_bg,
@@ -50,7 +51,7 @@ from .table_layout import (
     slot_level_of,
 )
 
-FONT_BLUE = (114, 188, 254, 255)
+FONT_BLUE = TITLE_BLUE
 _LEVEL_INDEXES = ("basic", "advanced", "expert", "master", "remaster")
 _DIFF_TEXT_COLOR = [
     (255, 255, 255, 255),

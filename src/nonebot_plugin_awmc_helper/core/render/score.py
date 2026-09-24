@@ -11,6 +11,7 @@ from maimai_py.models import SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
+    TEXT_BLUE,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     credit_text,
@@ -23,7 +24,7 @@ from .nb_chart import truncate_by_width
 from ...constants import RATE_FILE, chart_display_id
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 同源，tools 单源）
-_DEFAULT_TEXT_COLOR = (124, 129, 255, 255)
+_DEFAULT_TEXT_COLOR = TEXT_BLUE
 
 _LEVEL_INDEXES = ("basic", "advanced", "expert", "master", "remaster")
 """难度序 → 素材名后缀（rise_score_*/b50_score_*）。"""

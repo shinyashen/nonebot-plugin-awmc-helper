@@ -34,6 +34,7 @@ from maimai_py import (
 from ..http import build_smart_transport
 from .fonts import FONT_HAN, FONT_NUM, font
 from .tools import (
+    TEXT_BLUE,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     char_width,
@@ -87,7 +88,7 @@ RA_STAR_NUMS = [1, 2, 1, 2, 1, 2, 3, 4, 1, 2, 3, 4]
 DX_STAR_FILE = "UI_GAM_Gauge_DXScoreIcon_0{num}.png"
 
 FOOTER_COLORS = {
-    "prism_plus": (124, 129, 255, 255),
+    "prism_plus": TEXT_BLUE,
     "circle": (249, 62, 172, 255),
 }
 

@@ -12,7 +12,7 @@ from maimai_py import Song, Genre, SongType, ScoreExtend
 
 from ..calc import dx_star_ratio
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
-from .tools import image_to_bytes, truncate_by_width
+from .tools import TEXT_BLUE, image_to_bytes, truncate_by_width
 from .assets import assets
 from ...config import NICKNAME
 from .nb_chart import major_diffs, version_image, fit_version_logo
@@ -34,7 +34,7 @@ _GENRE_FILE: dict[Genre, str] = {
     Genre.オンゲキCHUNITHM: "info_ongeki.png",
 }
 
-_TEXT_COLOR = (124, 129, 255, 255)
+_TEXT_COLOR = TEXT_BLUE
 _CIRCLE_COLOR = (249, 62, 172, 255)
 
 

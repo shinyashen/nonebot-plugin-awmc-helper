@@ -19,7 +19,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from ...constants import display_song_id
+from ...constants import CHART_TYPE_BY_PREFIX, display_song_id
 from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.types import Song, SongType, SongDifficultyUtage
 from ...core.utils import handle_errors
@@ -35,11 +35,7 @@ def _reply(text: str) -> UniMessage:
 
 
 # 谱面前缀 → 卡片主类型（宴 前缀不改变卡片，宴曲本就走宴谱卡分支）
-_PREFIX_TO_TYPE = {
-    "dx": SongType.DX,
-    "标准": SongType.STANDARD,
-    "标": SongType.STANDARD,
-}
+# 谱面类型前缀 → 卡片主类型的映射单源在 constants.CHART_TYPE_BY_PREFIX
 
 
 def _type_entries(
@@ -332,21 +328,14 @@ async def _vote_hint(name: str) -> str | None:
     return msg
 
 
-@search_alias_song.handle()
-@handle_errors()
-async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
-    binding = await _binding_of(session)
-    name = match.group(1).strip()
-    page = int(match.group(2) or 1)
+async def _expand_alias_entries(
+    name: str,
+) -> tuple[list[Song], list, tuple[str, str, str] | None]:
+    """别名解析 → 谱面类型条目（查询链 + 前缀偏好过滤 + 宴重查）。
 
-    error_msg = (
-        f"未找到别名为「{name}」的歌曲\n"
-        "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
-        "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
-    )
-    # 别名（柚子 + 落雪 + 本地，去前缀合并）：展开为谱面类型条目（NB 原版
-    # 双条目语义）——同根 id 的标准/DX/宴条目共享别名，搜索应全部列出供选择；
-    # 带谱面前缀（dx/标准/标）时自动定位到对应类型条目，无前缀不设偏好
+    查询链：国服别名 → 日服别名 → 日服标题兜底（Q32）；带谱面前缀（dx/
+    标准/标/宴）时定位到对应类型条目。
+    """
     songs, strip_info = await song_service.by_alias_detail(name)
     if not songs:
         # 国服视图未命中 → 日服视图 fallback（Q32：日服作为国服查歌的兜底）
@@ -356,7 +345,8 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         # 日服标题兜底（国服侧标题按设计走「查歌」指令）——日服视图含国服
         # 也有的曲（标题子串命中，如实测 ROND），混合列表按逐曲标注区分
         songs = await song_service.jp_by_title_fuzzy(name)
-    prefer_type = _PREFIX_TO_TYPE.get(strip_info[1]) if strip_info else None
+    hit_word = strip_info[1].lower() if strip_info else None
+    prefer_type = CHART_TYPE_BY_PREFIX.get(hit_word) if hit_word else None
     entries = _type_entries(songs)
     if strip_info:
         if prefer_type is not None:
@@ -373,13 +363,35 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 ut_songs = await song_service.utage_by_keyword(strip_info[0])
                 if ut_songs:
                     entries = [e for e in _type_entries(ut_songs) if e[2] is None]
-    # 逐条目判定日服限定：国服也有的曲回取国服对象（定数口径/封面/B50 一致），
-    # 仅日服曲保留日服对象（日服卡渲染）
+    return songs, entries, strip_info
+
+
+def _entry_cn_flags(
+    entries: list,
+    cn_songs: dict[int, Song | None],
+) -> list[bool]:
+    """逐条目日服限定标注：国服也有的曲回取国服对象（定数口径/封面/B50 一致）。"""
+    return [cn_songs[s.id] is None for _, s, _ in entries]
+
+
+@search_alias_song.handle()
+@handle_errors()
+async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
+    binding = await _binding_of(session)
+    name = match.group(1).strip()
+    page = int(match.group(2) or 1)
+
+    error_msg = (
+        f"未找到别名为「{name}」的歌曲\n"
+        "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
+        "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
+    )
+    _songs, entries, _strip_info = await _expand_alias_entries(name)
     # SD/DX 条目同根曲共用一次查询：先去重再并发（原列表推导逐条串行且重复查）
     _unique_ids = {s.id for _, s, _ in entries}
     _hits = await asyncio.gather(*(song_service.by_id(i) for i in _unique_ids))
     cn_songs = dict(zip(_unique_ids, _hits))
-    flags = [cn_songs[s.id] is None for _, s, _ in entries]
+    flags = _entry_cn_flags(entries, cn_songs)
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
         jp = flags[0]

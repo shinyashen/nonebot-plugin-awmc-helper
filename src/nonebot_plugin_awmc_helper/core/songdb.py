@@ -765,7 +765,7 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
     ]
     cn_current = max(all_versions) if all_versions else state.cn_current_version()
     for song_id, entry in cn.items():
-        row = _fill_song_basics(state, song_id, entry)
+        _fill_song_basics(state, song_id, entry)
         for kind, charts in entry.charts.items():
             if not charts:
                 continue
@@ -1692,154 +1692,170 @@ def _merge_current_level(
     state.set_history(song_id, kind, level_id, history)
 
 
-async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
-    """外部标准 JSON 合并进主表：**只允许日服侧**，写 ``version_cn`` 忽略并告警。
+def _doc_anchor_version(state: State, doc: dict) -> int | None:
+    """锚定版本取「状态已有 ∨ 本文档最大」——与曲处理顺序无关。"""
+    return max(
+        (
+            v
+            for v in [
+                _jp_current_version(state),
+                *[
+                    sheet.get("version")
+                    for _k2, s2 in doc.items()
+                    if isinstance(s2, dict)
+                    for sheet in (s2.get("sheets") or {}).values()
+                    if isinstance(sheet, dict) and sheet.get("version")
+                ],
+            ]
+            if v is not None
+        ),
+        default=None,
+    )
 
-    主表缺失的曲（骨架外新曲、maimaiinfo 滞后的新版曲等，文档自带 id）直接
-    创建（仅日侧行，version_cn 恒 NULL）；单元素 sd/dx ``level`` 按「当前定数」
-    语义合并（:func:`_merge_current_level`），多元素列表按 01 文档线格式对位。
+
+def _merge_chart_content(
+    state: State,
+    song_id: int,
+    kind: str,
+    level_id: int,
+    content: dict,
+    group: store.SongSheetGroup,
+    *,
+    mode: str,
+    anchor: int | None,
+) -> None:
+    """单个谱面条目合并：designer/notes/buddy/宴字段/定数历史。"""
+    target = state.chart(song_id, kind, level_id)
+    if content.get("designer") and (mode == "override" or not target.designer):
+        target.designer = content["designer"]
+    # 01 文档线格式：notes 为 [Tap, Hold, Slide, Touch, Break]
+    notes = content.get("notes") or []
+    if (
+        isinstance(notes, list)
+        and len(notes) == 5
+        and (mode == "override" or not target.notes_tap)
+    ):
+        target.notes_tap = int(notes[0])
+        target.notes_hold = int(notes[1])
+        target.notes_slide = int(notes[2])
+        target.notes_touch = int(notes[3])
+        target.notes_break = int(notes[4])
+    # 01 文档双人谱口径：宴 buddy 左右手物量（JSON 存 notes_left/right）
+    for key in ("notes_left", "notes_right"):
+        val = content.get(key)
+        if (
+            isinstance(val, list)
+            and len(val) == 5
+            and (mode == "override" or getattr(target, key) is None)
+        ):
+            setattr(target, key, json.dumps([int(v) for v in val]))
+    if kind == "utage":
+        if content.get("is_buddy") is not None and (
+            mode == "override" or not target.is_buddy
+        ):
+            target.is_buddy = bool(content["is_buddy"])
+        for field in ("kanji", "comment"):
+            if content.get(field) and (
+                mode == "override" or not getattr(target, field)
+            ):
+                setattr(target, field, content[field])
+    # 01 文档线格式：level 为扁平列表（sd/dx 逐版本；宴单元素标级浮点）
+    flat = content.get("level") or []
+    if not flat:
+        return
+    debut = group.version
+    if kind == "utage":
+        points = [(debut, float(flat[0]))] if debut is not None else []
+        if points and (
+            mode == "override" or not state.history_of(song_id, kind, level_id)
+        ):
+            state.set_history(song_id, kind, level_id, points)
+    elif len(flat) == 1:
+        # 单元素 = 快照源的「当前定数」（§7.5-C 语义）
+        if mode == "fill" and state.history_of(song_id, kind, level_id):
+            return  # fill 不动已有历史
+        _merge_current_level(
+            state,
+            song_id,
+            kind,
+            level_id,
+            float(flat[0]),
+            debut,
+            anchor,
+        )
+    else:
+        points = _points_from_flat([float(v) for v in flat], debut)
+        if points and (
+            mode == "override" or not state.history_of(song_id, kind, level_id)
+        ):
+            state.set_history(song_id, kind, level_id, points)
+
+
+def _merge_song_doc(
+    state: State,
+    name: str,
+    mode: str,
+    song_id: int,
+    song_doc: dict,
+    anchor: int | None,
+) -> tuple[int, int]:
+    """单曲外部文档合并（返回 (applied, created)）。"""
+    applied = 0
+    created = 0
+    row = state.songs.get(song_id)
+    if row is None:
+        title = song_doc.get("title") or ""
+        if not title:
+            return 0, 0  # 连标题都缺失的条目无法建曲
+        row = state.song(song_id)
+        created = 1
+        logger.info(
+            f"songdb: 外部源 {name} 新增曲 id={song_id}「{title}」"
+            "（日侧行，version_cn=NULL，骨架待常规管线补全）"
+        )
+    for field_name in ("title", "artist", "genre", "bpm", "image_url"):
+        if field_name in song_doc and (
+            mode == "override" or not getattr(row, field_name)
+        ):
+            setattr(row, field_name, song_doc[field_name])
+    for kind, sheet in (song_doc.get("sheets") or {}).items():
+        if sheet.get("version_cn") is not None:
+            logger.warning(
+                f"songdb: 外部源 {name} 试图写 version_cn（id={song_id}），"
+                "已忽略（国服唯二源）"
+            )
+        group = state.group(song_id, kind)
+        if sheet.get("version") is not None and (
+            mode == "override" or group.version is None
+        ):
+            group.version = sheet["version"]
+        if sheet.get("date") is not None and (mode == "override" or group.date is None):
+            group.date = sheet["date"]
+        for content in sheet.get("contents") or []:
+            level_id = content.get("level_id")
+            if level_id is None:
+                continue
+            _merge_chart_content(
+                state,
+                song_id,
+                kind,
+                level_id,
+                content,
+                group,
+                mode=mode,
+                anchor=anchor,
+            )
+            applied += 1
+    return applied, created
+
+
+async def _archive_extra_docs(docs: list[tuple[str, str, dict]]) -> None:
+    """外部片段归档（source=extra:<名称>；同键多 mode 以 mode 后缀区分）。
+
+    重放前先清同 origin 旧行。
     """
     from pathlib import Path
 
-    state = await State.load()
-    applied = 0
-    created = 0
-    for name, mode, doc in docs:
-        # 锚定版本取「状态已有 ∨ 本文档最大」——与曲处理顺序无关
-        anchor = max(
-            (
-                v
-                for v in [
-                    _jp_current_version(state),
-                    *[
-                        sheet.get("version")
-                        for _k2, s2 in doc.items()
-                        if isinstance(s2, dict)
-                        for sheet in (s2.get("sheets") or {}).values()
-                        if isinstance(sheet, dict) and sheet.get("version")
-                    ],
-                ]
-                if v is not None
-            ),
-            default=None,
-        )
-        for song_id_str, song_doc in doc.items():
-            if not song_id_str.isdigit():
-                logger.warning(f"songdb: 外部源 {name} 非法 id {song_id_str!r}，跳过")
-                continue
-            song_id = int(song_id_str)
-            if not isinstance(song_doc, dict):
-                logger.warning(f"songdb: 外部源 {name} id={song_id} 条目非对象，跳过")
-                continue
-            row = state.songs.get(song_id)
-            if row is None:
-                title = song_doc.get("title") or ""
-                if not title:
-                    continue  # 连标题都缺失的条目无法建曲
-                row = state.song(song_id)
-                created += 1
-                logger.info(
-                    f"songdb: 外部源 {name} 新增曲 id={song_id}「{title}」"
-                    "（日侧行，version_cn=NULL，骨架待常规管线补全）"
-                )
-            for field_name in ("title", "artist", "genre", "bpm", "image_url"):
-                if field_name in song_doc and (
-                    mode == "override" or not getattr(row, field_name)
-                ):
-                    setattr(row, field_name, song_doc[field_name])
-            for kind, sheet in (song_doc.get("sheets") or {}).items():
-                if sheet.get("version_cn") is not None:
-                    logger.warning(
-                        f"songdb: 外部源 {name} 试图写 version_cn（id={song_id}），"
-                        "已忽略（国服唯二源）"
-                    )
-                group = state.group(song_id, kind)
-                if sheet.get("version") is not None and (
-                    mode == "override" or group.version is None
-                ):
-                    group.version = sheet["version"]
-                if sheet.get("date") is not None and (
-                    mode == "override" or group.date is None
-                ):
-                    group.date = sheet["date"]
-                for content in sheet.get("contents") or []:
-                    level_id = content.get("level_id")
-                    if level_id is None:
-                        continue
-                    target = state.chart(song_id, kind, level_id)
-                    if content.get("designer") and (
-                        mode == "override" or not target.designer
-                    ):
-                        target.designer = content["designer"]
-                    # 01 文档线格式：notes 为 [Tap, Hold, Slide, Touch, Break]
-                    notes = content.get("notes") or []
-                    if (
-                        isinstance(notes, list)
-                        and len(notes) == 5
-                        and (mode == "override" or not target.notes_tap)
-                    ):
-                        target.notes_tap = int(notes[0])
-                        target.notes_hold = int(notes[1])
-                        target.notes_slide = int(notes[2])
-                        target.notes_touch = int(notes[3])
-                        target.notes_break = int(notes[4])
-                    # 01 文档双人谱口径：宴 buddy 左右手物量（JSON 存 notes_left/right）
-                    for key in ("notes_left", "notes_right"):
-                        val = content.get(key)
-                        if (
-                            isinstance(val, list)
-                            and len(val) == 5
-                            and (mode == "override" or getattr(target, key) is None)
-                        ):
-                            setattr(target, key, json.dumps([int(v) for v in val]))
-                    if kind == "utage":
-                        if content.get("is_buddy") is not None and (
-                            mode == "override" or not target.is_buddy
-                        ):
-                            target.is_buddy = bool(content["is_buddy"])
-                        for field in ("kanji", "comment"):
-                            if content.get(field) and (
-                                mode == "override" or not getattr(target, field)
-                            ):
-                                setattr(target, field, content[field])
-                    # 01 文档线格式：level 为扁平列表（sd/dx 逐版本；宴单元素标级浮点）
-                    flat = content.get("level") or []
-                    if flat:
-                        debut = group.version
-                        if kind == "utage":
-                            points = (
-                                [(debut, float(flat[0]))] if debut is not None else []
-                            )
-                            if points and (
-                                mode == "override"
-                                or not state.history_of(song_id, kind, level_id)
-                            ):
-                                state.set_history(song_id, kind, level_id, points)
-                        elif len(flat) == 1:
-                            # 单元素 = 快照源的「当前定数」（§7.5-C 语义）
-                            if mode == "fill" and state.history_of(
-                                song_id, kind, level_id
-                            ):
-                                pass  # fill 不动已有历史
-                            else:
-                                _merge_current_level(
-                                    state,
-                                    song_id,
-                                    kind,
-                                    level_id,
-                                    float(flat[0]),
-                                    debut,
-                                    anchor,
-                                )
-                        else:
-                            points = _points_from_flat([float(v) for v in flat], debut)
-                            if points and (
-                                mode == "override"
-                                or not state.history_of(song_id, kind, level_id)
-                            ):
-                                state.set_history(song_id, kind, level_id, points)
-                    applied += 1
-    # 外部片段归档（source=extra:<名称>；同键多 mode 以 mode 后缀区分，重放先清旧行）
     origins = {
         f"extra:{Path(name).name if not name.startswith('http') else name}"
         for name, _m, _d in docs
@@ -1861,6 +1877,35 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
                 )
             )
         await session.commit()
+
+
+async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
+    """外部标准 JSON 合并进主表：**只允许日服侧**，写 ``version_cn`` 忽略并告警。
+
+    主表缺失的曲（骨架外新曲、maimaiinfo 滞后的新版曲等，文档自带 id）直接
+    创建（仅日侧行，version_cn 恒 NULL）；单元素 sd/dx ``level`` 按「当前定数」
+    语义合并（:func:`_merge_current_level`），多元素列表按 01 文档线格式对位。
+    """
+
+    state = await State.load()
+    applied = 0
+    created = 0
+    for name, mode, doc in docs:
+        anchor = _doc_anchor_version(state, doc)
+        for song_id_str, song_doc in doc.items():
+            if not song_id_str.isdigit():
+                logger.warning(f"songdb: 外部源 {name} 非法 id {song_id_str!r}，跳过")
+                continue
+            song_id = int(song_id_str)
+            if not isinstance(song_doc, dict):
+                logger.warning(f"songdb: 外部源 {name} id={song_id} 条目非对象，跳过")
+                continue
+            song_applied, song_created = _merge_song_doc(
+                state, name, mode, song_id, song_doc, anchor
+            )
+            applied += song_applied
+            created += song_created
+    await _archive_extra_docs(docs)
     if applied or created:
         await state.save()
     # 外部源直写主表不经过 rebuild，指纹必须在此同步，否则日服视图缓存失效键不变

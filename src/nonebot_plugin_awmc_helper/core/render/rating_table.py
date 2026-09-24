@@ -11,6 +11,7 @@ from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_NUM, FONT_RODIN, font
+from .tools import TEXT_BLUE
 from .assets import assets
 from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
 from .table_layout import (
@@ -168,7 +169,7 @@ def draw_rating_table(
         (394, 238),
         f"{stats.data['clear']}/{total_count}",
         font=font(30, FONT_NUM),
-        fill=(124, 129, 255, 255),
+        fill=TEXT_BLUE,
         anchor="mm",
         stroke_width=5,
         stroke_fill=(255, 255, 255, 255),
@@ -182,7 +183,7 @@ def draw_rating_table(
             (x, y),
             str(stats.data[key]),
             font=font(30, FONT_NUM),
-            fill=(124, 129, 255, 255),
+            fill=TEXT_BLUE,
             anchor="mm",
             stroke_width=2,
             stroke_fill=(255, 255, 255, 255),

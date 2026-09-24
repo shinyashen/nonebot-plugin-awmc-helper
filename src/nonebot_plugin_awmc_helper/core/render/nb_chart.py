@@ -11,7 +11,7 @@ from PIL import Image
 from maimai_py import Song, Version, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_RODIN, font
-from .tools import image_to_bytes
+from .tools import TEXT_BLUE, image_to_bytes
 from .assets import assets
 from ...config import NICKNAME
 from ...constants import (
@@ -252,7 +252,7 @@ def song_chart_info(
     mr = ImageDraw.Draw(im)
     f_han = font(24, FONT_HAN)
     f_rodin = font(28, FONT_RODIN)
-    text_color = (249, 62, 172, 255) if theme == "circle" else (124, 129, 255, 255)
+    text_color = (249, 62, 172, 255) if theme == "circle" else TEXT_BLUE
 
     base = assets.static_path() / "mai" / "pic"
     im.alpha_composite(

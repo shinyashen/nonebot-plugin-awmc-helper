@@ -18,8 +18,7 @@ from nonebot.rule import Rule
 from nonebot.params import RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Bot, Event
-from nonebot.permission import SUPERUSER
-from nonebot_plugin_uninfo import ADMIN, Session, SceneType, UniSession
+from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import store

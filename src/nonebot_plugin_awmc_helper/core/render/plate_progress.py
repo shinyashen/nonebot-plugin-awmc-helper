@@ -11,6 +11,8 @@ from PIL import Image, ImageDraw
 
 from .fonts import FONT_NUM, FONT_RODIN, font
 from .tools import (
+    TEXT_BLUE,
+    TITLE_BLUE,
     credit_text,
     image_to_bytes,
     generate_prism_bg,
@@ -20,7 +22,6 @@ from .assets import assets
 
 # 难度英文名（对齐 NB DIFFS，BASIC..ReMASTER）
 _DIFF_NAMES = ["Basic", "Advanced", "Expert", "Master", "Re:Master"]
-_TEXT_BLUE = (114, 188, 254, 255)
 _START_X, _START_Y, _GAP = 84, 455, 96
 
 
@@ -43,7 +44,7 @@ def progress_header(
         (700, 240),
         text,
         font=font(30, FONT_RODIN),
-        fill=(124, 129, 255, 255),
+        fill=TEXT_BLUE,
         anchor="mm",
         stroke_width=3,
         stroke_fill=(255, 255, 255, 255),
@@ -52,7 +53,7 @@ def progress_header(
         (1190, 240),
         f"{round(progress * 100, 2)}%",
         font=font(30, FONT_RODIN),
-        fill=(124, 129, 255, 255),
+        fill=TEXT_BLUE,
         anchor="rm",
         stroke_width=3,
         stroke_fill=(255, 255, 255, 255),
@@ -103,7 +104,7 @@ def plate_progress_bytes(
         group_progress = cleared / total if total else 0
         _progress_bar(im, start_y - 79, group_progress)
         g_text = "COMPLETED!!!" if cleared == total else f"{cleared}/{total}"
-        color = (124, 129, 255, 255)
+        color = TEXT_BLUE
         dr.text(
             (220, start_y - 57),
             _DIFF_NAMES[li],
@@ -145,7 +146,7 @@ def plate_progress_bytes(
                     (x, y + 35),
                     f"余「{len(items[num:])}」\n个未完成",
                     font=font(20, FONT_RODIN),
-                    fill=(124, 129, 255, 255),
+                    fill=TEXT_BLUE,
                     anchor="lm",
                 )
                 break
@@ -164,7 +165,7 @@ def plate_progress_bytes(
         (700, height - 75),
         credit_text(service),
         font=font(22, FONT_RODIN),
-        fill=_TEXT_BLUE,
+        fill=TITLE_BLUE,
         anchor="mm",
     )
     return image_to_bytes(im)

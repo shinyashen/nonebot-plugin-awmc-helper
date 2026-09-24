@@ -10,12 +10,25 @@ from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_RODIN, font
+from .tools import TEXT_BLUE, ID_TEXT_COLORS
 from .assets import assets
 from ..plates import major_type_of_plate
 from ...constants import RATE_FILE
+from .table_layout import (
+    PLATE_COLS,
+    PLATE_START_X,
+    PLATE_START_Y,
+    PLATE_GRID_STEP,
+)
 from .plate_progress import progress_header
 
-GRID_STEP, START_X, START_Y, ROW_COUNT = 96, 180, 490, 12
+# 完成表网格几何：单一事实来源 table_layout
+GRID_STEP, START_X, START_Y, ROW_COUNT = (
+    PLATE_GRID_STEP,
+    PLATE_START_X,
+    PLATE_START_Y,
+    PLATE_COLS,
+)
 
 
 def _qualified(kind: str, score) -> bool:
@@ -156,13 +169,6 @@ def draw_plate_table(
     stats_start_y = 300
     stats_gap_x = 253
     stats_start_x = 320
-    id_colors = [
-        (129, 217, 85, 255),
-        (245, 189, 21, 255),
-        (255, 129, 141, 255),
-        (159, 81, 220, 255),
-        (138, 0, 226, 255),
-    ]
     for li in range(slot_num):
         x = stats_start_x + li * stats_gap_x
         count, total = slot_counts[li], slot_total[li]
@@ -176,7 +182,7 @@ def draw_plate_table(
             (x, stats_start_y),
             str(count),
             font=font(40, FONT_RODIN),
-            fill=id_colors[li],
+            fill=ID_TEXT_COLORS[li],
             anchor="mm",
             stroke_width=4,
             stroke_fill=(255, 255, 255, 255),
@@ -185,7 +191,7 @@ def draw_plate_table(
             (x + 115, stats_start_y + 20),
             f"/{total}",
             font=font(14, FONT_RODIN),
-            fill=id_colors[li],
+            fill=ID_TEXT_COLORS[li],
             anchor="rd",
             stroke_width=3,
             stroke_fill=(255, 255, 255, 255),
@@ -194,7 +200,7 @@ def draw_plate_table(
             (x + 115, 343),
             f"{round(group_progress * 100, 2)}%",
             font=font(20, FONT_RODIN),
-            fill=(124, 129, 255, 255),
+            fill=TEXT_BLUE,
             anchor="rm",
             stroke_width=2,
             stroke_fill=(255, 255, 255, 255),
