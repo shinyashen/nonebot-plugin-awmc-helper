@@ -149,7 +149,8 @@ SOURCE_NAME_TO_VERSION: dict[str, int] = {
     "maimai DX PRiSM PLUS": 25500,
     "maimai DX CiRCLE": 26000,
     "maimai DX CiRCLE PLUS": 26500,
-    # —— all_data `from` 系（divingfish_to_version 缺 PLUS 各版，按枚举补全）——
+    # —— all_data `from` 系（maimaiinfo 命名域含 PLUS，按枚举本地补全；
+    #    水鱼 from 域不含——国服 DX 时代 PLUS 不作独立版本，库表不收是有意为之）——
     "maimai": 10000,
     "maimai PLUS": 11000,
     "maimai GreeN": 12000,

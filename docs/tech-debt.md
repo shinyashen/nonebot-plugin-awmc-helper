@@ -7,15 +7,17 @@ core/render/plugins 死代码清理、maimai_py fork 能力对齐（MAGiCAL、�
 
 本文记录**剩余**待办，按优先级分组；修复后请删除对应条目。行号会漂移，定位以符号名为准。
 
-## 一、上游 maimai.py 待办（fork 尚未包含，含库侧提请）
+## 一、上游 maimai.py
 
-| 项 | 说明 | 本仓受益 |
-|---|---|---|
-| `RateType._from_achievement` 转正 | 私有 API；core/render 4 处调用（calc.rate_of、render/score._rate_file_of、rating_table._rate_only、plate_table_draw._plate_icon） | 消除私有 API 依赖 |
-| `name_to_genre` 公开导出 | 现为 `@private`，constants.py 已在用 | 用得安心 |
-| `SongType._from_id` 公开 | raw id 形状解析；songs.prefer_type_from_raw_id 等 4 处本地实现可收敛 | 删 4 处重复 |
-| `divingfish_to_version` 补 PLUS 各版 | 现缺 Plus 各版；constants.SOURCE_NAME_TO_VERSION 的 all_data 系一半可删 | SOURCE_NAME_TO_VERSION 减半 |
-| （可选）枚举→版本官方显示名 | VERSION_TO_ZH / JP_VERSION_IMAGE 类表社区反复重写 | 视取舍 |
+**无待办**（2026-09-24 与维护者确认，撤销此前审查报告中的全部库侧提请）：
+
+- 私有 API（`RateType._from_achievement`、`name_to_genre`、`plate_aliases`、
+  `plate_to_version` 等）**直接使用即可**——库维护者即本插件作者，下划线名在两侧
+  同步演进，无转正/导出的必要；
+- `divingfish_to_version` **不应**补 DX 时代 PLUS 各版：该表键域镜像国服（水鱼）
+  `from` 字段的实际取值，而国服 DX 时代 PLUS 不作独立版本（`plate_to_version`
+  CN 表熊/华同码即同一口径）。maimaiinfo all_data 命名域里的 PLUS 名由本地
+  `SOURCE_NAME_TO_VERSION` 承接，各自归位；
 
 ## 二、P1 功能缺陷
 
