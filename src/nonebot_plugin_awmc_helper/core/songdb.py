@@ -428,7 +428,7 @@ class State:
         logger.warning(f"songdb: {message}")
 
     def charts_of_song(self, song_id: int) -> dict[tuple[str, int], store.SongChart]:
-        """单曲的全部谱面行（整库物化场景请用 :func:`_index_charts` 避免重复扫描）。"""
+        """单曲的全部谱面行（整库物化请直接遍历 self.charts，避免重复线性扫描）。"""
         return {
             (kind, level_id): row
             for (sid, kind, level_id), row in self.charts.items()
@@ -1420,12 +1420,6 @@ async def is_empty() -> bool:
         return (await session.exec(select(store.SongRow))).first() is None
 
 
-def fingerprint(state: State) -> str:
-    """规范表内容指纹（自定义 provider ``_hash`` 用；数据变更即自动重建缓存）。"""
-    raw = json.dumps(standard_json(state), ensure_ascii=False, sort_keys=True)
-    return hashlib.md5(raw.encode()).hexdigest()
-
-
 # ---------------------------------------------------------------------------
 # 取数编排（ext 直连，不碰 MaimaiClient）与国服更新检测
 # ---------------------------------------------------------------------------
@@ -1638,8 +1632,6 @@ async def apply_external_sources(
     返回 {sources, applied, changed}；内容哈希记 kv_cache，变化才写库。
     ``preloaded`` 传入已读取的文档（refresh_all 管线复用，避免重复读取）。
     """
-    import hashlib as _hashlib
-
     from ..config import plugin_config
 
     specs = plugin_config.awmc_extra_song_sources
@@ -1647,7 +1639,7 @@ async def apply_external_sources(
     if not specs:
         return summary
     docs = preloaded if preloaded is not None else await _load_extra_docs()
-    digest = _hashlib.md5(
+    digest = hashlib.md5(
         json.dumps(
             [(m, d) for _, m, d in docs], ensure_ascii=False, sort_keys=True
         ).encode()

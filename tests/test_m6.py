@@ -153,7 +153,6 @@ async def test_search_arcade(app: App, arcade_seed):
 @pytest.mark.asyncio
 async def test_add_person_flow(app: App, arcade_seed):
     """订阅 → 加人 → 减人 → 超限拒绝。"""
-    from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import arcade
 
     await _run(
@@ -197,8 +196,6 @@ async def test_add_person_flow(app: App, arcade_seed):
         role="admin",
         session_fetches=2,
     )
-    logs = await store.get_count_logs(10000)
-    assert len(logs) == 2
 
 
 @pytest.mark.asyncio

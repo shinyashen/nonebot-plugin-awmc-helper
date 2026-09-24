@@ -176,14 +176,16 @@ async def test_sse_runner_pushes_apply(yuzu_mock, yuzu_ext):
     )
 
     received: list[AliasPush] = []
+    holder: dict[str, asyncio.Task] = {}
 
     async def on_apply(push: AliasPush) -> None:
         received.append(push)
-        yuzu_ext.stop_alias_push()  # 收到后结束任务
+        holder["task"].cancel()  # 收到后结束任务
 
     yuzu_ext.start_alias_push(on_apply)
     task = yuzu_ext._push_task
     assert task is not None
+    holder["task"] = task
     try:
         await asyncio.wait_for(asyncio.shield(task), timeout=5)
     except (asyncio.TimeoutError, asyncio.CancelledError):

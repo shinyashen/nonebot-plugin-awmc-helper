@@ -520,12 +520,6 @@ async def kv_set(key: str, payload: Any) -> None:
         await session.commit()
 
 
-async def kv_updated_at(key: str) -> datetime | None:
-    async with _open_session() as session:
-        row = (await session.exec(select(KvCache).where(KvCache.key == key))).first()
-        return row.updated_at if row else None
-
-
 # ---------------------------------------------------------------------------
 # 机厅 CRUD（M6 使用，表结构先统一定义在此）
 # ---------------------------------------------------------------------------
@@ -637,22 +631,6 @@ async def add_arcade_alias(arcade_id: int, alias: str) -> bool:
         return True
 
 
-async def remove_arcade_alias(arcade_id: int, alias: str) -> bool:
-    async with _open_session() as session:
-        row = (
-            await session.exec(
-                select(ArcadeAlias).where(
-                    ArcadeAlias.arcade_id == arcade_id, ArcadeAlias.alias == alias
-                )
-            )
-        ).first()
-        if row is None:
-            return False
-        await session.delete(row)
-        await session.commit()
-        return True
-
-
 async def get_subscriptions(group_id: str) -> list[int]:
     async with _open_session() as session:
         rows = (
@@ -721,14 +699,3 @@ async def add_count_log(
             )
         )
         await session.commit()
-
-
-async def get_count_logs(arcade_id: int, limit: int = 50) -> list[ArcadeCountLog]:
-    async with _open_session() as session:
-        stmt = (
-            select(ArcadeCountLog)
-            .where(ArcadeCountLog.arcade_id == arcade_id)
-            .order_by(ArcadeCountLog.created_at.desc())  # type: ignore[arg-type]
-            .limit(limit)
-        )
-        return list((await session.exec(stmt)).all())

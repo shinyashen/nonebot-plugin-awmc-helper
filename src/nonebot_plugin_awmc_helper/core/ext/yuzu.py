@@ -299,8 +299,7 @@ async def run_alias_sse(on_apply: Callable[[AliasPush], Awaitable[None]]) -> Non
                 logger.warning(
                     f"别名推送服务器连接异常: {e}，将在 {reconnect_delay:g} 秒后重连"
                 )
-            except asyncio.CancelledError:
-                raise
+            # CancelledError 继承 BaseException，不会被下方 Exception 捕获，直接外传
             except Exception:
                 logger.exception("别名推送服务器连接失败，稍后重试")
 
@@ -317,10 +316,3 @@ def start_alias_push(on_apply: Callable[[AliasPush], Awaitable[None]]) -> None:
     if _push_task is not None and not _push_task.done():
         _push_task.cancel()
     _push_task = asyncio.create_task(run_alias_sse(on_apply))
-
-
-def stop_alias_push() -> None:
-    global _push_task
-    if _push_task is not None:
-        _push_task.cancel()
-        _push_task = None

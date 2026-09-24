@@ -36,8 +36,6 @@ FORTUNE = [
     "干饭",
     "抓绝赞",
     "收歌",
-    "打大歌",
-    "推AP",
 ]
 
 today_fortune = on_command("今日mai", aliases={"今日舞萌", "今日运势"}, block=True)
@@ -64,7 +62,7 @@ async def _(session: Session = UniSession()):
     rp = fortune_hash % 100
     h = fortune_hash
     lines = [f" 今日人品值：{rp}"]
-    for i in range(11):
+    for i in range(len(FORTUNE)):
         wm = h & 3
         h >>= 2
         if wm == 3:

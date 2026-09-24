@@ -10,18 +10,17 @@
 import time
 import random as _random
 import asyncio
-from enum import Enum
 from typing import Any
 from datetime import datetime
 from dataclasses import asdict, fields
 
 from nonebot import logger, get_driver
 from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDifficulty
-from maimai_py.models import SongDifficultyUtage
+from maimai_py.models import SongDifficulties, SongDifficultyUtage
 from nonebot_plugin_apscheduler import scheduler
 
 from . import store, songdb
-from .client import client, lxns_provider, yuzu_provider, divingfish_provider
+from .client import client, lxns_provider, yuzu_provider
 from ..config import plugin_config
 from .provider import AwmcSongProvider, AwmcAliasProvider
 from ..constants import normalize_text, strip_chart_prefix
@@ -31,19 +30,10 @@ CN_POLL_STATE_KEY = "cn_poll_state"
 
 # 曲库数据源组合（2026-09-22 数据入口统一，设计稿 §5.4）：
 # 曲库由规范表构造（CN 列；国服定数按 §5.3 推导、version_cn 为空的组不可见，
-# 等价于原落雪 disabled 过滤）；别名走柚子；配置了水鱼开发者 token 时附带
-# 曲线数据。规范表重建后 provider 指纹变化 → maimai_py 自动重建缓存。
+# 等价于原落雪 disabled 过滤）；别名走柚子。规范表重建后 provider 指纹变化
+# → maimai_py 自动重建缓存。
 _SONG_PROVIDER = AwmcSongProvider(scope="cn")
 _ALIAS_PROVIDER = AwmcAliasProvider(yuzu_provider, lxns_provider)
-_CURVE_PROVIDER = (
-    divingfish_provider if plugin_config.awmc_divingfish_developer_token else None
-)
-
-
-def _json_default(obj: Any) -> Any:
-    if isinstance(obj, Enum):
-        return obj.value
-    raise TypeError(f"未知的可序列化类型：{type(obj)!r}")
 
 
 def _convert_curve_dict(curve: dict[str, Any] | None) -> None:
@@ -76,8 +66,6 @@ def song_to_dict(song: Song) -> dict[str, Any]:
 
 
 def _diff_from_dict(d: dict[str, Any]) -> SongDifficulty:
-    from maimai_py.models import SongDifficultyUtage
-
     cls = SongDifficultyUtage if d["type"] == SongType.UTAGE.value else SongDifficulty
     kwargs = {
         f.name: d[f.name] for f in fields(cls) if f.name in d and f.name != "curve"
@@ -107,8 +95,6 @@ def song_from_dict(d: dict[str, Any]) -> Song:
         disabled=d.get("disabled", False),
         difficulties=None,  # type: ignore[arg-type]
     )
-    from maimai_py.models import SongDifficulties, SongDifficultyUtage
-
     song.difficulties = SongDifficulties(
         standard=[_diff_from_dict(x) for x in diffs["standard"]],
         dx=[_diff_from_dict(x) for x in diffs["dx"]],
@@ -154,10 +140,6 @@ class SongService:
         """等待曲库就绪并返回 MaimaiSongs 包装（查询均先调用本方法）。"""
         await self._ready.wait()
         return await client.songs()
-
-    @property
-    def loaded(self) -> bool:
-        return self._ready.is_set()
 
     async def load(self) -> bool:
         """加载曲库（规范表构造 + 别名）。成功后例行写快照；失败降级快照。"""
@@ -292,9 +274,6 @@ class SongService:
     async def by_id(self, song_id: int) -> Song | None:
         return await (await self.ensure_loaded()).by_id(song_id)
 
-    async def by_title(self, title: str) -> Song | None:
-        return await (await self.ensure_loaded()).by_title(title)
-
     async def by_title_fuzzy(self, title: str) -> list[Song]:
         """标题子串匹配（大小写不敏感），按 id 升序。"""
         kw = title.lower()
@@ -413,8 +392,6 @@ class SongService:
 
         返回 ``(宿主曲, 宴谱)``；未命中返回 None。
         """
-        from maimai_py.models import SongDifficultyUtage
-
         await self.ensure_loaded()
 
         def match(songs):
@@ -482,10 +459,6 @@ class SongService:
                 result.append(song)
         return result
 
-    async def by_keywords(self, keywords: str) -> list[Song]:
-        result = await (await self.ensure_loaded()).by_keywords(keywords)
-        return [s for s in result if not s.disabled]
-
     async def by_artist(self, artist: str) -> list[Song]:
         """曲师查歌（库实现区分大小写，这里归一为大小写不敏感）。"""
         kw = artist.lower()
@@ -493,14 +466,6 @@ class SongService:
 
     async def by_bpm(self, minimum: float, maximum: float) -> list[Song]:
         result = await (await self.ensure_loaded()).by_bpm(int(minimum), int(maximum))
-        return [s for s in result if not s.disabled]
-
-    async def by_genre(self, genre: Genre) -> list[Song]:
-        result = await (await self.ensure_loaded()).by_genre(genre)
-        return [s for s in result if not s.disabled]
-
-    async def by_versions(self, version: Any) -> list[Song]:
-        result = await (await self.ensure_loaded()).by_versions(version)
         return [s for s in result if not s.disabled]
 
     async def by_level_value(self, min_ds: float, max_ds: float) -> list[Song]:

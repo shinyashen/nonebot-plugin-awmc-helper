@@ -27,7 +27,6 @@ async def test_query_by_title_and_id(songs):
     song = await song_service.by_id(231)
     assert song is not None
     assert song.title == "PENGUIN"
-    assert await song_service.by_title("Preferences") is not None
     fuzzy = await song_service.by_title_fuzzy("PRE")
     assert {s.id for s in fuzzy} == {500}  # 大小写不敏感子串
 
@@ -128,8 +127,6 @@ async def test_filters(songs):
     assert {s.id for s in await song_service.by_note_designer("サルミ")} == {231, 500}
     # BPM 范围
     assert {s.id for s in await song_service.by_bpm(150, 190)} == {500}
-    # 分类（disabled 一律排除）
-    assert {s.id for s in await song_service.by_genre(Genre.maimai)} == {231, 500}
 
 
 @pytest.mark.asyncio

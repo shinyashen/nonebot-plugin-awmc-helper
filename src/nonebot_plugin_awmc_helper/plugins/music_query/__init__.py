@@ -97,11 +97,6 @@ def _is_float(value: str) -> bool:
         return False
 
 
-async def _chart_card(song, binding, prefer_type=None, jp: bool = False) -> bytes:
-    """谱面卡（实现下沉 core/chart_card，查歌/随机等子插件共用）。"""
-    return await chart_card_bytes(song, binding, prefer_type, jp)
-
-
 async def _banquet_card(song, utage_diff=None, jp: bool = False) -> bytes:
     """宴谱条目卡：宿主曲可能同时有普通谱（is_banquet 判定不成立），
     但条目 id ≥ 100000 时必须渲染宴会场卡（Hoshino 按 song_id ≥ 100000
@@ -139,7 +134,7 @@ async def _render_result(songs, page: int, binding=None) -> None:
     if not songs:
         await _reply(NOT_FOUND).finish(at_sender=True)
     if len(songs) == 1:
-        png = await _chart_card(songs[0], binding)
+        png = await chart_card_bytes(songs[0], binding)
         await UniMessage.image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
         text = "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in songs)
@@ -263,7 +258,7 @@ async def _render_jp_result(songs, page: int, binding=None) -> None:
         return
     note = _list_jp_note(flags)
     if len(songs) == 1:
-        png = await _chart_card(songs[0], None, None, True)
+        png = await chart_card_bytes(songs[0], None, None, True)
         await _reply(JP_ONLY_NOTE).image(raw=png).finish(at_sender=True)
     if len(songs) <= 5:
         text = "".join(
@@ -375,7 +370,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             png = await _banquet_card(song, utage_diff, jp)
         else:
             song = cn_songs[song.id] or song
-            png = await _chart_card(song, binding, card_prefer, jp)
+            png = await chart_card_bytes(song, binding, card_prefer, jp)
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
         msg = _reply(JP_ONLY_NOTE) if jp else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
@@ -420,7 +415,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 cn_song = await song_service.by_id(song.id)
                 jp_only = cn_song is None
                 note = f"\n{JP_ONLY_NOTE}" if jp_only else ""
-                png = await _chart_card(
+                png = await chart_card_bytes(
                     cn_song or song,
                     binding,
                     prefer_type_from_raw_id(raw_id),
@@ -438,7 +433,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
         cn_song = await song_service.by_id(song.id)
         jp_only = cn_song is None
-        png = await _chart_card(
+        png = await chart_card_bytes(
             cn_song or song, binding, prefer_type_from_raw_id(raw_id), jp_only
         )
         msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
@@ -468,7 +463,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 @handle_errors()
 async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
     _id = match.group(1)
-    raw_id = int(_id) if _id.isdigit() else None
+    raw_id = int(_id)  # 正则 ^id\s?([0-9]+)$ 保证恒为数字
     song = None
     jp = False
     card_prefer = None
@@ -501,7 +496,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     if is_utage_entry:
         png = await _banquet_card(song, utage_diff, jp)
     else:
-        png = await _chart_card(song, binding, card_prefer, jp)
+        png = await chart_card_bytes(song, binding, card_prefer, jp)
     reply = UniMessage.image(raw=png)
     if jp:
         reply = reply.text(f"\n{JP_ONLY_NOTE}")

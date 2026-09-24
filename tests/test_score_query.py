@@ -459,7 +459,6 @@ async def test_b50_rise_tips(db, songs):
     with respx.mock(assert_all_called=False) as m:
         m.post(f"{BASE_DF}/query/player").respond(json=payload)
         tips = await _b50_rise_tips(
-            song,
             [
                 _score_extend(231, SongType.DX, LevelIndex.MASTER, dx_rating=350),
                 _score_extend(

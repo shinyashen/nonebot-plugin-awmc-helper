@@ -82,10 +82,6 @@ class PendingBindingStore:
             return False
         return kind is None or sess.kind == kind
 
-    def consume(self, platform: str, user_id: str) -> str | None:
-        sess = self._sessions.pop((platform, user_id), None)
-        return sess.kind if sess else None
-
     def discard(self, platform: str, user_id: str) -> None:
         self._sessions.pop((platform, user_id), None)
 

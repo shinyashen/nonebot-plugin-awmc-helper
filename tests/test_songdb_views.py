@@ -189,7 +189,7 @@ async def test_jp_songs_entrypoint(db):
     song_service._ready.clear()
     await songdb.rebuild(full_payloads())
     # 运行时未加载（_ready 未置位）也不影响 JP 视图
-    assert not song_service.loaded
+    assert not song_service._ready.is_set()
     songs = await jp_songs()
     assert 8 in {s.id for s in songs}
     assert all(s.difficulties is not None for s in songs)
@@ -343,9 +343,9 @@ async def test_jp_fallback_handler(db, monkeypatch, app):
     from test_music_query import _assert_image_reply
 
     from nonebot_plugin_awmc_helper.core import store, songdb
-    from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.client import lxns_provider, yuzu_provider
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     async def fake_aliases(client):
         return {}
@@ -361,7 +361,7 @@ async def test_jp_fallback_handler(db, monkeypatch, app):
             app,
             "search_alias_song",
             "日限是什么歌",
-            lambda: music_query._chart_card(song, None, SongType.DX, True),
+            lambda: chart_card_bytes(song, None, SongType.DX, True),
             suffix="您要找的是不是这首？",
             prefix="此歌曲为日服限定",
         )
@@ -450,9 +450,9 @@ async def test_jp_fallback_all_cn_delegates(db, monkeypatch, app):
     """日服 fallback 整列表国服都有（日服定数口径变更命中）：按普通结果渲染。"""
     from test_music_query import _assert_image_reply
 
-    from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     # 断开自动绑定（QQ 号直查水鱼）的 B50 嵌入，渲染不依赖外部成绩
     monkeypatch.setattr(binding_service, "identifier_or_none", lambda b: None)
@@ -466,7 +466,7 @@ async def test_jp_fallback_all_cn_delegates(db, monkeypatch, app):
             app,
             "search",
             "定数查歌 12.4 12.6",
-            lambda: music_query._chart_card(song, None),
+            lambda: chart_card_bytes(song, None),
         )
     finally:
         song_service._ready.clear()

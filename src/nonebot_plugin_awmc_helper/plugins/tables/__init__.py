@@ -49,15 +49,13 @@ async def _warn_missing_templates() -> None:
     """NB 方案：底图未生成时启动告警（提示 SUPERUSER 执行更新指令）。"""
     if not plugin_config.awmc_startup_tasks:
         return
+    from nonebot import logger
+
     from ...core.render.table_template import plate_table_dir, rating_table_dir
 
     if not rating_table_dir().exists() or not any(rating_table_dir().iterdir()):
-        from nonebot import logger
-
         logger.warning("定数表底图未生成，请 SUPERUSER 执行「更新定数表」")
     if not plate_table_dir().exists() or not any(plate_table_dir().iterdir()):
-        from nonebot import logger
-
         logger.warning("完成表底图未生成，请 SUPERUSER 执行「更新完成表」")
 
 
@@ -317,7 +315,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
                 )
         await UniMessage.image(raw=png).finish(at_sender=True)
     # 进度（R7：NB DrawPlateProgress 版式总览图）
-    page = int(page_raw) if page_raw else 1
     cleared_plates = await plates.get_cleared()
     remained = await plates.get_remained()
 

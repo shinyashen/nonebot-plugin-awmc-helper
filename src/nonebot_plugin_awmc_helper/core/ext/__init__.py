@@ -34,10 +34,3 @@ def get_client() -> httpx.AsyncClient:
             transport=build_smart_transport(),
         )
     return _client
-
-
-async def close_client() -> None:
-    global _client
-    if _client is not None:
-        await _client.aclose()
-        _client = None

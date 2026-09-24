@@ -4,15 +4,7 @@ RA 计算直接使用 maimai-py 的 ``ScoreCoefficient``（单一事实来源）
 分数线与推分算法对齐原版 maimaiDX（core/utils/calc.py + handler.get_rise_score_list）。
 """
 
-from maimai_py import (
-    Song,
-    FCType,
-    RateType,
-    SongType,
-    LevelIndex,
-    ScoreExtend,
-    SongDifficulty,
-)
+from maimai_py import Song, RateType, SongType, ScoreExtend, SongDifficulty
 from maimai_py.utils import ScoreCoefficient
 
 from ..constants import RATE_TO_ZH
@@ -29,11 +21,6 @@ def compute_rating(ds: float, achievement: float) -> int:
 def rate_of(achievement: float) -> str:
     """达成率 → 评级名（SSS+ 等）。"""
     return RATE_TO_ZH[RateType._from_achievement(achievement)]
-
-
-def min_ra_of(scores: list[ScoreExtend]) -> int:
-    """B50 中最低 RA（入线门槛）。"""
-    return int(min((s.dx_rating or 0 for s in scores), default=0))
 
 
 def score_line(diff: SongDifficulty, line: float) -> dict[str, float] | None:
@@ -160,7 +147,8 @@ def rise_recommend(
                     gain = new_ra - old_ra
                     if gain < target:
                         continue
-                if best_gain is None or gain > best_gain["gain"]:
+                # 每谱面首个满足档位即最低要求（break 恒触发），best_gain 到此必为 None
+                if best_gain is None:
                     best_gain = {
                         "song": song,
                         "diff": diff,
@@ -193,12 +181,3 @@ def rise_recommend(
     return sorted(
         old_side + new_side, key=lambda r: r["diff"].level_value, reverse=True
     )
-
-
-def level_index_name(level_index: LevelIndex) -> str:
-    """难度枚举 → 英文名（表格列头用）。"""
-    return level_index.name
-
-
-def fc_abbr(fc: FCType | None) -> str:
-    return fc.name if fc else "-"

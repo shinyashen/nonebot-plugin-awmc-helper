@@ -106,7 +106,6 @@ async def _(session: Session = UniSession()):
 
 async def _pick_rise_song(scores: list[ScoreExtend]):
     """NB get_mai_what：随机侧 → 末位 RA 反推定数 [ds, ds+1] → 排除 SSS+ → 随机单曲。"""
-    side = []
     is_dx = _random.randint(0, 1) == 1
     target_type = SongType.DX if is_dx else SongType.STANDARD
     side = [s for s in scores if s.type == target_type]

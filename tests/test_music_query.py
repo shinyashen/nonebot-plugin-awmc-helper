@@ -141,12 +141,12 @@ async def _assert_image_reply(
 @requires_assets
 @pytest.mark.asyncio
 async def test_search_single_draws_card(app: App, songs):
-    from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     song = await song_service.by_id(500)
     await _assert_image_reply(
-        app, "search", "查歌 Preferences", lambda: music_query._chart_card(song, None)
+        app, "search", "查歌 Preferences", lambda: chart_card_bytes(song, None)
     )
 
 
@@ -216,8 +216,8 @@ async def test_alias_search_multi(app: App, songs):
 async def test_alias_search_single(app: App, songs):
     from maimai_py import SongType
 
-    from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     song = await song_service.by_id(500)
     # 双谱歌曲无前缀搜索 → 列出谱面类型条目供选择（不设偏好）
@@ -235,7 +235,7 @@ async def test_alias_search_single(app: App, songs):
         app,
         "search_alias_song",
         "dx普瑞是什么歌",
-        lambda: music_query._chart_card(song, None, SongType.DX),
+        lambda: chart_card_bytes(song, None, SongType.DX),
         suffix="您要找的是不是这首？",
     )
     # 带「标」前缀 → SD 条目出卡
@@ -243,7 +243,7 @@ async def test_alias_search_single(app: App, songs):
         app,
         "search_alias_song",
         "标普瑞是什么歌",
-        lambda: music_query._chart_card(song, None, SongType.STANDARD),
+        lambda: chart_card_bytes(song, None, SongType.STANDARD),
         suffix="您要找的是不是这首？",
     )
 
@@ -258,8 +258,8 @@ async def test_query_chart_not_found(app: App, songs):
 async def test_query_chart_card(app: App, songs):
     from maimai_py import SongType
 
-    from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     song = await song_service.by_id(231)
     # SD 形状 id → 卡片显示标准谱（NB 双条目语义：id 即条目类型）
@@ -267,7 +267,7 @@ async def test_query_chart_card(app: App, songs):
         app,
         "query_chart",
         "id 231",
-        lambda: music_query._chart_card(song, None, SongType.STANDARD),
+        lambda: chart_card_bytes(song, None, SongType.STANDARD),
     )
 
 

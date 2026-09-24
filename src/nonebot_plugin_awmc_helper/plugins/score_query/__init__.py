@@ -214,7 +214,7 @@ async def _(
         theme=(binding.theme or "prism_plus") if binding is not None else "prism_plus",
         prefer_type=prefer,
     )
-    tips = await _b50_rise_tips(song, info.scores, binding)
+    tips = await _b50_rise_tips(info.scores, binding)
     msg = UniMessage.image(raw=png)
     if tips:
         tips_img = text_to_image("\n".join(tips), size=22, padding=14)
@@ -222,7 +222,7 @@ async def _(
     await msg.finish(at_sender=True)
 
 
-async def _b50_rise_tips(song, scores, binding) -> list[str]:
+async def _b50_rise_tips(scores, binding) -> list[str]:
     """「可进 B50」增强提示（我方独有，基准以谱面卡上分预测区表达）。
 
     对不在 B50 且 RA 高于入线最低 RA 的成绩，给出替换后总 RA 提升量；

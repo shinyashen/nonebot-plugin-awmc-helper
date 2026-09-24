@@ -126,8 +126,6 @@ async def test_pending_bindings():
     pending_bindings.start("qq", "1", "lxns", ttl=60)
     assert pending_bindings.is_active("qq", "1", "lxns")
     assert not pending_bindings.is_active("qq", "2")
-    assert pending_bindings.consume("qq", "1") == "lxns"
-    assert not pending_bindings.is_active("qq", "1")
 
     # 过期
     pending_bindings.start("qq", "1", "lxns", ttl=-1)
