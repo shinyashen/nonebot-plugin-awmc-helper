@@ -1,7 +1,8 @@
 # 子插件开发指南
 
 本插件采用 NoneBot 官方《嵌套插件》结构：`plugins/` 下的每个子目录是一个
-独立子插件，可被 `awmc_disabled_plugins` 配置独立停用。
+独立子插件，可被 `awmc_disabled_plugins` 配置独立停用。第三方开发者不走
+嵌套结构，请直接看下方[第三方独立扩展插件](#第三方独立扩展插件)一节。
 
 ## 新建一个子插件
 
@@ -84,3 +85,52 @@ async def _(
 - 曲库数据用 `tests/mocks.py::seed_service` 注入；
 - 绘图函数做冒烟测试（非空 PNG）；
 - `uv run poe test` 全绿 + `uv run ruff check .` 通过。
+
+## 第三方独立扩展插件
+
+不进主插件仓库、想发布自己的插件？写一个**独立 NoneBot 插件**，把
+`nonebot-plugin-awmc-helper` 当依赖库用。官方示例模板在本仓库
+`awmc_plugins/nonebot_plugin_awmc_example/`（src 布局，可直接当起点复制）。
+
+### 与仓内嵌套子插件的差异
+
+1. **先 `require()` 再 import**：`require("nonebot_plugin_awmc_helper")` 必须先于
+   一切对主插件的 import（官方《跨插件访问》规范）；
+2. **绝对路径导入**：`from nonebot_plugin_awmc_helper.core.songs import song_service`
+   （嵌套子插件用相对导入 `from ...core import ...`）；
+3. **命名**：用你自己的插件名（`nonebot-plugin-xxx` / `nonebot_plugin_xxx`），
+   `awmc.` 前缀是主插件仓内子插件保留的；
+4. **不声明 `supported_adapters`**：经 `awmc_plugins/` 加载时主插件元数据尚未
+   就绪，`inherit_supported_adapters` 会 ValueError；确需声明就显式写
+   `supported_adapters={"~onebot.v11"}`；
+5. 硬性规则不变：禁止 `import maimai_py`、数据访问只走 core 公开接口
+   （接口清单见 `docs/api.md`）。
+
+### 安装（固定目录，零配置）
+
+主插件启动时固定扫描 **bot 工作目录（CWD）下的 `awmc_plugins/`**，把其中每个
+子目录作为子插件自动加载。支持两种布局：
+
+```text
+你的 bot 目录/
+└── awmc_plugins/
+    ├── nonebot_plugin_yours/            # 平铺：目录即插件包（目录名须合法标识符）
+    │   └── __init__.py
+    └── your-plugin-repo/                # src 布局：clone 整仓即可（目录名任意）
+        └── src/
+            └── nonebot_plugin_yours/
+                └── __init__.py
+```
+
+- 目录**不存在 = 零影响**；`_` 开头的目录视为停用（官方 `load_plugins` 约定）；
+- `awmc_disabled_plugins` 同样生效（命中一级目录名或模块名）；
+- **信任边界**：目录内的代码会被 bot 进程执行，只放你自己审查过的插件；
+- 同名模块冲突时只加载字典序第一个；单个插件加载失败只记日志，不影响其余插件。
+
+### 其余加载方式
+
+- bot 顶层 `[tool.nonebot]` `plugin_dirs`（NoneBot 标准目录加载，要求目录在
+  CWD 之下）；
+- pip 安装 + 加载列表（发布 PyPI 后；主插件 0.1.0 上架前无法走此路线）。
+
+一份代码三种方式通吃——加载路径不影响插件内部写法。

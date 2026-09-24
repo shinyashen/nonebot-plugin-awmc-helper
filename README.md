@@ -149,6 +149,18 @@ NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名�
   请妥善保管服务器与数据目录的访问权限；
 - 曲库数据每次刷新成功后快照入库，断网时自动降级为上次快照。
 
+## 扩展本插件
+
+想基于本插件写自己的功能？两种方式：
+
+- **第三方独立扩展**（推荐）：写一个独立 NoneBot 插件，`require()` 本插件后
+  使用其 core 公开接口。把它放进 bot 工作目录的 `awmc_plugins/` 即自动加载
+  （零配置），详见 [docs/subplugin-dev-guide.md](docs/subplugin-dev-guide.md)
+  的「第三方独立扩展插件」与官方示例模板
+  [awmc_plugins/nonebot_plugin_awmc_example](awmc_plugins/nonebot_plugin_awmc_example/)；
+- **仓内子插件**：向本仓库贡献，在 `plugins/` 下新增子插件，指南见
+  [docs/subplugin-dev-guide.md](docs/subplugin-dev-guide.md)。
+
 ## 开发
 
 ```bash
