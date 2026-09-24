@@ -275,6 +275,8 @@ class SongService:
             await cache.multi_set(
                 iter((s.title, s.id) for s in all_songs), namespace="tracks"
             )
+            # maimai_py 的 B35/B15 拆分与牌子进度读 versions 键，缺键即静默空结果
+            await self._seed_versions(all_songs)
             await self._apply_to_cache(all_songs)
             return True
         except Exception:
