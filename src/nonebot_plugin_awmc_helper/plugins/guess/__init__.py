@@ -4,8 +4,8 @@
 - 题库优先取热门曲（谱面游玩样本总数 > 10000；无曲线数据时退化为全曲库）；
 - 猜歌：每 ``awmc_guess_interval`` 秒发一条特征提示（8 种抽 6），提示用尽后发
   FFT 裁剪曲绘，``awmc_guess_duration`` 秒后揭晓；猜曲绘直接发裁剪曲绘；
-- 答案 = 曲目 ID / 标题 / 别名（不区分大小写），用 priority=0 的 on_message
-  拦截答案，不独占会话；
+- 答案 = 曲目 ID / 标题 / 别名（不区分大小写），用 priority=0 但不 block 的
+  on_message 兜住答案（不吞同群其他指令），不独占会话；
 - 群开关 ``guess``：部署默认 ``awmc_guess_enabled``，群级覆盖入库；关闭时终止
   进行中的游戏；`重置猜歌` 强制结束当前对局。
 """
@@ -82,6 +82,8 @@ class GuessGame:
         self.hint_index = 0
         self.task: asyncio.Task | None = None
         self.winner: str | None = None
+        # 揭晓幂等标志：答对/超时/重置并发时只揭晓一次
+        self.settled = False
 
     def _build_hints(self) -> list[str]:
         options = [
@@ -149,9 +151,16 @@ async def _cover_hint_bytes(song: Song) -> bytes:
 
 
 async def _reveal(game: GuessGame, prefix: str) -> None:
+    # 答对与超时可能同时醒来，先到先得；无 await 保证判定原子
+    if game.settled:
+        return
+    game.settled = True
     _games.pop(game.group_id, None)
-    if game.task is not None and not game.task.done():
-        game.task.cancel()
+    # 超时路径在本 task 内调用：自 cancel 会让 CancelledError 落在下面的
+    # send 上，把「时间到」揭晓一并吞掉，故仅外部调用（答对/重置/关开关）才取消
+    if asyncio.current_task() is not game.task and game.task is not None:
+        if not game.task.done():
+            game.task.cancel()
     suffix = f"（{game.winner}）" if game.winner else ""
     await (
         UniMessage.text(
@@ -164,6 +173,9 @@ async def _reveal(game: GuessGame, prefix: str) -> None:
 
 async def _hint_loop(game: GuessGame) -> None:
     """提示循环：逐条发提示 → 裁剪曲绘 → 计时揭晓。"""
+    # 开局「开始」发送期间可能已被抢先揭晓（答对/重置），届时本局已出 _games
+    if _games.get(game.group_id) is not game:
+        return
     # 循环仅由 _start_game（携带真实 bot/event）启动，测试路径不进入
     assert game.bot is not None
     assert game.event is not None
@@ -186,11 +198,14 @@ async def _hint_loop(game: GuessGame) -> None:
         raise
     except Exception:
         logger.exception("猜歌提示循环异常")
-        _games.pop(game.group_id, None)
+        if _games.get(game.group_id) is game:
+            _games.pop(game.group_id)
 
 
 async def _pic_loop(game: GuessGame) -> None:
     """猜曲绘循环：计时揭晓（曲绘已在开局发出）。"""
+    if _games.get(game.group_id) is not game:
+        return
     try:
         await asyncio.sleep(plugin_config.awmc_guess_duration)
         await _reveal(game, "时间到！")
@@ -206,13 +221,15 @@ async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) 
         await UniMessage.text(
             " 本群已关闭猜歌，请管理员使用「开启mai猜歌」开启"
         ).finish(at_sender=True)
+    # 先取曲再占位：判重与写入 _games 之间无 await（GuessGame 构造为同步），
+    # 并发「猜歌」不会双双过判重而互相覆盖（旧写法取曲在判重后，存在竞态窗口）
+    song = await _pick_song()
+    if song is None:
+        await UniMessage.text(" 曲库尚未就绪，请稍后再试").finish(at_sender=True)
     if _game_of(group_id) is not None:
         await UniMessage.text(
             "本群已有进行中的猜歌，请先作答或使用「重置猜歌」"
         ).finish(at_sender=True)
-    song = await _pick_song()
-    if song is None:
-        await UniMessage.text(" 曲库尚未就绪，请稍后再试").finish(at_sender=True)
     game = GuessGame(song, pic_mode=pic_mode, group_id=group_id, bot=bot, event=event)
     _games[group_id] = game
     mode_text = "猜曲绘开始" if pic_mode else "猜歌开始"
@@ -255,7 +272,9 @@ async def _is_guess_answer(bot: Bot, event: Event) -> bool:
     return bool(event.get_plaintext().strip())
 
 
-guess_answer = on_message(rule=Rule(_is_guess_answer), priority=0, block=True)
+# priority=0 让答案判定先于常规指令，但 block=False 不吞事件：
+# 对局期间同群其他指令（含 重置猜歌 / 开关）照常响应
+guess_answer = on_message(rule=Rule(_is_guess_answer), priority=0, block=False)
 
 
 @guess_answer.handle()
