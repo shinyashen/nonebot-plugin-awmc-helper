@@ -60,6 +60,11 @@ class Config(BaseModel):
     # 外部补充源列表（标准 JSON 文件路径或 http(s) URL，仅允许补充日服侧数据，匿名读取；
     # 可加 ::fill / ::override 后缀指定该源合并模式，默认 override）
     awmc_extra_song_sources: list[str] = []
+    # gamerch wiki 运行时补充（fill 语义，仅补规范表空字段）：重建/重载后对缺口
+    # 谱面抓取 gamerch 页面回填，稳态零抓取
+    awmc_gamerch_fill: bool = True
+    # gamerch 页面磁盘缓存 TTL（小时）
+    awmc_gamerch_max_age: int = 24
 
 
 plugin_config: Config = get_plugin_config(Config)

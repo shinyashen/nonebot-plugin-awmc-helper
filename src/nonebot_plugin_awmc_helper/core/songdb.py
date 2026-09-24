@@ -1514,6 +1514,20 @@ async def refresh_all(
             )
         except Exception:
             logger.exception("songdb: 外部补充源应用失败（不影响规范表）")
+    # gamerch wiki 运行时补充（fill 语义）：只填缺口谱面，稳态零抓取
+    from ..config import plugin_config
+
+    if plugin_config.awmc_gamerch_fill:
+        try:
+            from .ext import gamerch
+
+            g_applied, g_changed = await gamerch.apply_fill()
+            if g_changed:
+                extra_summary = result.setdefault("extra", {})
+                extra_summary["changed"] = True
+                extra_summary["gamerch_applied"] = g_applied
+        except Exception:
+            logger.exception("songdb: gamerch 补充失败（不影响规范表）")
     # 归并在外部源之后：本轮由外部源创建的曲即可清理对应 pending 行
     try:
         await flush_pending()
