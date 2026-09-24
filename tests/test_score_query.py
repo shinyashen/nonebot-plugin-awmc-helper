@@ -433,7 +433,6 @@ async def test_b50_rise_tips(db, songs):
     from nonebot_plugin_awmc_helper.plugins.score_query import _b50_rise_tips
 
     binding = await binding_service.ensure("OneBot V11", "12345678")
-    song = _curve_song()
     # B50：231 的 SD EXPERT 槽（ra 312 入线，须命中曲库存在的谱面）；
     # 候选：DX MASTER 350（应提示）/ DX BASIC 120（低于入线不提示）
     payload = {
