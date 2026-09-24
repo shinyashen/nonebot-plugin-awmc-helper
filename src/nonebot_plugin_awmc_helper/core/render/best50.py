@@ -14,9 +14,12 @@
 """
 
 import asyncio
+import colorsys
 from io import BytesIO
 from bisect import bisect_right
 from pathlib import Path
+from functools import lru_cache
+from collections import Counter
 
 import httpx
 from PIL import Image, ImageDraw
@@ -67,6 +70,58 @@ DIFF_BG = {
     LevelIndex.MASTER: "b50_score_master.png",
     LevelIndex.ReMASTER: "b50_score_remaster.png",
 }
+
+UTAGE_BAND_COLOR = (235, 119, 237)
+"""宴谱行卡主色 #EB77ED（粉紫，区别于 BASIC 绿）。"""
+
+UTAGE_ID_COLOR = (*UTAGE_BAND_COLOR, 255)
+"""宴谱行卡曲目 ID 文字色（ID 落在白色底条上，同主色；对应 BASIC 绿 ID 字）。"""
+
+
+@lru_cache(maxsize=1)
+def _utage_score_bg() -> Image.Image:
+    """由 BASIC 绿卡程序化染出宴谱底图（主色 #EB77ED），进程内缓存。
+
+    做法：取底图出现最多的高饱和像素为源主色，在 HSV 空间全图色相
+    旋转到目标色相、饱和度/明度等比缩放使源主色精确落在 #EB77ED；
+    其中明度缩放只作用于有彩度的像素（否则浅灰圆会被推成纯白），
+    白/灰区域完全不动，圆角与留白原样保留。返回值只读共用，
+    调用方不得修改。
+    """
+    src = Image.open(
+        assets.static_path() / "mai" / "pic" / DIFF_BG[LevelIndex.BASIC]
+    ).convert("RGBA")
+    alpha = src.getchannel("A")
+    hsv = src.convert("RGB").convert("HSV")
+    # 源主色：高饱和像素的众数（避开白色留白与抗锯齿边缘）
+    dominant = Counter(
+        px for px in hsv.getdata() if px[1] >= 128 and px[2] >= 128
+    ).most_common(1)[0][0]
+    th, ts, tv = colorsys.rgb_to_hsv(
+        UTAGE_BAND_COLOR[0] / 255, UTAGE_BAND_COLOR[1] / 255, UTAGE_BAND_COLOR[2] / 255
+    )
+    dh = (round(th * 255) - dominant[0]) % 256
+    ks = ts * 255 / dominant[1]
+    kv = tv * 255 / dominant[2]
+    h_ch, s_ch, v_ch = hsv.split()
+
+    # 同一 H/S 染色下，V 缩放与不缩放各出一份，按「有彩度」掩码逐像素取用
+    def _hs_chans(scale_v: bool):
+        return (
+            h_ch.point(lambda x: (x + dh) % 256),
+            s_ch.point(lambda x: min(255, round(x * ks))),
+            v_ch.point(lambda x: min(255, round(x * kv))) if scale_v else v_ch,
+        )
+
+    mask = s_ch.point(lambda x: 255 if x >= 24 else 0)
+    tinted = Image.composite(
+        Image.merge("HSV", _hs_chans(True)).convert("RGB"),
+        Image.merge("HSV", _hs_chans(False)).convert("RGB"),
+        mask,
+    ).convert("RGBA")
+    tinted.putalpha(alpha)
+    return tinted
+
 
 # circle 主题 DXRating ≥14000 的星级（Hoshino _ra_pic_star 同款阈值）
 RA_STAR_THRESHOLDS = [
@@ -363,13 +418,20 @@ def draw_score_row(
     score: ScoreExtend,
     theme: str,
 ) -> None:
-    """单张 B50 风格成绩行卡（b50_score_* 底图，B50 大图与等级完成表共用）。"""
+    """单张 B50 风格成绩行卡（b50_score_* 底图，B50 大图与等级完成表共用）。
+
+    宴谱成绩（``score.type == UTAGE``，库把其 level_index 记为 BASIC）
+    换用程序染色的 #EB77ED 宴谱底图，ID 文字同色，其余版式不变。
+    """
     diff = score.level_index.value  # LevelIndex.value 恰为 DIFF_*_COLORS 下标 0-4
     pic = assets.static_path() / "mai" / "pic"
-    im.alpha_composite(
-        Image.open(pic / DIFF_BG[score.level_index]).convert("RGBA"),
-        (x, y),
-    )
+    if score.type == SongType.UTAGE:
+        im.alpha_composite(_utage_score_bg(), (x, y))
+    else:
+        im.alpha_composite(
+            Image.open(pic / DIFF_BG[score.level_index]).convert("RGBA"),
+            (x, y),
+        )
     cover = assets.cover(score.id % 10000).resize((75, 75))
     im.alpha_composite(cover, (x + 12, y + 12))
     type_abbr = "DX" if score.type.name == "DX" else "SD"
@@ -395,7 +457,7 @@ def draw_score_row(
         (x + 26, y + 98),
         str(game_song_id(score)),
         font=font(13, FONT_NUM),
-        fill=ID_TEXT_COLORS[diff],
+        fill=UTAGE_ID_COLOR if score.type == SongType.UTAGE else ID_TEXT_COLORS[diff],
         anchor="mm",
     )
     draw.text(

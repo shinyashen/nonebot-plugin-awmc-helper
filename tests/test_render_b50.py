@@ -5,6 +5,8 @@
 
 import dataclasses
 
+from mocks import requires_assets
+
 
 def _score(song_id: int, type_):
     from maimai_py import Score, RateType, LevelIndex, ScoreExtend
@@ -120,3 +122,79 @@ def test_combo_sync_icon_files_cover_all_enum_members():
     assert set(SYNC_FILE) == {fs.name.lower() for fs in FSType}
     assert SYNC_FILE["sync"] == "Sync"
     assert COMBO_FILE["fcp"] == "FCp"
+
+
+def _render_row(score):
+    """渲染单张行卡（264×109，fc/fs/星留空以排除徽章干扰）。"""
+    from PIL import Image, ImageDraw
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import draw_score_row
+
+    im = Image.new("RGBA", (264, 109), (255, 255, 255, 255))
+    draw_score_row(im, ImageDraw.Draw(im), 0, 0, score, "prism_plus")
+    return im
+
+
+def _dominant_color(im):
+    """行卡高饱和像素众数 RGB（即色带主色，白色文字/留白不参与）。
+
+    阈值取 100 而非 128：目标色 #EB77ED 的 8-bit 饱和度恰为 127。
+    """
+    from collections import Counter
+
+    rgb = im.convert("RGB")
+    counter = Counter()
+    for px, color in zip(rgb.convert("HSV").getdata(), rgb.getdata()):
+        if px[1] >= 100 and px[2] >= 128:
+            counter[color] += 1
+    return counter.most_common(1)[0][0]
+
+
+@requires_assets
+def test_utage_score_row_tinted_eb77ed():
+    """宴谱行卡：UTAGE 换程序染色 #EB77ED 底图与同色 ID 字。
+
+    库把宴谱 level_index 记为 BASIC（divingfish provider 硬编码），
+    修复前会误用绿色 BASIC 底图。
+    """
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import UTAGE_BAND_COLOR
+
+    utage = dataclasses.replace(
+        _score(100001, SongType.UTAGE), level_index=LevelIndex.BASIC
+    )
+    im = _render_row(utage)
+    dominant = _dominant_color(im)
+    assert all(abs(a - b) <= 2 for a, b in zip(dominant, UTAGE_BAND_COLOR))
+    # 灰色圆等中性区域不动（V 缩放只作用于有彩度像素）
+    assert im.convert("RGB").getpixel((182, 96)) == (231, 231, 231)
+
+
+@requires_assets
+def test_basic_score_row_bg_not_tinted():
+    """普通 BASIC 行卡仍是绿底：染色只对 type=UTAGE 生效，其余难度不变。"""
+    from maimai_py import SongType, LevelIndex
+
+    basic = dataclasses.replace(
+        _score(100001, SongType.STANDARD), level_index=LevelIndex.BASIC
+    )
+    dominant = _dominant_color(_render_row(basic))
+    # BASIC 绿 #81D955，与宴谱粉紫 #EB77ED 相差悬殊
+    assert all(abs(a - b) <= 2 for a, b in zip(dominant, (129, 217, 85)))
+
+
+@requires_assets
+def test_utage_bg_cached_and_alpha_preserved():
+    """宴谱底图进程内缓存（同对象复用），透明度通道与源 BASIC 底图逐字节一致。"""
+    from PIL import Image
+
+    from nonebot_plugin_awmc_helper.core.render.assets import assets
+    from nonebot_plugin_awmc_helper.core.render.best50 import _utage_score_bg
+
+    bg = _utage_score_bg()
+    assert bg is _utage_score_bg()
+    src_alpha = Image.open(
+        assets.static_path() / "mai" / "pic" / "b50_score_basic.png"
+    ).getchannel("A")
+    assert bg.getchannel("A").tobytes() == src_alpha.tobytes()

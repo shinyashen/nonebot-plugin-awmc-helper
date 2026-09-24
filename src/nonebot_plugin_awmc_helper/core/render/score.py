@@ -219,7 +219,7 @@ class DrawScore:
     # -- 等级进度卡（R4，NB whiledraw / _while_pic / draw_plan / draw_category）
 
     def whiledraw(self, scores: list, list_y: int = 0) -> None:
-        """绘制成绩行卡（5 列 × N 行，b50_score_* 难度底）。
+        """绘制成绩行卡（5 列 × N 行，b50_score_* 难度底，宴谱换 #EB77ED 染色底）。
 
         ``scores``：ScoreExtend 列表；DX 星直接取 ``score.dx_star``（库已算）。
         """
