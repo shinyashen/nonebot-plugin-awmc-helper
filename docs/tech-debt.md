@@ -35,18 +35,42 @@
 - guess 极端并发观感：开局串行锁落地后「开始」消息必先于对局可答；曲绘提示与
   首条提示的交织理论上仍可能出现（量级极小，观察即可）。
 
-## 二A、渲染全量对照 Hoshino（进行中）
+## 二A、渲染全量对照 Hoshino（✅ 2026-09-24 完成）
 
-规范见 architecture.md「渲染坐标规范」。完成表（plate_table_draw +
-_plate_grid）与进度总览（plate_progress）已于 2026-09-24 对照修正；其余
-渲染器逐个对照 Hoshino 同名实现的坐标/素材/图层顺序：
+规范见 architecture.md「渲染坐标规范」。进度总览（plate_progress）、完成表
+（plate_table_draw + _plate_grid）与其余全部渲染器已逐个对照 Hoshino
+`core/image/` 同名实现并修正，每项含临时合成数据渲染 + 人工看图验证：
 
-- [ ] `rating_table.py`（定数表叠章）对照 Hoshino `rating_table.py`；
-- [ ] `score.py`（等级完成表/推分卡）对照 Hoshino `score.py`；
-- [ ] `best50.py` 对照 Hoshino `best50.py`；
-- [ ] `nb_chart.py` / `info.py` / `song.py`（查歌/单曲卡）对照 Hoshino
-  `chart.py` / `info.py` / `song.py`；
-- [ ] 舞/霸完成表双页的叠章分页过滤已补，端到端需用真实数据复核一次。
+- ✅ `rating_table.py`（定数表叠章）← Hoshino `rating_table.py`：lv15 大格
+  分支盖章（评级章原尺寸 (x+55,y+115)、FC/AP 计划 PlayBonus 大章 200×200、
+  不画完成底）与全曲徽章评级阈值（ACHIEVEMENT_LIST[-6:] 六档，曾误用
+  range(6) 致恒判 SSSp）；
+- ✅ `score.py`（推分/进度/分数列表）← Hoshino `score.py` + `base.py`：未游玩
+  小卡图层序（曲绘下、难度框上）、推分 ds 字号 18、标题截断 >26→25、未游玩
+  推荐行不画旧评级章；
+- ✅ `best50.py` ← Hoshino `best50.py`：头部名片/行卡坐标全对齐，无需修；
+- ✅ `nb_chart.py` / `info.py` ← Hoshino `chart.py` / `info.py`：宴谱卡描边改
+  回紫 (210,57,174,255)、截断规则（>L 才截、截后 ≤L-1）全线上对齐、info
+  署名行改 Hoshino 形式（Data from 嵌入、20pt）；
+- ✅ `song.py`（搜歌列表）← Hoshino `song.py`：整体重写为 PRiSM 曲卡网格版式；
+- ✅ 舞/霸双页端到端复核（合成舞代曲库 + 双页底图 + 叠章）：组内排序键改
+  Hoshino get_ds_sort_key（ReM 曲按 ReM 定数，模板/叠章两侧同步）、统计区
+  wu 专用布局（292/204/条宽 176 + plate_progress_wu，曾致 ReM 列出画面）、
+  头部计数整牌口径（分页前累计）。
+
+对照中确认的**有意偏差**（代码注释已记，此处汇总）：
+
+- `best50.py`：DX 星直接取 maimai_py `ScoreExtend.dx_star`（库算），与
+  Hoshino 现算 `dx_score()` 仅在恰好 85/90/93/95/97% 边界时差一星，库口径
+  更贴近官方 ≥ 语义；
+- `song.py::draw_song_card`（猜歌/运势线索卡）Hoshino 无对应实现，维持自有
+  版式；搜歌列表每页条数维持本项目 25/页（Hoshino PAGE_SIZE=14 属其翻页
+  UX），网格几何随条数自适应；
+- `nb_chart.py`：版本 logo 走 `fit_version_logo` 等比适配（Hoshino 直接
+  resize 有拉伸）；日服视图不渲染「新曲だよ!」标（国服口径）；Sync 计划
+  （rating_table/plate 叠章）为我方扩展，lv15 无 Sync 大章素材沿用小章；
+- 素材包差异：缺 `舞者.png` 牌头（舞将/舞極/舞神/霸者 齐全），舞+者 完成表
+  牌头留白跳过不报错；`progress_big.png` 43 高等裁剪 clamp 均按素材实际值。
 
 ## 三、硬编码收敛（暂缓，其余两条 2026-09-24 已完成）
 
