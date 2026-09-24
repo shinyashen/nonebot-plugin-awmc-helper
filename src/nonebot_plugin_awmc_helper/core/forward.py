@@ -29,6 +29,22 @@ except ImportError:  # pragma: no cover
     OB11Segment = None
     _OB11 = False
 
+
+def is_ob11(bot) -> bool:
+    """bot 实例是否为 OneBot v11 适配器（合并转发/群列表能力判定统一入口）。"""
+    return _OB11 and OB11Bot is not None and isinstance(bot, OB11Bot)
+
+
+def ob11_available() -> bool:
+    """OneBot v11 适配器是否可用。"""
+    return _OB11 and OB11Bot is not None and OB11Message is not None
+
+
+def ob11_text(text: str):
+    """构造 OneBot v11 文本消息（适配器不可用返回 None）。"""
+    return OB11Message(text) if ob11_available() else None
+
+
 # 转发节点发送者昵称：取 .env 变量列表的 NICKNAME（部署时配置的 bot 名），
 # 未配置回退 "Bot"（LLOneBot 源码 senderName: name ?? nickname ?? selfInfo.nick）
 NODE_NICKNAME = NICKNAME or "Bot"

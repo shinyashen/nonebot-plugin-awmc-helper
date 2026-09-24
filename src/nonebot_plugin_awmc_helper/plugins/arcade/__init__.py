@@ -27,7 +27,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core import store
 from ...config import plugin_config
 from ...core.ext import wahlap as wahlap_ext
-from ...core.utils import handle_errors
+from ...core.utils import user_id_of, group_admin, group_id_of, handle_errors
 from ...core.render.tools import text_to_image, image_to_bytes
 
 try:
@@ -116,20 +116,6 @@ arcade_person_num_2 = on_regex(
 )
 
 
-def _group_of(session: Session) -> str | None:
-    if session.scene and session.scene.type == SceneType.GROUP:
-        return str(session.scene.id)
-    return None
-
-
-def _user_of(session: Session) -> str:
-    return str(session.user.id)
-
-
-_admin_perm = ADMIN()
-"""群管/群主权限（uninfo，多适配器通用）。"""
-
-
 async def _find_arcade(keyword: str) -> store.Arcade | None:
     """按 ID / 全名 / 别名 精确定位机厅。"""
     keyword = keyword.strip()
@@ -181,7 +167,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         address=address,
         machines=int(count_raw),
         is_custom=True,
-        updated_by=_user_of(session),
+        updated_by=user_id_of(session),
     )
     await store.save_arcade(arcade)
     for al in aliases:
@@ -256,10 +242,10 @@ async def _(
     message: Message = CommandArg(),
     command: tuple = Command(),
 ):
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     if group_id is None:
         await UniMessage.text(" 订阅仅群聊可用").finish(at_sender=True)
-    if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
+    if not await group_admin()(bot, event):
         await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
     keyword = str(message).strip()
     arcade = await _find_arcade(keyword) if keyword else None
@@ -275,7 +261,7 @@ async def _(
 @arcade_show_sub.handle()
 @handle_errors("查询失败")
 async def _(session: Session = UniSession()):
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     ids = await store.get_subscriptions(group_id) if group_id else []
     if not ids:
         await UniMessage.text(" 该群未订阅任何机厅").finish(at_sender=True)
@@ -317,10 +303,10 @@ async def _(
     session: Session = UniSession(),
     groups: tuple = RegexGroup(),
 ):
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     if group_id is None:
         await UniMessage.text(" 排卡操作仅群聊可用").finish(at_sender=True)
-    if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
+    if not await group_admin()(bot, event):
         await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
     name_raw, op, amount_raw, unit = groups
     if not name_raw:
@@ -383,17 +369,17 @@ async def _(
         await UniMessage.text(
             f"单次变更不能超过 {plugin_config.awmc_arcade_max_delta} 人"
         ).finish(at_sender=True)
-    arcade.updated_by = _user_of(session)
+    arcade.updated_by = user_id_of(session)
     arcade.updated_at = datetime.now()
     await store.save_arcade(arcade)
-    await store.add_count_log(arcade.id, delta, arcade.machines, _user_of(session))
+    await store.add_count_log(arcade.id, delta, arcade.machines, user_id_of(session))
     await UniMessage.text(reply).finish(at_sender=True)
 
 
 @arcade_person_num.handle()
 @handle_errors("查询失败")
 async def _(session: Session = UniSession()):
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     ids = await store.get_subscriptions(group_id) if group_id else []
     if not ids:
         await UniMessage.text(" 该群未订阅任何机厅").finish(at_sender=True)

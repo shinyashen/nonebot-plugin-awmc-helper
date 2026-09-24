@@ -289,6 +289,31 @@ async def _render_query_result(songs, jp_fetch, page: int, binding=None) -> None
     await _render_result(songs, page, binding)
 
 
+async def _resolve_raw_id(
+    raw_id: int,
+) -> tuple[Song, SongType | None, bool, SongDifficultyUtage | None] | None:
+    """数字 id → (song, 卡片主类型偏好, 仅日服, 宴谱或 None)；未命中返回 None。
+
+    6 位宴谱机台 id 按 diff_id 定位**该张**宴谱（by_id 取模会错配同号普通曲），
+    渲染走宴会卡；其余按查分器 id 形状推断偏好，5 位 DX 展示 id 回查国服
+    对象定日服标注。别名/查歌的数字解析共用本函数。
+    """
+    if raw_id > 99999:
+        utage_hit = await song_service.by_utage_id(raw_id)
+        if utage_hit is None:
+            return None
+        ut_host, ut_diff = utage_hit
+        # 宴谱可能日服限定（国服宿主曲无此 diff_id）：日服卡渲染口径
+        jp = await _utage_jp_only(ut_host.id, ut_diff.diff_id)
+        return ut_host, None, jp, ut_diff
+    song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
+    if song is None:
+        return None
+    # raw_id 可能是 DX 展示 id：按解析出的根 id 回查国服视图定标注
+    cn_song = await song_service.by_id(song.id)
+    return cn_song or song, prefer_type_from_raw_id(raw_id), cn_song is None, None
+
+
 async def _vote_hint(name: str) -> str | None:
     """柚子投票中提示（属柚子扩展；接口不可用/未命中时返回 None）。"""
     from ...core.ext.yuzu import yuzu_client
@@ -412,50 +437,27 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 
     # 纯数字 → ID（查分器 id 形状推断谱面类型：≤4 位 SD、5 位 DX、6 位宴）
     if name.isdigit():
-        raw_id = int(name)
-        if raw_id > 99999:
-            # 6 位宴谱机台 id：按 diff_id 定位该张宴谱（取模会错配同号普通曲）
-            utage_hit = await song_service.by_utage_id(raw_id)
-            if utage_hit:
-                ut_host, ut_diff = utage_hit
-                # 宴谱可能日服限定（国服宿主曲无此 diff_id）：日服卡渲染口径
-                jp_only = await _utage_jp_only(ut_host.id, ut_diff.diff_id)
-                png = await _banquet_card(ut_host, ut_diff, jp_only)
-                await (
-                    UniMessage.image(raw=png)
-                    .text("\n您要找的是不是这首？")
-                    .finish(at_sender=True)
-                )
-        else:
-            song = await song_service.by_id(raw_id) or await song_service.jp_by_id(
-                raw_id
+        hit = await _resolve_raw_id(int(name))
+        if hit is not None:
+            song, prefer, jp, utage_diff = hit
+            png = (
+                await _banquet_card(song, utage_diff, jp)
+                if utage_diff is not None
+                else await chart_card_bytes(song, binding, prefer, jp)
             )
-            if song:
-                # raw_id 可能是 DX 展示 id：按解析出的根 id 回查国服视图定标注
-                cn_song = await song_service.by_id(song.id)
-                jp_only = cn_song is None
-                note = f"\n{JP_ONLY_NOTE}" if jp_only else ""
-                png = await chart_card_bytes(
-                    cn_song or song,
-                    binding,
-                    prefer_type_from_raw_id(raw_id),
-                    jp_only,
-                )
-                await (
-                    UniMessage.image(raw=png)
-                    .text(f"\n您要找的是不是这首？{note}")
-                    .finish(at_sender=True)
-                )
+            note = f"\n{JP_ONLY_NOTE}" if jp and utage_diff is None else ""
+            await (
+                UniMessage.image(raw=png)
+                .text(f"\n您要找的是不是这首？{note}")
+                .finish(at_sender=True)
+            )
     if idm := re.match(r"^id([0-9]+)$", name, re.IGNORECASE):
-        raw_id = int(idm.group(1))
-        song = await song_service.by_id(raw_id) or await song_service.jp_by_id(raw_id)
-        if not song:
+        hit = await _resolve_raw_id(int(idm.group(1)))
+        if hit is None:
             await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
-        cn_song = await song_service.by_id(song.id)
-        jp_only = cn_song is None
-        png = await chart_card_bytes(
-            cn_song or song, binding, prefer_type_from_raw_id(raw_id), jp_only
-        )
+        song, prefer, jp_only, _utage_diff = hit
+        # 此别名入口不渲染宴会卡（与「id xxx」指令的口径差异属既有行为）
+        png = await chart_card_bytes(song, binding, prefer, jp_only)
         msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
 

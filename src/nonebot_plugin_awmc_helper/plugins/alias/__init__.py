@@ -24,19 +24,16 @@ from ...core import store
 from ...config import plugin_config
 from ...core.ext import yuzu as yuzu_ext
 from ...core.songs import song_service
-from ...core.utils import paginate, handle_errors
-from ...core.forward import try_send_forward
+from ...core.utils import (
+    paginate,
+    parse_page,
+    user_id_of,
+    group_admin,
+    group_id_of,
+    handle_errors,
+)
+from ...core.forward import is_ob11, ob11_text, ob11_available, try_send_forward
 from ...core.render.tools import text_to_image, image_to_bytes
-
-try:  # OneBot v11 可用时提供合并转发/群列表能力（构造统一走 core/forward）
-    from nonebot.adapters.onebot.v11 import Bot as OB11Bot
-    from nonebot.adapters.onebot.v11 import Message as OB11Message
-
-    _OB11 = True
-except ImportError:  # pragma: no cover
-    OB11Bot = None
-    OB11Message = None
-    _OB11 = False
 
 PUSH_FEATURE = "alias_push"
 
@@ -48,20 +45,6 @@ __plugin_meta__ = PluginMetadata(
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
 )
-
-
-def _group_id_of(session: Session) -> str | None:
-    if session.scene and session.scene.type == SceneType.GROUP:
-        return str(session.scene.id)
-    return None
-
-
-def _user_id_of(session: Session) -> str:
-    return str(session.user.id)
-
-
-_admin_perm = ADMIN()
-"""群管/群主权限（uninfo 提供，多适配器通用）。"""
 
 
 NOT_FOUND_ALIAS = " 未找到此歌曲\n可以使用「添加别名」指令给该乐曲添加别名"
@@ -111,12 +94,12 @@ async def _finish_multi_forward(
     仅 OB11 走合并转发（core/forward 统一构造，与别名推送同口径）；
     适配器不支持或协议端发送失败返回 False，由调用方降级为普通消息。
     """
-    group_id = _group_id_of(session)
+    group_id = group_id_of(session)
     return await try_send_forward(
         bot,
         [header, *blocks],
         group_id=group_id,
-        user_id=None if group_id else _user_id_of(session),
+        user_id=None if group_id else user_id_of(session),
     )
 
 
@@ -164,29 +147,13 @@ async def _(bot: Bot, session: Session = UniSession(), groups: tuple = RegexGrou
 @alias_local_apply.handle()
 @handle_errors("添加本地别名失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    args = str(message).strip().split(maxsplit=1)
-    if len(args) < 2:
-        await UniMessage.text(" 参数错误：添加本地别名 <id> <别名>").finish(
-            at_sender=True
-        )
-    song_id_raw, alias_name = args[0], args[1].strip()
-    if not song_id_raw.isdigit():
-        await UniMessage.text(" 请输入正确的ID").finish(at_sender=True)
-    song_id = int(song_id_raw)
-    if await song_service.by_id(song_id) is None:
-        await UniMessage.text(f" 未找到ID为「{song_id}」的曲目").finish(at_sender=True)
-
-    try:
-        server = await yuzu_ext.yuzu_client.get_alias(song_id)
-    except yuzu_ext.ExtError as e:
-        server = None
-        logger.warning(f"查询柚子别名失败（忽略并继续本地添加）：{e}")
-    if server is not None and server.has(alias_name):
+    song_id, alias_name = await _parse_alias_args(message, "添加本地别名 <id> <别名>")
+    if await _yuzu_server_has(song_id, alias_name):
         await UniMessage.text(f" 该曲目的别名「{alias_name}」已存在别名服务器").finish(
             at_sender=True
         )
 
-    if await store.add_local_alias(song_id, alias_name, _user_id_of(session)):
+    if await store.add_local_alias(song_id, alias_name, user_id_of(session)):
         await song_service.reload_alias_index()
         await UniMessage.text(
             f" 已成功为ID「{song_id}」添加别名「{alias_name}」到本地别名库"
@@ -194,26 +161,41 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     await UniMessage.text(" 本地别名库已存在该别名").finish(at_sender=True)
 
 
-@alias_apply.handle()
-@handle_errors("添加别名失败，请稍后再试")
-async def _(session: Session = UniSession(), message: Message = CommandArg()):
+async def _parse_alias_args(message: Message, usage: str) -> tuple[int, str]:
+    """申请类指令公共前置校验：参数拆分 → id 合法性 → 曲目存在性。"""
     args = str(message).strip().split(maxsplit=1)
     if len(args) < 2:
-        await UniMessage.text(" 参数错误：添加别名 <id> <别名>").finish(at_sender=True)
+        await UniMessage.text(f" 参数错误：{usage}").finish(at_sender=True)
     song_id_raw, alias_name = args[0], args[1].strip()
     if not song_id_raw.isdigit():
         await UniMessage.text(" 请输入正确的ID").finish(at_sender=True)
     song_id = int(song_id_raw)
     if await song_service.by_id(song_id) is None:
         await UniMessage.text(f" 未找到ID为「{song_id}」的曲目").finish(at_sender=True)
+    return song_id, alias_name
+
+
+async def _yuzu_server_has(song_id: int, alias_name: str) -> bool | None:
+    """柚子同名判重（查询失败返回 None，调用方按各自口径降级）。"""
     try:
         server = await yuzu_ext.yuzu_client.get_alias(song_id)
-        if server is not None and server.has(alias_name):
-            await UniMessage.text(
-                f" 该曲目的别名「{alias_name}」已存在别名服务器"
-            ).finish(at_sender=True)
+    except yuzu_ext.ExtError as e:
+        logger.warning(f"查询柚子别名失败（忽略并继续本地添加）：{e}")
+        return None
+    return server is not None and server.has(alias_name)
+
+
+@alias_apply.handle()
+@handle_errors("添加别名失败，请稍后再试")
+async def _(session: Session = UniSession(), message: Message = CommandArg()):
+    song_id, alias_name = await _parse_alias_args(message, "添加别名 <id> <别名>")
+    if await _yuzu_server_has(song_id, alias_name):
+        await UniMessage.text(f" 该曲目的别名「{alias_name}」已存在别名服务器").finish(
+            at_sender=True
+        )
+    try:
         msg = await yuzu_ext.yuzu_client.apply_alias(
-            song_id, alias_name, _user_id_of(session), _group_id_of(session) or ""
+            song_id, alias_name, user_id_of(session), group_id_of(session) or ""
         )
     except yuzu_ext.ExtError as e:
         msg = str(e)
@@ -227,7 +209,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     if not tag:
         await UniMessage.text(" 参数错误：同意别名 <TAG>").finish(at_sender=True)
     try:
-        msg = await yuzu_ext.yuzu_client.agree_alias(tag, _user_id_of(session))
+        msg = await yuzu_ext.yuzu_client.agree_alias(tag, user_id_of(session))
     except yuzu_ext.ExtError as e:
         msg = str(e)
     await UniMessage.text(" " + msg).finish(at_sender=True)
@@ -245,7 +227,7 @@ async def _(message: Message = CommandArg()):
         await UniMessage.text(" 未查询到正在进行的别名投票").finish(at_sender=True)
 
     page_size = 25
-    page = int(args) if args.isdigit() else 1
+    page = parse_page(args)
     page_data, total = paginate(status, page, page_size)
     if not page_data:
         await UniMessage.text(f" 页码超出范围（共 {total} 页）").finish(at_sender=True)
@@ -272,10 +254,10 @@ async def _(
     groups: tuple = RegexGroup(),
 ):
     action = groups[0]
-    group_id = _group_id_of(session)
+    group_id = group_id_of(session)
     if group_id is None:
         await UniMessage.text(" 别名推送开关仅群聊可用").finish(at_sender=True)
-    if not (await SUPERUSER(bot, event) or await _admin_perm(bot, event)):
+    if not await group_admin()(bot, event):
         await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
 
     enabled = action == "开启"
@@ -294,7 +276,7 @@ async def _(groups: tuple = RegexGroup()):
     enabled = groups[0] == "开启"
     count = 0
     for bot in list(get_bots().values()):
-        if _OB11 and OB11Bot is not None and isinstance(bot, OB11Bot):
+        if is_ob11(bot):
             try:
                 group_list = await bot.get_group_list()
             except Exception as e:
@@ -341,10 +323,10 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
     text = "\n======\n".join(lines)
 
     default = plugin_config.awmc_alias_push
-    if not _OB11 or OB11Bot is None or OB11Message is None:
+    if not ob11_available():
         return
     for bot in list(get_bots().values()):
-        if not isinstance(bot, OB11Bot):
+        if not is_ob11(bot):
             continue
         try:
             group_list = await bot.get_group_list()
@@ -358,9 +340,7 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
             # 合并转发优先（core/forward 统一构造），失败降级普通消息
             if not await try_send_forward(bot, [text], group_id=gid):
                 try:
-                    await bot.send_group_msg(
-                        group_id=int(gid), message=OB11Message(text)
-                    )
+                    await bot.send_group_msg(group_id=int(gid), message=ob11_text(text))
                 except Exception:
                     logger.exception(f"别名推送到群 {gid} 失败")
             await asyncio.sleep(5)

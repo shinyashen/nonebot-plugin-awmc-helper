@@ -12,6 +12,17 @@ from ..constants import RATE_TO_ZH
 # 推分试算的达成率档位（原版 RISE_ACHIEVEMENT_LIST）
 RISE_ACHIEVEMENTS = (99.0, 99.5, 100.0, 100.5)
 
+SSSP_ACHIEVEMENT = 100.5
+"""SSS+ 达成率阈值（推分忽略集与评级上界）。"""
+
+SSSP_COEFFICIENT = ScoreCoefficient(SSSP_ACHIEVEMENT).c
+"""SSSP 档 RA 系数（22.4，NB get_mai_what 的 RA→定数反推基准）。"""
+
+
+def min_ds_of_ra(ra: float) -> float:
+    """B50 末位 RA → 入线所需最低定数（SSSP 系数反推，调用方自行取整）。"""
+    return ra / SSSP_COEFFICIENT
+
 
 def compute_rating(ds: float, achievement: float) -> int:
     """达成率 → RA（maimai-py 系数表）。"""
@@ -103,7 +114,7 @@ def rise_recommend(
     by_key: dict[tuple, ScoreExtend] = {
         (s.id, s.type, s.level_index): s for s in scores
     }
-    ignored_ids = {s.id for s in scores if (s.achievements or 0) >= 100.5}
+    ignored_ids = {s.id for s in scores if (s.achievements or 0) >= SSSP_ACHIEVEMENT}
 
     # 两侧入线基准 = 该侧 B50 末位（最低）RA：升序排列后取首位
     sides: dict[str, list[ScoreExtend]] = {

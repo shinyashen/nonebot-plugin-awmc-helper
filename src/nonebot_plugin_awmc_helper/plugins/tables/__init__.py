@@ -27,7 +27,7 @@ from ...constants import (
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import FCType, FSType, SongType
-from ...core.utils import handle_errors
+from ...core.utils import parse_page, handle_errors
 from ...core.plates import in_plate_scope, major_type_of_plate, plate_version_range
 from ...core.binding import session_keys, binding_service
 from ...core.render.score import DrawScore
@@ -277,43 +277,40 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
-@plate_cmd.handle()
-@handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
-    version, kind, mode, page_raw = groups
-    binding = await binding_service.ensure(*session_keys(session))
-    page = int(page_raw) if page_raw else 1
-    plates = await score_service.get_plates(binding, f"{version}{kind}")
-    if mode == "完成表":
-        # NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条
-        from ...core.render import table_template
+async def _plate_completion_sheet(binding, version: str, kind: str, page: int) -> None:
+    """完成表（NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条）。"""
+    from ...core.render import table_template
 
-        major = major_type_of_plate(version)
-        rng = plate_version_range(version)
-        entries = []
-        if rng is not None:
-            lo, hi = rng
-            for song in await song_service.get_all():
-                for d in song.get_difficulties():
-                    if in_plate_scope(song, d, lo, hi, major):
-                        entries.append((song, d))
-        if not entries:
-            await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
-        scores = await score_service.get_scores_all(binding)
-        png = await table_template.draw_plate_table_with_fallback(
-            version,
-            kind,
-            scores.scores,
-            entries,
-            page=page,
-            song_service=song_service,
-        )
-        if png is None:
-            await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
-                at_sender=True
-            )
-        await UniMessage.image(raw=png).finish(at_sender=True)
-    # 进度（R7：NB DrawPlateProgress 版式总览图）
+    major = major_type_of_plate(version)
+    rng = plate_version_range(version)
+    entries = []
+    if rng is not None:
+        lo, hi = rng
+        for song in await song_service.get_all():
+            for d in song.get_difficulties():
+                if in_plate_scope(song, d, lo, hi, major):
+                    entries.append((song, d))
+    if not entries:
+        await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
+    scores = await score_service.get_scores_all(binding)
+    png = await table_template.draw_plate_table_with_fallback(
+        version,
+        kind,
+        scores.scores,
+        entries,
+        page=page,
+        song_service=song_service,
+    )
+    if png is None:
+        await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(at_sender=True)
+    await UniMessage.image(raw=png).finish(at_sender=True)
+
+
+async def _plate_progress_overview(
+    binding, plates, version: str, kind: str, page: int
+) -> None:
+    """进度总览（R7：NB DrawPlateProgress 版式总览图）。"""
+    cleared_plates = await plates.get_cleared()
     cleared_plates = await plates.get_cleared()
     remained = await plates.get_remained()
 
@@ -396,6 +393,19 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
+@plate_cmd.handle()
+@handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
+async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+    version, kind, mode, page_raw = groups
+    binding = await binding_service.ensure(*session_keys(session))
+    page = parse_page(page_raw)
+    plates = await score_service.get_plates(binding, f"{version}{kind}")
+    if mode == "完成表":
+        await _plate_completion_sheet(binding, version, kind, page)
+        return
+    await _plate_progress_overview(binding, plates, version, kind, page)
+
+
 @plate_help.handle()
 @handle_errors()
 async def _():
@@ -413,7 +423,7 @@ async def _():
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     """分数列表（R5，NB DrawScore.draw_score_list 行卡版式，80/页）。"""
     ds_raw, page_raw = groups
-    page = int(page_raw) if page_raw else 1
+    page = parse_page(page_raw)
     binding = await binding_service.ensure(*session_keys(session))
     scores = await score_service.get_scores_all(binding)
     if "." in ds_raw:  # 定数

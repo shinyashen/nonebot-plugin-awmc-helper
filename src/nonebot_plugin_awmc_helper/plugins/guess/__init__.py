@@ -27,7 +27,7 @@ from ...config import plugin_config
 from ...constants import GENRE_TO_ZH, version_zh
 from ...core.songs import song_service
 from ...core.types import Song, SongType
-from ...core.utils import handle_errors
+from ...core.utils import group_admin, group_id_of, handle_errors
 from ...core.render import song as song_render
 from ...core.render.cover import crop_cover_randomly
 from ...core.render.tools import image_to_bytes
@@ -43,12 +43,6 @@ __plugin_meta__ = PluginMetadata(
 
 HOT_SAMPLE_THRESHOLD = 10000
 GUESS_FEATURE = "guess"
-
-
-def _group_of(session: Session) -> str | None:
-    if session.scene and session.scene.type == SceneType.GROUP:
-        return str(session.scene.id)
-    return None
 
 
 async def _guess_enabled(group_id: str | None) -> bool:
@@ -218,7 +212,7 @@ async def _pic_loop(game: GuessGame) -> None:
 
 
 async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) -> None:
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     if group_id is None:
         await UniMessage.text(" 猜歌仅群聊可用").finish(at_sender=True)
     if not await _guess_enabled(group_id):
@@ -254,7 +248,7 @@ async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) 
 
 async def _handle_answer(session: Session, text: str) -> bool:
     """答案命中时揭晓并返回 True。"""
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     game = _game_of(group_id)
     if game is None or not game.match(text):
         return False
@@ -276,7 +270,7 @@ async def _is_guess_answer(bot: Bot, event: Event) -> bool:
     session = await get_session(bot, event)
     if session is None:
         return False
-    if _game_of(_group_of(session)) is None:
+    if _game_of(group_id_of(session)) is None:
         return False
     return bool(event.get_plaintext().strip())
 
@@ -311,7 +305,7 @@ async def _(bot: Bot, event: Event, session: Session = UniSession()):
 @guess_reset.handle()
 @handle_errors()
 async def _(session: Session = UniSession()):
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     game = _game_of(group_id)
     if game is None:
         await UniMessage.text(" 当前没有进行中的猜歌").finish(at_sender=True)
@@ -326,10 +320,10 @@ async def _(
     session: Session = UniSession(),
     groups: tuple = RegexGroup(),
 ):
-    group_id = _group_of(session)
+    group_id = group_id_of(session)
     if group_id is None:
         await UniMessage.text(" 猜歌开关仅群聊可用").finish(at_sender=True)
-    if not (await SUPERUSER(bot, event) or await ADMIN()(bot, event)):
+    if not await group_admin()(bot, event):
         await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
     enabled = groups[0] == "开启"
     await store.set_group_switch(group_id, GUESS_FEATURE, enabled)

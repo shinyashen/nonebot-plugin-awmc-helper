@@ -14,6 +14,27 @@ T = TypeVar("T")
 _TM = TypeVar("_TM", bound=str | Message | UniMessage)
 
 
+def group_id_of(session) -> str | None:
+    """会话的群 id（非群聊返回 None；uninfo 语义，各子插件共用）。"""
+    from nonebot_plugin_uninfo import SceneType
+
+    if session.scene and session.scene.type == SceneType.GROUP:
+        return str(session.scene.id)
+    return None
+
+
+def user_id_of(session) -> str:
+    """会话的用户 id（字符串口径，各子插件共用）。"""
+    return str(session.user.id)
+
+
+def parse_page(args: str | None, default: int = 1) -> int:
+    """指令参数 → 页码（缺省/非数字回默认值）。"""
+    if args and str(args).isdigit():
+        return int(args)
+    return default
+
+
 def paginate(data: list[T], page: int, per_page: int) -> tuple[list[T], int]:
     """切片分页，返回 (当前页数据, 总页数)；页码越界时返回空列表。"""
     total = max(1, -(-len(data) // per_page))
@@ -91,3 +112,18 @@ def handle_errors(
         return wrapper
 
     return decorator
+
+
+GROUP_ADMIN = None
+"""群管理权限（SUPERUSER ∨ 群管/群主；延迟装配见 :func:`group_admin`）。"""
+
+
+def group_admin():
+    """群管权限单例（模块导入期装配，避免与 nonebot 初始化次序纠缠）。"""
+    global GROUP_ADMIN
+    if GROUP_ADMIN is None:
+        from nonebot.permission import SUPERUSER
+        from nonebot_plugin_uninfo import ADMIN
+
+        GROUP_ADMIN = SUPERUSER | ADMIN()
+    return GROUP_ADMIN

@@ -15,6 +15,7 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import COLOR_TO_LEVEL_INDEX
+from ...core.calc import SSSP_ACHIEVEMENT, min_ds_of_ra
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import SongType, ScoreExtend
@@ -116,9 +117,9 @@ async def _pick_rise_song(scores: list[ScoreExtend]):
             return None
     side.sort(key=lambda s: s.dx_rating or 0)  # 升序，取末位应为最低
     lowest_ra = side[0].dx_rating or 0
-    ignore_ids = {s.id for s in scores if (s.achievements or 0) >= 100.5}
+    ignore_ids = {s.id for s in scores if (s.achievements or 0) >= SSSP_ACHIEVEMENT}
 
-    ds = round(lowest_ra / 22.4, 1)
+    ds = round(min_ds_of_ra(lowest_ra), 1)
     candidates = []
     for song in await song_service.by_level_value(ds, ds + 1):
         if song.id in ignore_ids:

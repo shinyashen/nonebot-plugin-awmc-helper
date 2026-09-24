@@ -23,7 +23,7 @@ from ...core.calc import score_line, rise_recommend
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import SongType
-from ...core.utils import paginate, handle_errors
+from ...core.utils import paginate, parse_page, handle_errors
 from ...core.binding import session_keys, binding_service
 from ...core.render.tools import text_to_image, image_to_bytes
 
@@ -125,7 +125,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             if any(d.level == level for d in s.get_difficulties())
         ]
     else:
-        min_ds = math.ceil((lowest_ra + target) / 22.4 * 10) / 10
+        min_ds = math.ceil(min_ds_of_ra(lowest_ra + target) * 10) / 10
         candidates = [
             s
             for s in await song_service.get_all()
@@ -171,7 +171,7 @@ async def _(message: Message = CommandArg()):
         await UniMessage.image(raw=png).finish(at_sender=True)
     if args and not args.isdigit():
         await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(at_sender=True)
-    page = int(args) if args.isdigit() else 1
+    page = parse_page(args)
     page_data, total = paginate(users, page, 50)
     if not page_data:
         await UniMessage.text(f"  页码超出范围（共 {total} 页）").finish(at_sender=True)
