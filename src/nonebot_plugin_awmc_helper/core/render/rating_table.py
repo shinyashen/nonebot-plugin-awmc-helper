@@ -12,7 +12,20 @@ from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 from . import table_template
 from .fonts import FONT_NUM, FONT_RODIN, font
 from .assets import assets
-from ...constants import RATE_FILE
+from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
+from .table_layout import (
+    LV15_COLS,
+    RATING_COLS,
+    LV15_START_X,
+    LV15_START_Y,
+    LV15_COL_STEP,
+    LV15_ROW_STEP,
+    RATING_START_X,
+    RATING_START_Y,
+    RATING_GRID_STEP,
+    RATING_GROUP_GAP,
+    group_by_ds,
+)
 from .table_template import FONT_BLUE
 
 # NB constants 同源：统计键序与阈值表
@@ -219,9 +232,9 @@ def draw_rating_table(
     if level == "15":
         ordered = sorted(entries, key=lambda pair: pair[1].level_value, reverse=True)
         for i, (song, diff) in enumerate(ordered):
-            row, col = divmod(i, 3)
-            x = 100 + col * 425
-            y = 500 + row * 450
+            row, col = divmod(i, LV15_COLS)
+            x = LV15_START_X + col * LV15_COL_STEP
+            y = LV15_START_Y + row * LV15_ROW_STEP
             score = played.get((song.id, diff.level_index.value))
             if score is None:
                 continue
@@ -232,18 +245,14 @@ def draw_rating_table(
             else:
                 stamp_sync(x, y, score)
     else:
-        groups: dict[str, list[tuple[Song, SongDifficulty]]] = {}
-        for song, diff in entries:
-            if diff.level_value < 7:
-                continue
-            groups.setdefault(f"{diff.level_value:.1f}", []).append((song, diff))
-        current_y = 450
-        for ds in sorted(groups, key=float, reverse=True):
+        groups = group_by_ds(entries)
+        current_y = RATING_START_Y
+        for ds in groups:
             charts = groups[ds]
             for num, (song, diff) in enumerate(charts):
-                row, col = divmod(num, 14)
-                x = 140 + col * 85
-                y = current_y + row * 85
+                row, col = divmod(num, RATING_COLS)
+                x = RATING_START_X + col * RATING_GRID_STEP
+                y = current_y + row * RATING_GRID_STEP
                 score = played.get((song.id, diff.level_index.value))
                 if score is None:
                     continue
@@ -253,8 +262,8 @@ def draw_rating_table(
                     stamp_sync(x, y, score)
                 else:
                     stamp_rank(x, y, diff.level_value, score)
-            rows = (len(charts) - 1) // 14 + 1
-            current_y += rows * 85 + 30
+            rows = (len(charts) - 1) // RATING_COLS + 1
+            current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
 
     # 全曲达成徽章（NB _calc_achievements_fc：增量阈值全部满足时挂 Allclear 图）
     thresholds = (
@@ -296,12 +305,12 @@ def draw_rating_table(
 
 
 def _combo_file(key: str) -> str:
-    # UI_MSS_MBase_Icon_：FC/FCp/AP/APp
-    return {"fc": "FC", "fcp": "FCp", "ap": "AP", "app": "APp"}[key]
+    # UI_MSS_MBase_Icon_：FC/FCp/AP/APp（映射单源 constants）
+    return COMBO_FILE[key]
 
 
 def _sync_file(key: str) -> str:
-    return {"fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FSDp"}[key]
+    return SYNC_FILE[key]
 
 
 def _sync_allclear(key: str) -> str:

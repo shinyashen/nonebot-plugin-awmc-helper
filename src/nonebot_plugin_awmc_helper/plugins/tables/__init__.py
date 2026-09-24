@@ -187,9 +187,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         level, plan, scores.scores, entries, theme=theme, song_service=song_service
     )
     if png is None:
-        await UniMessage.text(" 定数表底图生成失败，请稍后再试").finish(
-            at_sender=True
-        )
+        await UniMessage.text(" 定数表底图生成失败，请稍后再试").finish(at_sender=True)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

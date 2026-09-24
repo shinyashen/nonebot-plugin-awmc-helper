@@ -18,9 +18,9 @@ from .tools import (
     generate_prism_bg,
 )
 from .assets import assets
-from .best50 import game_song_id
+from .best50 import draw_score_row
 from .nb_chart import truncate_by_width
-from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE, chart_display_id
+from ...constants import RATE_FILE, chart_display_id
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 同源，tools 单源）
 _DEFAULT_TEXT_COLOR = (124, 129, 255, 255)
@@ -230,91 +230,7 @@ class DrawScore:
             row, col = divmod(num, 5)
             x = start_x + col * col_step
             y = list_y + row * gap
-            li = score.level_index.value
-
-            self._im.alpha_composite(
-                assets.pic(f"b50_score_{_LEVEL_INDEXES[li]}.png"), (x, y)
-            )
-            self._im.alpha_composite(
-                assets.cover(score.id % 10000).resize((75, 75)), (x + 12, y + 12)
-            )
-            type_abbr = "DX" if score.type == SongType.DX else "SD"
-            type_path = self._base / f"{type_abbr}.png"
-            if type_path.exists():
-                self._im.alpha_composite(
-                    Image.open(type_path).convert("RGBA").resize((37, 14)),
-                    (x + 51, y + 91),
-                )
-            if score.rate is not None:
-                rate_path = (
-                    self._base
-                    / self._theme
-                    / (f"UI_TTR_Rank_{RATE_FILE[score.rate.name]}.png")
-                )
-                if rate_path.exists():
-                    self._im.alpha_composite(
-                        Image.open(rate_path).convert("RGBA").resize((63, 28)),
-                        (x + 92, y + 78),
-                    )
-            if score.fc:
-                self._im.alpha_composite(
-                    assets.pic(
-                        f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name.lower()]}.png"
-                    ).resize((34, 34)),
-                    (x + 154, y + 77),
-                )
-            if score.fs:
-                self._im.alpha_composite(
-                    assets.pic(
-                        f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name.lower()]}.png"
-                    ).resize((34, 34)),
-                    (x + 185, y + 77),
-                )
-            if score.dx_star:
-                star_path = (
-                    self._base / f"UI_GAM_Gauge_DXScoreIcon_0{score.dx_star}.png"
-                )
-                if star_path.exists():
-                    self._im.alpha_composite(
-                        Image.open(star_path).convert("RGBA").resize((47, 26)),
-                        (x + 217, y + 80),
-                    )
-
-            dr.text(
-                (x + 26, y + 98),
-                str(game_song_id(score)),
-                font=font(13, FONT_NUM),
-                fill=ID_TEXT_COLORS[li],
-                anchor="mm",
-            )
-            dr.text(
-                (x + 93, y + 14),
-                truncate_by_width(score.title, 18),
-                font=font(14, FONT_HAN),
-                fill=DIFF_TEXT_COLORS[li],
-                anchor="lm",
-            )
-            dr.text(
-                (x + 93, y + 38),
-                f"{score.achievements or 0:.4f}%",
-                font=font(30, FONT_NUM),
-                fill=DIFF_TEXT_COLORS[li],
-                anchor="lm",
-            )
-            dr.text(
-                (x + 219, y + 65),
-                f"{score.dx_score or 0}/{score.level_dx_score}",
-                font=font(15, FONT_NUM),
-                fill=DIFF_TEXT_COLORS[li],
-                anchor="mm",
-            )
-            dr.text(
-                (x + 93, y + 65),
-                f"{score.level_value} -> {int(score.dx_rating or 0)}",
-                font=font(15, FONT_NUM),
-                fill=DIFF_TEXT_COLORS[li],
-                anchor="lm",
-            )
+            draw_score_row(self._im, dr, x, y, score, self._theme)
 
     def _while_pic(
         self, items: list[tuple[int, int, float]], start_y: int = 200

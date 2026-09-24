@@ -31,6 +31,24 @@ from .assets import assets
 from ..plates import in_plate_scope, major_type_of_plate, plate_version_range
 from .nb_chart import version_image
 from ...constants import chart_display_id
+from .table_layout import (
+    LV15_COLS,
+    PLATE_COLS,
+    RATING_COLS,
+    LV15_START_X,
+    LV15_START_Y,
+    LV15_COL_STEP,
+    LV15_ROW_STEP,
+    PLATE_START_X,
+    PLATE_START_Y,
+    RATING_START_X,
+    RATING_START_Y,
+    PLATE_GRID_STEP,
+    RATING_GRID_STEP,
+    RATING_GROUP_GAP,
+    group_by_ds,
+    slot_level_of,
+)
 
 FONT_BLUE = (114, 188, 254, 255)
 _LEVEL_INDEXES = ("basic", "advanced", "expert", "master", "remaster")
@@ -68,29 +86,19 @@ def _credit(im: Image.Image, height: int) -> None:
     )
 
 
-def _group_by_ds(
-    entries: Sequence[tuple[Song, SongDifficulty]],
-) -> dict[str, list[tuple[Song, SongDifficulty]]]:
-    """按定数串分组（"13.0"/"13.6"），节序按定数降序（NB by_level_list 同序）。"""
-    grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
-    for song, diff in entries:
-        if diff.level_value < 7:
-            continue
-        grouped.setdefault(f"{diff.level_value:.1f}", []).append((song, diff))
-    return {k: grouped[k] for k in sorted(grouped, key=float, reverse=True)}
+_group_by_ds = group_by_ds
 
 
 def _rating_grid(
     entries: Sequence[tuple[Song, SongDifficulty]],
 ) -> Image.Image:
     """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 定数节封面网格。"""
-    GRID_STEP, START_X, START_Y = 85, 140, 450
     groups = _group_by_ds(entries)
 
-    current_y = START_Y
+    current_y = RATING_START_Y
     for charts in groups.values():
-        rows = (len(charts) - 1) // 14 + 1
-        current_y += rows * GRID_STEP + 30
+        rows = (len(charts) - 1) // RATING_COLS + 1
+        current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
     height = current_y + 230
 
     im = generate_frosted_card(_generate_bg(height, 360), (50, 404, 1350, current_y))
@@ -100,7 +108,7 @@ def _rating_grid(
 
     _credit(im, height)
 
-    start_y = START_Y
+    start_y = RATING_START_Y
     for ds, charts in groups.items():
         # 节标签 = 定数小数部分（如 ".6"）
         dr.text(
@@ -114,10 +122,10 @@ def _rating_grid(
         )
         max_row = 0
         for num, (song, diff) in enumerate(charts):
-            row, col = divmod(num, 14)
+            row, col = divmod(num, RATING_COLS)
             max_row = max(max_row, row)
-            x = START_X + col * GRID_STEP
-            y = start_y + row * GRID_STEP
+            x = RATING_START_X + col * RATING_GRID_STEP
+            y = start_y + row * RATING_GRID_STEP
             li = diff.level_index.value
             im.alpha_composite(assets.cover(song.id).resize((75, 75)), (x, y))
             im.alpha_composite(
@@ -130,7 +138,7 @@ def _rating_grid(
                 fill=_DIFF_TEXT_COLOR[li],
                 anchor="mm",
             )
-        start_y += (max_row + 1) * GRID_STEP + 30
+        start_y += (max_row + 1) * RATING_GRID_STEP + RATING_GROUP_GAP
     return im
 
 
@@ -139,8 +147,8 @@ def _rating_grid_15(
 ) -> Image.Image:
     """NB update_level_15_rating_table：lv15 三列大图（含 UNKNOWN 占位）。"""
     count = len(entries)
-    lines = count // 3 + (1 if count % 3 else 0)
-    height = 650 + lines * 450
+    lines = count // LV15_COLS + (1 if count % LV15_COLS else 0)
+    height = 650 + lines * LV15_ROW_STEP
 
     im = _generate_bg(height, 360)
     from PIL import ImageDraw
@@ -150,9 +158,9 @@ def _rating_grid_15(
 
     unknown = assets.cover(0).convert("RGBA").resize((330, 330))
     for i in range(lines * 3):
-        row, col = divmod(i, 3)
-        x = 100 + col * 425
-        y = 500 + row * 450
+        row, col = divmod(i, LV15_COLS)
+        x = LV15_START_X + col * LV15_COL_STEP
+        y = LV15_START_Y + row * LV15_ROW_STEP
         im.alpha_composite(assets.pic("chart_white.png"), (x, y))
         if i < count:
             song, diff = entries[i]
@@ -205,36 +213,23 @@ def _plate_grid(
     pages: int | None = None,
 ) -> Image.Image:
     """NB _draw_plate 布局：牌子完成表底图（12 列，ReM 曲紫 id）。"""
-    GRID_STEP, START_X, START_Y = 96, 180, 490
     remaster_ids = {s.id for s, _d in (remaster_entries or [])}
 
     # 按 MASTER 槽等级分组（舞/霸的 ReM 曲用 ReM 槽等级）
-    def level_of(song: Song, diff: SongDifficulty) -> str:
-        if remaster_entries and song.id in remaster_ids:
-            re_m = next(
-                (
-                    d
-                    for s2, d in remaster_entries
-                    if s2.id == song.id and d.level_index.value == 4
-                ),
-                None,
-            )
-            if re_m is not None:
-                return re_m.level
-        return diff.level
-
     grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
     for song, diff in entries:
-        grouped.setdefault(level_of(song, diff), []).append((song, diff))
+        grouped.setdefault(slot_level_of(song, diff, remaster_entries), []).append(
+            (song, diff)
+        )
     order = sorted(
         grouped, key=lambda lv: (float(lv.rstrip("+")), lv.endswith("+")), reverse=True
     )
     groups = {k: grouped[k] for k in order}
 
-    current_y = START_Y
+    current_y = PLATE_START_Y
     for charts in groups.values():
-        rows = (len(charts) - 1) // 12 + 1
-        current_y += rows * GRID_STEP + 30
+        rows = (len(charts) - 1) // PLATE_COLS + 1
+        current_y += rows * PLATE_GRID_STEP + RATING_GROUP_GAP
     height = current_y + 180
 
     im = generate_frosted_card(_generate_bg(height, 400), (50, 444, 1350, current_y))
@@ -251,7 +246,7 @@ def _plate_grid(
         )
     _credit(im, height)
 
-    start_y = START_Y
+    start_y = PLATE_START_Y
     for level, charts in groups.items():
         charts.sort(key=lambda pair: pair[1].level_value, reverse=True)
         dr.text(
@@ -265,10 +260,10 @@ def _plate_grid(
         )
         max_row = 0
         for num, (song, diff) in enumerate(charts):
-            row, col = divmod(num, 12)
+            row, col = divmod(num, PLATE_COLS)
             max_row = max(max_row, row)
-            x = START_X + col * GRID_STEP
-            y = start_y + row * GRID_STEP
+            x = PLATE_START_X + col * PLATE_GRID_STEP
+            y = start_y + row * PLATE_GRID_STEP
             is_rem = song.id in remaster_ids
             im.alpha_composite(assets.cover(song.id).resize((80, 80)), (x, y))
             im.alpha_composite(
@@ -284,7 +279,7 @@ def _plate_grid(
                 fill=(138, 0, 226, 255) if is_rem else (255, 255, 255, 255),
                 anchor="mm",
             )
-        start_y += (max_row + 1) * GRID_STEP + 30
+        start_y += (max_row + 1) * RATING_GRID_STEP + RATING_GROUP_GAP
     return im
 
 
@@ -366,21 +361,8 @@ def _by_level(
     remaster: Sequence[tuple[Song, SongDifficulty]],
 ) -> dict[str, list[tuple[Song, SongDifficulty]]]:
     grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
-    remaster_ids = {s.id for s, _d in remaster}
     for song, diff in entries:
-        lv = diff.level
-        if song.id in remaster_ids:
-            re_m = next(
-                (
-                    d
-                    for s2, d in remaster
-                    if s2.id == song.id and d.level_index.value == 4
-                ),
-                None,
-            )
-            if re_m is not None:
-                lv = re_m.level
-        grouped.setdefault(lv, []).append((song, diff))
+        grouped.setdefault(slot_level_of(song, diff, remaster), []).append((song, diff))
     return grouped
 
 

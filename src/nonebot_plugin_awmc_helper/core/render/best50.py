@@ -354,7 +354,7 @@ async def _draw_header(
     )
 
 
-def _draw_row(
+def draw_score_row(
     im: Image.Image,
     draw: ImageDraw.ImageDraw,
     x: int,
@@ -362,6 +362,7 @@ def _draw_row(
     score: ScoreExtend,
     theme: str,
 ) -> None:
+    """单张 B50 风格成绩行卡（b50_score_* 底图，B50 大图与等级完成表共用）。"""
     diff = score.level_index.value  # LevelIndex.value 恰为 DIFF_*_COLORS 下标 0-4
     pic = assets.static_path() / "mai" / "pic"
     im.alpha_composite(
@@ -462,7 +463,7 @@ async def draw_b50_nb(
             row, col = divmod(num, 5)
             x = 16 + col * 276
             y = initial_y + row * 114
-            _draw_row(im, draw, x, y, score, theme)
+            draw_score_row(im, draw, x, y, score, theme)
 
     service_name = SERVICE_DISPLAY.get(service or "", "")
     footer_color = FOOTER_COLORS.get(theme, FOOTER_COLORS["prism_plus"])
