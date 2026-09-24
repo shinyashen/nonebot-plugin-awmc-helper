@@ -42,9 +42,11 @@ from .table_layout import (
     LV15_ROW_STEP,
     PLATE_START_X,
     PLATE_START_Y,
+    PLATE_COL_STEP,
+    PLATE_ROW_STEP,
     RATING_START_X,
     RATING_START_Y,
-    PLATE_GRID_STEP,
+    PLATE_GROUP_GAP,
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
     group_by_ds,
@@ -247,7 +249,7 @@ def _plate_grid(
     current_y = PLATE_START_Y
     for charts in groups.values():
         rows = (len(charts) - 1) // PLATE_COLS + 1
-        current_y += rows * PLATE_GRID_STEP + RATING_GROUP_GAP
+        current_y += rows * PLATE_ROW_STEP + PLATE_GROUP_GAP
     height = current_y + 180
 
     im = generate_frosted_card(_generate_bg(height, 400), (50, 444, 1350, current_y))
@@ -280,8 +282,8 @@ def _plate_grid(
         for num, (song, diff) in enumerate(charts):
             row, col = divmod(num, PLATE_COLS)
             max_row = max(max_row, row)
-            x = PLATE_START_X + col * PLATE_GRID_STEP
-            y = start_y + row * PLATE_GRID_STEP
+            x = PLATE_START_X + col * PLATE_COL_STEP
+            y = start_y + row * PLATE_ROW_STEP
             is_rem = song.id in remaster_ids
             im.alpha_composite(assets.cover(song.id).resize((80, 80)), (x, y))
             im.alpha_composite(
@@ -297,7 +299,7 @@ def _plate_grid(
                 fill=(138, 0, 226, 255) if is_rem else (255, 255, 255, 255),
                 anchor="mm",
             )
-        start_y += (max_row + 1) * PLATE_GRID_STEP + RATING_GROUP_GAP
+        start_y += (max_row + 1) * PLATE_ROW_STEP + PLATE_GROUP_GAP
     return im
 
 

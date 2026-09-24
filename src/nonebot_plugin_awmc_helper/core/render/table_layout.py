@@ -22,11 +22,14 @@ LV15_START_Y = 500
 LV15_COL_STEP = 425
 LV15_ROW_STEP = 450
 
-# 牌子完成表：96px 格、12 列、起点 (180, 490)
-PLATE_GRID_STEP = 96
+# 牌子完成表：96px 横向列距、起点 (180, 490)；纵向行距用紧凑的 85
+# （2026-09-25 用户拍板：完成表行距取小间距版，区别于 Hoshino 原版 96）
+PLATE_COL_STEP = 96
+PLATE_ROW_STEP = 85
 PLATE_START_X = 180
 PLATE_START_Y = 490
 PLATE_COLS = 12
+PLATE_GROUP_GAP = 30
 
 
 def group_by_ds(

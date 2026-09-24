@@ -18,17 +18,17 @@ from .table_layout import (
     PLATE_COLS,
     PLATE_START_X,
     PLATE_START_Y,
-    PLATE_GRID_STEP,
+    PLATE_COL_STEP,
+    PLATE_ROW_STEP,
 )
 from .plate_progress import progress_header
 
 # 完成表网格几何：单一事实来源 table_layout
-GRID_STEP, START_X, START_Y, ROW_COUNT = (
-    PLATE_GRID_STEP,
-    PLATE_START_X,
-    PLATE_START_Y,
-    PLATE_COLS,
-)
+COL_STEP = PLATE_COL_STEP  # 横向列距 96
+ROW_STEP = PLATE_ROW_STEP  # 纵向行距 85（紧凑版）
+START_X = PLATE_START_X
+START_Y = PLATE_START_Y
+ROW_COUNT = PLATE_COLS
 
 
 def _qualified(kind: str, score) -> bool:
@@ -210,8 +210,8 @@ def draw_plate_table(
         rows = (len(songs_slots) - 1) // ROW_COUNT + 1
         for idx, (song_id, slots) in enumerate(songs_slots.items()):
             row, col = divmod(idx, ROW_COUNT)
-            x = START_X + col * GRID_STEP
-            y = current_y + row * GRID_STEP
+            x = START_X + col * COL_STEP
+            y = current_y + row * ROW_STEP
             qualified_slots = qualified_slots_of[song_id]
             if slot_num - 1 in qualified_slots:
                 best = slots[slot_num - 1]
@@ -227,7 +227,7 @@ def draw_plate_table(
                     )
                 else:
                     im.alpha_composite(mark, (x + 4 + 19 * s_idx, y + 63))
-        current_y += rows * GRID_STEP + 30
+        current_y += rows * ROW_STEP + 30
 
     # 头部计数与进度条（与进度总览同源组件）
     progress_header(im, dr, qualified_count, len(song_level))
