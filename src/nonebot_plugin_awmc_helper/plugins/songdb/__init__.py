@@ -28,7 +28,9 @@ reload_extra = on_command("重载补充数据", permission=SUPERUSER, block=True
 async def _():
     # 进度提示必须用 send：finish 会抛 FinishedException 终止 handler，后续逻辑不再执行
     await UniMessage.text(" 正在重载外部补充数据……").send(at_sender=True)
-    summary = await songdb.apply_external_sources()
+    # force：显式重载必须真重放——重建以基础源覆写过外部字段时，文件哈希虽未变
+    # 也得把校正写回去，按"哈希未变"跳过是错的
+    summary = await songdb.apply_external_sources(force=True)
     if summary.get("changed"):
         from ...core.songs import prerender_templates
 

@@ -23,7 +23,8 @@ async def test_reload_extra_continues_after_progress(app: App, monkeypatch):
 
     monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
 
-    async def fake_apply() -> dict:
+    async def fake_apply(*, force: bool = False) -> dict:
+        assert force  # 显式重载必须强制重应用（重建覆写后哈希门控会漏）
         return {"sources": 1, "applied": 123, "changed": True}
 
     async def fake_prerender() -> str:

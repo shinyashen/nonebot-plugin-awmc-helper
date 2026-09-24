@@ -425,6 +425,81 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_external_source_forced_reapply_after_rebuild(db, tmp_path, monkeypatch):
+    """回归（2026-09-25）：重建以基础源覆写外部字段后，必须强制重应用外部源。
+
+    apply_jp 无条件写回 maimaiinfo 物量/定数历史，外部源合并曾按文件哈希门控
+    ——文件未变即跳过，机台校正活不过下一次每日重建。refresh_all 现以 force
+    重放；无真实值变化时 changed=False（不触发无谓底图重建）。
+    """
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    doc = tmp_path / "magical.json"
+    doc.write_text(
+        json.dumps(
+            {
+                "8": {
+                    "sheets": {
+                        "sd": {
+                            "contents": [
+                                {
+                                    "level_id": 0,
+                                    "notes": [9, 9, 9, 9, 9],
+                                    "level": [7.7],
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(doc)],
+    )
+    summary = await songdb.apply_external_sources(force=True)
+    assert summary["changed"]
+    assert summary["applied"] > 0
+    state = await songdb.State.load()
+    assert (
+        state.charts[(8, "sd", 0)].notes_tap,
+        state.charts[(8, "sd", 0)].notes_touch,
+    ) == (9, 9)
+
+    # 模拟次日重建：maimaiinfo 旧物量/定数历史写回，机台校正被冲掉
+    await songdb.rebuild(full_payloads())
+    state = await songdb.State.load()
+    assert state.charts[(8, "sd", 0)].notes_tap == 63
+    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5)]
+
+    # 文件未变，force 重放：校正恢复且 changed 反映真实变化
+    summary = await songdb.apply_external_sources(force=True)
+    assert summary["changed"]
+    state = await songdb.State.load()
+    assert (
+        state.charts[(8, "sd", 0)].notes_tap,
+        state.charts[(8, "sd", 0)].notes_touch,
+    ) == (9, 9)
+    assert state.history_of(8, "sd", 0) == [
+        (20000, 4.0),
+        (23000, 4.5),
+        (26500, 7.7),
+    ]
+
+    # 幂等：再次 force 无真实变化 → changed=False（不触发底图重建）
+    summary = await songdb.apply_external_sources(force=True)
+    assert not summary["changed"]
+
+    # 非 force：哈希未变仍跳过（上传路径语义保持）
+    summary = await songdb.apply_external_sources()
+    assert not summary["changed"]
+
+
+@pytest.mark.asyncio
 async def test_external_source_creates_missing_song(db, tmp_path, monkeypatch):
     """骨架外新曲（文档自带 id）直接创建日侧行，并经 extra 在列信号免于误删。"""
     from nonebot_plugin_awmc_helper.core import songdb
