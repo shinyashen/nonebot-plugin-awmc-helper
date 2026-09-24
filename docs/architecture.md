@@ -82,3 +82,26 @@ SSE 推送为常驻协程：断线指数退避 3s→60s、Last-Event-ID 断点�
 - maimai-py / ext 的 HTTP 交互用 respx 拦截（不联网）；
 - 绘图函数做冒烟测试（输出非空 PNG）；
 - 曲库通过向 MaimaiClient 缓存注入样例数据绕过网络（`tests/mocks.py`）。
+
+## 渲染坐标规范（以 Hoshino 为准）
+
+`core/render/` 各绘图模块的**坐标、素材引用与图层顺序，一律以 Hoshino 版
+maimaiDX（`local/repos/maimaiDX/core/image/`）为唯一权威**；NB 版
+（`local/repos/nonebot-plugin-maimaidx`）仅作结构参考。改动任何渲染布局前，
+先对照 Hoshino 同名实现（`plate_table.py` / `rating_table.py` / `score.py` /
+`best50.py` / `chart.py` / `info.py` 等）确认坐标与素材名。
+
+注意事项（实测踩坑）：
+
+- **素材引用以 Hoshino `assets.py` 的映射为准**，不要按文件名望文生义：
+  完成表头部大面板是 `plate_progress.png`（`_plate_progress_bg`），
+  `progress_bg.png` 是进度总览每槽的底部小条（`_plate_progress_bottom_bg`）；
+  进度总览头部面板是 `plate_progress_2.png`；
+- **素材包的简繁命名与 fork `plate_aliases` 不同**：牌头仅 晓/樱/堇/辉/华 +
+  「極」用繁体（`render/assets.py` 的 `_S2T_VERSION`/`_S2T_KIND`），牌种
+  將/鏡 等在素材包中是简体，不能从 `plate_aliases` 反推；
+- **素材尺寸与 Hoshino 原版可能不同**（如 `progress_big.png` 为 43 高，
+  Hoshino 按 92 裁）：裁剪一律 clamp 到素材实际尺寸；
+- 牌子完成表/进度总览的网格为「**一格一曲**」语义（四槽完成小标画在同一格），
+  模板（`table_template._plate_grid`）与叠章（`plate_table_draw.draw_plate_table`）
+  的分组、排序、分页必须逐条一致，改动任一侧先核对另一侧。

@@ -13,6 +13,7 @@ from .fonts import FONT_NUM, FONT_RODIN, font
 from .tools import (
     TEXT_BLUE,
     TITLE_BLUE,
+    ID_TEXT_COLORS,
     credit_text,
     image_to_bytes,
     generate_prism_bg,
@@ -26,11 +27,14 @@ _START_X, _START_Y, _GAP = 84, 455, 96
 
 
 def _progress_bar(im: Image.Image, y: int, progress: float) -> None:
-    """993×92 进度条（progress_big 裁剪）。"""
+    """总进度条（progress_big 按 993 宽裁剪；高度以素材实际为准）。"""
     if progress <= 0:
         return
     big = assets.pic("progress_big.png")
-    im.alpha_composite(big.crop((0, 0, int(993 * progress), 92)), (204, y))
+    # Hoshino 按 92 高裁，素材包此素材为 43 高：裁剪高度取素材实际值
+    im.alpha_composite(
+        big.crop((0, 0, int(993 * progress), big.height)), (204, y)
+    )
 
 
 def progress_header(
@@ -92,9 +96,6 @@ def plate_progress_bytes(
 
     dr = ImageDraw.Draw(im)
 
-    # 总进度（progress = 完成曲数 / 牌子曲数）
-    progress_header(im, dr, completed_count, total_count)
-
     start_y = _START_Y
     for slot in slots:
         li = slot["level_index"]
@@ -104,7 +105,8 @@ def plate_progress_bytes(
         group_progress = cleared / total if total else 0
         _progress_bar(im, start_y - 79, group_progress)
         g_text = "COMPLETED!!!" if cleared == total else f"{cleared}/{total}"
-        color = TEXT_BLUE
+        # 每槽节文案按槽位配色（Hoshino new_color：id 配色倒序取用）
+        color = ID_TEXT_COLORS[li]
         dr.text(
             (220, start_y - 57),
             _DIFF_NAMES[li],

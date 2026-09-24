@@ -35,6 +35,19 @@
 - guess 极端并发观感：开局串行锁落地后「开始」消息必先于对局可答；曲绘提示与
   首条提示的交织理论上仍可能出现（量级极小，观察即可）。
 
+## 二A、渲染全量对照 Hoshino（进行中）
+
+规范见 architecture.md「渲染坐标规范」。完成表（plate_table_draw +
+_plate_grid）与进度总览（plate_progress）已于 2026-09-24 对照修正；其余
+渲染器逐个对照 Hoshino 同名实现的坐标/素材/图层顺序：
+
+- [ ] `rating_table.py`（定数表叠章）对照 Hoshino `rating_table.py`；
+- [ ] `score.py`（等级完成表/推分卡）对照 Hoshino `score.py`；
+- [ ] `best50.py` 对照 Hoshino `best50.py`；
+- [ ] `nb_chart.py` / `info.py` / `song.py`（查歌/单曲卡）对照 Hoshino
+  `chart.py` / `info.py` / `song.py`；
+- [ ] 舞/霸完成表双页的叠章分页过滤已补，端到端需用真实数据复核一次。
+
 ## 三、硬编码收敛（暂缓，其余两条 2026-09-24 已完成）
 
 - 分页大小各自硬编码（alias 25 / score_tools 50 / tables 80）。

@@ -135,28 +135,32 @@ def draw_plate_table(
             if (_lv_key(lv) >= 13) == (page <= 1)
         }
     # 组序（等级降序）与组内序（定数降序）对齐模板 _plate_grid
-    played = {
-        lv: {
-            sid: slots
-            for sid, slots in sorted(
-                group.items(),
-                key=lambda kv: next(
-                    (
-                        d.level_value
-                        for d in all_slots[kv[0]]
-                        if d.level_index == LevelIndex.MASTER
+    played = dict(
+        sorted(
+            (
+                (
+                    lv,
+                    dict(
+                        sorted(
+                            group.items(),
+                            key=lambda kv: next(
+                                (
+                                    d.level_value
+                                    for d in all_slots[kv[0]]
+                                    if d.level_index == LevelIndex.MASTER
+                                ),
+                                0,
+                            ),
+                            reverse=True,
+                        )
                     ),
-                    0,
-                ),
-                reverse=True,
-            )
-        }
-        for lv, group in sorted(
-            played.items(),
+                )
+                for lv, group in played.items()
+            ),
             key=lambda kv: (float(kv[0].rstrip("+")), kv[0].endswith("+")),
             reverse=True,
         )
-    }
+    )
 
     qualified_count = 0
     slot_counts = [0] * slot_num
@@ -166,8 +170,9 @@ def draw_plate_table(
     from PIL import ImageDraw
 
     dr = ImageDraw.Draw(im)
-    progress_bg = assets.pic("progress_bg.png")
-    im.alpha_composite(progress_bg, (175, 20))
+    # 头部白色大面板（Hoshino _plate_progress_bg = plate_progress.png；
+    # progress_bg.png 是进度总览每槽的底部小条，误用致面板缺失、白条外露）
+    im.alpha_composite(assets.pic("plate_progress.png"), (175, 20))
     # 牌头走 Assets.plate_version（含简→繁转换与缓存；本地手拼文件名
     # 不做版本字转换，晓/樱/堇/辉/华 及一切「极」牌的繁体文件名永远打不开）
     bg = assets.plate_version(version, kind)
@@ -224,7 +229,8 @@ def draw_plate_table(
         if group_progress:
             small = assets.pic("progress_small.png")
             im.alpha_composite(
-                small.crop((0, 0, int(230 * group_progress), 46)), (x - 115, 326)
+                small.crop((0, 0, int(230 * group_progress), min(46, small.height))),
+                (x - 115, 326),
             )
         dr.text(
             (x, stats_start_y),
