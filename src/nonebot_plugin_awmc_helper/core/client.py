@@ -15,12 +15,13 @@ from maimai_py import LXNSProvider, MaimaiClient, YuzuProvider, DivingFishProvid
 
 from .http import build_smart_transport
 from ..config import plugin_config
+from .ext.yuzu import YUZU_DOMAIN_CN
 
 
 class ProxyYuzuProvider(YuzuProvider):
     """走 .cn 中转域的柚子别名源（YuzuProvider 的 base_url 是类属性，子类化改写）。"""
 
-    base_url = "https://www.yuzuchan.cn/api/"
+    base_url = f"{YUZU_DOMAIN_CN}/api/"
 
 
 def _build_yuzu() -> YuzuProvider:

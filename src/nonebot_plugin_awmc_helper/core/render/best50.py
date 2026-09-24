@@ -33,7 +33,7 @@ from maimai_py import (
 
 from ..http import build_smart_transport
 from .fonts import FONT_HAN, FONT_NUM, font
-from .tools import image_to_bytes
+from .tools import char_width, column_width, image_to_bytes
 from .assets import assets, online_item_cache_dir
 from ...config import NICKNAME, plugin_config
 from ...constants import SYNC_FILE, COMBO_FILE
@@ -133,67 +133,13 @@ def game_song_id(score: ScoreExtend) -> int:
     return score.id
 
 
-def get_char_width(o: int) -> int:
-    """字符显示宽度（0/1/2，东亚宽度近似，Hoshino base.py 同款表）。"""
-    widths = [
-        (126, 1),
-        (159, 0),
-        (687, 1),
-        (710, 0),
-        (711, 1),
-        (727, 0),
-        (733, 1),
-        (879, 0),
-        (1154, 1),
-        (1161, 0),
-        (4347, 1),
-        (4447, 2),
-        (7467, 1),
-        (7521, 0),
-        (8369, 1),
-        (8426, 0),
-        (9000, 1),
-        (9002, 2),
-        (11021, 1),
-        (12350, 2),
-        (12351, 1),
-        (12438, 2),
-        (12442, 0),
-        (19893, 2),
-        (19967, 1),
-        (55203, 2),
-        (63743, 1),
-        (64106, 2),
-        (65039, 1),
-        (65059, 0),
-        (65131, 2),
-        (65279, 1),
-        (65376, 2),
-        (65500, 1),
-        (65510, 2),
-        (120831, 1),
-        (262141, 2),
-        (1114109, 1),
-    ]
-    if o == 0xE or o == 0xF:
-        return 0
-    for num, wid in widths:
-        if o <= num:
-            return wid
-    return 1
-
-
-def column_width(s: str) -> int:
-    return sum(get_char_width(ord(ch)) for ch in s)
-
-
 def truncate_title(s: str, limit: int = 18, keep: int = 17) -> str:
     """标题超宽截断：按显示宽度保留前 keep 列再加省略号（Hoshino 同款规则）。"""
     if column_width(s) <= limit:
         return s
     res, out = 0, []
     for ch in s:
-        res += get_char_width(ord(ch))
+        res += char_width(ord(ch))
         if res <= keep:
             out.append(ch)
     return "".join(out) + "..."

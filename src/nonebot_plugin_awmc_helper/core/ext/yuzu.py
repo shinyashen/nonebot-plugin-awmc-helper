@@ -16,9 +16,13 @@ from . import ExtError, get_client
 from ..http import build_smart_transport
 from ...config import plugin_config
 
-BASE_URL_MOE = "https://www.yuzuchan.moe/api/v2"
-BASE_URL_CN = "https://www.yuzuchan.cn/api/v2"
-VOTE_URL = "https://www.yuzuchan.moe/vote"
+YUZU_DOMAIN_MOE = "https://www.yuzuchan.moe"
+YUZU_DOMAIN_CN = "https://www.yuzuchan.cn"
+"""柚子双域：.moe 主域 / .cn 中转域（awmc_yuzu_proxy 时别名 API 走 CN）。"""
+
+BASE_URL_MOE = f"{YUZU_DOMAIN_MOE}/api/v2"
+BASE_URL_CN = f"{YUZU_DOMAIN_CN}/api/v2"
+VOTE_URL = f"{YUZU_DOMAIN_MOE}/vote"
 """投票详情页（推送文案附链接）。"""
 
 SSE_RECONNECT_DELAY = 3.0

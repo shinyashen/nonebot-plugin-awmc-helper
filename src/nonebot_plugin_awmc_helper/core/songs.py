@@ -612,7 +612,7 @@ async def _notify_superusers(text: str) -> None:
             logger.debug(f"更新通知发送失败（superuser={user_id}）：{e}")
 
 
-async def _prerender_templates() -> str:
+async def prerender_templates() -> str:
     """预渲染全部底图（core 实现，自动触发与 SUPERUSER 指令共用），返回结果描述。"""
     from .render import table_template
 
@@ -644,7 +644,7 @@ async def _ensure_templates() -> None:
 
     if _empty(rating_dir) or _empty(plate_dir):
         try:
-            await _prerender_templates()
+            await prerender_templates()
         except Exception:
             logger.exception("底图兜底预渲染失败（保留现状，不阻断）")
 
@@ -726,7 +726,7 @@ async def _on_cn_update(
     template_msg = "已跳过（awmc_auto_templates=false）"
     if plugin_config.awmc_auto_templates:
         try:
-            template_msg = await _prerender_templates()
+            template_msg = await prerender_templates()
         except Exception:
             logger.exception("国服更新自动预渲染失败（保留旧底图，不阻断曲库刷新）")
             template_msg = "失败（保留旧底图）"
@@ -762,7 +762,7 @@ async def full_refresh() -> dict:
         # 外部源已在 refresh_all 内应用（含新曲创建），此处只负责底图重建
         logger.info(f"外部补充源有变化，重建底图（{extra}）")
         try:
-            await _prerender_templates()
+            await prerender_templates()
         except Exception:
             logger.exception("外部补充源触发的预渲染失败（保留旧底图，不阻塞）")
     await _ensure_templates()

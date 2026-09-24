@@ -261,16 +261,16 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
         song_service._ready.clear()
 
 
-def test_major_diffs_prefer_type():
+def testmajor_diffs_prefer_type():
     """双谱歌曲卡片主类型：默认 DX 优先；带「标准/标」前缀搜索时显示 SD。"""
     from mocks import make_diff, make_song
     from maimai_py import SongType, LevelIndex
 
-    from nonebot_plugin_awmc_helper.core.render.nb_chart import _major_diffs
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import major_diffs
 
     song = make_song(199, "dual")  # 默认种子：SD EXPERT + DX MASTER
-    assert [d.type for d in _major_diffs(song)] == [SongType.DX]  # NB 默认
-    prefer_sd = _major_diffs(song, SongType.STANDARD)
+    assert [d.type for d in major_diffs(song)] == [SongType.DX]  # NB 默认
+    prefer_sd = major_diffs(song, SongType.STANDARD)
     assert [d.type for d in prefer_sd] == [SongType.STANDARD]
     # 仅 SD 的歌曲：无偏好与偏好 SD 均显示 SD
     sd_only = make_song(
@@ -285,8 +285,8 @@ def test_major_diffs_prefer_type():
             )
         ],
     )
-    assert [d.type for d in _major_diffs(sd_only)] == [SongType.STANDARD]
-    assert [d.type for d in _major_diffs(sd_only, SongType.STANDARD)] == [
+    assert [d.type for d in major_diffs(sd_only)] == [SongType.STANDARD]
+    assert [d.type for d in major_diffs(sd_only, SongType.STANDARD)] == [
         SongType.STANDARD
     ]
 

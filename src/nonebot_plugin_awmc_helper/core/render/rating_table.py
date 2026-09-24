@@ -10,7 +10,7 @@ from PIL import Image
 from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
-from .fonts import font
+from .fonts import FONT_NUM, FONT_RODIN, font
 from .assets import assets
 from ...constants import RATE_FILE
 from .table_template import FONT_BLUE
@@ -134,7 +134,7 @@ def draw_rating_table(
     dr.text(
         (495, title_y),
         "Level.",
-        font=font(70, "FOT-NewRodin Pro EB.otf"),
+        font=font(70, FONT_RODIN),
         fill=FONT_BLUE,
         anchor="ld",
         stroke_width=8,
@@ -143,7 +143,7 @@ def draw_rating_table(
     dr.text(
         (750, title_y),
         level,
-        font=font(100, "FOT-NewRodin Pro EB.otf"),
+        font=font(100, FONT_RODIN),
         fill=FONT_BLUE,
         anchor="ld",
         stroke_width=8,
@@ -154,7 +154,7 @@ def draw_rating_table(
     dr.text(
         (394, 238),
         f"{stats.data['clear']}/{total_count}",
-        font=font(30, "Torus SemiBold.otf"),
+        font=font(30, FONT_NUM),
         fill=(124, 129, 255, 255),
         anchor="mm",
         stroke_width=5,
@@ -168,7 +168,7 @@ def draw_rating_table(
         dr.text(
             (x, y),
             str(stats.data[key]),
-            font=font(30, "Torus SemiBold.otf"),
+            font=font(30, FONT_NUM),
             fill=(124, 129, 255, 255),
             anchor="mm",
             stroke_width=2,

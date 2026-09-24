@@ -5,9 +5,82 @@ from typing import Literal
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from .fonts import font
+from .fonts import FONT_HAN, font
 
 DEFAULT_TEXT_SIZE = 28
+
+# NB base.py 的东亚字宽判定（截断用）；best50 行卡与 nb_chart 曲名截断共用
+_CHAR_WIDTHS = [
+    (126, 1),
+    (159, 0),
+    (687, 1),
+    (710, 0),
+    (711, 1),
+    (727, 0),
+    (733, 1),
+    (879, 0),
+    (1154, 1),
+    (1161, 0),
+    (4347, 1),
+    (4447, 2),
+    (7467, 1),
+    (7521, 0),
+    (8369, 1),
+    (8426, 0),
+    (9000, 1),
+    (9002, 2),
+    (11021, 1),
+    (12350, 2),
+    (12351, 1),
+    (12438, 2),
+    (12442, 0),
+    (19893, 2),
+    (19967, 1),
+    (55203, 2),
+    (63743, 1),
+    (64106, 2),
+    (65039, 1),
+    (65059, 0),
+    (65131, 2),
+    (65279, 1),
+    (65376, 2),
+    (65500, 1),
+    (65510, 2),
+    (120831, 1),
+    (262141, 2),
+    (1114109, 1),
+]
+
+
+def char_width(o: int) -> int:
+    """单字符显示宽度（0/1/2）。"""
+    if o in (0xE, 0xF):
+        return 0
+    for num, wid in _CHAR_WIDTHS:
+        if o <= num:
+            return wid
+    return 1
+
+
+def column_width(text: str) -> int:
+    """字符串显示宽度（列数）。"""
+    return sum(char_width(ord(ch)) for ch in text)
+
+
+def truncate_by_width(text: str, limit: int) -> str:
+    """按显示宽度截断，超宽加省略号。"""
+    if column_width(text) <= limit:
+        return text
+    res = 0
+    out = []
+    for ch in text:
+        w = char_width(ord(ch))
+        if res + w <= limit:
+            out.append(ch)
+            res += w
+        else:
+            break
+    return "".join(out) + "..."
 
 
 def image_to_bytes(img: Image.Image, fmt: Literal["PNG", "JPEG"] = "PNG") -> bytes:
@@ -43,7 +116,7 @@ def text_to_image(
     max_width: int = 1200,
 ) -> Image.Image:
     """多行长文本转图（白底黑字），自动换行与宽度截断。"""
-    f = font(size, font_name or "ResourceHanRoundedCN-Bold.ttf")
+    f = font(size, font_name or FONT_HAN)
     line_spacing = int(size * 0.4)
     lines: list[str] = []
     for raw in text.splitlines() or [""]:

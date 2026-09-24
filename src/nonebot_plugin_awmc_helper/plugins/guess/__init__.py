@@ -14,7 +14,6 @@ import random
 import asyncio
 
 from nonebot import logger, on_regex, on_command, on_message
-from maimai_py import Song, SongType
 from nonebot.rule import Rule
 from nonebot.params import RegexGroup
 from nonebot.plugin import PluginMetadata
@@ -26,6 +25,7 @@ from ...core import store
 from ...config import plugin_config
 from ...constants import GENRE_TO_ZH, version_zh
 from ...core.songs import song_service
+from ...core.types import Song, SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.render.cover import crop_cover_randomly

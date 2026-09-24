@@ -11,7 +11,6 @@
 """
 
 from nonebot import on_regex, on_command, on_fullmatch
-from maimai_py import FCType, FSType, SongType
 from nonebot.params import RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.permission import SUPERUSER
@@ -27,7 +26,9 @@ from ...constants import (
 )
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
+from ...core.types import FCType, FSType, SongType
 from ...core.utils import handle_errors
+from ...core.plates import in_plate_scope, major_type_of_plate, plate_version_range
 from ...core.binding import session_keys, binding_service
 from ...core.render.score import DrawScore
 from ...core.render.tools import text_to_image, image_to_bytes
@@ -292,14 +293,14 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         from ...core.render import table_template
         from ...core.render.plate_table_draw import draw_plate_table
 
-        major = table_template._major_type_of_plate(version)
-        rng = table_template._plate_version_range(version)
+        major = major_type_of_plate(version)
+        rng = plate_version_range(version)
         entries = []
         if rng is not None:
             lo, hi = rng
             for song in await song_service.get_all():
                 for d in song.get_difficulties():
-                    if table_template._in_plate_scope(song, d, lo, hi, major):
+                    if in_plate_scope(song, d, lo, hi, major):
                         entries.append((song, d))
         if not entries:
             await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
@@ -330,17 +331,9 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
     is_wu = version in ("舞", "霸")
     slot_count = 5 if is_wu else 4
-    # 牌子主类型（maimai_py MaimaiPlates._major_type 同语义）：DX 世代牌推 DX 谱，
-    # 旧作牌（含舞/霸）推 SD 谱——决定未达成网格的 per-type 游戏 id 与定数取哪侧谱面
-    from maimai_py import plate_to_version
-
-    if is_wu:
-        major_type = SongType.STANDARD
-    else:
-        pv = plate_to_version.get(version)
-        major_type = (
-            SongType.DX if pv is not None and pv.value >= 20000 else SongType.STANDARD
-        )
+    # 牌子主类型：DX 世代牌推 DX 谱，旧作牌（含舞/霸）推 SD 谱——决定未达成
+    # 网格的 per-type 游戏 id 与定数取哪侧谱面（判定下沉 core/plates）
+    major_type = major_type_of_plate(version)
     slot_total = [0] * slot_count
     slot_cleared = [0] * slot_count
     remained_by_slot: list[list[tuple[int, int, float, str]]] = [

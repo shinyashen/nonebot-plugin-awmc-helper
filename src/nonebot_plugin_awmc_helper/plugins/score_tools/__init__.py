@@ -11,7 +11,6 @@ import math
 import time
 
 from nonebot import on_regex, on_command
-from maimai_py import SongType
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Message
@@ -23,6 +22,7 @@ from ...constants import LEVEL_INDEX_ZH, COLOR_TO_LEVEL_INDEX
 from ...core.calc import score_line, rise_recommend
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
+from ...core.types import SongType
 from ...core.utils import paginate, handle_errors
 from ...core.binding import session_keys, binding_service
 from ...core.render.tools import text_to_image, image_to_bytes

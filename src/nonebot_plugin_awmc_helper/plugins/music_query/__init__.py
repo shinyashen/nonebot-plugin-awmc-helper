@@ -13,15 +13,14 @@ import re
 from re import Match
 
 from nonebot import on_regex
-from maimai_py import Song, SongType
 from nonebot.params import RegexMatched
 from nonebot.plugin import PluginMetadata
-from maimai_py.models import SongDifficultyUtage
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import display_song_id
 from ...core.songs import song_service, prefer_type_from_raw_id
+from ...core.types import Song, SongType, SongDifficultyUtage
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart

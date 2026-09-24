@@ -30,7 +30,7 @@ async def test_reload_extra_continues_after_progress(app: App, monkeypatch):
         return "定数表 1 谱面次（失败 0）"
 
     monkeypatch.setattr(songdb, "apply_external_sources", fake_apply)
-    monkeypatch.setattr(songs_mod, "_prerender_templates", fake_prerender)
+    monkeypatch.setattr(songs_mod, "prerender_templates", fake_prerender)
 
     event = fake_private_message_event_v11(message="重载补充数据", user_id=12345678)
     async with app.test_matcher(plugin.reload_extra) as ctx:

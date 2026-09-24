@@ -9,10 +9,10 @@ from PIL import Image
 from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
-from .fonts import font
+from .fonts import FONT_RODIN, font
 from .assets import assets
+from ..plates import major_type_of_plate
 from ...constants import RATE_FILE
-from .table_template import _major_type_of_plate
 
 GRID_STEP, START_X, START_Y, ROW_COUNT = 96, 180, 490, 12
 
@@ -70,7 +70,7 @@ def draw_plate_table(
 ) -> bytes | None:
     """绘制牌子完成表。``entries`` 为牌子范围内主类型谱面（与模板同源）。"""
     is_wu = version in ("舞", "霸")
-    major = _major_type_of_plate(version)
+    major = major_type_of_plate(version)
     slot_num = 5 if is_wu else 4
     plate_name = f"{version}-{page}" if is_wu else f"{version}{kind}"
 
@@ -162,7 +162,7 @@ def draw_plate_table(
     dr.text(
         (700, 240),
         text,
-        font=font(30, "FOT-NewRodin Pro EB.otf"),
+        font=font(30, FONT_RODIN),
         fill=(124, 129, 255, 255),
         anchor="mm",
         stroke_width=3,
@@ -172,7 +172,7 @@ def draw_plate_table(
     dr.text(
         (1190, 240),
         pct,
-        font=font(30, "FOT-NewRodin Pro EB.otf"),
+        font=font(30, FONT_RODIN),
         fill=(124, 129, 255, 255),
         anchor="rm",
         stroke_width=3,
@@ -202,7 +202,7 @@ def draw_plate_table(
         dr.text(
             (x, stats_start_y),
             str(count),
-            font=font(40, "FOT-NewRodin Pro EB.otf"),
+            font=font(40, FONT_RODIN),
             fill=id_colors[li],
             anchor="mm",
             stroke_width=4,
@@ -211,7 +211,7 @@ def draw_plate_table(
         dr.text(
             (x + 115, stats_start_y + 20),
             f"/{total}",
-            font=font(14, "FOT-NewRodin Pro EB.otf"),
+            font=font(14, FONT_RODIN),
             fill=id_colors[li],
             anchor="rd",
             stroke_width=3,
@@ -220,7 +220,7 @@ def draw_plate_table(
         dr.text(
             (x + 115, 343),
             f"{round(group_progress * 100, 2)}%",
-            font=font(20, "FOT-NewRodin Pro EB.otf"),
+            font=font(20, FONT_RODIN),
             fill=(124, 129, 255, 255),
             anchor="rm",
             stroke_width=2,

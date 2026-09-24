@@ -201,6 +201,10 @@ DX_VERSION_CODES: list[int] = [
 ]
 
 
+# 渲染主题（素材包 pic/<theme>/ 子目录名；bind 指令 0/1 映射）
+THEMES = ("prism_plus", "circle")
+DEFAULT_THEME = "prism_plus"
+
 # 谱面类型别名前缀：社区对同根id双谱（标准/DX/宴）的惯用区分写法
 # （dx圣诞、标准39、标星光、旧谱、宴Oshama…）。用于查询侧剥离兜底，
 # 最长优先匹配；数据侧别名保留原样（含前缀）不去除

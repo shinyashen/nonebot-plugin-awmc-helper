@@ -12,9 +12,7 @@ from maimai_py.enums import plate_aliases as _LIB_PLATE_ALIASES
 from nonebot_plugin_localstore import get_data_dir
 
 from ...config import plugin_config
-
-THEMES = ("prism_plus", "circle")
-DEFAULT_THEME = "prism_plus"
+from ...constants import DEFAULT_THEME
 
 # 牌头素材文件名为繁体（暁/櫻/菫/輝/華/極…），简繁差异集与 maimai_py
 # plate_aliases（繁→简）同源；查不到繁体名时回退原始输入

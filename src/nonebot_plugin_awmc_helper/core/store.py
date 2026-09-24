@@ -329,6 +329,11 @@ def _open_session() -> AsyncSession:
     return AsyncSession(get_engine(), expire_on_commit=False)
 
 
+def session() -> AsyncSession:
+    """会话上下文（供 songdb 等 core 内模块批量读写；AsyncSession 本身即异步 CM）。"""
+    return _open_session()
+
+
 # ---------------------------------------------------------------------------
 # 通用 CRUD
 # ---------------------------------------------------------------------------

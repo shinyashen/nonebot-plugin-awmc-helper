@@ -176,7 +176,7 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
 
     monkeypatch.setattr(songdb, "refresh_all", fake_refresh_all)
     monkeypatch.setattr(song_service, "refresh", fake_runtime_refresh)
-    monkeypatch.setattr(songs_mod, "_prerender_templates", fake_prerender)
+    monkeypatch.setattr(songs_mod, "prerender_templates", fake_prerender)
     monkeypatch.setattr(songs_mod, "_notify_superusers", fake_notify)
     monkeypatch.setattr(plugin_config, "awmc_update_notify", True)
 
@@ -193,7 +193,7 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
     async def boom():
         raise RuntimeError("render down")
 
-    monkeypatch.setattr(songs_mod, "_prerender_templates", boom)
+    monkeypatch.setattr(songs_mod, "prerender_templates", boom)
     await songs_mod._on_cn_update(set(), {9002}, {9002: "CN Only Song"})
     assert calls["runtime"] == 2
     assert len(calls["notify"]) == 1
@@ -252,7 +252,7 @@ async def test_daily_songdb_pipeline(db, monkeypatch):
         pass
 
     monkeypatch.setattr(songdb, "refresh_all", fake_refresh_all)
-    monkeypatch.setattr(songs_mod, "_prerender_templates", fake_prerender)
+    monkeypatch.setattr(songs_mod, "prerender_templates", fake_prerender)
     monkeypatch.setattr(songs_mod, "_ensure_templates", fake_ensure)
     monkeypatch.setattr(plugin_config, "awmc_extra_song_sources", [])
     await songs_mod._daily_songdb()

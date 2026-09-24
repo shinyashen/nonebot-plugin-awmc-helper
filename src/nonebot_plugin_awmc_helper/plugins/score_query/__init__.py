@@ -8,7 +8,6 @@
 import io
 
 from nonebot import on_regex, on_command
-from maimai_py import FCType, SongType, LevelIndex
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Event, Message
@@ -18,6 +17,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...constants import COLOR_TO_LEVEL_INDEX
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service, prefer_type_from_raw_id
+from ...core.types import FCType, SongType, LevelIndex
 from ...core.utils import handle_errors
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
@@ -147,7 +147,7 @@ async def _(
     maimai_py 无 AP50 端点：全量成绩本地过滤后按版本拆 b35/b15 两侧灌入
     B50 模板（Hoshino 落雪 ap50 端点 → Best50 → draw_best50 同构）。
     """
-    from maimai_py import current_version
+    from ...core.types import current_version
 
     binding = await _get_binding(session, event)
     scores = await score_service.get_scores_all(binding)

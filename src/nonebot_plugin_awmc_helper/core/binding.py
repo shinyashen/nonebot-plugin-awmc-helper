@@ -14,14 +14,13 @@ from maimai_py import PlayerIdentifier
 from . import store
 from .store import UserBinding
 from ..config import plugin_config
+from ..constants import THEMES
 
 if TYPE_CHECKING:
     from nonebot_plugin_uninfo import Session
 
 SERVICE_DIVINGFISH = "divingfish"
 SERVICE_LXNS = "lxns"
-
-THEMES = ("prism_plus", "circle")
 
 # user_id 可作 QQ 号的平台：qq 为 Hoshino 迁移数据的历史键；OneBot v11 是
 # uninfo 单平台适配器（Session.platform 恒为 None，适配器标识即平台语义）

@@ -9,7 +9,6 @@
 import random as _random
 
 from nonebot import on_regex, on_command
-from maimai_py import SongType, ScoreExtend
 from nonebot.params import RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot_plugin_uninfo import Session, UniSession
@@ -18,6 +17,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...constants import COLOR_TO_LEVEL_INDEX
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
+from ...core.types import SongType, ScoreExtend
 from ...core.utils import handle_errors
 from ...core.binding import session_keys, binding_service
 from ...core.chart_card import chart_card_bytes

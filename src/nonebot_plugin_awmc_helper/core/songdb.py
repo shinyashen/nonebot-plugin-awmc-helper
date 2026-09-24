@@ -443,7 +443,7 @@ class State:
     async def load(cls) -> "State":
         """从 DB 载入现有行（合并基线：单源失败时已有数据不丢）。"""
         state = cls()
-        async with store._open_session() as session:
+        async with store.session() as session:
             for row in (await session.exec(select(store.SongRow))).all():
                 state.songs[row.id] = row
             for row in (await session.exec(select(store.SongSheetGroup))).all():
@@ -464,7 +464,7 @@ class State:
         行对象按值重建（load 出的 ORM 实例附着在旧 session 上，跨 session 复用
         会被当作 persistent 走 UPDATE 而撞上刚 DELETE 掉的空表）。
         """
-        async with store._open_session() as session:
+        async with store.session() as session:
             # SQLModel 已弃用 session.execute，delete/insert 一律走 exec
             await session.exec(delete(store.SongChartLevel))
             await session.exec(delete(store.SongChart))
@@ -1071,7 +1071,7 @@ async def _archive_raw(payloads: dict[str, Any]) -> None:
                 payload=json.dumps(payloads["otoge_deleted"], ensure_ascii=False),
             )
         )
-    async with store._open_session() as session:
+    async with store.session() as session:
         await session.exec(delete(store.SongSourceRaw))
         # 同名多义（如 otoge-db 的 'Link'×2）会生成重复键：追加序号去重
         seen: dict[tuple[str, str], int] = {}
@@ -1417,7 +1417,7 @@ async def _refresh_standard_json(state: State) -> str:
 
 async def is_empty() -> bool:
     """规范表是否为空（冷启动判定：空表时运行时加载前须先全量重建）。"""
-    async with store._open_session() as session:
+    async with store.session() as session:
         return (await session.exec(select(store.SongRow))).first() is None
 
 
@@ -1545,7 +1545,7 @@ async def flush_pending() -> int:
     """
     from datetime import datetime
 
-    async with store._open_session() as session:
+    async with store.session() as session:
         rows = list((await session.exec(select(store.SongPending))).all())
         state = await State.load()
         titles = {norm_title(row.title) for row in state.songs.values() if row.title}
@@ -1569,7 +1569,7 @@ async def upsert_pending(source: str, key: str, reason: str, payload: dict) -> N
     """构造器遇到主键不可得的曲目时 upsert 暂存（幂等）。"""
     from datetime import datetime
 
-    async with store._open_session() as session:
+    async with store.session() as session:
         row = (
             await session.exec(
                 select(store.SongPending).where(
@@ -1862,7 +1862,7 @@ async def _merge_extra_docs(docs: list[tuple[str, str, dict]]) -> int:
         f"extra:{Path(name).name if not name.startswith('http') else name}"
         for name, _m, _d in docs
     }
-    async with store._open_session() as session:
+    async with store.session() as session:
         for origin in origins:
             await session.exec(
                 delete(store.SongSourceRaw).where(

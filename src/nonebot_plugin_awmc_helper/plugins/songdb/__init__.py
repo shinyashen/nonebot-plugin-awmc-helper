@@ -30,9 +30,9 @@ async def _():
     await UniMessage.text(" 正在重载外部补充数据……").send(at_sender=True)
     summary = await songdb.apply_external_sources()
     if summary.get("changed"):
-        from ...core.songs import _prerender_templates
+        from ...core.songs import prerender_templates
 
-        await _prerender_templates()  # 与自动管线共用：变化即重建底图（§7.5-C）
+        await prerender_templates()  # 与自动管线共用：变化即重建底图（§7.5-C）
         await UniMessage.text(
             f"补充数据已重载并重建底图（源 {summary['sources']} 个）。"
         ).finish(at_sender=True)

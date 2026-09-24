@@ -136,7 +136,7 @@ def new_best_score(
     return value - lowest
 
 
-def _major_diffs(song: Song, prefer_type: SongType | None = None) -> list:
+def major_diffs(song: Song, prefer_type: SongType | None = None) -> list:
     """取主类型 5 档难度，按难度序。
 
     NB 原版数据模型中双谱歌曲是两个条目（各带类型与谱面表）；maimai_py 模型
@@ -193,7 +193,7 @@ def _jp_version_logo_name(version: int) -> str | None:
     return JP_VERSION_IMAGE.get(version // 500 * 500) if version >= 20000 else None
 
 
-def _version_image(version: int, jp: bool = False) -> Image.Image | None:
+def version_image(version: int, jp: bool = False) -> Image.Image | None:
     if jp:
         # 日服视图：DX 世代用日服 logo（pic/jp/，含 MAGiCAL 等超枚举版本）
         jp_name = _jp_version_logo_name(version)
@@ -211,9 +211,7 @@ def _version_image(version: int, jp: bool = False) -> Image.Image | None:
     return None
 
 
-def _fit_version_logo(
-    img: Image.Image, box: tuple[int, int] = (182, 90)
-) -> Image.Image:
+def fit_version_logo(img: Image.Image, box: tuple[int, int] = (182, 90)) -> Image.Image:
     """版本 logo 等比适配槽位：裁透明留白 → 高≥72 且 宽≥140（取大者）→ 不超槽位。
 
     各世代素材画布的留白量与宽高比差异很大（国服 AR 1.2~4.9、日服 1.4~2.8），
@@ -271,9 +269,9 @@ def song_chart_info(
         )
     cover = assets.cover(song.id).resize((242, 242))
     im.alpha_composite(cover, (133, 197))
-    version_img = _version_image(chart_version, jp)
+    version_img = version_image(chart_version, jp)
     if version_img is not None:
-        logo = _fit_version_logo(version_img)
+        logo = fit_version_logo(version_img)
         im.alpha_composite(
             logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
         )
@@ -317,7 +315,7 @@ def song_chart_info(
         anchor="mm",
     )
 
-    diffs = _major_diffs(song, prefer_type)
+    diffs = major_diffs(song, prefer_type)
     for index, diff in enumerate(diffs):
         color = (255, 255, 255, 255)
         spacing = 70 * index
@@ -481,9 +479,9 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
 
     # 曲绘 / 版本
     im.alpha_composite(assets.cover(song.id).resize((242, 242)), (133, 246))
-    version_img = _version_image(chart_version, jp=jp)
+    version_img = version_image(chart_version, jp=jp)
     if version_img is not None:
-        logo = _fit_version_logo(version_img)
+        logo = fit_version_logo(version_img)
         im.alpha_composite(
             logo, (800 + (182 - logo.width) // 2, 415 + (90 - logo.height) // 2)
         )

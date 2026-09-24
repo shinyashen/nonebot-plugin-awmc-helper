@@ -4,7 +4,7 @@
 右侧按难度 5 行成绩（评级/FC/FS 徽章、DX 分与星数、未游玩谱灰行）。
 
 与基准的差异（有意为之，见 render-parity §四）：
-- 版本 logo 用 :func:`nb_chart._fit_version_logo` 等比适配（防各世代画布拉伸）；
+- 版本 logo 用 :func:`nb_chart.fit_version_logo` 等比适配（防各世代画布拉伸）；
 - ``service`` 为空（未绑定纯谱面视图）时省略「Data from …」署名行。
 """
 
@@ -12,15 +12,10 @@ from maimai_py import Song, Genre, SongType, ScoreExtend
 
 from ..calc import dx_star_ratio
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
-from .tools import image_to_bytes
+from .tools import image_to_bytes, truncate_by_width
 from .assets import assets
 from ...config import NICKNAME
-from .nb_chart import (
-    _major_diffs,
-    _version_image,
-    _fit_version_logo,
-    truncate_by_width,
-)
+from .nb_chart import major_diffs, version_image, fit_version_logo
 from ...constants import (
     RATE_FILE,
     SYNC_FILE,
@@ -74,11 +69,11 @@ def song_play_data(
     if genre_file and (base / genre_file).exists():
         im.alpha_composite(Image.open(base / genre_file).convert("RGBA"), (100, 260))
     # 版本 logo（等比适配槽位，项目内既定做法）
-    diffs = _major_diffs(song, prefer_type)
+    diffs = major_diffs(song, prefer_type)
     chart_version = diffs[0].version if diffs and diffs[0].version else song.version
-    version_img = _version_image(chart_version)
+    version_img = version_image(chart_version)
     if version_img is not None:
-        logo = _fit_version_logo(version_img, (183, 90))
+        logo = fit_version_logo(version_img, (183, 90))
         im.alpha_composite(
             logo, (295 + (183 - logo.width) // 2, 205 + (90 - logo.height) // 2)
         )
