@@ -192,3 +192,7 @@ local/
 # ---- 静态素材包（曲绘/UI 素材，用户自行下载，不入库） ----
 static/
 .zcodeignore
+
+# ---- 第三方子插件目录（运行时 clone 安装区，内容不入库；仅官方示例插件例外） ----
+awmc_plugins/*
+!awmc_plugins/nonebot_plugin_awmc_example

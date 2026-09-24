@@ -18,6 +18,7 @@ require("nonebot_plugin_localstore")
 require("nonebot_plugin_apscheduler")
 
 from .config import plugin_config
+from .plugin_loader import load_extra_plugins
 
 __plugin_meta__ = PluginMetadata(
     name="awmc-helper",
@@ -57,3 +58,11 @@ else:  # 首个子插件落地前 plugins/ 目录尚不存在
     sub_plugins = []
 if _disabled:
     logger.info(f"awmc-helper 已停用子插件：{', '.join(sorted(_disabled))}")
+
+# 固定目录 awmc_plugins/（CWD 相对路径）：第三方子插件的「git clone 即安装」
+# 落点，存在才扫描、不存在零影响；须在 core 导入之后（第三方插件 import core）。
+_awmc_plugins_dir = Path("awmc_plugins")
+if _awmc_plugins_dir.is_dir():
+    _extra = load_extra_plugins(_awmc_plugins_dir, _disabled)
+    if _extra:
+        logger.info(f"awmc-helper 已加载第三方子插件：{', '.join(_extra)}")
