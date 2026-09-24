@@ -28,7 +28,12 @@ from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import FCType, FSType, SongType
 from ...core.utils import parse_page, handle_errors
-from ...core.plates import in_plate_scope, major_type_of_plate, plate_version_range
+from ...core.plates import (
+    in_plate_scope,
+    is_valid_plate,
+    major_type_of_plate,
+    plate_version_range,
+)
 from ...core.binding import session_keys, binding_service
 from ...core.render.score import DrawScore
 from ...core.render.tools import text_to_image, image_to_bytes
@@ -397,6 +402,12 @@ async def _plate_progress_overview(
 @handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     version, kind, mode, page_raw = groups
+    # 舞/霸按真实牌表收紧：不存在 舞者/霸将/霸极/霸神/霸舞舞
+    if not is_valid_plate(version, kind):
+        await UniMessage.text(
+            f" 没有找到「{version}{kind}」牌子。"
+            "舞代牌为 舞将/舞极/舞神/舞舞舞，霸仅 霸者"
+        ).finish(at_sender=True)
     binding = await binding_service.ensure(*session_keys(session))
     page = parse_page(page_raw)
     plates = await score_service.get_plates(binding, f"{version}{kind}")

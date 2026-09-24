@@ -61,6 +61,26 @@ def test_plate_chars_align_with_library():
     assert plate_to_version["回"] == Version.MAIMAI_DX_CIRCLE_PLUS
 
 
+def test_wu_plate_kinds_and_validity():
+    """舞/霸真实牌表：舞代仅 将/极/神/舞舞，霸仅 者（唯一「者」尾牌）。"""
+    from nonebot_plugin_awmc_helper.core.plates import (
+        is_valid_plate,
+        plate_kinds_of,
+    )
+
+    assert plate_kinds_of("舞") == ("将", "极", "神", "舞舞")
+    assert plate_kinds_of("霸") == ("者",)
+    assert plate_kinds_of("樱") == ("将",)
+    assert is_valid_plate("舞", "将")
+    assert is_valid_plate("霸", "者")
+    for kind in ("者",):
+        assert not is_valid_plate("舞", kind)
+    for kind in ("将", "极", "神", "舞舞"):
+        assert not is_valid_plate("霸", kind)
+    # 非舞/霸版本不设限
+    assert is_valid_plate("樱", "极")
+
+
 def test_chart_display_id_rules():
     """展示 id 规则：SD=根 id、DX=根 id+10000、宴=diff_id。"""
     from mocks import make_song, make_utage

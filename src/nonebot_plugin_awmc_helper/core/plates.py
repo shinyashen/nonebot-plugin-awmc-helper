@@ -9,6 +9,34 @@ from maimai_py import Song, SongType, SongDifficulty, plate_to_version
 _LEGACY_PLATES = ("舞", "霸")
 """旧作全集牌：横跨全部旧框版本，主类型为 SD。"""
 
+_WU_PLATE_KINDS: dict[str, tuple[str, ...]] = {
+    "舞": ("将", "极", "神", "舞舞"),
+    "霸": ("者",),
+}
+"""舞/霸实际存在的牌种（游戏内与素材包一致）：舞代仅 舞将/舞极/舞神/舞舞舞，
+霸前缀仅 霸者 一张（也是全游戏唯一「者」尾牌）——不存在 舞者/霸将 等组合。"""
+
+
+def plate_kinds_of(version: str) -> tuple[str, ...]:
+    """版本实际存在的牌种（完成表预渲染枚举口径）：舞代四牌、霸仅者。
+
+    其余版本沿用「将」的单牌预渲染口径（查询兜底生成不限于将）。
+    """
+    if version in _WU_PLATE_KINDS:
+        return _WU_PLATE_KINDS[version]
+    return ("将",)
+
+
+def is_valid_plate(version: str, kind: str) -> bool:
+    """（版本字, 牌种）是否为真实存在的牌子。
+
+    舞/霸按真实牌表收紧（舞者/霸将/霸极/霸神/霸舞舞 均不存在）；其余版本
+    不设限，交由数据源判定。
+    """
+    if version in _WU_PLATE_KINDS:
+        return kind in _WU_PLATE_KINDS[version]
+    return True
+
 
 def major_type_of_plate(version: str) -> SongType:
     """牌子主类型（maimai_py MaimaiPlates._major_type 同语义）。

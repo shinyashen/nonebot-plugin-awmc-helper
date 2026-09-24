@@ -404,13 +404,17 @@ async def refresh_all_rating_tables(song_service) -> tuple[int, list[str]]:
 
 
 async def refresh_all_plate_tables(song_service) -> tuple[int, list[str]]:
-    """全部版本牌种完成表底图（含舞/霸两页）；返回 (谱面次, 失败项)。"""
-    from ...constants import PLATE_CHARS, PLATE_KINDS
+    """全部版本牌种完成表底图（舞代四牌、霸仅者，均旧作全集双页）。
+
+    返回 (谱面次, 失败项)。
+    """
+    from ..plates import plate_kinds_of
+    from ...constants import PLATE_CHARS
 
     async with _template_lock:
         total, failed = 0, []
         for version in PLATE_CHARS:
-            for kind in PLATE_KINDS if version in ("舞", "霸") else ("将",):
+            for kind in plate_kinds_of(version):
                 try:
                     total += await generate_plate_template(version, kind, song_service)
                 except Exception:
