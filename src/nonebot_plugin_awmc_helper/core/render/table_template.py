@@ -211,18 +211,30 @@ def _plate_grid(
     pages: int | None = None,
 ) -> Image.Image:
     """NB _draw_plate 布局：牌子完成表底图（12 列，ReM 曲紫 id）。"""
-    remaster_ids = {s.id for s, _d in (remaster_entries or [])}
-
-    # 按 MASTER 槽等级分组（舞/霸的 ReM 曲用 ReM 槽等级）
-    grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
+    # NB 语义：**一格一曲**（四槽完成小标与达成章由叠章层绘制在同一格），
+    # 按 Master 槽等级分组（舞/霸的 ReM 曲用 ReM 槽等级），组内定数降序——
+    # 分组/排序必须与 plate_table_draw.draw_plate_table 的叠章侧逐条一致
+    master_pair: dict[int, tuple[Song, SongDifficulty]] = {}
+    remaster_pair: dict[int, tuple[Song, SongDifficulty]] = {}
     for song, diff in entries:
-        grouped.setdefault(slot_level_of(song, diff, remaster_entries), []).append(
-            (song, diff)
+        if diff.level_index.value == 3:
+            master_pair.setdefault(song.id, (song, diff))
+        elif diff.level_index.value == 4:
+            remaster_pair.setdefault(song.id, (song, diff))
+    grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
+    for song_id, pair in master_pair.items():
+        re_pair = remaster_pair.get(song_id)
+        level = (
+            re_pair[1].level
+            if re_pair is not None and remaster_entries
+            else pair[1].level
         )
+        grouped.setdefault(level, []).append(pair)
     order = sorted(
         grouped, key=lambda lv: (float(lv.rstrip("+")), lv.endswith("+")), reverse=True
     )
     groups = {k: grouped[k] for k in order}
+    remaster_ids = {s.id for s, _d in (remaster_entries or [])}
 
     current_y = PLATE_START_Y
     for charts in groups.values():
@@ -411,7 +423,7 @@ async def draw_rating_table_with_fallback(
     *,
     theme: str,
     song_service,
-) -> Image.Image | None:
+) -> bytes | None:
     """定数表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。"""
     from .rating_table import draw_rating_table
 
@@ -430,7 +442,7 @@ async def draw_plate_table_with_fallback(
     *,
     page: int,
     song_service,
-) -> Image.Image | None:
+) -> bytes | None:
     """牌子完成表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。"""
     from .plate_table_draw import draw_plate_table
 

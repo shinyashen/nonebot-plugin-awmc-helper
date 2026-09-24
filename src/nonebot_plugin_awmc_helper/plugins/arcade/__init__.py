@@ -419,16 +419,18 @@ async def sync_and_reset() -> int:
         return 0
     # 单事务批量 upsert（原先每机厅独立 session 串行两次事务）
     await store.upsert_arcades(
-        store.Arcade(
-            id=w.id,
-            name=w.name,
-            address=w.address,
-            province=w.province,
-            mall=w.mall,
-            machines=w.machine_count,
-            is_custom=False,
-        )
-        for w in official
+        [
+            store.Arcade(
+                id=w.id,
+                name=w.name,
+                address=w.address,
+                province=w.province,
+                mall=w.mall,
+                machines=w.machine_count,
+                is_custom=False,
+            )
+            for w in official
+        ]
     )
     count = await store.reset_all_persons()
     logger.info(

@@ -6,7 +6,7 @@
 
 from maimai_py import Song, SongType, SongDifficulty, plate_to_version
 
-_WU_BA = ("舞", "霸")
+_LEGACY_PLATES = ("舞", "霸")
 """旧作全集牌：横跨全部旧框版本，主类型为 SD。"""
 
 
@@ -16,7 +16,7 @@ def major_type_of_plate(version: str) -> SongType:
     DX 世代牌推 DX 谱，旧作牌（含舞/霸）推 SD 谱——决定 per-type 游戏 id
     与定数取哪侧谱面。
     """
-    if version in _WU_BA:
+    if version in _LEGACY_PLATES:
         return SongType.STANDARD
     pv = plate_to_version.get(version)
     return SongType.DX if pv is not None and pv.value >= 20000 else SongType.STANDARD
@@ -24,7 +24,7 @@ def major_type_of_plate(version: str) -> SongType:
 
 def plate_version_range(version: str) -> tuple[int, int] | None:
     """牌子覆盖的谱面版本码闭区间（未知牌字返回 None）。"""
-    if version in _WU_BA:
+    if version in _LEGACY_PLATES:
         vals = [v.value for v in plate_to_version.values() if v.value < 20000]
         return (min(vals), max(vals)) if vals else None
     pv = plate_to_version.get(version)

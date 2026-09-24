@@ -145,6 +145,7 @@ async def test_search_single_draws_card(app: App, songs):
     from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     song = await song_service.by_id(500)
+    assert song is not None
     await _assert_image_reply(
         app, "search", "查歌 Preferences", lambda: chart_card_bytes(song, None)
     )
@@ -220,6 +221,7 @@ async def test_alias_search_single(app: App, songs):
     from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     song = await song_service.by_id(500)
+    assert song is not None
     # 双谱歌曲无前缀搜索 → 列出谱面类型条目供选择（不设偏好）
     await _assert_reply(
         app,
@@ -262,6 +264,7 @@ async def test_query_chart_card(app: App, songs):
     from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     song = await song_service.by_id(231)
+    assert song is not None
     # SD 形状 id → 卡片显示标准谱（NB 双条目语义：id 即条目类型）
     await _assert_image_reply(
         app,

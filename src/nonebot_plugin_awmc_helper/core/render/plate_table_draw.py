@@ -6,7 +6,7 @@
 """
 
 from PIL import Image
-from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
+from maimai_py import Song, FCType, FSType, RateType, LevelIndex, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_RODIN, font
@@ -93,12 +93,25 @@ def draw_plate_table(
         return None
     im = Image.open(path).convert("RGBA")
 
-    # 数据组装（NB _process_plate_table_data 同构）：等级 → 曲 → 槽位成绩
-    song_level = {}
+    # 数据组装（NB _process_plate_table_data 同构）：**一格一曲**，按 Master
+    # 槽等级分组（舞/霸 ReM 曲用 ReM 槽等级）——分组/排序与模板 _plate_grid
+    # 逐条一致，否则叠章与底图格子错位
     all_slots: dict[int, list[SongDifficulty]] = {}
     for song, diff in entries:
-        song_level.setdefault(song.id, diff.level)
         all_slots.setdefault(song.id, []).append(diff)
+
+    def _chart_level(song_id: int) -> str:
+        diffs = all_slots[song_id]
+        if is_wu:
+            re_m = next((d for d in diffs if d.level_index.value == 4), None)
+            if re_m is not None:
+                return re_m.level
+        master = next(
+            (d for d in diffs if d.level_index == LevelIndex.MASTER), diffs[0]
+        )
+        return master.level
+
+    song_level = {sid: _chart_level(sid) for sid in all_slots}
     played: dict[str, dict[int, list]] = {}
     for song_id, level in song_level.items():
         played.setdefault(level, {}).setdefault(song_id, [None] * slot_num)
@@ -109,6 +122,41 @@ def draw_plate_table(
             continue
         slots = played[song_level[score.id]].setdefault(score.id, [None] * slot_num)
         slots[score.level_index.value] = score
+
+    # 舞/霸双页：与模板分页同规则（lv≥13 第 1 页，<13 第 2 页）
+    if is_wu:
+
+        def _lv_key(lv: str) -> float:
+            return float(lv.rstrip("+")) + (0.3 if lv.endswith("+") else 0.0)
+
+        played = {
+            lv: group
+            for lv, group in played.items()
+            if (_lv_key(lv) >= 13) == (page <= 1)
+        }
+    # 组序（等级降序）与组内序（定数降序）对齐模板 _plate_grid
+    played = {
+        lv: {
+            sid: slots
+            for sid, slots in sorted(
+                group.items(),
+                key=lambda kv: next(
+                    (
+                        d.level_value
+                        for d in all_slots[kv[0]]
+                        if d.level_index == LevelIndex.MASTER
+                    ),
+                    0,
+                ),
+                reverse=True,
+            )
+        }
+        for lv, group in sorted(
+            played.items(),
+            key=lambda kv: (float(kv[0].rstrip("+")), kv[0].endswith("+")),
+            reverse=True,
+        )
+    }
 
     qualified_count = 0
     slot_counts = [0] * slot_num

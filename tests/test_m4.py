@@ -436,6 +436,8 @@ async def test_table_template_overlay(songs, tmp_path, monkeypatch):
     assert png.startswith(b"\x89PNG\r\n")
 
 
+@requires_assets
+@requires_assets
 @pytest.mark.asyncio
 async def test_rating_grid_per_type_id(songs, monkeypatch):
     """定数表/等级完成表底图网格 id 必须为谱面级展示 id（DX=根 id+10000）。

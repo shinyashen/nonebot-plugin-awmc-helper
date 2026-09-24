@@ -8,15 +8,18 @@ from typing import ClassVar
 from pathlib import Path
 
 from PIL import Image
-from maimai_py.enums import plate_aliases as _LIB_PLATE_ALIASES
 from nonebot_plugin_localstore import get_data_dir
 
 from ...config import plugin_config
 from ...constants import DEFAULT_THEME
 
-# 牌头素材文件名为繁体（暁/櫻/菫/輝/華/極…），简繁差异集与 maimai_py
-# plate_aliases（繁→简）同源；查不到繁体名时回退原始输入
-_S2T = str.maketrans({v: k for k, v in _LIB_PLATE_ALIASES.items()})
+# 牌头素材文件名口径（按素材包实测）：版本字仅 晓/樱/堇/辉/华 用繁体，
+# 牌种仅「极」用「極」。fork 的 plate_aliases 是**用户输入归一**口径（含
+# 將/鏡/廻），与素材包命名不一致，不能反推——曾致 樱将 等牌头全 miss
+_S2T_VERSION = str.maketrans(
+    {"晓": "暁", "樱": "櫻", "堇": "菫", "辉": "輝", "华": "華"}
+)
+_S2T_KIND = str.maketrans({"极": "極"})
 
 
 def jp_cache_dir() -> Path:
@@ -90,8 +93,8 @@ class Assets:
         素材包文件名为繁体（牌种「極」、版本字 暁/櫻/菫/輝/華），先按繁体名
         查找再回退原始输入；舞舞牌「舞舞舞」、霸者「霸者」自然命中。
         """
-        kind_t = kind.translate(_S2T)
-        version_t = version.translate(_S2T)
+        kind_t = kind.translate(_S2T_KIND)
+        version_t = version.translate(_S2T_VERSION)
         for name in (f"{version_t}{kind_t}.png", f"{version}{kind}.png"):
             path = cls.static_path() / "mai" / "plate_version" / name
             if path.exists():

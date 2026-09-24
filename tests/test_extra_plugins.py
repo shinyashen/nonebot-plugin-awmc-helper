@@ -56,6 +56,7 @@ def _make_src(root: Path, dirname: str, pkgname: str, code: str) -> Path:
     pkg = root / dirname / "src" / pkgname
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(code, encoding="utf-8")
+    return pkg
 
 
 async def _assert_reply(app: App, matcher, text: str, reply: str):

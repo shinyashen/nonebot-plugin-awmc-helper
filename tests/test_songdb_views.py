@@ -359,6 +359,7 @@ async def test_jp_fallback_handler(db, monkeypatch, app):
     try:
         await song_service.load()
         song = await song_service.jp_by_id(555)
+        assert song is not None
         await _assert_image_reply(
             app,
             "search_alias_song",

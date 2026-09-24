@@ -1180,8 +1180,13 @@ def build_song(
         return None  # 该 scope 下无任何谱面组（如 JP-only 曲的 CN 视图）
     if index is None:
         index = state.charts_of_song(song_id)
-    if cn_current is None and scope == "cn":
-        cn_current = state.cn_current_version()
+    cn_cur = (
+        cn_current
+        if cn_current is not None
+        else state.cn_current_version()
+        if scope == "cn"
+        else 0
+    )
     standard, dx, utage = [], [], []
     for group in groups:
         group_version = getattr(group, version_key)
@@ -1195,8 +1200,7 @@ def build_song(
                 level_value = state.resolve_chart_level(song_id, kind, level_id)
             elif scope == "cn":
                 level_value = cn_level_value(
-                    state.history_of(song_id, kind, level_id),
-                    cn_current,
+                    state.history_of(song_id, kind, level_id), cn_cur
                 )
             else:
                 level_value = state.resolve_chart_level(song_id, kind, level_id)

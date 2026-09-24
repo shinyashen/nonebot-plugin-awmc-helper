@@ -543,7 +543,7 @@ async def get_arcade_by_ids(ids: list[int]) -> list[Arcade]:
         return []
     async with _open_session() as session:
         rows = list(
-            (await session.exec(select(Arcade).where(Arcade.id.in_(ids)))).all()
+            (await session.exec(select(Arcade).where(col(Arcade.id).in_(ids)))).all()
         )
     by_id = {a.id: a for a in rows}
     return [by_id[i] for i in ids if i in by_id]
@@ -558,8 +558,8 @@ async def get_arcades_by_name(keyword: str) -> list[Arcade]:
                 await session.exec(
                     select(Arcade).where(
                         or_(
-                            Arcade.name.ilike(f"%{kw}%"),
-                            Arcade.address.ilike(f"%{kw}%"),
+                            col(Arcade.name).ilike(f"%{kw}%"),
+                            col(Arcade.address).ilike(f"%{kw}%"),
                         )
                     )
                 )
@@ -568,7 +568,7 @@ async def get_arcades_by_name(keyword: str) -> list[Arcade]:
         alias_rows = list(
             (
                 await session.exec(
-                    select(ArcadeAlias).where(ArcadeAlias.alias.ilike(f"%{kw}%"))
+                    select(ArcadeAlias).where(col(ArcadeAlias.alias).ilike(f"%{kw}%"))
                 )
             ).all()
         )
@@ -579,7 +579,7 @@ async def get_arcades_by_name(keyword: str) -> list[Arcade]:
                 rows += list(
                     (
                         await session.exec(
-                            select(Arcade).where(Arcade.id.in_(extra_ids))
+                            select(Arcade).where(col(Arcade.id).in_(extra_ids))
                         )
                     ).all()
                 )

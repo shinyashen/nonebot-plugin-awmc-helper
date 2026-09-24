@@ -99,6 +99,7 @@ exclude = [
 executionEnvironments = [
   { root = "./tests", extraPaths = [
     "./src",
+    "./awmc_plugins/nonebot_plugin_awmc_example/src",
   ] },
   { root = "./src" },
 ]

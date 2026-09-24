@@ -42,7 +42,9 @@ def ob11_available() -> bool:
 
 def ob11_text(text: str):
     """构造 OneBot v11 文本消息（适配器不可用返回 None）。"""
-    return OB11Message(text) if ob11_available() else None
+    if not (_OB11 and OB11Message is not None):
+        return None
+    return OB11Message(text)
 
 
 # 转发节点发送者昵称：取 .env 变量列表的 NICKNAME（部署时配置的 bot 名），
