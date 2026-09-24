@@ -4,6 +4,8 @@
 子插件只收 :class:`UserScoreError`。
 """
 
+import asyncio
+
 import httpx
 from maimai_py import (
     Song,
@@ -112,11 +114,11 @@ class ScoreService:
     ) -> tuple["DivingFishPlayer", MaimaiScores]:
         """水鱼公开代查：b50 <水鱼用户名>（无需绑定）。"""
         ident = PlayerIdentifier(username=username)
-        player = await self._run(
-            None, lambda: client.players(ident, provider=divingfish_provider)
-        )
-        bests = await self._run(
-            None, lambda: client.bests(ident, provider=divingfish_provider)
+        player, bests = await asyncio.gather(
+            self._run(
+                None, lambda: client.players(ident, provider=divingfish_provider)
+            ),
+            self._run(None, lambda: client.bests(ident, provider=divingfish_provider)),
         )
         return player, bests  # type: ignore[return-value]
 

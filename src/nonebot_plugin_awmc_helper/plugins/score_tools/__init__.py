@@ -173,9 +173,7 @@ async def _(message: Message = CommandArg()):
         png = image_to_bytes(text_to_image(msg))
         await UniMessage.image(raw=png).finish(at_sender=True)
     if args and not args.isdigit():
-        await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(
-            at_sender=True
-        )
+        await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(at_sender=True)
     page = int(args) if args.isdigit() else 1
     page_data, total = paginate(users, page, 50)
     if not page_data:

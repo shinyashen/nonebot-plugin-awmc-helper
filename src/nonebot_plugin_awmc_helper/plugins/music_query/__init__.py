@@ -10,6 +10,7 @@
 """
 
 import re
+import asyncio
 from re import Match
 
 from nonebot import on_regex
@@ -241,7 +242,8 @@ def _list_jp_note(flags: list[bool]) -> str:
 
 async def _jp_flags(songs: "list[Song]") -> list[bool]:
     """逐曲判定是否仅日服可用（国服运行时视图无此曲）。"""
-    return [await song_service.by_id(s.id) is None for s in songs]
+    hits = await asyncio.gather(*(song_service.by_id(s.id) for s in songs))
+    return [hit is None for hit in hits]
 
 
 async def _render_jp_result(songs, page: int, binding=None) -> None:
@@ -252,7 +254,8 @@ async def _render_jp_result(songs, page: int, binding=None) -> None:
     """
     flags = await _jp_flags(songs)
     if not any(flags):
-        songs = [(await song_service.by_id(s.id)) or s for s in songs]
+        hits = await asyncio.gather(*(song_service.by_id(s.id) for s in songs))
+        songs = [hit or s for s, hit in zip(songs, hits)]
         await _render_result(songs, page, binding)
         return
     note = _list_jp_note(flags)
@@ -332,7 +335,10 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                     entries = [e for e in _type_entries(ut_songs) if e[2] is None]
     # 逐条目判定日服限定：国服也有的曲回取国服对象（定数口径/封面/B50 一致），
     # 仅日服曲保留日服对象（日服卡渲染）
-    cn_songs = {s.id: await song_service.by_id(s.id) for _, s, _ in entries}
+    # SD/DX 条目同根曲共用一次查询：先去重再并发（原列表推导逐条串行且重复查）
+    _unique_ids = {s.id for _, s, _ in entries}
+    _hits = await asyncio.gather(*(song_service.by_id(i) for i in _unique_ids))
+    cn_songs = dict(zip(_unique_ids, _hits))
     flags = [cn_songs[s.id] is None for _, s, _ in entries]
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]

@@ -13,6 +13,7 @@
 
 import json
 import time
+import asyncio
 import hashlib
 from typing import Literal
 
@@ -84,12 +85,10 @@ class AwmcAliasProvider(IAliasProvider):
                     bucket.add(low)
                     target.append(text)
 
-        # 远端源单源容错：拉取成功即整源写库（song_alias 表）；失败回退库内快照
-        for name, fetch in (
-            ("yuzu", self._fetch_yuzu),
-            ("lxns", self._fetch_lxns),
-        ):
-            pairs: list[tuple[int, list[str]]] | None = None
+        # 远端源单源容错：拉取成功即整源写库（song_alias 表）；失败回退库内快照。
+        # 两源并发拉取，合并仍按 yuzu→lxns 顺序（保序去重口径不变）
+
+        async def _pull(name, fetch):
             started = time.monotonic()
             try:
                 pairs = await fetch(client)
@@ -98,11 +97,17 @@ class AwmcAliasProvider(IAliasProvider):
                     f"{sum(len(v) for v in pairs)} 条"
                     f"（{time.monotonic() - started:.1f}s）"
                 )
+                return pairs
             except Exception as e:
                 logger.warning(
                     f"别名源 {name} 拉取失败，回退上次快照"
                     f"（{time.monotonic() - started:.1f}s：{e}）"
                 )
+                return None
+
+        sources = (("yuzu", self._fetch_yuzu), ("lxns", self._fetch_lxns))
+        pulled = await asyncio.gather(*(_pull(name, fetch) for name, fetch in sources))
+        for (name, _fetch), pairs in zip(sources, pulled):
             if pairs is not None:
                 await store.save_song_aliases(name, dict(pairs))
             else:

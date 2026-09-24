@@ -58,9 +58,7 @@ async def _(session: Session = UniSession()):
     user_id = str(session.user.id)
     # 非数字 user_id 用 crc32（内建 hash 受 PYTHONHASHSEED 盐化，重启即变，
     # 与「同人同日结果稳定」矛盾）
-    seed = (
-        int(user_id) if user_id.isdigit() else zlib.crc32(user_id.encode()) % (10**8)
-    )
+    seed = int(user_id) if user_id.isdigit() else zlib.crc32(user_id.encode()) % (10**8)
     fortune_hash = qqhash(seed)
     daily_random = random.Random(fortune_hash)
 

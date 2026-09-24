@@ -22,7 +22,7 @@ from datetime import datetime
 
 from pydantic import NaiveDatetime
 from sqlmodel import Field, SQLModel, col, delete, select
-from sqlalchemy import UniqueConstraint, text, inspect
+from sqlalchemy import UniqueConstraint, or_, text, inspect
 from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
@@ -537,22 +537,53 @@ async def get_arcade(arcade_id: int) -> Arcade | None:
         ).first()
 
 
-async def get_arcades_by_name(keyword: str) -> list[Arcade]:
-    """按名称/地址/别称模糊查找机厅。"""
+async def get_arcade_by_ids(ids: list[int]) -> list[Arcade]:
+    """按 id 批量取机厅（保持入参顺序，缺失跳过）。"""
+    if not ids:
+        return []
     async with _open_session() as session:
-        arcades = list((await session.exec(select(Arcade))).all())
-        aliases = list((await session.exec(select(ArcadeAlias))).all())
-    alias_map: dict[int, list[str]] = {}
-    for a in aliases:
-        alias_map.setdefault(a.arcade_id, []).append(a.alias)
+        rows = list(
+            (await session.exec(select(Arcade).where(Arcade.id.in_(ids)))).all()
+        )
+    by_id = {a.id: a for a in rows}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+async def get_arcades_by_name(keyword: str) -> list[Arcade]:
+    """按名称/地址/别称模糊查找机厅（名称/地址/别称均走 SQL LIKE）。"""
     kw = keyword.lower()
-    return [
-        a
-        for a in arcades
-        if kw in a.name.lower()
-        or kw in a.address.lower()
-        or any(kw in al.lower() for al in alias_map.get(a.id, []))
-    ]
+    async with _open_session() as session:
+        rows = list(
+            (
+                await session.exec(
+                    select(Arcade).where(
+                        or_(
+                            Arcade.name.ilike(f"%{kw}%"),
+                            Arcade.address.ilike(f"%{kw}%"),
+                        )
+                    )
+                )
+            ).all()
+        )
+        alias_rows = list(
+            (
+                await session.exec(
+                    select(ArcadeAlias).where(ArcadeAlias.alias.ilike(f"%{kw}%"))
+                )
+            ).all()
+        )
+        if alias_rows:
+            seen = {r.id for r in rows}
+            extra_ids = [a.arcade_id for a in alias_rows if a.arcade_id not in seen]
+            if extra_ids:
+                rows += list(
+                    (
+                        await session.exec(
+                            select(Arcade).where(Arcade.id.in_(extra_ids))
+                        )
+                    ).all()
+                )
+    return rows
 
 
 async def get_all_arcades() -> list[Arcade]:
@@ -571,12 +602,30 @@ async def upsert_arcade(arcade: Arcade) -> None:
     async with _open_session() as session:
         row = (await session.exec(select(Arcade).where(Arcade.id == arcade.id))).first()
         if row:
-            # 保留本地标记与排卡人数
+            # 保留本地标记、排卡人数与本地更新时间
             arcade.is_custom = row.is_custom
             arcade.person = row.person
             arcade.updated_by = row.updated_by
+            arcade.updated_at = row.updated_at
             await session.delete(row)
         session.add(arcade)
+        await session.commit()
+
+
+async def upsert_arcades(arcades: list["Arcade"]) -> None:
+    """按主键批量覆盖（华立官方同步用；单事务，保留本地字段同 upsert_arcade）。"""
+    async with _open_session() as session:
+        for arcade in arcades:
+            row = (
+                await session.exec(select(Arcade).where(Arcade.id == arcade.id))
+            ).first()
+            if row:
+                arcade.is_custom = row.is_custom
+                arcade.person = row.person
+                arcade.updated_by = row.updated_by
+                arcade.updated_at = row.updated_at
+                await session.delete(row)
+            session.add(arcade)
         await session.commit()
 
 

@@ -133,6 +133,9 @@ class SongService:
         self._alias_provider = _ALIAS_PROVIDER
         self._jp_view: dict[int, Song] = {}
         self._jp_fingerprint: str | None = None
+        self._jp_alias_cache: tuple[dict, dict] | None = None
+        self._jp_kanji: set[str] = set()
+        self._jp_kanji_cache_fp: str | None = None
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -353,16 +356,25 @@ class SongService:
         lib = getattr(self._alias_provider, "last_merged", None)
         if not lib:  # 尚未拉取成功：回退 song_alias 快照
             lib = await store.load_song_aliases(["yuzu", "lxns"])
-        index: dict[str, set[int]] = {}
-        for sid, aliases in lib.items():
-            for a in aliases:
-                index.setdefault(normalize_text(a), set()).add(sid)
-        jp_kanji: set[str] = set()
-        for song in jp.values():
-            for diff in song.get_difficulties(SongType.UTAGE):
-                if isinstance(diff, SongDifficultyUtage) and diff.kanji:
-                    jp_kanji.add(diff.kanji)
-                    jp_kanji.add(normalize_text(diff.kanji))
+        # 别名索引随合并库对象缓存（每次查询重建全量索引是 O(全库)）
+        if self._jp_alias_cache is None or self._jp_alias_cache[0] is not lib:
+            index: dict[str, set[int]] = {}
+            for sid, aliases in lib.items():
+                for a in aliases:
+                    index.setdefault(normalize_text(a), set()).add(sid)
+            self._jp_alias_cache = (lib, index)
+        index = self._jp_alias_cache[1]
+        # 宴 kanji 集随日服视图指纹缓存
+        if self._jp_kanji_cache_fp != songdb.CURRENT_FINGERPRINT:
+            jp_kanji: set[str] = set()
+            for song in jp.values():
+                for diff in song.get_difficulties(SongType.UTAGE):
+                    if isinstance(diff, SongDifficultyUtage) and diff.kanji:
+                        jp_kanji.add(diff.kanji)
+                        jp_kanji.add(normalize_text(diff.kanji))
+            self._jp_kanji = jp_kanji
+            self._jp_kanji_cache_fp = songdb.CURRENT_FINGERPRINT
+        jp_kanji = self._jp_kanji
         key = normalize_text(alias)
         ids = index.get(key, set())
         strip_info = None
@@ -545,15 +557,26 @@ class SongService:
         标题本身不计入别名——剥前后缀后与歌名相同的形态同样与歌名重复
         （如「标准39」剥出的「39」），按归一化比对去除（大小写/全角/简繁）。
         """
-        song = await self.by_id(song_id)
-        if song is None:
-            return None
-        aliases = list(song.aliases or [])
+        return (await self.aliases_of_many([song_id])).get(song_id)
+
+    async def aliases_of_many(self, song_ids: list[int]) -> dict[int, list[str] | None]:
+        """多曲别名批量查询：本地别名表整表读一次（原先每曲全表读，N 曲 N 次）。"""
+        local_by_song: dict[int, list[str]] = {}
         for la in await store.get_local_aliases():
-            if la.song_id == song_id and la.alias not in aliases:
-                aliases.append(la.alias)
-        title_key = normalize_text(song.title)
-        return [a for a in aliases if normalize_text(a) != title_key]
+            local_by_song.setdefault(la.song_id, []).append(la.alias)
+        result: dict[int, list[str] | None] = {}
+        for song_id in song_ids:
+            song = await self.by_id(song_id)
+            if song is None:
+                result[song_id] = None
+                continue
+            aliases = list(song.aliases or [])
+            for alias in local_by_song.get(song_id, []):
+                if alias not in aliases:
+                    aliases.append(alias)
+            title_key = normalize_text(song.title)
+            result[song_id] = [a for a in aliases if normalize_text(a) != title_key]
+        return result
 
 
 song_service = SongService()
@@ -675,11 +698,13 @@ async def _hourly_cn_poll() -> None:
     from .ext import lxns as ext_lxns
     from .ext import divingfish as ext_df
 
-    try:
-        light = await ext_lxns.fetch_song_list(notes=False)
-        df = await ext_df.fetch_music_data()
-    except Exception as e:
-        logger.warning(f"国服轮询拉取失败，跳过本次检测：{e}")
+    light, df = await asyncio.gather(
+        ext_lxns.fetch_song_list(notes=False),
+        ext_df.fetch_music_data(),
+        return_exceptions=True,
+    )
+    if isinstance(light, BaseException) or isinstance(df, BaseException):
+        logger.warning(f"国服轮询拉取失败，跳过本次检测：{light or df}")
         return
     lx_keys = _poll_keys(light.get("songs", []))
     df_keys: set[songdb.DetectKey] = set()

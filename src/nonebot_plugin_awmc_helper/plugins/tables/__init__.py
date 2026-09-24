@@ -80,6 +80,20 @@ PLANS: dict[str, str] = {
 # 牌种正则（牌子字符 PLATE_CHARS 与 core 预渲染共用 constants 一份）
 PLATE_KINDS = "舞舞|将|者|极|神"
 
+_LEVEL_ORDER = {lv: i for i, lv in enumerate(LEVEL_LIST)}
+"""标级 → 序号（替代循环内 LEVEL_LIST.index 的 O(n) 查找）。"""
+
+
+async def _level_entries(level: str) -> list[tuple]:
+    """全库指定标级的谱面条目（定数表/完成表/推分计划三处查询共用）。"""
+    return [
+        (song, d)
+        for song in await song_service.get_all()
+        for d in song.get_difficulties()
+        if d.type != SongType.UTAGE and d.level == level
+    ]
+
+
 LEVEL_RE = r"([0-9]+\+?)"
 DS_RE = r"([0-9]+(?:\.[0-9]+)?\+?)"
 PLAN_RE = r"(sssp|sss|ssp|ss|spp|sp|s|ap|fcp|fc|fsp|fs|fdx)"
@@ -139,11 +153,7 @@ async def _(
     from ...core.render import table_template
 
     (level,) = groups
-    entries = []
-    for song in await song_service.get_all():
-        for d in song.get_difficulties():
-            if d.type != SongType.UTAGE and d.level == level:
-                entries.append((song, d))
+    entries = await _level_entries(level)
     if not entries:
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
@@ -166,13 +176,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
     level, plan = groups
     binding = await binding_service.ensure(*session_keys(session))
-    songs = await song_service.get_all()
-    entries = [
-        (song, d)
-        for song in songs
-        for d in song.get_difficulties()
-        if d.type != SongType.UTAGE and d.level == level
-    ]
+    entries = await _level_entries(level)
     if not entries:
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
@@ -211,21 +215,18 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     completed: list = []
     unfinished: list = []
     notplayed: list[tuple[int, int, float]] = []
-    for song in await song_service.get_all():
-        for d in song.get_difficulties():
-            # NB by_plan 含 SD+DX 全部谱面（与本插件完成表口径一致），宴谱除外
-            if d.type == SongType.UTAGE or d.level != level:
-                continue
-            sc = score_map.get((song.id, d.type, d.level_index))
-            if sc is None:
-                # 未游玩网格显示游戏内 per-type id（DX 曲 10231 形状，NB 同款）
-                notplayed.append(
-                    (chart_display_id(song, d), d.level_index.value, d.level_value)
-                )
-            elif checker(sc.achievements, sc.fc, sc.fs):
-                completed.append(sc)
-            else:
-                unfinished.append(sc)
+    for song, d in await _level_entries(level):
+        # NB by_plan 含 SD+DX 全部谱面（与本插件完成表口径一致），宴谱除外
+        sc = score_map.get((song.id, d.type, d.level_index))
+        if sc is None:
+            # 未游玩网格显示游戏内 per-type id（DX 曲 10231 形状，NB 同款）
+            notplayed.append(
+                (chart_display_id(song, d), d.level_index.value, d.level_value)
+            )
+        elif checker(sc.achievements, sc.fc, sc.fs):
+            completed.append(sc)
+        else:
+            unfinished.append(sc)
     total = len(completed) + len(unfinished) + len(notplayed)
     if total == 0:
         await UniMessage.text(f"  没有找到等级为「{level}」的谱面").finish(
@@ -366,19 +367,15 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         slot.sort(key=lambda x: -x[2])
 
     # 槽节倒序（Re:MASTER → Basic，NB 同款）；舞/霸按等级 13 分界分页（NB 同款）
-    boundary = LEVEL_LIST.index("13")
+    boundary = _LEVEL_ORDER["13"]
     slots = []
     for li in range(slot_count):
         items_full = remained_by_slot[li]
         if is_wu:
             if page <= 1:
-                items = [
-                    it[:3] for it in items_full if LEVEL_LIST.index(it[3]) >= boundary
-                ]
+                items = [it[:3] for it in items_full if _LEVEL_ORDER[it[3]] >= boundary]
             else:
-                items = [
-                    it[:3] for it in items_full if LEVEL_LIST.index(it[3]) < boundary
-                ]
+                items = [it[:3] for it in items_full if _LEVEL_ORDER[it[3]] < boundary]
         else:
             items = [it[:3] for it in items_full]
         slots.append(

@@ -394,6 +394,11 @@ class State:
         self.charts: dict[tuple[int, str, int], store.SongChart] = {}
         self.levels: dict[tuple[int, str, int], list[tuple[int, float]]] = {}
         self.warnings: list[str] = []
+        # 单曲级懒建索引：逐曲读取 O(1)（原先每曲全表线性扫描，整库物化 O(n²)）
+        self._charts_by_song: (
+            dict[int, dict[tuple[str, int], store.SongChart]] | None
+        ) = None
+        self._groups_by_song: dict[int, list[store.SongSheetGroup]] | None = None
 
     # -- 行构造 --
 
@@ -406,6 +411,7 @@ class State:
         key = (song_id, kind)
         if key not in self.groups:
             self.groups[key] = store.SongSheetGroup(song_id=song_id, kind=kind)
+            self._groups_by_song = None
         return self.groups[key]
 
     def chart(self, song_id: int, kind: str, level_id: int) -> store.SongChart:
@@ -414,6 +420,7 @@ class State:
             self.charts[key] = store.SongChart(
                 song_id=song_id, kind=kind, level_id=level_id
             )
+            self._charts_by_song = None
         return self.charts[key]
 
     def set_history(
@@ -427,15 +434,21 @@ class State:
         logger.warning(f"songdb: {message}")
 
     def charts_of_song(self, song_id: int) -> dict[tuple[str, int], store.SongChart]:
-        """单曲的全部谱面行（整库物化请直接遍历 self.charts，避免重复线性扫描）。"""
-        return {
-            (kind, level_id): row
-            for (sid, kind, level_id), row in self.charts.items()
-            if sid == song_id
-        }
+        """单曲的全部谱面行（懒建索引，O(1) 定位）。"""
+        if self._charts_by_song is None:
+            by_song: dict[int, dict[tuple[str, int], store.SongChart]] = {}
+            for (sid, kind, level_id), row in self.charts.items():
+                by_song.setdefault(sid, {})[(kind, level_id)] = row
+            self._charts_by_song = by_song
+        return self._charts_by_song.get(song_id, {})
 
     def groups_of_song(self, song_id: int) -> list[store.SongSheetGroup]:
-        return [row for (sid, _), row in self.groups.items() if sid == song_id]
+        if self._groups_by_song is None:
+            by_song: dict[int, list[store.SongSheetGroup]] = {}
+            for (sid, _kind), row in self.groups.items():
+                by_song.setdefault(sid, []).append(row)
+            self._groups_by_song = by_song
+        return self._groups_by_song.get(song_id, [])
 
     # -- 加载/写回 --
 
@@ -922,6 +935,8 @@ def apply_missing(
                 del state.charts[key]
             for key in [k for k in state.levels if k[0] == song_id]:
                 del state.levels[key]
+            state._charts_by_song = None
+            state._groups_by_song = None
             removed += 1
     return removed
 
@@ -1173,11 +1188,13 @@ def build_song(
     song_id: int,
     scope: Scope,
     index: dict[tuple[str, int], store.SongChart] | None = None,
+    cn_current: int | None = None,
 ) -> Song | None:
     """规范表行 → maimai_py ``Song``（scope 决定用国服列还是日服列，§5.1/§5.2）。
 
-    ``index`` 为 ``(kind, level_id) → SongChart`` 索引；整库物化时由 :func:`all_songs`
-    传入以避免逐曲扫描。
+    ``index`` 为 ``(kind, level_id) → SongChart`` 索引；``cn_current`` 为国服当前
+    版本码——整库物化时由 :func:`all_songs` 计算一次传入（cn_current_version
+    内部全组扫描，原先每张谱面调一次，物化上万次）。
     """
     row = state.songs.get(song_id)
     if row is None:
@@ -1188,6 +1205,8 @@ def build_song(
         return None  # 该 scope 下无任何谱面组（如 JP-only 曲的 CN 视图）
     if index is None:
         index = state.charts_of_song(song_id)
+    if cn_current is None and scope == "cn":
+        cn_current = state.cn_current_version()
     standard, dx, utage = [], [], []
     for group in groups:
         group_version = getattr(group, version_key)
@@ -1202,7 +1221,7 @@ def build_song(
             elif scope == "cn":
                 level_value = cn_level_value(
                     state.history_of(song_id, kind, level_id),
-                    state.cn_current_version(),
+                    cn_current,
                 )
             else:
                 level_value = state.resolve_chart_level(song_id, kind, level_id)
@@ -1237,9 +1256,12 @@ def all_songs(state: State, scope: Scope) -> list[Song]:
     index: dict[int, dict[tuple[str, int], store.SongChart]] = {}
     for (song_id, kind, level_id), row in state.charts.items():
         index.setdefault(song_id, {})[(kind, level_id)] = row
+    cn_current = state.cn_current_version() if scope == "cn" else None
     result = []
     for song_id in sorted(state.songs):
-        if song := build_song(state, song_id, scope, index.get(song_id, {})):
+        if song := build_song(
+            state, song_id, scope, index.get(song_id, {}), cn_current
+        ):
             result.append(song)
     return result
 
@@ -1340,13 +1362,11 @@ def song_standard_json(state: State, song_id: int) -> dict[str, Any] | None:
     if row is None:
         return None
     by_group: dict[str, list[tuple[int, store.SongChart]]] = {}
-    for (sid, kind, level_id), chart in state.charts.items():
-        if sid == song_id:
-            by_group.setdefault(kind, []).append((level_id, chart))
+    for (kind, level_id), chart in state.charts_of_song(song_id).items():
+        by_group.setdefault(kind, []).append((level_id, chart))
     sheets: dict[str, Any] = {}
-    for (sid, kind), group in state.groups.items():
-        if sid != song_id:
-            continue
+    for group in state.groups_of_song(song_id):
+        kind = group.kind
         contents = []
         for level_id, chart in sorted(by_group.get(kind, [])):
             history = state.history_of(song_id, kind, level_id)
@@ -1469,45 +1489,32 @@ async def refresh_all(
         + "）……"
     )
     payloads: dict[str, Any] = {}
+
+    async def _fetch(name: str, fetch) -> None:
+        started = time.monotonic()
+        try:
+            payloads[name] = await fetch()
+            logger.info(f"songdb：{name} 拉取成功（{time.monotonic() - started:.1f}s）")
+        except Exception as e:
+            logger.warning(
+                f"songdb: {name} 拉取失败，本次跳过"
+                f"（{time.monotonic() - started:.1f}s：{e}）"
+            )
+
+    jobs = []
     if include_jp:
-        for name, fetch in (
-            ("maimaiinfo", ext_info.fetch_all_data),
-            ("dschange", ext_info.fetch_dschange),
-            ("otoge_db", ext_otoge.fetch_music_ex),
-            ("otoge_deleted", ext_otoge.fetch_music_ex_deleted),
-        ):
-            started = time.monotonic()
-            try:
-                payloads[name] = await fetch()
-                logger.info(
-                    f"songdb：{name} 拉取成功（{time.monotonic() - started:.1f}s）"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"songdb: {name} 拉取失败，本次跳过"
-                    f"（{time.monotonic() - started:.1f}s：{e}）"
-                )
+        jobs += [
+            _fetch("maimaiinfo", ext_info.fetch_all_data),
+            _fetch("dschange", ext_info.fetch_dschange),
+            _fetch("otoge_db", ext_otoge.fetch_music_ex),
+            _fetch("otoge_deleted", ext_otoge.fetch_music_ex_deleted),
+        ]
     if include_cn:
-        started = time.monotonic()
-        try:
-            payloads["lxns"] = await ext_lxns.fetch_song_list(notes=True)
-            logger.info(f"songdb：lxns 拉取成功（{time.monotonic() - started:.1f}s）")
-        except Exception as e:
-            logger.warning(
-                f"songdb: 落雪曲库拉取失败，本次跳过"
-                f"（{time.monotonic() - started:.1f}s：{e}）"
-            )
-        started = time.monotonic()
-        try:
-            payloads["divingfish"] = await ext_df.fetch_music_data()
-            logger.info(
-                f"songdb：divingfish 拉取成功（{time.monotonic() - started:.1f}s）"
-            )
-        except Exception as e:
-            logger.warning(
-                f"songdb: 水鱼曲库拉取失败，本次跳过"
-                f"（{time.monotonic() - started:.1f}s：{e}）"
-            )
+        jobs += [
+            _fetch("lxns", lambda: ext_lxns.fetch_song_list(notes=True)),
+            _fetch("divingfish", ext_df.fetch_music_data),
+        ]
+    await asyncio.gather(*jobs)  # 单源容错在 _fetch 内，互不阻塞
     # 外部补充源：读取一次，id 集作 JP 在列信号参与删除判定，重建后合并（§7.5-C）
     try:
         extra_docs = await _load_extra_docs()

@@ -140,10 +140,11 @@ async def _(bot: Bot, session: Session = UniSession(), groups: tuple = RegexGrou
             f"无需添加「{matched}」{pos}，直接搜索「{stripped}」即可。"
         )
     if len(songs) > 1:
-        blocks = []
-        for item in songs:
-            aliases = await song_service.aliases_of(item.id)
-            blocks.append(f"ID：{_ids_text(item)}\n" + "\n".join(aliases or []))
+        alias_map = await song_service.aliases_of_many([item.id for item in songs])
+        blocks = [
+            f"ID：{_ids_text(item)}\n" + "\n".join(alias_map.get(item.id) or [])
+            for item in songs
+        ]
         if hint:
             blocks[-1] += f"\n{hint}"
         header = f"找到{len(songs)}个相同别名的曲目："

@@ -278,13 +278,10 @@ async def _(session: Session = UniSession()):
     ids = await store.get_subscriptions(group_id) if group_id else []
     if not ids:
         await UniMessage.text(" 该群未订阅任何机厅").finish(at_sender=True)
-    lines = []
-    for i in ids:
-        a = await store.get_arcade(i)
-        if a:
-            lines.append(
-                f"「{a.name}」（ID {a.id}，机台 {a.machines}，排卡 {a.person} 人）"
-            )
+    lines = [
+        f"「{a.name}」（ID {a.id}，机台 {a.machines}，排卡 {a.person} 人）"
+        for a in await store.get_arcade_by_ids(ids)
+    ]
     await UniMessage.text(" 本群订阅的机厅：\n" + "\n".join(lines)).finish(
         at_sender=True
     )
@@ -339,12 +336,19 @@ async def _(
         name = name[:-2]
     elif name.endswith("卡"):
         name = name[:-1]
-    arcade = None
-    for i in sub_ids:
-        a = await store.get_arcade(i)
-        if a and (a.name == name or await _alias_matches(a.id, name)):
-            arcade = a
-            break
+    subs = await store.get_arcade_by_ids(sub_ids)
+    aliases_of = {al.arcade_id: al for al in await store.get_arcade_aliases()}
+    arcade = next(
+        (
+            a
+            for a in subs
+            if a.name == name
+            or any(
+                al.alias == name for al in aliases_of.values() if al.arcade_id == a.id
+            )
+        ),
+        None,
+    )
     if arcade is None:
         await UniMessage.text(" 已订阅的机厅中未找到该机厅").finish(at_sender=True)
     if amount_raw in ("＋", "+", "－", "-"):
@@ -426,18 +430,19 @@ async def sync_and_reset() -> int:
     except wahlap_ext.ExtError as e:
         logger.warning(f"华立机厅同步失败：{e}")
         return 0
-    for w in official:
-        await store.upsert_arcade(
-            store.Arcade(
-                id=w.id,
-                name=w.name,
-                address=w.address,
-                province=w.province,
-                mall=w.mall,
-                machines=w.machine_count,
-                is_custom=False,
-            )
+    # 单事务批量 upsert（原先每机厅独立 session 串行两次事务）
+    await store.upsert_arcades(
+        store.Arcade(
+            id=w.id,
+            name=w.name,
+            address=w.address,
+            province=w.province,
+            mall=w.mall,
+            machines=w.machine_count,
+            is_custom=False,
         )
+        for w in official
+    )
     count = await store.reset_all_persons()
     logger.info(
         f"maimaiDX排卡数据更新完毕"
