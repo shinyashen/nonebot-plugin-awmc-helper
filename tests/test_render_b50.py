@@ -116,7 +116,7 @@ def test_combo_sync_icon_files_cover_all_enum_members():
 
     from nonebot_plugin_awmc_helper.constants import SYNC_FILE, COMBO_FILE
 
-    assert set(COMBO_FILE) == {fc.name for fc in FCType}
-    assert set(SYNC_FILE) == {fs.name for fs in FSType}
-    assert SYNC_FILE["SYNC"] == "Sync"
-    assert COMBO_FILE["FCP"] == "FCp"
+    assert set(COMBO_FILE) == {fc.name.lower() for fc in FCType}
+    assert set(SYNC_FILE) == {fs.name.lower() for fs in FSType}
+    assert SYNC_FILE["sync"] == "Sync"
+    assert COMBO_FILE["fcp"] == "FCp"

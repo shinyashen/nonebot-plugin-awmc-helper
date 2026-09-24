@@ -13,6 +13,7 @@ from .fonts import FONT_RODIN, font
 from .assets import assets
 from ..plates import major_type_of_plate
 from ...constants import RATE_FILE
+from .plate_progress import progress_header
 
 GRID_STEP, START_X, START_Y, ROW_COUNT = 96, 180, 490, 12
 
@@ -148,36 +149,8 @@ def draw_plate_table(
                     im.alpha_composite(mark, (x + 4 + 19 * s_idx, y + 63))
         current_y += rows * GRID_STEP + 30
 
-    # 头部计数与进度条
-    total_count = len(song_level)
-    text = (
-        "COMPLETED!!!"
-        if qualified_count == total_count
-        else f"{qualified_count}/{total_count}"
-    )
-    progress = qualified_count / total_count if total_count else 0
-    if progress:
-        big = assets.pic("progress_big.png")
-        im.alpha_composite(big.crop((0, 0, int(993 * progress), 92)), (204, 219))
-    dr.text(
-        (700, 240),
-        text,
-        font=font(30, FONT_RODIN),
-        fill=(124, 129, 255, 255),
-        anchor="mm",
-        stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
-    )
-    pct = f"{round(progress * 100, 2)}%"
-    dr.text(
-        (1190, 240),
-        pct,
-        font=font(30, FONT_RODIN),
-        fill=(124, 129, 255, 255),
-        anchor="rm",
-        stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
-    )
+    # 头部计数与进度条（与进度总览同源组件）
+    progress_header(im, dr, qualified_count, len(song_level))
 
     # 各难度分组计数（模板按等级分组；此处按槽位统计，与 NB slot_counts 一致）
     stats_start_y = 300

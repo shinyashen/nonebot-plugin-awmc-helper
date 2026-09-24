@@ -177,14 +177,14 @@ def song_play_data(
         if score.fc:
             im.alpha_composite(
                 Image.open(
-                    base / f"UI_CHR_PlayBonus_{COMBO_FILE[score.fc.name]}.png"
+                    base / f"UI_CHR_PlayBonus_{COMBO_FILE[score.fc.name.lower()]}.png"
                 ).resize((65, 65)),
                 (960, 261 + y),
             )
         if score.fs:
             im.alpha_composite(
                 Image.open(
-                    base / f"UI_CHR_PlayBonus_{SYNC_FILE[score.fs.name]}.png"
+                    base / f"UI_CHR_PlayBonus_{SYNC_FILE[score.fs.name.lower()]}.png"
                 ).resize((65, 65)),
                 (1025, 261 + y),
             )

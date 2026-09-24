@@ -172,7 +172,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     （NB plan=False，盖章为各谱面实际评级）。
     """
     from ...core.render import table_template
-    from ...core.render.rating_table import draw_rating_table
 
     level, plan = groups
     binding = await binding_service.ensure(*session_keys(session))
@@ -184,15 +183,13 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     scores = await score_service.get_scores_all(binding)
 
     theme = binding.theme or "prism_plus"
-    png = draw_rating_table(level, plan, scores.scores, entries, theme=theme)
+    png = await table_template.draw_rating_table_with_fallback(
+        level, plan, scores.scores, entries, theme=theme, song_service=song_service
+    )
     if png is None:
-        # 底图缺失：现场按 NB 布局生成（不落盘）后重试
-        await table_template.generate_rating_template(level, song_service)
-        png = draw_rating_table(level, plan, scores.scores, entries, theme=theme)
-        if png is None:
-            await UniMessage.text(" 定数表底图生成失败，请稍后再试").finish(
-                at_sender=True
-            )
+        await UniMessage.text(" 定数表底图生成失败，请稍后再试").finish(
+            at_sender=True
+        )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
@@ -292,7 +289,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     if mode == "完成表":
         # NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条
         from ...core.render import table_template
-        from ...core.render.plate_table_draw import draw_plate_table
 
         major = major_type_of_plate(version)
         rng = plate_version_range(version)
@@ -306,15 +302,18 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         if not entries:
             await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
         scores = await score_service.get_scores_all(binding)
-        png = draw_plate_table(version, kind, scores.scores, entries, page=page)
+        png = await table_template.draw_plate_table_with_fallback(
+            version,
+            kind,
+            scores.scores,
+            entries,
+            page=page,
+            song_service=song_service,
+        )
         if png is None:
-            # 底图缺失：现场按 NB 布局生成（不落盘）后重试
-            await table_template.generate_plate_template(version, kind, song_service)
-            png = draw_plate_table(version, kind, scores.scores, entries, page=page)
-            if png is None:
-                await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
-                    at_sender=True
-                )
+            await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
+                at_sender=True
+            )
         await UniMessage.image(raw=png).finish(at_sender=True)
     # 进度（R7：NB DrawPlateProgress 版式总览图）
     cleared_plates = await plates.get_cleared()

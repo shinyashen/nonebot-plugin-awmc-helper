@@ -328,6 +328,14 @@ LEVEL_LIST = [
     "15",
 ]
 
+# FCType/FSType 枚举名小写 → UI_MSS_MBase_Icon_*.png 文件名后缀
+# （键统一用 ``fc.name.lower()`` 口径，全部渲染模块共用这一份）
+COMBO_FILE = {"fc": "FC", "fcp": "FCp", "ap": "AP", "app": "APp"}
+SYNC_FILE = {"sync": "Sync", "fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FSDp"}
+
+# 数据源 → 署名显示名（查分器站点品牌名，各卡面共用）
+SERVICE_DISPLAY = {"divingfish": "Diving-Fish", "lxns": "Lxns-Network"}
+
 # RateType 枚举名 → UI_TTR_Rank_*.png 文件名后缀
 RATE_FILE = {
     "SSSP": "SSSp",
@@ -345,13 +353,6 @@ RATE_FILE = {
     "C": "C",
     "D": "D",
 }
-
-# FCType/FSType 枚举名 → UI_MSS_MBase_Icon_*.png 文件名后缀
-COMBO_FILE = {"FC": "FC", "FCP": "FCp", "AP": "AP", "APP": "APp"}
-SYNC_FILE = {"FS": "FS", "FSP": "FSp", "FSD": "FSD", "FSDP": "FSDp", "SYNC": "Sync"}
-
-# 绑定数据源 → 卡片署名显示名（minfo 成绩卡 / 推分行卡 Data from …）
-SERVICE_DISPLAY = {"divingfish": "DivingFish", "lxns": "LXNS"}
 
 # 日服 DX 世代版本码 → 日服 logo 文件名（static/mai/pic/jp/ 下）。
 # 现有素材库的 DX 代 logo 为国服特有版本，日服视图渲染时改用本表；

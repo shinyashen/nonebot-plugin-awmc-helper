@@ -58,6 +58,15 @@ class Assets:
         return cls.get(base / name)
 
     @classmethod
+    def pic_optional(cls, name: str, theme: str = DEFAULT_THEME) -> Image.Image | None:
+        """同 pic，但主题子目录与根目录都不存在时返回 None（调用方走回退/跳过）。"""
+        base = cls.static_path() / "mai" / "pic"
+        for path in (base / theme / name, base / name):
+            if path.exists():
+                return cls.get(path)
+        return None
+
+    @classmethod
     def cover_candidates(cls, song_id: int) -> tuple[Path, ...]:
         """曲绘候选链：static 素材 → 日服封面缓存（jp_cover 在线拉取落盘）→ 0.png。"""
         return (
