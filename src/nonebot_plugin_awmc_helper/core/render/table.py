@@ -8,6 +8,7 @@ from maimai_py import Song
 from .fonts import font
 from .tools import fit_text, rounded_mask, image_to_bytes
 from .assets import assets
+from ...constants import chart_display_id
 
 CELL = 104
 COVER = 84
@@ -38,7 +39,7 @@ def draw_completion_grid(
     draw.text((20, 18), title, font=font(26), fill="#333")
 
     f_small = font(14)
-    for i, (song, _diff, state) in enumerate(items):
+    for i, (song, diff, state) in enumerate(items):
         r, c = divmod(i, per_row)
         x = GAP + c * (CELL + GAP) + 8
         y = header_h + r * (CELL + GAP)
@@ -50,10 +51,10 @@ def draw_completion_grid(
         )
         cover = assets.cover(song.id).resize((COVER, COVER))
         img.paste(cover, (x + (CELL - COVER) // 2, y + 4), rounded_mask(cover.size, 8))
-        lvl = getattr(_diff, "level", "")
+        lvl = getattr(diff, "level", "")
         draw.text(
             (x + 6, y + COVER + 6),
-            fit_text(f"{song.id} {lvl}", f_small, CELL - 12),
+            fit_text(f"{chart_display_id(song, diff)} {lvl}", f_small, CELL - 12),
             font=f_small,
             fill="#666",
         )

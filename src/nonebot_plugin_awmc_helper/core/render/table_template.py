@@ -136,7 +136,7 @@ def _rating_grid(
             )
             dr.text(
                 (x + 56, y + 4),
-                str(song.id),
+                str(chart_display_id(song, diff)),
                 font=font(13, "Torus SemiBold.otf"),
                 fill=_DIFF_TEXT_COLOR[li],
                 anchor="mm",
@@ -182,7 +182,7 @@ def _rating_grid_15(
                 im.alpha_composite(banner, (x + 9, y - 80))
             dr.text(
                 (x + 100, y + 370),
-                str(song.id),
+                str(chart_display_id(song, diff)),
                 font=font(35, "FOT-NewRodin Pro EB.otf"),
                 fill=FONT_BLUE,
                 anchor="mm",
