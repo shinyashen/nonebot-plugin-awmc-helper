@@ -17,11 +17,9 @@ import asyncio
 import colorsys
 from io import BytesIO
 from bisect import bisect_right
-from typing import cast
 from pathlib import Path
 from functools import lru_cache
 from collections import Counter
-from collections.abc import Iterator
 
 import httpx
 from PIL import Image, ImageDraw
@@ -95,9 +93,8 @@ def _utage_score_bg() -> Image.Image:
     ).convert("RGBA")
     alpha = src.getchannel("A")
     hsv = src.convert("RGB").convert("HSV")
-    # getdata() 返回 core.ImagingCore（桩类型不透明），按 HSV 三元组迭代取像素；
     # 源主色取高饱和像素的众数（避开白色留白与抗锯齿边缘）
-    pixels = cast(Iterator[tuple[int, int, int]], hsv.getdata())
+    pixels = hsv.get_flattened_data()
     dominant = Counter(
         px for px in pixels if px[1] >= 128 and px[2] >= 128
     ).most_common(1)[0][0]

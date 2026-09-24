@@ -144,7 +144,9 @@ def _dominant_color(im):
 
     rgb = im.convert("RGB")
     counter = Counter()
-    for px, color in zip(rgb.convert("HSV").getdata(), rgb.getdata()):
+    for px, color in zip(
+        rgb.convert("HSV").get_flattened_data(), rgb.get_flattened_data()
+    ):
         if px[1] >= 100 and px[2] >= 128:
             counter[color] += 1
     return counter.most_common(1)[0][0]
