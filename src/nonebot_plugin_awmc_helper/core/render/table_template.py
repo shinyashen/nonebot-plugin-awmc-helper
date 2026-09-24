@@ -297,7 +297,7 @@ def _plate_grid(
                 fill=(138, 0, 226, 255) if is_rem else (255, 255, 255, 255),
                 anchor="mm",
             )
-        start_y += (max_row + 1) * RATING_GRID_STEP + RATING_GROUP_GAP
+        start_y += (max_row + 1) * PLATE_GRID_STEP + RATING_GROUP_GAP
     return im
 
 
