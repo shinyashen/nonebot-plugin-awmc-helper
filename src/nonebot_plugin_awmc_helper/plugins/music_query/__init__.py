@@ -13,7 +13,7 @@ import re
 import asyncio
 from re import Match
 
-from nonebot import on_regex
+from nonebot import logger, on_regex
 from nonebot.params import RegexMatched
 from nonebot.plugin import PluginMetadata
 from nonebot_plugin_uninfo import Session, UniSession
@@ -171,12 +171,12 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 "定数查歌「最小定数」「最大定数」「页数」"
             ).finish(at_sender=True)
         songs = await song_service.by_level_value(min(ds1, ds2), max(ds1, ds2))
-        if not songs:
-            # 国服定数未命中 → 日服定数口径 fallback（Q32）
-            songs = await song_service.jp_by_level_value(min(ds1, ds2), max(ds1, ds2))
-            if songs:
-                await _render_jp_result(songs, page, binding)
-        await _render_result(songs, page, binding)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_level_value(min(ds1, ds2), max(ds1, ds2)),
+            page,
+            binding,
+        )
     elif cmd == "bpm":
         page = 1
         if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
@@ -192,45 +192,45 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 "bpm查歌「最小bpm」「最大bpm」「页数」"
             ).finish(at_sender=True)
         songs = await song_service.by_bpm(min(b1, b2), max(b1, b2))
-        if not songs:
-            # 国服 BPM 未命中 → 日服视图 fallback（Q32）
-            songs = await song_service.jp_by_bpm(min(b1, b2), max(b1, b2))
-            if songs:
-                await _render_jp_result(songs, page, binding)
-        await _render_result(songs, page, binding)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_bpm(min(b1, b2), max(b1, b2)),
+            page,
+            binding,
+        )
     elif cmd == "曲师":
         if not a_list:
             await _reply("曲师查歌「曲师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_artist(name)
-        if not songs:
-            # 国服曲师未命中 → 日服视图 fallback（Q32）
-            songs = await song_service.jp_by_artist(name)
-            if songs:
-                await _render_jp_result(songs, page, binding)
-        await _render_result(songs, page, binding)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_artist(name),
+            page,
+            binding,
+        )
     elif cmd == "谱师":
         if not a_list:
             await _reply("谱师查歌「谱师」「页数」").finish(at_sender=True)
         name, page = _split_page(a_list)
         songs = await song_service.by_note_designer(name)
-        if not songs:
-            # 国服谱师未命中 → 日服视图 fallback（Q32）
-            songs = await song_service.jp_by_note_designer(name)
-            if songs:
-                await _render_jp_result(songs, page, binding)
-        await _render_result(songs, page, binding)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_note_designer(name),
+            page,
+            binding,
+        )
     else:
         if not a_list:
             await _reply(NOT_FOUND).finish(at_sender=True)
         title, page = _split_page(a_list)
         songs = await song_service.by_title_fuzzy(title)
-        if not songs:
-            # 国服标题未命中 → 日服视图 fallback（Q32，与别名 fallback 同口径）
-            songs = await song_service.jp_by_title_fuzzy(title)
-            if songs:
-                await _render_jp_result(songs, page, binding)
-        await _render_result(songs, page, binding)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_title_fuzzy(title),
+            page,
+            binding,
+        )
 
 
 def _list_jp_note(flags: list[bool]) -> str:
@@ -275,13 +275,28 @@ async def _render_jp_result(songs, page: int, binding=None) -> None:
     )
 
 
+async def _render_query_result(songs, jp_fetch, page: int, binding=None) -> None:
+    """查询结果渲染：国服命中走普通结果，未命中走日服 fallback（Q32）。
+
+    返回值驱动：fallback 未命中明确落到「未找到」，不再依赖
+    ``_render_jp_result`` 内部必 finish 的控制流（避免未来加 return 路径双发）。
+    """
+    if not songs:
+        songs = await jp_fetch()
+        if songs:
+            await _render_jp_result(songs, page, binding)
+            return
+    await _render_result(songs, page, binding)
+
+
 async def _vote_hint(name: str) -> str | None:
     """柚子投票中提示（属柚子扩展；接口不可用/未命中时返回 None）。"""
     from ...core.ext.yuzu import yuzu_client
 
     try:
         found = await yuzu_client.get_apply_songs(name)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"投票提示拉取失败（不影响查询）：{e}")
         return None
     if found is None or not found.votes:
         return None

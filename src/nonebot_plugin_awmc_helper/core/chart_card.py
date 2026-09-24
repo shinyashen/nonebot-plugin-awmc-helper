@@ -5,6 +5,7 @@ Hoshino/NB 的 ``draw_chart_info`` 语义：绑定且能拉到 B50 时嵌入成�
 加分预测（calc=True），否则出纯谱面卡。
 """
 
+from nonebot import logger
 from maimai_py import Song, SongType
 
 from .score import UserScoreError, score_service
@@ -55,8 +56,9 @@ async def chart_card_bytes(
                 is_full = len(best_list) >= (15 if major_dx else 35)
                 calc = True
                 theme = binding.theme or "prism_plus"
-            except UserScoreError:
-                pass
+            except UserScoreError as e:
+                # 成绩卡照常出（不带 B50 信息），但留痕排障
+                logger.debug(f"谱面卡 B50 信息拉取失败（song={song.id}）：{e}")
     return nb_chart.song_chart_info(
         song, calc, is_full, best_list, theme, prefer_type, jp
     )

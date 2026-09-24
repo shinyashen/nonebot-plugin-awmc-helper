@@ -249,7 +249,6 @@ async def _(message: Message = CommandArg()):
     page_data, total = paginate(status, page, page_size)
     if not page_data:
         await UniMessage.text(f" 页码超出范围（共 {total} 页）").finish(at_sender=True)
-    real_page = min(max(page, 1), total)
     lines: list[str] = []
     for s in page_data:
         apply_alias = (
@@ -259,7 +258,7 @@ async def _(message: Message = CommandArg()):
             f"- {s.tag}：\n- ID：{s.song_id}"
             f"\n- 别名：{apply_alias}\n- 票数：{s.agree_votes}/{s.votes}"
         )
-    lines.append(f"第「{real_page}」页，共「{total}」页")
+    lines.append(f"第「{page}」页，共「{total}」页")
     png = image_to_bytes(text_to_image("\n".join(lines)))
     await UniMessage.image(raw=png).finish(at_sender=True)
 
@@ -298,7 +297,8 @@ async def _(groups: tuple = RegexGroup()):
         if _OB11 and OB11Bot is not None and isinstance(bot, OB11Bot):
             try:
                 group_list = await bot.get_group_list()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"群列表拉取失败（bot={bot}），跳过该连接：{e}")
                 continue
             for g in group_list:
                 await store.set_group_switch(str(g["group_id"]), PUSH_FEATURE, enabled)
@@ -348,7 +348,8 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
             continue
         try:
             group_list = await bot.get_group_list()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"群列表拉取失败（bot={bot}），跳过该连接：{e}")
             continue
         for g in group_list:
             gid = str(g["group_id"])

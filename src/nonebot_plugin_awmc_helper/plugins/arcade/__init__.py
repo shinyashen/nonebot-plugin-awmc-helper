@@ -173,9 +173,10 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     if not count_raw.isdigit():
         await UniMessage.text(" 机台数量需为数字").finish(at_sender=True)
     arcades = await store.get_all_arcades()
-    new_id = max((a.id for a in arcades), default=9999) + 1
+    # 自定义 id 段（≥10000）内部自增：与官方段隔离，不撞未来官方新 id
+    new_id = max((a.id for a in arcades if a.id >= 10000), default=9999) + 1
     arcade = store.Arcade(
-        id=max(new_id, 10000),
+        id=new_id,
         name=name,
         address=address,
         machines=int(count_raw),

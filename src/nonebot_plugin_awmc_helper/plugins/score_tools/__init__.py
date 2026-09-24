@@ -104,7 +104,7 @@ async def _(message: Message = CommandArg()):
 
 
 @rise_score.handle()
-@handle_errors("推分推荐失败，请稍后再试")
+@handle_errors("推分推荐失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     from ...constants import SERVICE_DISPLAY
     from ...core.render.score import DrawScore
@@ -112,10 +112,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     level, target_raw = groups
     target = int(target_raw) if target_raw else 1
     binding = await binding_service.ensure(*session_keys(session))
-    try:
-        bests = await score_service.get_b50(binding)
-    except UserScoreError as e:
-        await UniMessage.text(str(e)).finish(at_sender=True)
+    bests = await score_service.get_b50(binding)
 
     # 候选：指定等级时按等级过滤，否则按 B50 末位 RA 推算定数区间
     lowest_ra = min(
@@ -178,10 +175,9 @@ async def _(message: Message = CommandArg()):
     page_data, total = paginate(users, page, 50)
     if not page_data:
         await UniMessage.text(f"  页码超出范围（共 {total} 页）").finish(at_sender=True)
-    real_page = min(max(page, 1), total)
-    lines = [f"水鱼 RA 排行榜（第 {real_page}/{total} 页，共 {len(users)} 人）"]
+    lines = [f"水鱼 RA 排行榜（第 {page}/{total} 页，共 {len(users)} 人）"]
     lines += [
-        f"{(real_page - 1) * 50 + i + 1:5d}  {u.username[:16]}  {u.ra}"
+        f"{(page - 1) * 50 + i + 1:5d}  {u.username[:16]}  {u.ra}"
         for i, u in enumerate(page_data)
     ]
     png = image_to_bytes(text_to_image("\n".join(lines), size=22))

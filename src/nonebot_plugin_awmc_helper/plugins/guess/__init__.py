@@ -126,6 +126,9 @@ class GuessGame:
 _games: dict[str, GuessGame] = {}
 """进行中的猜歌局（进程内存，键 = group_id）。"""
 
+_start_lock = asyncio.Lock()
+"""开局串行锁：判重 → 发送开始消息 → 占位 全程持锁，消除时序错乱与并发双开。"""
+
 
 def _game_of(group_id: str | None) -> GuessGame | None:
     return _games.get(group_id) if group_id else None
@@ -222,26 +225,31 @@ async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) 
         await UniMessage.text(
             " 本群已关闭猜歌，请管理员使用「开启mai猜歌」开启"
         ).finish(at_sender=True)
-    # 先取曲再占位：判重与写入 _games 之间无 await（GuessGame 构造为同步），
-    # 并发「猜歌」不会双双过判重而互相覆盖（旧写法取曲在判重后，存在竞态窗口）
-    song = await _pick_song()
+    song = await _pick_song()  # 取曲在锁外：并发取曲只读曲库，无害
     if song is None:
         await UniMessage.text(" 曲库尚未就绪，请稍后再试").finish(at_sender=True)
-    if _game_of(group_id) is not None:
-        await UniMessage.text(
-            "本群已有进行中的猜歌，请先作答或使用「重置猜歌」"
-        ).finish(at_sender=True)
-    game = GuessGame(song, pic_mode=pic_mode, group_id=group_id, bot=bot, event=event)
-    _games[group_id] = game
-    mode_text = "猜曲绘开始" if pic_mode else "猜歌开始"
-    await UniMessage.text(f"  {mode_text}，直接回复曲目名称/别名/ID 作答").send(
-        at_sender=True
-    )
-    if pic_mode:
-        await UniMessage.image(raw=await _cover_hint_bytes(song)).send(at_sender=True)
-        game.task = asyncio.create_task(_pic_loop(game))
-    else:
-        game.task = asyncio.create_task(_hint_loop(game))
+    async with _start_lock:
+        if _game_of(group_id) is not None:
+            await UniMessage.text(
+                "本群已有进行中的猜歌，请先作答或使用「重置猜歌」"
+            ).finish(at_sender=True)
+        # 开始/曲绘消息先发，再同步占位并起循环（占位与起 task 之间无 await）：
+        # 对局可被作答时「开始」必已发出，不会出现揭晓先于开始消息
+        mode_text = "猜曲绘开始" if pic_mode else "猜歌开始"
+        await UniMessage.text(f"  {mode_text}，直接回复曲目名称/别名/ID 作答").send(
+            at_sender=True
+        )
+        game = GuessGame(
+            song, pic_mode=pic_mode, group_id=group_id, bot=bot, event=event
+        )
+        _games[group_id] = game
+        if pic_mode:
+            await UniMessage.image(raw=await _cover_hint_bytes(song)).send(
+                at_sender=True
+            )
+        game.task = asyncio.create_task(
+            _pic_loop(game) if pic_mode else _hint_loop(game)
+        )
 
 
 async def _handle_answer(session: Session, text: str) -> bool:

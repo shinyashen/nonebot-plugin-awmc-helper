@@ -39,7 +39,11 @@ AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
 
 def _at_target(event: Event | None) -> str | None:
-    """消息中被 @ 的目标用户（代查），仅取第一个非全体 at。"""
+    """消息中被 @ 的目标用户（代查），仅取第一个非全体 at。
+
+    段形状按 OneBot v11（``seg.type == "at"``）判定；其他适配器的 at 段
+    类型名不同时会静默退化为查自己，属已知限制。
+    """
     message = getattr(event, "message", None)
     if message is None:
         return None

@@ -623,7 +623,8 @@ async def jp_songs() -> list[Song]:
 
 
 async def _notify_superusers(text: str) -> None:
-    """跨适配器向全部 SUPERUSER 主动私聊推送（OB11 优先；失败记 debug 不影响流程）。"""
+    """向全部 SUPERUSER 经 OneBot v11 主动私聊推送（多适配器部署其余适配器
+    不覆盖；发送失败记 debug，不影响主流程）。"""
     from nonebot_plugin_alconna.uniseg import Target, UniMessage, SupportAdapter
 
     for user_id in get_driver().config.superusers:
