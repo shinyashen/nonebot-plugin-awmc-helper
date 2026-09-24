@@ -34,10 +34,6 @@ def _reply(text: str) -> UniMessage:
     return UniMessage.text(f" {text}")
 
 
-# 谱面前缀 → 卡片主类型（宴 前缀不改变卡片，宴曲本就走宴谱卡分支）
-# 谱面类型前缀 → 卡片主类型的映射单源在 constants.CHART_TYPE_BY_PREFIX
-
-
 def _type_entries(
     songs: "list[Song]",
 ) -> "list[tuple[int, Song, SongType | None]]":
@@ -328,9 +324,7 @@ async def _vote_hint(name: str) -> str | None:
     return msg
 
 
-async def _expand_alias_entries(
-    name: str,
-) -> tuple[list[Song], list, tuple[str, str, str] | None]:
+async def _expand_alias_entries(name: str) -> list:
     """别名解析 → 谱面类型条目（查询链 + 前缀偏好过滤 + 宴重查）。
 
     查询链：国服别名 → 日服别名 → 日服标题兜底（Q32）；带谱面前缀（dx/
@@ -363,7 +357,7 @@ async def _expand_alias_entries(
                 ut_songs = await song_service.utage_by_keyword(strip_info[0])
                 if ut_songs:
                     entries = [e for e in _type_entries(ut_songs) if e[2] is None]
-    return songs, entries, strip_info
+    return entries
 
 
 def _entry_cn_flags(
@@ -386,7 +380,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
         "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
     )
-    _songs, entries, _strip_info = await _expand_alias_entries(name)
+    entries = await _expand_alias_entries(name)
     # SD/DX 条目同根曲共用一次查询：先去重再并发（原列表推导逐条串行且重复查）
     _unique_ids = {s.id for _, s, _ in entries}
     _hits = await asyncio.gather(*(song_service.by_id(i) for i in _unique_ids))

@@ -87,14 +87,11 @@ def _credit(im: Image.Image, height: int) -> None:
     )
 
 
-_group_by_ds = group_by_ds
-
-
 def _rating_grid(
     entries: Sequence[tuple[Song, SongDifficulty]],
 ) -> Image.Image:
     """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 定数节封面网格。"""
-    groups = _group_by_ds(entries)
+    groups = group_by_ds(entries)
 
     current_y = RATING_START_Y
     for charts in groups.values():

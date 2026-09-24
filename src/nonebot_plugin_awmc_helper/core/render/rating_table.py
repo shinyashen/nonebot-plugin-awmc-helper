@@ -189,7 +189,7 @@ def draw_rating_table(
             stroke_fill=(255, 255, 255, 255),
         )
 
-    # 逐谱面盖章（按模板生成时的分组与排序：_group_by_ds 降序 / lv15 特例）
+    # 逐谱面盖章（按模板生成时的分组与排序：group_by_ds 降序 / lv15 特例）
     qualified: list[float] = []
 
     def stamp_rank(x: int, y: int, ds: float, score) -> None:
