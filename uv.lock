@@ -1008,7 +1008,7 @@ wheels = [
 [[package]]
 name = "maimai-py"
 version = "1.5.2"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/shinyashen/maimai.py?branch=main#0c950dad498c656faca58b231f1e509d991a3dfc" }
 dependencies = [
     { name = "aiocache" },
     { name = "cryptography" },
@@ -1018,10 +1018,6 @@ dependencies = [
     { name = "lxml-stubs" },
     { name = "maimai-ffi" },
     { name = "tenacity" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/34/6a4397af76e8f5bddd0fb7c9148672fdb2ddbd8cfeb809b41c194946e63c/maimai_py-1.5.2.tar.gz", hash = "sha256:40209df090c3a2a39f61290568760799a4b7e73b0092f142d3ba0714b7538db0", size = 303847, upload-time = "2026-09-20T07:53:27.809Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/c0/38d3095eaa5bacfc0c591be6bfd3520dca80d3e08f6a62226584a2fabfb1/maimai_py-1.5.2-py3-none-any.whl", hash = "sha256:e8f9f39a5c8013c65fef0be4515b34c49a77f95090b7b11d8f89b22e9b709c88", size = 316607, upload-time = "2026-09-20T07:53:29.207Z" },
 ]
 
 [[package]]
@@ -1353,7 +1349,7 @@ test = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
-    { name = "maimai-py", specifier = ">=1.5.2" },
+    { name = "maimai-py", git = "https://github.com/shinyashen/maimai.py?branch=main" },
     { name = "nonebot-plugin-alconna", specifier = ">=0.60.0,<1.0.0" },
     { name = "nonebot-plugin-apscheduler", specifier = ">=0.5.0,<1.0.0" },
     { name = "nonebot-plugin-localstore", specifier = ">=0.7.4,<1.0.0" },

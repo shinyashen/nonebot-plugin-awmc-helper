@@ -51,6 +51,10 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 nonebug = { git = "https://github.com/nonebot/nonebug" }
+# maimai-py 暂钉作者 fork（MAGiCAL 27000 / 国服「回」牌已入库，PyPI 1.5.2
+# 尚未发布）；仅影响 uv 解析（dev/lock），服务器仍按依赖声明装 fork。
+# PyPI 收录后删除本行即回到跟随最新版。
+maimai-py = { git = "https://github.com/shinyashen/maimai.py", branch = "main" }
 
 [tool.bumpversion]
 current_version = "0.1.0"
