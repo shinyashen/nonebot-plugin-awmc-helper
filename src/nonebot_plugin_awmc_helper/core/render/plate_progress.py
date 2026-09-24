@@ -32,9 +32,7 @@ def _progress_bar(im: Image.Image, y: int, progress: float) -> None:
         return
     big = assets.pic("progress_big.png")
     # Hoshino 按 92 高裁，素材包此素材为 43 高：裁剪高度取素材实际值
-    im.alpha_composite(
-        big.crop((0, 0, int(993 * progress), big.height)), (204, y)
-    )
+    im.alpha_composite(big.crop((0, 0, int(993 * progress), big.height)), (204, y))
 
 
 def progress_header(
