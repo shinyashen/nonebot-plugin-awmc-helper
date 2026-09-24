@@ -111,6 +111,18 @@ def draw_plate_table(
         )
         return master.level
 
+    def _slot_ds(song_id: int) -> float:
+        """组内排序键（Hoshino get_ds_sort_key 同款）：ReM 曲用 ReM 定数。"""
+        diffs = all_slots[song_id]
+        if is_wu:
+            re_m = next((d for d in diffs if d.level_index.value == 4), None)
+            if re_m is not None:
+                return re_m.level_value
+        master = next(
+            (d for d in diffs if d.level_index == LevelIndex.MASTER), diffs[0]
+        )
+        return master.level_value
+
     song_level = {sid: _chart_level(sid) for sid in all_slots}
     played: dict[str, dict[int, list]] = {}
     for song_id, level in song_level.items():
@@ -123,6 +135,24 @@ def draw_plate_table(
         slots = played[song_level[score.id]].setdefault(score.id, [None] * slot_num)
         slots[score.level_index.value] = score
 
+    qualified_count = 0
+    slot_counts = [0] * slot_num
+    slot_total = [0] * slot_num
+    qualified_slots_of: dict[int, list[int]] = {}
+
+    # 全牌统计先于分页（Hoshino process：completed/slot_counts 均为整牌口径，
+    # 跨舞/霸两页合计；网格与 t 形小标只画当前页）
+    for group in played.values():
+        for song_id, slots in group.items():
+            qualified_slots = [i for i, s in enumerate(slots) if _qualified(kind, s)]
+            qualified_slots_of[song_id] = qualified_slots
+            for i, s in enumerate(slots):
+                slot_total[i] += 1
+                if i in qualified_slots:
+                    slot_counts[i] += 1
+            if len(qualified_slots) == len(slots):
+                qualified_count += 1
+
     # 舞/霸双页：与模板分页同规则（lv≥13 第 1 页，<13 第 2 页）
     if is_wu:
 
@@ -134,7 +164,8 @@ def draw_plate_table(
             for lv, group in played.items()
             if (_lv_key(lv) >= 13) == (page <= 1)
         }
-    # 组序（等级降序）与组内序（定数降序）对齐模板 _plate_grid
+    # 组序（等级降序）与组内序（Hoshino get_ds_sort_key：ReM 曲用 ReM 定数）
+    # 对齐模板 _plate_grid，否则叠章与底图格子错位
     played = dict(
         sorted(
             (
@@ -143,14 +174,7 @@ def draw_plate_table(
                     dict(
                         sorted(
                             group.items(),
-                            key=lambda kv: next(
-                                (
-                                    d.level_value
-                                    for d in all_slots[kv[0]]
-                                    if d.level_index == LevelIndex.MASTER
-                                ),
-                                0,
-                            ),
+                            key=lambda kv: _slot_ds(kv[0]),
                             reverse=True,
                         )
                     ),
@@ -162,17 +186,15 @@ def draw_plate_table(
         )
     )
 
-    qualified_count = 0
-    slot_counts = [0] * slot_num
-    slot_total = [0] * slot_num
-    qualified_slots_of: dict[int, list[int]] = {}
-
     from PIL import ImageDraw
 
     dr = ImageDraw.Draw(im)
-    # 头部白色大面板（Hoshino _plate_progress_bg = plate_progress.png；
-    # progress_bg.png 是进度总览每槽的底部小条，误用致面板缺失、白条外露）
-    im.alpha_composite(assets.pic("plate_progress.png"), (175, 20))
+    # 头部白色大面板：舞/霸用 wu 变体（Hoshino _plate_progress_wu_bg；非舞是
+    # plate_progress.png，progress_bg.png 是进度总览每槽的底部小条，勿混用）
+    im.alpha_composite(
+        assets.pic("plate_progress_wu.png" if is_wu else "plate_progress.png"),
+        (175, 20),
+    )
     # 牌头走 Assets.plate_version（含简→繁转换与缓存；本地手拼文件名
     # 不做版本字转换，晓/樱/堇/辉/华 及一切「极」牌的繁体文件名永远打不开）
     bg = assets.plate_version(version, kind)
@@ -183,16 +205,6 @@ def draw_plate_table(
 
     current_y = START_Y
     for level, songs_slots in played.items():
-        for song_id, slots in songs_slots.items():
-            qualified_slots = [i for i, s in enumerate(slots) if _qualified(kind, s)]
-            qualified_slots_of[song_id] = qualified_slots
-            for i, s in enumerate(slots):
-                slot_total[i] += 1
-                if i in qualified_slots:
-                    slot_counts[i] += 1
-            if len(qualified_slots) == len(slots):
-                qualified_count += 1
-
         rows = (len(songs_slots) - 1) // ROW_COUNT + 1
         for idx, (song_id, slots) in enumerate(songs_slots.items()):
             row, col = divmod(idx, ROW_COUNT)
@@ -218,19 +230,33 @@ def draw_plate_table(
     # 头部计数与进度条（与进度总览同源组件）
     progress_header(im, dr, qualified_count, len(song_level))
 
-    # 各难度分组计数（模板按等级分组；此处按槽位统计，与 NB slot_counts 一致）
+    # 各难度分组计数（模板按等级分组；此处按槽位统计，与 NB slot_counts 一致）。
+    # 布局分两套（Hoshino DrawPlateTable.__init__）：非舞 320/253/条宽 230；
+    # 舞/霸五档 292/204/条宽 176（progress_small_wu），否则第 5 列出画面
     stats_start_y = 300
-    stats_gap_x = 253
-    stats_start_x = 320
+    if is_wu:
+        stats_start_x, stats_gap_x = 292, 204
+        bar_width, text_x, bar_x = 176, 89, 88
+        progress_small = assets.pic("progress_small_wu.png")
+    else:
+        stats_start_x, stats_gap_x = 320, 253
+        bar_width, text_x, bar_x = 230, 115, 115
+        progress_small = assets.pic("progress_small.png")
     for li in range(slot_num):
         x = stats_start_x + li * stats_gap_x
         count, total = slot_counts[li], slot_total[li]
         group_progress = count / total if total else 0
         if group_progress:
-            small = assets.pic("progress_small.png")
             im.alpha_composite(
-                small.crop((0, 0, int(230 * group_progress), min(46, small.height))),
-                (x - 115, 326),
+                progress_small.crop(
+                    (
+                        0,
+                        0,
+                        int(bar_width * group_progress),
+                        min(46, progress_small.height),
+                    )
+                ),
+                (x - bar_x, 326),
             )
         dr.text(
             (x, stats_start_y),
@@ -242,7 +268,7 @@ def draw_plate_table(
             stroke_fill=(255, 255, 255, 255),
         )
         dr.text(
-            (x + 115, stats_start_y + 20),
+            (x + text_x, stats_start_y + 20),
             f"/{total}",
             font=font(14, FONT_RODIN),
             fill=ID_TEXT_COLORS[li],
@@ -251,7 +277,7 @@ def draw_plate_table(
             stroke_fill=(255, 255, 255, 255),
         )
         dr.text(
-            (x + 115, 343),
+            (x + text_x, 343),
             f"{round(group_progress * 100, 2)}%",
             font=font(20, FONT_RODIN),
             fill=TEXT_BLUE,

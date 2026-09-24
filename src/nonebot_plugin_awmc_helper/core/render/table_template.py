@@ -222,6 +222,7 @@ def _plate_grid(
         elif diff.level_index.value == 4:
             remaster_pair.setdefault(song.id, (song, diff))
     grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
+    sort_ds: dict[int, float] = {}
     for song_id, pair in master_pair.items():
         re_pair = remaster_pair.get(song_id)
         level = (
@@ -230,6 +231,13 @@ def _plate_grid(
             else pair[1].level
         )
         grouped.setdefault(level, []).append(pair)
+        # 组内排序键（Hoshino get_ds_sort_key 同款）：ReM 曲用 ReM 定数，
+        # 其余用 Master 定数
+        sort_ds[song_id] = (
+            re_pair[1].level_value
+            if re_pair is not None and remaster_entries
+            else pair[1].level_value
+        )
     order = sorted(
         grouped, key=lambda lv: (float(lv.rstrip("+")), lv.endswith("+")), reverse=True
     )
@@ -258,7 +266,7 @@ def _plate_grid(
 
     start_y = PLATE_START_Y
     for level, charts in groups.items():
-        charts.sort(key=lambda pair: pair[1].level_value, reverse=True)
+        charts.sort(key=lambda pair: sort_ds[pair[0].id], reverse=True)
         dr.text(
             (72, start_y + 40),
             level,
