@@ -116,6 +116,20 @@ async def _banquet_card(song, utage_diff=None, jp: bool = False) -> bytes:
     return nb_chart.song_chart_banquet_info(song, diffs, jp=jp)
 
 
+async def _utage_jp_only(song_id: int, diff_id: int) -> bool:
+    """该张宴谱是否日服限定：国服视图无宿主曲，或宿主曲无此 diff_id。
+
+    宿主曲在国服有普通谱不代表宴谱也在国服（悪戯センセーション DX 国服
+    21004、宴[奏] 仅日服 26509）——按 diff_id 逐张判定，宿主曲级判定会
+    误出日服宴谱的国服卡。
+    """
+    cn_song = await song_service.by_id(song_id)
+    return cn_song is None or not any(
+        getattr(d, "diff_id", None) == diff_id
+        for d in cn_song.get_difficulties(SongType.UTAGE)
+    )
+
+
 async def _binding_of(session):
     return await binding_service.ensure(*session_keys(session))
 
@@ -328,22 +342,42 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     flags = [cn_songs[s.id] is None for _, s, _ in entries]
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
-        song = cn_songs[song.id] or song
+        jp = flags[0]
         if _entry_id >= 100000:
-            # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；只画命中的那张
-            utage_diff = next(
-                (
-                    d
-                    for d in song.get_difficulties(SongType.UTAGE)
-                    if getattr(d, "diff_id", None) == _entry_id
-                ),
-                None,
+            # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；只画命中的那张。
+            # 该张可能日服限定（国服宿主曲无此 diff_id，如悪戯センセーション
+            # 宴[奏]）——保留 JP 宿主对象画日服卡，不回取国服对象
+            cn_song = cn_songs[song.id]
+            cn_diff = (
+                next(
+                    (
+                        d
+                        for d in cn_song.get_difficulties(SongType.UTAGE)
+                        if getattr(d, "diff_id", None) == _entry_id
+                    ),
+                    None,
+                )
+                if cn_song is not None
+                else None
             )
-            png = await _banquet_card(song, utage_diff, flags[0])
+            if cn_song is not None and cn_diff is not None:
+                song, utage_diff, jp = cn_song, cn_diff, False
+            else:
+                jp = True
+                utage_diff = next(
+                    (
+                        d
+                        for d in song.get_difficulties(SongType.UTAGE)
+                        if getattr(d, "diff_id", None) == _entry_id
+                    ),
+                    None,
+                )
+            png = await _banquet_card(song, utage_diff, jp)
         else:
-            png = await _chart_card(song, binding, card_prefer, flags[0])
+            song = cn_songs[song.id] or song
+            png = await _chart_card(song, binding, card_prefer, jp)
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
-        msg = _reply(JP_ONLY_NOTE) if flags[0] else UniMessage()
+        msg = _reply(JP_ONLY_NOTE) if jp else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
     if entries:
         msg = f"找到{len(entries)}个谱面：\n"
@@ -369,8 +403,8 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             utage_hit = await song_service.by_utage_id(raw_id)
             if utage_hit:
                 ut_host, ut_diff = utage_hit
-                # 日服限定宿主曲（JP 视图兜底命中）：宴会卡不挂国服新曲标
-                jp_only = await song_service.by_id(ut_host.id) is None
+                # 宴谱可能日服限定（国服宿主曲无此 diff_id）：日服卡渲染口径
+                jp_only = await _utage_jp_only(ut_host.id, ut_diff.diff_id)
                 png = await _banquet_card(ut_host, ut_diff, jp_only)
                 await (
                     UniMessage.image(raw=png)
@@ -449,9 +483,9 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             if utage_hit is not None:
                 song, utage_diff = utage_hit
                 is_utage_entry = True
-                # 日服限定宿主曲（JP 视图兜底命中）：宴会卡不挂国服新曲标，
-                # 回复补「日服限定」标注（与其余查询路径同口径）
-                jp = await song_service.by_id(song.id) is None
+                # 宴谱可能日服限定（国服宿主曲无此 diff_id）：日服卡渲染口径
+                # + 回复补「日服限定」标注（与其余查询路径同口径）
+                jp = await _utage_jp_only(song.id, utage_diff.diff_id)
         else:
             song = await song_service.by_id(raw_id)
             if song is None:

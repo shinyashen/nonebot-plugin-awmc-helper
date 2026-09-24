@@ -203,6 +203,12 @@ class SongService:
     async def inject(self, songs: list[Song]) -> None:
         """直接注入曲目数据并置就绪（测试与本地快照恢复共用；不触发网络）。"""
         cache = client._cache
+        # ids 只门控 get_all，by_id 直读单曲键：注入是整库替换，上一轮残留的
+        # 单曲键不清会让空库/换库后 by_id 命中已移除的曲（快照恢复同理）
+        old_ids: list[int] = await cache.get("ids", namespace="songs") or []
+        keep = {s.id for s in songs}
+        for stale in (i for i in old_ids if i not in keep):
+            await cache.delete(str(stale), namespace="songs")
         await cache.set("provider", "inject", ttl=client._cache_ttl, namespace="songs")
         await cache.set("ids", [s.id for s in songs], namespace="songs")
         await cache.multi_set(iter((s.id, s) for s in songs), namespace="songs")

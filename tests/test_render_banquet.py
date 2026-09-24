@@ -47,27 +47,55 @@ def test_banquet_buddy_notes_drawn():
 
 @requires_assets
 def test_banquet_jp_suppresses_new_song_badge():
-    """日服限定宿主曲不渲染国服「新曲」标；非当前版本曲 jp 与否无差。"""
+    """日服限定宴谱不渲染国服「新曲」标；旧版本宴谱 jp 与否无差。
+
+    新曲标口径随宴谱组版本（非宿主曲整曲版本），故用宴谱版本控制判定。
+    """
     from nonebot_plugin_awmc_helper.core.render import nb_chart
 
-    def host(version: int):
+    def host(utage_version: int):
         return make_song(
             363,
             "Milky Beat",
             genre=Genre.宴会場,
-            version=version,
-            utage=[make_utage(diff_id=100363)],
+            utage=[make_utage(diff_id=100363, version=utage_version)],
         )
 
-    # 99999 恒判「当前版本」：jp 卡应无新曲标 → 与默认（渲染标）字节不同
+    # 宴谱版本 99999 恒判「当前版本」：jp 卡应无新曲标 → 与默认（渲染标）字节不同
     new_song = host(99999)
     assert nb_chart.song_chart_banquet_info(new_song) != (
         nb_chart.song_chart_banquet_info(new_song, jp=True)
     )
-    # 老曲（10000）本就不挂标：jp 口径不影响字节
+    # 旧版本宴谱（10000）本就不挂标：jp 口径不影响字节
     old_song = host(10000)
     assert nb_chart.song_chart_banquet_info(old_song) == (
         nb_chart.song_chart_banquet_info(old_song, jp=True)
+    )
+
+
+@requires_assets
+def test_banquet_version_follows_chart():
+    """版本标志/新曲标口径 = 宴谱组登场版本，而非宿主曲整曲最小版本。
+
+    宿主 DX 组 10000 / 宴谱组 24000 的混合曲（悪戯センセーション形态）：
+    应与整曲 24000 的纯宴曲同字节；修复前按整曲版本取，与整曲 10000 同字节。
+    """
+    from nonebot_plugin_awmc_helper.core.render import nb_chart
+
+    def host(song_version: int, utage_version: int):
+        return make_song(
+            363,
+            "Milky Beat",
+            version=song_version,
+            utage=[make_utage(diff_id=100363, version=utage_version)],
+        )
+
+    mixed = host(10000, 24000)
+    assert nb_chart.song_chart_banquet_info(mixed) == (
+        nb_chart.song_chart_banquet_info(host(24000, 24000))
+    )
+    assert nb_chart.song_chart_banquet_info(mixed) != (
+        nb_chart.song_chart_banquet_info(host(10000, 10000))
     )
 
 

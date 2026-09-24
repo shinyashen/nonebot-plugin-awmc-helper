@@ -70,6 +70,7 @@ def make_utage(
     slide_num: int = 10,
     touch_num: int = 10,
     break_num: int = 5,
+    version: int = 24000,
 ) -> SongDifficultyUtage:
     return SongDifficultyUtage(
         type=SongType.UTAGE,
@@ -77,7 +78,7 @@ def make_utage(
         level_value=level_value,
         level_index=LevelIndex.BASIC,
         note_designer="宴譜",
-        version=24000,
+        version=version,
         tap_num=tap_num,
         hold_num=hold_num,
         slide_num=slide_num,

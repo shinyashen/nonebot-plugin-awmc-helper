@@ -468,8 +468,12 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     im.alpha_composite(
         Image.open(base / "prism_plus" / "logo.png").resize((249, 120)), (10, 35)
     )
+    # 版本/新曲标口径 = 宴谱组自己的登场版本：宿主曲整曲最小版本常由普通谱
+    # 决定（悪戯センセーション DX 21000 / 宴[奏] 26509），按整曲取会画错世代；
+    # 宴谱组无版本时回落整曲版本。日服限定卡（jp）用日服世代图（pic/jp/）
+    chart_version = getattr(first, "version", 0) or song.version
     # 「新曲」标是国服当前版本口径：日服限定曲不渲染（对齐 song_chart_info）
-    if _is_new(song.version) and not jp:
+    if _is_new(chart_version) and not jp:
         im.alpha_composite(
             Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (950, 165),
@@ -477,7 +481,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
 
     # 曲绘 / 版本
     im.alpha_composite(assets.cover(song.id).resize((242, 242)), (133, 246))
-    version_img = _version_image(song.version)
+    version_img = _version_image(chart_version, jp=jp)
     if version_img is not None:
         logo = _fit_version_logo(version_img)
         im.alpha_composite(

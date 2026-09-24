@@ -433,6 +433,41 @@ async def test_utage_id_jp_only_host_card(app: App, db, monkeypatch):
 
 @requires_assets
 @pytest.mark.asyncio
+async def test_utage_id_jp_chart_on_cn_host(app: App, db, monkeypatch):
+    """日服宴谱挂在国服宿主曲（悪戯センセーション形态）：仍按日服卡渲染。
+
+    宿主曲国服有普通谱、宴谱仅日服——修复前按宿主曲级判定 jp，会出
+    国服卡（国服版本标志/挂新曲标/无日服标注）。
+    """
+    from mocks import make_song, make_utage, seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import nb_chart
+
+    cn_host = make_song(363, "Milky Beat CN", version=21004)  # 国服：仅普通谱
+    jp_host = make_song(
+        363,
+        "Milky Beat JP",
+        version=21000,
+        utage=[make_utage(diff_id=100363, version=26509)],
+    )
+    await seed_service(song_service, [cn_host])
+
+    async def fake_jp_map():
+        return {363: jp_host}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    await _assert_image_reply(
+        app,
+        "query_chart",
+        "id100363",
+        lambda: nb_chart.song_chart_banquet_info(jp_host, jp=True),
+        suffix="\n此歌曲为日服限定",
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
 async def test_utage_id_on_mixed_host_draws_banquet_card(app: App, db):
     """宴谱挂在普通曲上（宿主有 DX 谱）：id100363 也必须出宴会卡而非 DX 卡。"""
     from mocks import make_diff, make_song, make_utage, seed_service
