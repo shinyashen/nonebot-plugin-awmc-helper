@@ -415,15 +415,18 @@ def song_chart_info(
     return image_to_bytes(im)
 
 
-def song_chart_banquet_info(song: Song, utage_diffs=None) -> bytes:
+def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> bytes:
     """宴会场谱面卡（Hoshino/NB chart.py::song_chart_banquet_info 1:1 移植）。
 
     底图 ``chart_info_enkaijou.png``（1200×1200）：左侧曲绘与 utg 玩家牌、
-    右侧标题/曲师/BPM/ID/分类（白字紫描边），下方 kanji 牌 + 等级 + 六列
+    右侧标题/曲师/BPM/ID/分类（白字描边），下方 kanji 牌 + 等级 + 六列
     notes（total/tap/hold/slide/touch/brak）。
 
-    ``utage_diffs``：要画的宴谱列表。一个 diff_id 对应一张宴谱——id 召唤
-    时只画命中的那一张；缺省画宿主曲全部宴谱（多张时分行）。
+    ``utage_diffs``：要画的宴谱。一个宴谱 id（diff_id）只对应一张谱面——
+    卡片恒只画其中一张：id/条目召唤传命中的那张；缺省取宿主曲第一张
+    （kanji/等级/描述同源，不会出现牌信息与物量行不同谱）。
+    ``jp=True``：宿主曲为日服限定（JP 视图对象）——「新曲だよ!」徽章是
+    国服当前版本口径，日服曲不渲染（同 :func:`song_chart_info` 的 jp 口径）。
     """
     from PIL import ImageDraw
 
@@ -438,6 +441,8 @@ def song_chart_banquet_info(song: Song, utage_diffs=None) -> bytes:
         if utage_diffs is not None
         else song.get_difficulties(SongType.UTAGE)
     )
+    # 一个宴谱 id 只对应一张谱面：卡片恒取一张（缺省=宿主曲第一张）
+    utage_diffs = utage_diffs[:1]
     first = next(iter(utage_diffs), None)
     is_buddy = bool(getattr(first, "is_buddy", False))
 
@@ -447,31 +452,24 @@ def song_chart_banquet_info(song: Song, utage_diffs=None) -> bytes:
         (140, 660 if is_buddy else 730),
     )
     if is_buddy:
+        # 底图 utg_2p 自带 TOTAL..BREAK 表头与 1P/2P 两条数据行，行位 820/920
         p_y, base_y, step_y = 715, 820, 100
         im.alpha_composite(
             Image.open(base / "utg_buddy.png").convert("RGBA"), (255, 660)
         )
         player_path = base / "utg_2p.png"
     else:
-        # NB 原版非双人宴 step_y=0：多张宴谱会全部叠在一行（id100227 实测）。
-        # 单张保持底图数据行原位（y=890）；多张时首行落到底图数据条下方
-        # （y=930），行距 62、字号 22，避让底图表头（y≈838）与版权行
-        n_rows = len(utage_diffs)
-        p_y = 785
+        # 底图 utg_1p 只有一条 1P 数据行，行位 890
+        p_y, base_y, step_y = 785, 890, 0
         player_path = base / "utg_1p.png"
-        if n_rows > 1:
-            step_y = 62
-            base_y = 930
-        else:
-            step_y = 0
-            base_y = 890
     im.alpha_composite(Image.open(player_path).convert("RGBA"), (98, p_y))
 
     # logo / 新曲标
     im.alpha_composite(
         Image.open(base / "prism_plus" / "logo.png").resize((249, 120)), (10, 35)
     )
-    if _is_new(song.version):
+    # 「新曲」标是国服当前版本口径：日服限定曲不渲染（对齐 song_chart_info）
+    if _is_new(song.version) and not jp:
         im.alpha_composite(
             Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (950, 165),
@@ -486,13 +484,15 @@ def song_chart_banquet_info(song: Song, utage_diffs=None) -> bytes:
             logo, (800 + (182 - logo.width) // 2, 415 + (90 - logo.height) // 2)
         )
 
-    def t(pos, text, size, *, anchor="mm", sw=0, fill=white):
+    def t(pos, text, size, *, anchor="mm", sw=0, fill=white, han=False):
         # 描边用不透明黑色（用户拍板）：NB 源码字面为 (0,0,0,0) 透明镂空，
-        # 但 QQ 渲染透明区域颜色不可控，直接画黑色描边观感一致且稳定
+        # 但 QQ 渲染透明区域颜色不可控，直接画黑色描边观感一致且稳定；
+        # 简体字样（分类中文名等）走中文字体——FOT-NewRodin 为日文字体，
+        # 缺部分简体字形（与 song_chart_info 的分类行同口径）
         mr.text(
             pos,
             text,
-            font=font(size, FONT_RODIN),
+            font=font(size, FONT_HAN if han else FONT_RODIN),
             fill=fill,
             anchor=anchor,
             stroke_width=sw,
@@ -511,27 +511,48 @@ def song_chart_banquet_info(song: Song, utage_diffs=None) -> bytes:
     t((405, 475), f"ID {card_id}", 22, anchor="lm", sw=3)
     from ...constants import GENRE_TO_ZH
 
-    t((680, 475), GENRE_TO_ZH.get(song.genre, song.genre.value), 22, sw=3)
+    t((680, 475), GENRE_TO_ZH.get(song.genre, song.genre.value), 22, sw=3, han=True)
     # 描述
     t((595, 595), truncate_by_width(getattr(first, "description", ""), 46), 25)
     # 等级（玩家牌内）
     t((180, p_y + 28), f"Lv. {first.level if first else '?'}", 24, sw=3)
-    # 六列 notes（total/tap/hold/slide/touch/brak）
-    for index, diff in enumerate(utage_diffs):
-        notes = (
-            diff.tap_num
-            + diff.hold_num
-            + diff.slide_num
-            + diff.touch_num
-            + diff.break_num,
-            diff.tap_num,
-            diff.hold_num,
-            diff.slide_num,
-            diff.touch_num,
-            diff.break_num,
-        )
-        for n, value in enumerate(notes):
-            t((330 + 140 * n, base_y + step_y * index), str(value), 25, sw=3)
+    # 六列 notes（total/tap/hold/slide/touch/brak）：卡片只画一张宴谱；
+    # buddy 谱物量在 buddy_notes 左右手两组（谱面行顶层五项恒 0），按底图
+    # 1P/2P 行各占一行（NB 原版同款展开）；buddy_notes 缺失（快照降级回填
+    # 为 None）时回退顶层行
+    if first is not None:
+        buddy = getattr(first, "buddy_notes", None)
+        if getattr(first, "is_buddy", False) and buddy is not None:
+            rows = [
+                (
+                    buddy.left_tap_num,
+                    buddy.left_hold_num,
+                    buddy.left_slide_num,
+                    buddy.left_touch_num,
+                    buddy.left_break_num,
+                ),
+                (
+                    buddy.right_tap_num,
+                    buddy.right_hold_num,
+                    buddy.right_slide_num,
+                    buddy.right_touch_num,
+                    buddy.right_break_num,
+                ),
+            ]
+        else:
+            rows = [
+                (
+                    first.tap_num,
+                    first.hold_num,
+                    first.slide_num,
+                    first.touch_num,
+                    first.break_num,
+                )
+            ]
+        for row, notes in enumerate(rows):
+            values = (sum(notes), *notes)
+            for n, value in enumerate(values):
+                t((330 + 140 * n, base_y + step_y * row), str(value), 25, sw=3)
 
     credit = (
         "Designed by Yuri-YuzuChaN & BlueDeer233. "

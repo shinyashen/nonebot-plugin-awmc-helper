@@ -28,7 +28,7 @@ async def chart_card_bytes(
         from .render import jp_cover
 
         await jp_cover.ensure(song.id)
-        return nb_chart.song_chart_banquet_info(song)
+        return nb_chart.song_chart_banquet_info(song, jp=jp)
     if jp:
         # 日服限定曲本地无素材：按需在线拉取官方曲绘（代理优先，落盘缓存）
         from .render import jp_cover

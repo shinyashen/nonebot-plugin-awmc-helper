@@ -102,17 +102,18 @@ async def _chart_card(song, binding, prefer_type=None, jp: bool = False) -> byte
     return await chart_card_bytes(song, binding, prefer_type, jp)
 
 
-async def _banquet_card(song, utage_diff=None) -> bytes:
+async def _banquet_card(song, utage_diff=None, jp: bool = False) -> bytes:
     """宴谱条目卡：宿主曲可能同时有普通谱（is_banquet 判定不成立），
     但条目 id ≥ 100000 时必须渲染宴会场卡（Hoshino 按 song_id ≥ 100000
     路由同语义）；日服宴曲封面在线兜底。
 
-    ``utage_diff``：要画的宴谱（id 召唤时只画命中的那一张，一个 diff_id
-    对应一张宴谱）；缺省画宿主曲全部宴谱。
+    ``utage_diff``：要画的宴谱（id/条目召唤传命中的那张；一个宴谱 id 只
+    对应一张谱面），缺省取宿主曲第一张。``jp=True``：日服限定宿主曲
+    （JP 视图对象），宴会卡不渲染国服口径的新曲标。
     """
     await jp_cover.ensure(song.id)
     diffs = [utage_diff] if utage_diff is not None else None
-    return nb_chart.song_chart_banquet_info(song, diffs)
+    return nb_chart.song_chart_banquet_info(song, diffs, jp=jp)
 
 
 async def _binding_of(session):
@@ -338,7 +339,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 ),
                 None,
             )
-            png = await _banquet_card(song, utage_diff)
+            png = await _banquet_card(song, utage_diff, flags[0])
         else:
             png = await _chart_card(song, binding, card_prefer, flags[0])
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
@@ -367,7 +368,10 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             # 6 位宴谱机台 id：按 diff_id 定位该张宴谱（取模会错配同号普通曲）
             utage_hit = await song_service.by_utage_id(raw_id)
             if utage_hit:
-                png = await _banquet_card(*utage_hit)
+                ut_host, ut_diff = utage_hit
+                # 日服限定宿主曲（JP 视图兜底命中）：宴会卡不挂国服新曲标
+                jp_only = await song_service.by_id(ut_host.id) is None
+                png = await _banquet_card(ut_host, ut_diff, jp_only)
                 await (
                     UniMessage.image(raw=png)
                     .text("\n您要找的是不是这首？")
@@ -445,6 +449,9 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             if utage_hit is not None:
                 song, utage_diff = utage_hit
                 is_utage_entry = True
+                # 日服限定宿主曲（JP 视图兜底命中）：宴会卡不挂国服新曲标，
+                # 回复补「日服限定」标注（与其余查询路径同口径）
+                jp = await song_service.by_id(song.id) is None
         else:
             song = await song_service.by_id(raw_id)
             if song is None:
@@ -458,7 +465,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     binding = await _binding_of(session)
     if is_utage_entry:
-        png = await _banquet_card(song, utage_diff)
+        png = await _banquet_card(song, utage_diff, jp)
     else:
         png = await _chart_card(song, binding, card_prefer, jp)
     reply = UniMessage.image(raw=png)

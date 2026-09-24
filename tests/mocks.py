@@ -12,7 +12,7 @@ from maimai_py import (
     SongDifficulty,
     SongDifficulties,
 )
-from maimai_py.models import CurveObject, SongDifficultyUtage
+from maimai_py.models import BuddyNotes, CurveObject, SongDifficultyUtage
 
 if TYPE_CHECKING:
     from nonebot_plugin_awmc_helper.core.songs import SongService
@@ -63,6 +63,13 @@ def make_utage(
     level_value: float = 11.5,
     kanji: str = "宴",
     description: str = "新年の宴",
+    is_buddy: bool = False,
+    buddy_notes: "BuddyNotes | None" = None,
+    tap_num: int = 300,
+    hold_num: int = 10,
+    slide_num: int = 10,
+    touch_num: int = 10,
+    break_num: int = 5,
 ) -> SongDifficultyUtage:
     return SongDifficultyUtage(
         type=SongType.UTAGE,
@@ -71,17 +78,36 @@ def make_utage(
         level_index=LevelIndex.BASIC,
         note_designer="宴譜",
         version=24000,
-        tap_num=300,
-        hold_num=10,
-        slide_num=10,
-        touch_num=10,
-        break_num=5,
+        tap_num=tap_num,
+        hold_num=hold_num,
+        slide_num=slide_num,
+        touch_num=touch_num,
+        break_num=break_num,
         curve=None,
         kanji=kanji,
         description=description,
         diff_id=diff_id,
-        is_buddy=False,
-        buddy_notes=None,
+        is_buddy=is_buddy,
+        buddy_notes=buddy_notes,
+    )
+
+
+def make_buddy_notes(
+    left: tuple[int, int, int, int, int] = (474, 61, 59, 28, 15),
+    right: tuple[int, int, int, int, int] = (470, 59, 59, 28, 15),
+) -> BuddyNotes:
+    """左右手物量（01 文档双人谱口径五元组 [Tap, Hold, Slide, Touch, Break]）。"""
+    return BuddyNotes(
+        left_tap_num=left[0],
+        left_hold_num=left[1],
+        left_slide_num=left[2],
+        left_touch_num=left[3],
+        left_break_num=left[4],
+        right_tap_num=right[0],
+        right_hold_num=right[1],
+        right_slide_num=right[2],
+        right_touch_num=right[3],
+        right_break_num=right[4],
     )
 
 
