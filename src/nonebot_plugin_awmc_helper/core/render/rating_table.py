@@ -70,6 +70,11 @@ SYNC_D_SP = ["fs", "fsp", "fsd", "fsdp"]
 _COMPLETED_BG = "complete_1.png"
 _UNFINISHED_BG = "unfinished_1.png"
 
+# 全曲达成徽章的评级阈值（升序 S→SSSP）：Hoshino ACHIEVEMENT_LIST[-6:] 同源，
+# 与 maimai_py RateType._from_achievement 的 S~SSSP 分界（97/98/99/99.5/100/
+# 100.5）一致；maimai_py 未导出列表常量（阈值内联在私有方法里），按值固化
+RANK_ACHIEVEMENT_THRESHOLDS = (97.0, 98.0, 99.0, 99.5, 100.0, 100.5)
+
 
 def _rate_only(ds: float, ach: float) -> str:
     """达成率 → 评级键（小写，NB compute_rating(onlyrate=True) 同义）。"""
@@ -192,24 +197,36 @@ def draw_rating_table(
     # 逐谱面盖章（按模板生成时的分组与排序：group_by_ds 降序 / lv15 特例）
     qualified: list[float] = []
 
-    def stamp_rank(x: int, y: int, ds: float, score) -> None:
+    def stamp_rank(x: int, y: int, ds: float, score, *, lv15: bool = False) -> None:
         ach = score.achievements or 0
         qualified.append(ach)
+        rate = RATE_FILE[RateType._from_achievement(ach).name]
+        name = f"UI_TTR_Rank_{rate}.png"
+        if lv15:
+            # Hoshino lv15 大格分支：不画完成/未完成底，评级章原尺寸置中
+            if (assets.static_path() / "mai" / "pic" / theme / name).exists():
+                im.alpha_composite(assets.pic(name, theme), (x + 55, y + 115))
+            return
         im.alpha_composite(
             assets.pic(_COMPLETED_BG if ach >= 100 else _UNFINISHED_BG), (x + 1, y + 1)
         )
-        rate = RATE_FILE[RateType._from_achievement(ach).name]
-        p = assets.static_path() / "mai" / "pic" / theme / f"UI_TTR_Rank_{rate}.png"
-        if p.exists():
-            im.alpha_composite(
-                assets.pic(f"UI_TTR_Rank_{rate}.png", theme).resize((78, 35)),
-                (x, y + 20),
-            )
+        if (assets.static_path() / "mai" / "pic" / theme / name).exists():
+            im.alpha_composite(assets.pic(name, theme).resize((78, 35)), (x, y + 20))
 
-    def stamp_combo(x: int, y: int, score) -> None:
+    def stamp_combo(x: int, y: int, score, *, lv15: bool = False) -> None:
         if not score.fc:
             return
         qualified.append(COMBO_SP.index(score.fc.name.lower()))
+        if lv15:
+            # Hoshino lv15 计划分支：PlayBonus 大章 200×200，不画完成底
+            name = _combo_file(score.fc.name.lower())
+            p = assets.static_path() / "mai" / "pic" / f"UI_CHR_PlayBonus_{name}.png"
+            if p.exists():
+                im.alpha_composite(
+                    assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((200, 200)),
+                    (x + 75, y + 80),
+                )
+            return
         im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
         im.alpha_composite(
             assets.pic(
@@ -218,11 +235,14 @@ def draw_rating_table(
             (x + 15, y + 13),
         )
 
-    def stamp_sync(x: int, y: int, score) -> None:
+    def stamp_sync(x: int, y: int, score, *, lv15: bool = False) -> None:
         if not score.fs or score.fs.name.lower() == "sync":
             return
         qualified.append(SYNC_D_SP.index(score.fs.name.lower()))
-        im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
+        # 扩展分支（NB 未支持 Sync 计划）：PlayBonus 大章无 Sync 档素材，
+        # lv15 也只能用 50×50 小章；lv15 按 Hoshino 分支惯例不画完成底
+        if not lv15:
+            im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
         im.alpha_composite(
             assets.pic(
                 f"UI_MSS_MBase_Icon_{_sync_file(score.fs.name.lower())}.png"
@@ -240,11 +260,11 @@ def draw_rating_table(
             if score is None:
                 continue
             if not combo_mode and not sync_mode:
-                stamp_rank(x, y, diff.level_value, score)
+                stamp_rank(x, y, diff.level_value, score, lv15=True)
             elif combo_mode:
-                stamp_combo(x, y, score)
+                stamp_combo(x, y, score, lv15=True)
             else:
-                stamp_sync(x, y, score)
+                stamp_sync(x, y, score, lv15=True)
     else:
         groups = group_by_ds(entries)
         current_y = RATING_START_Y
@@ -266,13 +286,16 @@ def draw_rating_table(
             rows = (len(charts) - 1) // RATING_COLS + 1
             current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
 
-    # 全曲达成徽章（NB _calc_achievements_fc：增量阈值全部满足时挂 Allclear 图）
+    # 全曲达成徽章（Hoshino _calc_achievements_fc 同构）：连击/Sync 计划的
+    # qualified 存 COMBO_SP/SYNC_D_SP 下标，逐档 0..3；评级分支存原始达成率，
+    # 阈值用 RANK_ACHIEVEMENT_THRESHOLDS 逐档（曾误用 range(6) 当阈值，
+    # 全完成表恒判 SSSp）
     thresholds = (
         list(range(4))
         if combo_mode
         else list(range(len(SYNC_D_SP)))
         if sync_mode
-        else list(range(len(RANK_SP[-6:])))
+        else list(RANK_ACHIEVEMENT_THRESHOLDS)
     )
     if total_count and len(qualified) == total_count:
         r = -1
