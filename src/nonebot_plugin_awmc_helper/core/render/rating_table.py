@@ -6,14 +6,20 @@ S~SSS+ 评级分布、Sync/FC 分布）并逐谱面盖章：普通模式盖评�
 缺失该谱面成绩的谱面不盖章。
 """
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_NUM, FONT_RODIN, font
-from .tools import TEXT_BLUE
+from .tools import TEXT_BLUE, image_to_bytes
 from .assets import assets
-from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE, ACHIEVEMENT_LIST
+from ...constants import (
+    RATE_FILE,
+    SYNC_FILE,
+    COMBO_FILE,
+    DEFAULT_THEME,
+    ACHIEVEMENT_LIST,
+)
 from .table_layout import (
     LV15_COLS,
     RATING_COLS,
@@ -110,7 +116,7 @@ def draw_rating_table(
     play_result: list,
     entries: list[tuple[Song, SongDifficulty]],
     *,
-    theme: str = "prism_plus",
+    theme: str = DEFAULT_THEME,
 ) -> bytes | None:
     """绘制等级完成表。
 
@@ -122,8 +128,6 @@ def draw_rating_table(
     if not path.exists():
         return None
     im = Image.open(path).convert("RGBA")
-
-    from PIL import ImageDraw
 
     dr = ImageDraw.Draw(im)
     combo_mode = plan in ("fc", "fcp", "ap")
@@ -320,8 +324,6 @@ def draw_rating_table(
     im = im.resize(
         (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS
     )
-    from .tools import image_to_bytes
-
     return image_to_bytes(im)
 
 

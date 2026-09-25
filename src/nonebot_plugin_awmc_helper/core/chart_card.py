@@ -10,6 +10,7 @@ from maimai_py import Song, SongType
 
 from .score import UserScoreError, score_service
 from .render import nb_chart
+from ..constants import DEFAULT_THEME
 
 
 async def chart_card_bytes(
@@ -36,7 +37,7 @@ async def chart_card_bytes(
 
         await jp_cover.ensure(song.id)
     calc, is_full, best_list = False, False, []
-    theme = "prism_plus"
+    theme = DEFAULT_THEME
     if binding is not None and not jp:
         ident = binding_service_ident(binding)
         if ident is not None:
@@ -60,7 +61,7 @@ async def chart_card_bytes(
                 )
                 is_full = len(best_list) >= (15 if is_new_chart else 35)
                 calc = True
-                theme = binding.theme or "prism_plus"
+                theme = binding.theme or DEFAULT_THEME
             except UserScoreError as e:
                 # 成绩卡照常出（不带 B50 信息），但留痕排障
                 logger.debug(f"谱面卡 B50 信息拉取失败（song={song.id}）：{e}")

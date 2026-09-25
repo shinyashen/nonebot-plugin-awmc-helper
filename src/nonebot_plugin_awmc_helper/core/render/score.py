@@ -5,7 +5,7 @@
 底图尺寸由调用方按数据量计算后传入（NB handler 同款约定）。
 """
 
-from PIL import Image
+from PIL import ImageDraw
 from maimai_py import RateType, SongType
 from maimai_py.models import SongDifficulty
 
@@ -21,13 +21,10 @@ from .tools import (
 )
 from .assets import assets
 from .best50 import draw_score_row
-from ...constants import RATE_FILE, chart_display_id
+from ...constants import RATE_FILE, LEVEL_INDEX_EN, chart_display_id
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 同源，tools 单源）
 _DEFAULT_TEXT_COLOR = TEXT_BLUE
-
-_LEVEL_INDEXES = ("basic", "advanced", "expert", "master", "remaster")
-"""难度序 → 素材名后缀（rise_score_*/b50_score_*）。"""
 
 
 def _rate_file_of(achievement: float) -> str:
@@ -41,6 +38,8 @@ class DrawScore:
 
     def __init__(self, height: int, *, service: str | None = None) -> None:
         base = assets.static_path() / "mai" / "pic"
+        # 行卡画布固定 prism_plus 版式（generate_prism_bg 渐变与装饰层均
+        # prism_plus 专属，无 circle 变体）——非「默认主题」语义，勿改常量
         theme = "prism_plus"
         im = generate_prism_bg(height)
         self._im = im
@@ -62,8 +61,6 @@ class DrawScore:
         ``data`` 元素为 :func:`core.calc.rise_recommend` 的输出 dict（含 old_*）；
         ``base_x``：栏起点（SD 栏 200 / DX 栏 700，与 NB 一致）。
         """
-        from PIL import ImageDraw
-
         dr = ImageDraw.Draw(self._im)
         start_y, step = 120, 140
         for index, row in enumerate(data):
@@ -74,18 +71,14 @@ class DrawScore:
             y = start_y + index * step
 
             self._im.alpha_composite(
-                assets.pic(f"rise_score_{_LEVEL_INDEXES[li]}.png"), (x + 30, y)
+                assets.pic(f"rise_score_{LEVEL_INDEX_EN[li]}.png"), (x + 30, y)
             )
             self._im.alpha_composite(
                 assets.cover(song.id).resize((80, 80)), (x + 55, y + 41)
             )
             type_abbr = "DX" if diff.type == SongType.DX else "SD"
-            type_path = self._base / f"{type_abbr}.png"
-            if type_path.exists():
-                self._im.alpha_composite(
-                    Image.open(type_path).convert("RGBA").resize((60, 22)),
-                    (x + 240, y + 114),
-                )
+            if badge := assets.type_badge(type_abbr, (60, 22)):
+                self._im.alpha_composite(badge, (x + 240, y + 114))
             # 旧成绩评级（Hoshino：无旧成绩不画旧章；未游玩推荐行不显示 D）
             old_ach = row.get("old_achievements") or 0
             if old_ach:
@@ -176,8 +169,6 @@ class DrawScore:
         双栏按版本划分：旧版本 = 当前版本以前全部谱面（b35 侧）、
         新版本 = 当前版本谱面（b15 侧），数据为 rise_recommend 输出 dict。
         """
-        from PIL import ImageDraw
-
         dr = ImageDraw.Draw(self._im)
         title_bg = self._title_bg.resize((273, 80))
         self._im.alpha_composite(title_bg, (314, 30))
@@ -225,8 +216,6 @@ class DrawScore:
 
         ``scores``：ScoreExtend 列表；DX 星直接取 ``score.dx_star``（库已算）。
         """
-        from PIL import ImageDraw
-
         dr = ImageDraw.Draw(self._im)
         gap, col_step, start_x = 114, 276, 16
         for num, score in enumerate(scores):
@@ -243,8 +232,6 @@ class DrawScore:
         ``items``：**(游戏内谱面 id, level_index, level_value)**——NB 显示
         per-type id（DX 曲 10231 形状）；曲绘按根 id（% 10000）回退链取。
         """
-        from PIL import ImageDraw
-
         dr = ImageDraw.Draw(self._im)
         step, start_x = 65, 55
         for num, (song_id, li, _lv) in enumerate(items):
@@ -256,7 +243,7 @@ class DrawScore:
                 assets.cover(song_id % 10000).resize((55, 55)), (x, y)
             )
             self._im.alpha_composite(
-                assets.pic(f"border_progress_{_LEVEL_INDEXES[li]}.png"), (x - 4, y - 4)
+                assets.pic(f"border_progress_{LEVEL_INDEX_EN[li]}.png"), (x - 4, y - 4)
             )
             dr.text(
                 (x + 36, y + 3),
@@ -273,8 +260,6 @@ class DrawScore:
 
         NB 字号：draw_plan 段落 25pt，draw_category 标题 28pt。
         """
-        from PIL import ImageDraw
-
         dr = ImageDraw.Draw(self._im)
         self._im.alpha_composite(self._title_lengthen_bg, (475, y - 47))
         dr.text(
@@ -298,8 +283,6 @@ class DrawScore:
     def _footer(
         self, text: str, *, design_bg_y: int, text_y: int, size: int = 22
     ) -> None:
-        from PIL import ImageDraw
-
         dr = ImageDraw.Draw(self._im)
         self._im.alpha_composite(
             assets.pic("design.png", self._theme), (200, design_bg_y)
@@ -394,8 +377,6 @@ class DrawScore:
             self._im.alpha_composite(
                 assets.pic("design.png", self._theme), (200, height - 113)
             )
-            from PIL import ImageDraw
-
             ImageDraw.Draw(self._im).text(
                 (700, height - 70),
                 f"未游玩谱面共计「{len(data)}」个",
@@ -413,8 +394,6 @@ class DrawScore:
         end_page: int,
     ) -> bytes:
         """绘制分数列表（80/页，每 20 条一段，NB draw_score_list 同布局）。"""
-        from PIL import ImageDraw
-
         dr = ImageDraw.Draw(self._im)
         start_offset = (page - 1) * 80
         current_page_result = play_result[start_offset : page * 80]

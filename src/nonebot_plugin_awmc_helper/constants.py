@@ -59,6 +59,23 @@ LEVEL_INDEX_ZH: dict[LevelIndex, str] = {
     LevelIndex.ReMASTER: "宗师",
 }
 
+# 难度英文小写名（素材名后缀：border_*/b50_score_*/rise_score_* 等）与
+# 显示名（统计卡/进度总览表头），渲染模块共用
+LEVEL_INDEX_EN: tuple[str, ...] = (
+    "basic",
+    "advanced",
+    "expert",
+    "master",
+    "remaster",
+)
+DIFF_DISPLAY_NAMES: tuple[str, ...] = (
+    "Basic",
+    "Advanced",
+    "Expert",
+    "Master",
+    "Re:Master",
+)
+
 # 达成率评级（RateType）→ 显示名，值越小评级越高
 RATE_TO_ZH: dict[RateType, str] = {
     RateType.SSSP: "SSS+",

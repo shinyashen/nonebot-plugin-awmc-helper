@@ -21,6 +21,7 @@ from ...config import plugin_config
 from ...constants import (
     LEVEL_LIST,
     PLATE_CHARS,
+    DEFAULT_THEME,
     SERVICE_DISPLAY,
     chart_display_id,
 )
@@ -187,7 +188,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         )
     scores = await score_service.get_scores_all(binding)
 
-    theme = binding.theme or "prism_plus"
+    theme = binding.theme or DEFAULT_THEME
     png = await table_template.draw_rating_table_with_fallback(
         level, plan, scores.scores, entries, theme=theme, song_service=song_service
     )

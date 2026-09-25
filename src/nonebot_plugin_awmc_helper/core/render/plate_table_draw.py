@@ -5,12 +5,12 @@
 舞舞盖 Sync 章 + t_0..t_4 分槽小标）、各难度分组计数与进度条。
 """
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from maimai_py import Song, FCType, FSType, RateType, LevelIndex, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_RODIN, font
-from .tools import TEXT_BLUE, ID_TEXT_COLORS
+from .tools import TEXT_BLUE, ID_TEXT_COLORS, image_to_bytes
 from .assets import assets
 from ..plates import major_type_of_plate
 from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
@@ -173,8 +173,6 @@ def draw_plate_table(
         )
     )
 
-    from PIL import ImageDraw
-
     dr = ImageDraw.Draw(im)
     # 头部白色大面板：舞/霸用 wu 变体（Hoshino _plate_progress_wu_bg；非舞是
     # plate_progress.png，progress_bg.png 是进度总览每槽的底部小条，勿混用）
@@ -276,6 +274,4 @@ def draw_plate_table(
     im = im.resize(
         (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS
     )
-    from .tools import image_to_bytes
-
     return image_to_bytes(im)

@@ -35,6 +35,7 @@ from maimai_py import (
 from .fonts import FONT_HAN, FONT_NUM, font
 from .tools import (
     TEXT_BLUE,
+    CIRCLE_PINK,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     credit_text,
@@ -44,7 +45,13 @@ from .tools import (
 from .assets import assets, online_item_cache_dir
 from ...config import plugin_config
 from .download import DownloadGate, download_to_file
-from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE, SERVICE_DISPLAY
+from ...constants import (
+    RATE_FILE,
+    SYNC_FILE,
+    COMBO_FILE,
+    DEFAULT_THEME,
+    SERVICE_DISPLAY,
+)
 
 RA_THRESHOLD = [
     (1000, "01"),
@@ -156,7 +163,7 @@ DX_STAR_FILE = "UI_GAM_Gauge_DXScoreIcon_0{num}.png"
 
 FOOTER_COLORS = {
     "prism_plus": TEXT_BLUE,
-    "circle": (249, 62, 172, 255),
+    "circle": CIRCLE_PINK,
 }
 
 _ITEM_HOST = "https://www.yuzuchan.moe/assets/maimaidx"
@@ -183,7 +190,7 @@ def dani_plate_num(course_rank: int) -> str:
     return f"{course_rank if course_rank <= 10 else course_rank + 1:02d}"
 
 
-def ra_badge_num(rating: int, theme: str = "prism_plus") -> str:
+def ra_badge_num(rating: int, theme: str = DEFAULT_THEME) -> str:
     """DXRating 段位牌号：≥15000 归 11 号；circle 主题 16000–16999 用 12 号。"""
     for limit, n in RA_THRESHOLD:
         if rating < limit:
@@ -409,11 +416,8 @@ def draw_score_row(
     cover = assets.cover(score.id % 10000).resize((75, 75))
     im.alpha_composite(cover, (x + 12, y + 12))
     type_abbr = "DX" if score.type.name == "DX" else "SD"
-    type_path = pic / f"{type_abbr}.png"
-    if type_path.exists():
-        im.alpha_composite(
-            Image.open(type_path).convert("RGBA").resize((37, 14)), (x + 51, y + 91)
-        )
+    if badge := assets.type_badge(type_abbr, (37, 14)):
+        im.alpha_composite(badge, (x + 51, y + 91))
     rate = _rate_badge(theme, score.rate)
     if rate is not None:
         im.alpha_composite(rate.resize((63, 28)), (x + 92, y + 78))
@@ -475,7 +479,7 @@ async def draw_b50_nb(
     player: Player | None = None,
     qqid: int | None = None,
     service: str | None = None,
-    theme: str = "prism_plus",
+    theme: str = DEFAULT_THEME,
 ) -> Image.Image:
     """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。"""
     pic = assets.static_path() / "mai" / "pic"
@@ -503,7 +507,7 @@ async def draw_b50_nb(
             draw_score_row(im, draw, x, y, score, theme)
 
     service_name = SERVICE_DISPLAY.get(service or "", "")
-    footer_color = FOOTER_COLORS.get(theme, FOOTER_COLORS["prism_plus"])
+    footer_color = FOOTER_COLORS[DEFAULT_THEME]
     draw.text(
         (700, 1570),
         credit_text(service_name or None),
@@ -527,7 +531,7 @@ async def best50_bytes(
     player: Player | None = None,
     qqid: int | None = None,
     service: str | None = None,
-    theme: str = "prism_plus",
+    theme: str = DEFAULT_THEME,
 ) -> bytes:
     return image_to_bytes(
         await draw_b50_nb(

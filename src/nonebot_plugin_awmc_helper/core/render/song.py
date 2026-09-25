@@ -12,6 +12,7 @@ from maimai_py import Song, SongType, LevelIndex
 from .fonts import FONT_HAN, FONT_MONO, FONT_RODIN, font
 from .tools import (
     TEXT_BLUE,
+    DIFF_TEXT_COLORS,
     fit_text,
     text_size,
     credit_text,
@@ -190,12 +191,8 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         )
         if not is_utage:
             type_abbr = "DX" if song.difficulties.dx else "SD"
-            type_path = assets.static_path() / "mai" / "pic" / f"{type_abbr}.png"
-            if type_path.exists():
-                im.alpha_composite(
-                    Image.open(type_path).convert("RGBA").resize((40, 15)),
-                    (x + 50, y + 75),
-                )
+            if badge := assets.type_badge(type_abbr, (40, 15)):
+                im.alpha_composite(badge, (x + 50, y + 75))
         im.alpha_composite(
             assets.pic("sl_diff_utg.png" if is_utage else "sl_diff.png"),
             (x + 100, y + 95),
@@ -250,11 +247,8 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
             for diff in song.get_difficulties():
                 if diff.type != major or diff.type == SongType.UTAGE:
                     continue
-                color = (
-                    (138, 0, 226, 255)
-                    if diff.level_index == LevelIndex.ReMASTER
-                    else (255, 255, 255, 255)
-                )
+                # 难度配色单源 tools.DIFF_TEXT_COLORS（0-3 白、ReM 紫）
+                color = DIFF_TEXT_COLORS[diff.level_index.value]
                 draw.text(
                     (x + 125 + 50 * diff.level_index.value, y + 105),
                     f"{diff.level_value}",

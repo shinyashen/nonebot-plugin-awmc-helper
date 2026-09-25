@@ -14,6 +14,8 @@ DEFAULT_TEXT_SIZE = 28
 # PRiSM PLUS 蓝两档（素材包 UI 取色）：正文/计数蓝 与 大标题蓝
 TEXT_BLUE = (124, 129, 255, 255)
 TITLE_BLUE = (114, 188, 254, 255)
+# circle 主题主色（素材包 UI 取色）
+CIRCLE_PINK = (249, 62, 172, 255)
 
 # 行卡文字/曲目 id 按难度配色（Hoshino AssetsImage 同源，三处渲染共用）
 DIFF_TEXT_COLORS = [

@@ -9,12 +9,13 @@
 
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from maimai_py import Song, Version, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_RODIN, font
 from .tools import (
     TEXT_BLUE,
+    CIRCLE_PINK,
     credit_text,
     image_to_bytes,
     truncate_hoshino,
@@ -22,6 +23,7 @@ from .tools import (
 from .assets import assets
 from ...constants import (
     GENRE_TO_ZH,
+    DEFAULT_THEME,
     VERSION_IMAGE,
     ACHIEVEMENT_LIST,
     JP_VERSION_IMAGE,
@@ -181,7 +183,7 @@ def song_chart_info(
     calc: bool,
     is_full: bool,
     best_list: list[ScoreExtend],
-    theme: str = "prism_plus",
+    theme: str = DEFAULT_THEME,
     prefer_type: SongType | None = None,
     jp: bool = False,
     *,
@@ -201,15 +203,13 @@ def song_chart_info(
     touch 恒 0（机制上无 touch）显示 ``-``，DX 谱 touch=0 为真实数据（确有
     无 touch 的 DX 谱面）显示 ``0``，详见 :func:`notes_cell_text`。
     """
-    from PIL import ImageDraw
-
     im = Image.open(
         assets.static_path() / "mai" / "pic" / theme / "chart_info.png"
     ).convert("RGBA")
     mr = ImageDraw.Draw(im)
     f_han = font(24, FONT_HAN)
     f_rodin = font(28, FONT_RODIN)
-    text_color = (249, 62, 172, 255) if theme == "circle" else TEXT_BLUE
+    text_color = CIRCLE_PINK if theme == "circle" else TEXT_BLUE
 
     base = assets.static_path() / "mai" / "pic"
     im.alpha_composite(
@@ -235,9 +235,8 @@ def song_chart_info(
         im.alpha_composite(
             logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
         )
-    type_path = base / f"{type_abbr}.png"
-    if type_path.exists():
-        im.alpha_composite(Image.open(type_path).resize((80, 30)), (295, 410))
+    if badge := assets.type_badge(type_abbr, (80, 30)):
+        im.alpha_composite(badge, (295, 410))
 
     title = truncate_hoshino(song.title, 40)
     mr.text(
@@ -388,8 +387,6 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     ``jp=True``：宿主曲为日服限定（JP 视图对象）——「新曲だよ!」徽章是
     国服当前版本口径，日服曲不渲染（同 :func:`song_chart_info` 的 jp 口径）。
     """
-    from PIL import ImageDraw
-
     base = assets.static_path() / "mai" / "pic"
     im = Image.open(base / "chart_info_enkaijou.png").convert("RGBA")
     mr = ImageDraw.Draw(im)
@@ -474,8 +471,6 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     utage_id = next((getattr(d, "diff_id", None) for d in utage_diffs), None)
     card_id = utage_id if utage_id is not None else song.id
     t((405, 475), f"ID {card_id}", 22, anchor="lm", sw=3)
-    from ...constants import GENRE_TO_ZH
-
     t((680, 475), GENRE_TO_ZH.get(song.genre, song.genre.value), 22, sw=3, han=True)
     # 描述（Hoshino 原版不截断，直接绘制）
     t((595, 595), getattr(first, "description", ""), 25)

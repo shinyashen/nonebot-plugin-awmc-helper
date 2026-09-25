@@ -87,6 +87,14 @@ class Assets:
         return Image.new("RGBA", (400, 400), "#666666")
 
     @classmethod
+    def type_badge(cls, abbr: str, size: tuple[int, int]) -> Image.Image | None:
+        """SD/DX 类型徽章（``mai/pic/{abbr}.png``）缩放到 size；缺失返回 None。"""
+        path = cls.static_path() / "mai" / "pic" / f"{abbr}.png"
+        if not path.exists():
+            return None
+        return cls.get(path).resize(size)
+
+    @classmethod
     def plate_version(cls, version: str, kind: str) -> Image.Image | None:
         """牌子表头素材（``{版本}{牌种}.png``）。
 

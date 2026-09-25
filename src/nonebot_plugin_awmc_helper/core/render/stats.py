@@ -11,13 +11,11 @@ from maimai_py import Song, FCType, SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import image_to_bytes
-from ...constants import chart_display_id
+from ...constants import DIFF_DISPLAY_NAMES, chart_display_id
 
 W, H = 1000, 900
 TITLE_COLOR = (44, 52, 60, 255)
 MUTED = (120, 128, 138, 255)
-DIFF_NAMES = ["Basic", "Advanced", "Expert", "Master", "Re:Master"]
-
 # 全连分布配色（Not FC 灰 + 全连档位渐进）
 _FC_ITEMS: list[tuple[str, FCType | None, str]] = [
     ("Not FC", None, "#d9d9d9"),
@@ -77,7 +75,7 @@ def song_global_data(song: Song, diff: SongDifficulty) -> bytes:
     li = diff.level_index.value
     dr.text(
         (W // 2, 42),
-        f"{chart_display_id(song, diff)} {song.title} 「{DIFF_NAMES[li]}」",
+        f"{chart_display_id(song, diff)} {song.title} 「{DIFF_DISPLAY_NAMES[li]}」",
         font=font(30, FONT_RODIN),
         fill=TITLE_COLOR,
         anchor="mm",

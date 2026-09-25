@@ -15,7 +15,7 @@ from nonebot.adapters import Event, Message
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from ...constants import COLOR_TO_LEVEL_INDEX
+from ...constants import DEFAULT_THEME, COLOR_TO_LEVEL_INDEX
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.types import FCType, SongType, LevelIndex
@@ -136,7 +136,7 @@ async def _(
             player=player,
             qqid=binding_service.qq_of(binding),
             service=binding.service,
-            theme=binding.theme or "prism_plus",
+            theme=binding.theme or DEFAULT_THEME,
         )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
@@ -189,7 +189,7 @@ async def _(
         player=player,
         qqid=binding_service.qq_of(binding),
         service=binding.service,
-        theme=binding.theme or "prism_plus",
+        theme=binding.theme or DEFAULT_THEME,
     )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
@@ -228,7 +228,9 @@ async def _(
         song,
         info.scores,
         service=binding.service if binding is not None else None,
-        theme=(binding.theme or "prism_plus") if binding is not None else "prism_plus",
+        theme=(binding.theme or DEFAULT_THEME)
+        if binding is not None
+        else DEFAULT_THEME,
         prefer_type=prefer,
     )
     tips = await _b50_rise_tips(info.scores, binding, bests=bests)
@@ -290,7 +292,7 @@ async def _(groups: tuple = RegexGroup()):
     # R2：与查歌同源富谱面卡（渲染器在 core/render，无跨插件问题）；
     # 卡片主类型跟随所选谱面（选 SD 色谱显示 SD 卡）
     prefer = SongType.STANDARD if diff.type == SongType.STANDARD else None
-    card = nb_chart.song_chart_info(song, False, False, [], "prism_plus", prefer)
+    card = nb_chart.song_chart_info(song, False, False, [], DEFAULT_THEME, prefer)
     # R9：统计信息画入双环统计卡（样本/拟合/均值/σ/DX + 全连与评级分布）
     stats_png = stats_render.song_global_data(song, diff)
     png = _ginfo_image(card, stats_png)

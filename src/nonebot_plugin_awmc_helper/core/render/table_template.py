@@ -16,7 +16,7 @@ import asyncio
 from pathlib import Path
 from collections.abc import Sequence
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from nonebot import logger
 from maimai_py import Song, SongType, SongDifficulty
 
@@ -31,7 +31,7 @@ from .tools import (
 from .assets import assets
 from ..plates import in_plate_scope, major_type_of_plate, plate_version_range
 from .nb_chart import version_image
-from ...constants import chart_display_id
+from ...constants import LEVEL_INDEX_EN, chart_display_id
 from .table_layout import (
     LV15_COLS,
     PLATE_COLS,
@@ -56,7 +56,6 @@ from .table_layout import (
 )
 
 FONT_BLUE = TITLE_BLUE
-_LEVEL_INDEXES = ("basic", "advanced", "expert", "master", "remaster")
 _DIFF_TEXT_COLOR = [
     (255, 255, 255, 255),
     (255, 255, 255, 255),
@@ -80,8 +79,6 @@ def _generate_bg(height: int, separator_height: int) -> Image.Image:
 
 
 def _credit(im: Image.Image, height: int) -> None:
-    from PIL import ImageDraw
-
     ImageDraw.Draw(im).text(
         (700, height - 75),
         credit_text(),
@@ -104,8 +101,6 @@ def _rating_grid(
     height = current_y + 230
 
     im = generate_frosted_card(_generate_bg(height, 360), (50, 404, 1350, current_y))
-    from PIL import ImageDraw
-
     dr = ImageDraw.Draw(im)
 
     _credit(im, height)
@@ -131,7 +126,7 @@ def _rating_grid(
             li = diff.level_index.value
             im.alpha_composite(assets.cover(song.id).resize((75, 75)), (x, y))
             im.alpha_composite(
-                assets.pic(f"border_{_LEVEL_INDEXES[li]}.png"), (x - 5, y - 5)
+                assets.pic(f"border_{LEVEL_INDEX_EN[li]}.png"), (x - 5, y - 5)
             )
             dr.text(
                 (x + 56, y + 4),
@@ -153,8 +148,6 @@ def _rating_grid_15(
     height = 650 + lines * LV15_ROW_STEP
 
     im = _generate_bg(height, 360)
-    from PIL import ImageDraw
-
     dr = ImageDraw.Draw(im)
     _credit(im, height)
 
@@ -248,8 +241,6 @@ def _plate_grid(
     height = current_y + 180
 
     im = generate_frosted_card(_generate_bg(height, 400), (50, 444, 1350, current_y))
-    from PIL import ImageDraw
-
     dr = ImageDraw.Draw(im)
     if pages is not None:
         dr.text(
@@ -471,8 +462,6 @@ def rating_table_text_bytes(
     底图存在时直接叠「Level. {level}」大字；缺失时按 NB 布局现算（不落盘）；
     最终按 NB 同款 0.8 缩放输出。坐标对 NB 1400 宽底图原生适配。
     """
-    from PIL import ImageDraw
-
     path = rating_table_dir() / f"{level}.png"
     if path.exists():
         im = Image.open(path).convert("RGBA")

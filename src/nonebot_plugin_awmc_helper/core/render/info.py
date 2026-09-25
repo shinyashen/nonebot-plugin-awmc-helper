@@ -9,12 +9,14 @@
 - 难度槽定数小字统一 21pt 垂直居中（Hoshino 已玩 20pt/未玩 25pt 两档）。
 """
 
+from PIL import Image, ImageDraw
 from maimai_py import Song, Genre, SongType, ScoreExtend
 
 from ..calc import dx_star_ratio
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
     TEXT_BLUE,
+    CIRCLE_PINK,
     credit_text,
     image_to_bytes,
     truncate_hoshino,
@@ -25,6 +27,7 @@ from ...constants import (
     RATE_FILE,
     SYNC_FILE,
     COMBO_FILE,
+    DEFAULT_THEME,
     SERVICE_DISPLAY,
     chart_display_id,
 )
@@ -40,7 +43,7 @@ _GENRE_FILE: dict[Genre, str] = {
 }
 
 _TEXT_COLOR = TEXT_BLUE
-_CIRCLE_COLOR = (249, 62, 172, 255)
+_CIRCLE_COLOR = CIRCLE_PINK
 
 
 def song_play_data(
@@ -48,7 +51,7 @@ def song_play_data(
     play_result: list[ScoreExtend],
     *,
     service: str | None = None,
-    theme: str = "prism_plus",
+    theme: str = DEFAULT_THEME,
     prefer_type: SongType | None = None,
 ) -> bytes:
     """谱面游玩成绩卡。
@@ -56,8 +59,6 @@ def song_play_data(
     ``play_result``：该曲成绩（maimai_py ``PlayerSong.scores``）；只取主类型
     谱面的成绩入槽，未游玩槽画灰行。``service``：数据源署名（未绑定省略）。
     """
-    from PIL import Image, ImageDraw
-
     base = assets.static_path() / "mai" / "pic"
     color = _CIRCLE_COLOR if theme == "circle" else _TEXT_COLOR
     im = Image.open(base / theme / "play_info.png").convert("RGBA")
@@ -89,9 +90,10 @@ def song_play_data(
         if prefer_sd
         else (SongType.DX if song.difficulties.dx else SongType.STANDARD)
     )
-    type_path = base / f"{'SD' if major_type == SongType.STANDARD else 'DX'}.png"
-    if type_path.exists():
-        im.alpha_composite(Image.open(type_path).resize((55, 20)), (350, 560))
+    if badge := assets.type_badge(
+        "SD" if major_type == SongType.STANDARD else "DX", (55, 20)
+    ):
+        im.alpha_composite(badge, (350, 560))
 
     # 曲目信息（截断规则对齐 Hoshino：宽 >L 才截、截后保留 ≤L-1 列）
     dr.text(

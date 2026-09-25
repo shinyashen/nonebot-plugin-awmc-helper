@@ -20,9 +20,8 @@ from .tools import (
     generate_frosted_card,
 )
 from .assets import assets
+from ...constants import DIFF_DISPLAY_NAMES
 
-# 难度英文名（对齐 NB DIFFS，BASIC..ReMASTER）
-_DIFF_NAMES = ["Basic", "Advanced", "Expert", "Master", "Re:Master"]
 _START_X, _START_Y, _GAP = 84, 455, 96
 
 
@@ -107,7 +106,7 @@ def plate_progress_bytes(
         color = ID_TEXT_COLORS[li]
         dr.text(
             (220, start_y - 57),
-            _DIFF_NAMES[li],
+            DIFF_DISPLAY_NAMES[li],
             font=font(34, FONT_RODIN),
             fill=color,
             anchor="lm",
