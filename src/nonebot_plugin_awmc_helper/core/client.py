@@ -29,6 +29,8 @@ def _build_yuzu() -> YuzuProvider:
 
 
 client = MaimaiClient(
+    # 默认 20s：传分全量/大增量 POST update_records 实测会 ReadTimeout（2026-09-26）
+    timeout=120.0,
     cache_ttl=plugin_config.awmc_cache_ttl_hours * 3600,
     transport=build_smart_transport(),
 )
