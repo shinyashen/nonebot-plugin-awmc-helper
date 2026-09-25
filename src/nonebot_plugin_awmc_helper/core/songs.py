@@ -23,7 +23,12 @@ from . import store, songdb
 from .client import client, lxns_provider, yuzu_provider
 from .songdb import Scope
 from ..config import plugin_config
-from .provider import AwmcSongProvider, AwmcAliasProvider
+from .provider import (
+    AwmcSongProvider,
+    ListSongProvider,
+    AwmcAliasProvider,
+    songs_list_digest,
+)
 from ..constants import normalize_text, strip_chart_prefix
 
 SNAPSHOT_KEY = "songs_snapshot"
@@ -120,6 +125,35 @@ def prefer_type_from_raw_id(raw_id: int) -> SongType | None:
     return None if song_type == SongType.UTAGE else song_type
 
 
+def chart_entries(song: Song) -> "list[tuple[int, Song, SongType | None]]":
+    """曲目 → 谱面类型条目（NB 双条目语义的单一事实来源）。
+
+    - SD 条目 id = 曲 id、DX 条目 id = 曲 id + 10000（查分器 id 形状）；
+    - 宴条目 id = 6 位机台内部 diff_id、主类型偏好 None（按 diff_id 定位该张），
+      按 diff_id 升序。
+
+    ``SongService.available_ids`` 与查歌侧条目展开均由本函数派生；曲级展示 id
+    （``constants.display_song_id``）与卡片代表 id（``nb_chart._display_card_id``）
+    属各自特例，另有单源。
+    """
+    entries: list[tuple[int, Song, SongType | None]] = []
+    if song.difficulties.standard:
+        entries.append((song.id, song, SongType.STANDARD))
+    if song.difficulties.dx:
+        entries.append((song.id + 10000, song, SongType.DX))
+    entries.extend(
+        sorted(
+            (
+                (d.diff_id, song, None)
+                for d in song.get_difficulties(SongType.UTAGE)
+                if isinstance(d, SongDifficultyUtage)
+            ),
+            key=lambda e: e[0],
+        )
+    )
+    return entries
+
+
 class SongService:
     """曲库服务单例（见模块级 ``song_service``）。"""
 
@@ -131,6 +165,8 @@ class SongService:
         self._title_index: dict[str, int] = {}
         # 宴谱汉字集（前缀剥离用）：运行时全部宴谱的 kanji 及其简体形态
         self._utage_kanji: set[str] = set()
+        # 宴谱 diff_id → 宿主根 id（CN 运行时视图；by_utage_id 定位用）
+        self._utage_index: dict[int, int] = {}
         # 日服视图缓存（国服查不到时的 fallback，Q32）：根 id → 日服 Song
         self._alias_provider = _ALIAS_PROVIDER
         self._jp_view: dict[int, Song] = {}
@@ -138,6 +174,8 @@ class SongService:
         self._jp_alias_cache: tuple[dict, dict] | None = None
         self._jp_kanji: set[str] = set()
         self._jp_kanji_cache_fp: str | None = None
+        # JP 视图宴谱索引（随日服视图指纹缓存）
+        self._jp_utage_index: dict[int, int] = {}
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -185,47 +223,46 @@ class SongService:
             self._alias_index.setdefault(la.alias.lower(), set()).add(la.song_id)
 
     async def inject(self, songs: list[Song]) -> None:
-        """直接注入曲目数据并置就绪（测试与本地快照恢复共用；不触发网络）。"""
+        """直接注入曲目数据并置就绪（测试注入；不触发网络）。
+
+        经 maimai_py provider 通道走正规 ``client.songs``：``_configure`` 自动
+        种子化 ids/tracks/versions 缓存（B35/B15 拆分与牌子进度依赖），
+        项目侧不再手工写 ``client._cache``。上一轮残留的单曲键仍需手工清理——
+        by_id 直读单曲键、上游换 provider 不清命名空间（待议，tech-debt §一），
+        整库替换后 stale 键会让 by_id 命中已移除的曲。
+        """
         cache = client._cache
-        # ids 只门控 get_all，by_id 直读单曲键：注入是整库替换，上一轮残留的
-        # 单曲键不清会让空库/换库后 by_id 命中已移除的曲（快照恢复同理）
         old_ids: list[int] = await cache.get("ids", namespace="songs") or []
         keep = {s.id for s in songs}
         for stale in (i for i in old_ids if i not in keep):
             await cache.delete(str(stale), namespace="songs")
-        await cache.set("provider", "inject", ttl=client._cache_ttl, namespace="songs")
-        await cache.set("ids", [s.id for s in songs], namespace="songs")
-        await cache.multi_set(iter((s.id, s) for s in songs), namespace="songs")
-        await cache.multi_set(iter((s.title, s.id) for s in songs), namespace="tracks")
-        await self._seed_versions(songs)
+        await client.songs(
+            provider=ListSongProvider(songs, songs_list_digest(songs)),
+            alias_provider=None,  # 曲对象自带 aliases，无需别名通道
+        )
         await self._apply_to_cache(songs)
-
-    async def _seed_versions(self, all_songs: list[Song]) -> None:
-        """种子化 versions 缓存（B35/B15 拆分与牌子进度依赖）。"""
-        versions = {
-            f"{s.id} {d.type} {d.level_index}": d.version
-            for s in all_songs
-            for d in s.get_difficulties()
-        }
-        await client._cache.set("versions", versions, namespace="songs")
 
     async def _apply_to_cache(self, all_songs: list[Song]) -> None:
         index: dict[str, set[int]] = {}
         titles: dict[str, int] = {}
         utage_kanji: set[str] = set()
+        utage_index: dict[int, int] = {}
         for song in all_songs:
             titles[song.title.lower()] = song.id
             for alias in song.aliases or []:
                 index.setdefault(normalize_text(alias), set()).add(song.id)
             for diff in song.get_difficulties(SongType.UTAGE):
-                if isinstance(diff, SongDifficultyUtage) and diff.kanji:
-                    utage_kanji.add(diff.kanji)
-                    utage_kanji.add(normalize_text(diff.kanji))  # 简体形态
+                if isinstance(diff, SongDifficultyUtage):
+                    utage_index[diff.diff_id] = song.id
+                    if diff.kanji:
+                        utage_kanji.add(diff.kanji)
+                        utage_kanji.add(normalize_text(diff.kanji))  # 简体形态
         for la in await store.get_local_aliases():
             index.setdefault(normalize_text(la.alias), set()).add(la.song_id)
         self._alias_index = index
         self._title_index = titles
         self._utage_kanji = utage_kanji
+        self._utage_index = utage_index
         self._ready.set()
 
     # -- 快照 --------------------------------------------------------------
@@ -241,22 +278,21 @@ class SongService:
             logger.exception("曲库快照写入失败（不影响运行）")
 
     async def _load_snapshot(self) -> bool:
+        """快照降级：经内容哈希 provider 走正规 ``client.songs`` 通道。
+
+        maimai_py ``_configure`` 自动种子化 ids/tracks/versions 缓存（缺
+        versions 键会让 B35/B15 拆分与牌子进度静默空结果），本项目侧零
+        ``client._cache`` 直写。
+        """
         try:
             snap = await store.kv_get(SNAPSHOT_KEY)
-            if not snap:
+            if not snap or not snap.get("songs"):
                 return False
             all_songs = [song_from_dict(d) for d in snap["songs"]]
-            cache = client._cache
-            await cache.set(
-                "provider", "snapshot", ttl=client._cache_ttl, namespace="songs"
+            await client.songs(
+                provider=ListSongProvider(all_songs, songs_list_digest(all_songs)),
+                alias_provider=None,  # 曲对象自带 aliases（快照反序列化）
             )
-            await cache.set("ids", [s.id for s in all_songs], namespace="songs")
-            await cache.multi_set(iter((s.id, s) for s in all_songs), namespace="songs")
-            await cache.multi_set(
-                iter((s.title, s.id) for s in all_songs), namespace="tracks"
-            )
-            # maimai_py 的 B35/B15 拆分与牌子进度读 versions 键，缺键即静默空结果
-            await self._seed_versions(all_songs)
             await self._apply_to_cache(all_songs)
             return True
         except Exception:
@@ -298,6 +334,12 @@ class SongService:
             return self._jp_view
         state = await songdb.State.load()
         self._jp_view = {s.id: s for s in songdb.all_songs(state, "jp")}
+        self._jp_utage_index = {
+            d.diff_id: s.id
+            for s in self._jp_view.values()
+            for d in s.get_difficulties(SongType.UTAGE)
+            if isinstance(d, SongDifficultyUtage)
+        }
         self._jp_fingerprint = fp
         return self._jp_view
 
@@ -394,21 +436,36 @@ class SongService:
         （version_cn=NULL 不在 CN 运行时视图），CN 视图未命中时回退
         JP 视图。
 
-        返回 ``(宿主曲, 宴谱)``；未命中返回 None。
+        返回 ``(宿主曲, 宴谱)``；未命中返回 None。CN/JP 视图各自维护
+        ``diff_id → 宿主 id`` 索引（随视图缓存重建），免逐曲线性扫描。
         """
         await self.ensure_loaded()
 
-        def match(songs):
-            for song in songs:
-                for diff in song.get_difficulties(SongType.UTAGE):
-                    if getattr(diff, "diff_id", None) == diff_id:
-                        assert isinstance(diff, SongDifficultyUtage)
-                        return song, diff
-            return None
+        def _host_diff(song: Song) -> "SongDifficultyUtage | None":
+            return next(
+                (
+                    d
+                    for d in song.get_difficulties(SongType.UTAGE)
+                    if isinstance(d, SongDifficultyUtage) and d.diff_id == diff_id
+                ),
+                None,
+            )
 
-        return match(await self.get_all()) or match(
-            (await self._jp_songs_map()).values()
-        )
+        if host_id := self._utage_index.get(diff_id):
+            song = await self.by_id(host_id)
+            # get_all 语义排除 disabled（落雪打标下架曲）
+            if song is not None and not song.disabled and (d := _host_diff(song)):
+                return song, d
+        # CN 未命中（宴曲多为日服限定）→ JP 视图索引；索引未随视图就绪
+        # （测试替换视图等）时退化为线性兜底
+        jp = await self._jp_songs_map()
+        if host_id := self._jp_utage_index.get(diff_id):
+            if (song := jp.get(host_id)) and (d := _host_diff(song)):
+                return song, d
+        for song in jp.values():
+            if d := _host_diff(song):
+                return song, d
+        return None
 
     async def utage_by_keyword(self, keyword: str) -> list[Song]:
         """在含宴谱的曲中按标题/别名模糊匹配（「宴XX」召唤宴谱用）。
@@ -533,19 +590,9 @@ class SongService:
         - 宴谱机台 id：逐谱纳入（``SongDifficultyUtage.diff_id``，
           100000 + level_id * 10000 + 根 id）。
         """
-        ids: list[int] = []
-        if song.get_difficulties(SongType.STANDARD):
-            ids.append(song.id)
-        if song.get_difficulties(SongType.DX):
-            ids.append(song.id + 10000)
-        ids.extend(
-            sorted(
-                d.diff_id
-                for d in song.get_difficulties(SongType.UTAGE)
-                if isinstance(d, SongDifficultyUtage)
-            )
-        )
-        return ids or [song.id]  # 无任何谱面的异常数据兜底，避免展示空 ID
+        return [eid for eid, _song, _t in chart_entries(song)] or [
+            song.id
+        ]  # 无任何谱面的异常数据兜底，避免展示空 ID
 
     async def aliases_of(self, song_id: int) -> list[str] | None:
         """某曲目的全部别名（柚子 + 本地）；曲目不存在返回 None。

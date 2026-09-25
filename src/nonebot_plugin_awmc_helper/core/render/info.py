@@ -63,9 +63,7 @@ def song_play_data(
     dr = ImageDraw.Draw(im)
 
     # logo
-    im.alpha_composite(
-        assets.pic("logo.png", theme).resize((249, 120)), (42, 34)
-    )
+    im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (42, 34))
     # 曲绘（assets.cover 自带回退链）
     im.alpha_composite(assets.cover(song.id).resize((300, 300)), (100, 260))
     # 分类徽章（素材缺失时跳过，如宴会場）
@@ -125,9 +123,7 @@ def song_play_data(
     level_y = 251
     for num, level_index in enumerate(slots):
         y = step_y * num
-        im.alpha_composite(
-            assets.pic(f"d_{num}.png"), (650, 235 + y)
-        )
+        im.alpha_composite(assets.pic(f"d_{num}.png"), (650, 235 + y))
         score = by_slot.get(level_index)
         diff = next(d for d in diffs if d.level_index == level_index)
         if score is None:
@@ -155,9 +151,7 @@ def song_play_data(
         star = score.dx_star or 0
         if star:
             im.alpha_composite(
-                assets.pic(f"UI_GAM_Gauge_DXScoreIcon_0{star}.png").resize(
-                    (32, 19)
-                ),
+                assets.pic(f"UI_GAM_Gauge_DXScoreIcon_0{star}.png").resize((32, 19)),
                 (851, 296 + y),
             )
         dr.text(
@@ -167,9 +161,7 @@ def song_play_data(
             fill=color,
             anchor="mm",
         )
-        im.alpha_composite(
-            assets.pic("fcfs.png"), (965, 265 + y)
-        )
+        im.alpha_composite(assets.pic("fcfs.png"), (965, 265 + y))
         if score.fc:
             im.alpha_composite(
                 assets.pic(

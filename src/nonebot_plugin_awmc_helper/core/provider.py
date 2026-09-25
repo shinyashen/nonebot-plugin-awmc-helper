@@ -27,6 +27,30 @@ from .songdb import Scope
 from ..constants import normalize_text, strip_chart_prefix
 
 
+class ListSongProvider(ISongProvider):
+    """内存曲目列表 provider（测试注入与快照降级共用，内容哈希驱动缓存）。"""
+
+    def __init__(self, songs: list[Song], digest: str) -> None:
+        self._songs = songs
+        self._digest = digest
+
+    async def get_songs(self, client) -> list[Song]:
+        return self._songs
+
+    def _hash(self) -> str:
+        return self._digest
+
+
+def songs_list_digest(songs: list[Song]) -> str:
+    """曲目列表内容哈希（注入/快照 provider 的缓存失效键；序列化含别名）。"""
+    from .songs import song_to_dict
+
+    payload = json.dumps(
+        [song_to_dict(s) for s in songs], ensure_ascii=False, sort_keys=True
+    )
+    return hashlib.md5(payload.encode()).hexdigest()
+
+
 class AwmcSongProvider(ISongProvider):
     """以规范表为数据源的曲库 provider（scope=cn/jp 双视图共用一个实现）。"""
 

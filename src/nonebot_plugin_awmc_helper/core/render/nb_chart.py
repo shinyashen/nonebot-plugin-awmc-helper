@@ -209,9 +209,7 @@ def song_chart_info(
     f_rodin = font(28, FONT_RODIN)
     text_color = CIRCLE_PINK if theme == "circle" else TEXT_BLUE
 
-    im.alpha_composite(
-        assets.pic("logo.png", theme).resize((249, 120)), (65, 25)
-    )
+    im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (65, 25))
     prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
     type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
     chart_version = _chart_version(song, prefer_sd)
@@ -407,9 +405,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     if is_buddy:
         # 底图 utg_2p 自带 TOTAL..BREAK 表头与 1P/2P 两条数据行，行位 820/920
         p_y, base_y, step_y = 715, 820, 100
-        im.alpha_composite(
-            assets.pic("utg_buddy.png"), (255, 660)
-        )
+        im.alpha_composite(assets.pic("utg_buddy.png"), (255, 660))
         player_file = "utg_2p.png"
     else:
         # 底图 utg_1p 只有一条 1P 数据行，行位 890

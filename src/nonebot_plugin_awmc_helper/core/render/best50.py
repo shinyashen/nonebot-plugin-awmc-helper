@@ -83,6 +83,7 @@ def _score_row_bg(level_index: LevelIndex) -> Image.Image:
         assets.static_path() / "mai" / "pic" / DIFF_BG[level_index]
     ).convert("RGBA")
 
+
 UTAGE_BAND_COLOR = (235, 119, 237)
 """宴谱行卡主色 #EB77ED（粉紫，区别于 BASIC 绿）。"""
 

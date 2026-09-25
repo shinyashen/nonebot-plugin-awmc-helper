@@ -106,7 +106,7 @@ async def test_ensure_false_when_song_unknown(jp_env, mock):
 
 def test_ssl_context_includes_intermediate():
     """TLS 上下文并入 GlobalSign 中间证书（maimaidx.jp 官方缺链的修复）。"""
-    from nonebot_plugin_awmc_helper.core.render.jp_cover import _ssl_context
+    from nonebot_plugin_awmc_helper.core.http import maimaidx_ssl_context
 
-    subjects = str(_ssl_context().get_ca_certs())
+    subjects = str(maimaidx_ssl_context().get_ca_certs())
     assert "GlobalSign GCC R46 OV TLS CA 2025" in subjects
