@@ -27,6 +27,7 @@ from .provider import (
     AwmcSongProvider,
     ListSongProvider,
     AwmcAliasProvider,
+    DivingFishCurveProvider,
     songs_list_digest,
 )
 from ..constants import normalize_text, strip_chart_prefix
@@ -36,10 +37,12 @@ CN_POLL_STATE_KEY = "cn_poll_state"
 
 # 曲库数据源组合（2026-09-22 数据入口统一，设计稿 §5.4）：
 # 曲库由规范表构造（CN 列；国服定数按 §5.3 推导、version_cn 为空的组不可见，
-# 等价于原落雪 disabled 过滤）；别名走柚子。规范表重建后 provider 指纹变化
-# → maimai_py 自动重建缓存。
+# 等价于原落雪 disabled 过滤）；别名走柚子；曲线（拟合定数/分布）走水鱼
+# chart_stats。规范表重建后 provider 指纹变化 → maimai_py 自动重建缓存。
 _SONG_PROVIDER = AwmcSongProvider(scope="cn")
 _ALIAS_PROVIDER = AwmcAliasProvider(yuzu_provider, lxns_provider)
+_CURVE_PROVIDER = DivingFishCurveProvider()
+"""曲线 provider：增强数据，拉取失败自动降级为无曲线（不影响曲库可用性）。"""
 
 
 def _convert_curve_dict(curve: dict[str, Any] | None) -> None:
@@ -195,11 +198,13 @@ class SongService:
         return await client.songs()
 
     async def load(self) -> bool:
-        """加载曲库（规范表构造 + 别名）。成功后例行写快照；失败降级快照。"""
+        """加载曲库（规范表构造 + 别名 + 水鱼曲线）。成功后例行写快照；失败降级快照。"""
         started = time.monotonic()
         try:
             songs = await client.songs(
-                provider=_SONG_PROVIDER, alias_provider=_ALIAS_PROVIDER
+                provider=_SONG_PROVIDER,
+                alias_provider=_ALIAS_PROVIDER,
+                curve_provider=_CURVE_PROVIDER,
             )
             all_songs = await songs.get_all()
             if not all_songs:

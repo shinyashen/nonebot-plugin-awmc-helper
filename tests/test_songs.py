@@ -288,3 +288,40 @@ async def test_jp_attribute_fallbacks(songs):
     finally:
         song_service._jp_view = {}
         song_service._jp_fingerprint = None
+
+
+@pytest.mark.asyncio
+async def test_load_passes_curve_provider(db, monkeypatch):
+    """load() 接线：曲库 / 别名 / 水鱼曲线三 provider 一并传入 client.songs。"""
+    from mocks import sample_songs
+
+    from nonebot_plugin_awmc_helper.core import client as client_mod
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.provider import DivingFishCurveProvider
+
+    captured = {}
+
+    class _FakeSongs:
+        async def get_all(self):
+            return sample_songs()
+
+    async def fake_songs(**kwargs):
+        captured.update(kwargs)
+        return _FakeSongs()
+
+    monkeypatch.setattr(client_mod.client, "songs", fake_songs)
+    assert await song_service.load() is True
+    assert captured["provider"] is not None
+    assert captured["alias_provider"] is not None
+    assert isinstance(captured["curve_provider"], DivingFishCurveProvider)
+
+
+@pytest.fixture
+async def db(tmp_path):
+    """独立临时数据库（load 快照写入用）。"""
+    from nonebot_plugin_awmc_helper.core import store
+
+    store.set_db_file(tmp_path / "awmc.db")
+    await store.init_db()
+    yield
+    store.set_db_file(None)
