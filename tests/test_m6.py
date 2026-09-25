@@ -199,6 +199,39 @@ async def test_add_person_flow(app: App, arcade_seed):
 
 
 @pytest.mark.asyncio
+async def test_add_person_multi_alias(app: App, arcade_seed):
+    """多别称机厅：任一别称都须命中（回归：曾按机厅折叠字典只剩最后一条别称）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import arcade
+
+    await store.add_arcade_alias(10000, "Hall")
+    await _run(
+        app,
+        arcade.arcade_sub,
+        "订阅机厅 游戏厅",
+        "已订阅「游戏厅」",
+        role="admin",
+        session_fetches=2,
+    )
+    await _run(
+        app,
+        arcade.arcade_add_person,
+        "Game+2人",
+        "「游戏厅」当前排卡 2 人",
+        role="admin",
+        session_fetches=2,
+    )
+    await _run(
+        app,
+        arcade.arcade_add_person,
+        "Hall-1人",
+        "「游戏厅」当前排卡 1 人",
+        role="admin",
+        session_fetches=2,
+    )
+
+
+@pytest.mark.asyncio
 async def test_person_query(app: App, arcade_seed):
     import nonebot
 

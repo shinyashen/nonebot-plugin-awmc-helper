@@ -291,10 +291,6 @@ async def _(message: Message = CommandArg()):
     )
 
 
-async def _alias_matches(arcade_id: int, name: str) -> bool:
-    return any(al.alias == name for al in await store.get_arcade_aliases(arcade_id))
-
-
 @arcade_add_person.handle()
 @handle_errors()
 async def _(
@@ -324,16 +320,13 @@ async def _(
     elif name.endswith("卡"):
         name = name[:-1]
     subs = await store.get_arcade_by_ids(sub_ids)
-    aliases_of = {al.arcade_id: al for al in await store.get_arcade_aliases()}
+    # 订阅机厅的别称集合（按机厅分组；多别称必须全部参与匹配）
+    alias_by_arcade: dict[int, set[str]] = {}
+    for al in await store.get_arcade_aliases():
+        if al.arcade_id in sub_ids:
+            alias_by_arcade.setdefault(al.arcade_id, set()).add(al.alias)
     arcade = next(
-        (
-            a
-            for a in subs
-            if a.name == name
-            or any(
-                al.alias == name for al in aliases_of.values() if al.arcade_id == a.id
-            )
-        ),
+        (a for a in subs if a.name == name or name in alias_by_arcade.get(a.id, set())),
         None,
     )
     if arcade is None:
