@@ -49,8 +49,10 @@ from .table_layout import (
     PLATE_GROUP_GAP,
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
+    slot_rep,
     group_by_ds,
     slot_level_of,
+    level_page_key,
 )
 
 FONT_BLUE = TITLE_BLUE
@@ -227,22 +229,15 @@ def _plate_grid(
     sort_ds: dict[int, float] = {}
     for song_id, pair in master_pair.items():
         re_pair = remaster_pair.get(song_id)
-        level = (
-            re_pair[1].level
-            if re_pair is not None and remaster_entries
-            else pair[1].level
+        rep = slot_rep(
+            pair[1],
+            re_pair[1] if re_pair else None,
+            use_remaster=bool(remaster_entries),
         )
-        grouped.setdefault(level, []).append(pair)
-        # 组内排序键（Hoshino get_ds_sort_key 同款）：ReM 曲用 ReM 定数，
-        # 其余用 Master 定数
-        sort_ds[song_id] = (
-            re_pair[1].level_value
-            if re_pair is not None and remaster_entries
-            else pair[1].level_value
-        )
-    order = sorted(
-        grouped, key=lambda lv: (float(lv.rstrip("+")), lv.endswith("+")), reverse=True
-    )
+        grouped.setdefault(rep.level, []).append(pair)
+        # 组内排序键随代表谱面定数（ReM 曲用 ReM 定数，其余用 Master 定数）
+        sort_ds[song_id] = rep.level_value
+    order = sorted(grouped, key=level_page_key, reverse=True)
     groups = {k: grouped[k] for k in order}
     remaster_ids = {s.id for s, _d in (remaster_entries or [])}
 
@@ -359,8 +354,8 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
         boundary = 13
         by_level = _by_level(entries, remaster)
         page_groups = [
-            {k: v for k, v in by_level.items() if _lv_key(k) >= boundary},
-            {k: v for k, v in by_level.items() if _lv_key(k) < boundary},
+            {k: v for k, v in by_level.items() if level_page_key(k) >= boundary},
+            {k: v for k, v in by_level.items() if level_page_key(k) < boundary},
         ]
         total = 0
         for pages, group in enumerate(page_groups):
@@ -384,10 +379,6 @@ def _by_level(
     for song, diff in entries:
         grouped.setdefault(slot_level_of(song, diff, remaster), []).append((song, diff))
     return grouped
-
-
-def _lv_key(lv: str) -> float:
-    return float(lv.rstrip("+")) + (0.3 if lv.endswith("+") else 0.0)
 
 
 async def refresh_all_rating_tables(song_service) -> tuple[int, list[str]]:

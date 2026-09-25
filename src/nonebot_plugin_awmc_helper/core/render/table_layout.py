@@ -44,6 +44,30 @@ def group_by_ds(
     return {k: grouped[k] for k in sorted(grouped, key=float, reverse=True)}
 
 
+def slot_rep(
+    master: SongDifficulty,
+    remaster: SongDifficulty | None,
+    *,
+    use_remaster: bool,
+) -> SongDifficulty:
+    """完成表槽位代表谱面（分组标级与组内排序键的**唯一依据**，Hoshino
+    get_ds_sort_key 同语义）：舞/霸（``use_remaster``）且组内有 Re:MASTER
+    谱时用 ReM 谱，否则用 MASTER 谱。
+
+    模板生成（``table_template._plate_grid``）与叠章
+    （``plate_table_draw``）必须同用本函数，否则底图格子与叠章错位。
+    """
+    if use_remaster and remaster is not None:
+        return remaster
+    return master
+
+
+def level_page_key(lv: str) -> float:
+    """舞/霸分页与组序键：标级串 → 可比较浮点（+ 记 0.3，小于下一整数档，
+    与「先按整数、再按是否有 +」的元组序同序）。"""
+    return float(lv.rstrip("+")) + (0.3 if lv.endswith("+") else 0.0)
+
+
 def slot_level_of(
     song: Song,
     diff: SongDifficulty,
@@ -59,6 +83,5 @@ def slot_level_of(
             ),
             None,
         )
-        if re_m is not None:
-            return re_m.level
+        return slot_rep(diff, re_m, use_remaster=True).level
     return diff.level

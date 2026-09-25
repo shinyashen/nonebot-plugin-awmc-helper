@@ -21,6 +21,8 @@ from .table_layout import (
     PLATE_COL_STEP,
     PLATE_ROW_STEP,
     PLATE_GROUP_GAP,
+    slot_rep,
+    level_page_key,
 )
 from .plate_progress import progress_header
 
@@ -95,36 +97,24 @@ def draw_plate_table(
     im = Image.open(path).convert("RGBA")
 
     # 数据组装（NB _process_plate_table_data 同构）：**一格一曲**，按 Master
-    # 槽等级分组（舞/霸 ReM 曲用 ReM 槽等级）——分组/排序与模板 _plate_grid
-    # 逐条一致，否则叠章与底图格子错位
+    # 槽等级分组（舞/霸 ReM 曲用 ReM 槽等级）——代表谱面（组标级与组内排序键）
+    # 与模板 _plate_grid 同用 table_layout.slot_rep，保证叠章与底图格子对位
     all_slots: dict[int, list[SongDifficulty]] = {}
     for song, diff in entries:
         all_slots.setdefault(song.id, []).append(diff)
 
-    def _chart_level(song_id: int) -> str:
-        diffs = all_slots[song_id]
-        if is_wu:
-            re_m = next((d for d in diffs if d.level_index.value == 4), None)
-            if re_m is not None:
-                return re_m.level
+    song_rep: dict[int, SongDifficulty] = {}
+    for song_id, diffs in all_slots.items():
+        re_m = (
+            next((d for d in diffs if d.level_index.value == 4), None)
+            if is_wu
+            else None
+        )
         master = next(
             (d for d in diffs if d.level_index == LevelIndex.MASTER), diffs[0]
         )
-        return master.level
-
-    def _slot_ds(song_id: int) -> float:
-        """组内排序键（Hoshino get_ds_sort_key 同款）：ReM 曲用 ReM 定数。"""
-        diffs = all_slots[song_id]
-        if is_wu:
-            re_m = next((d for d in diffs if d.level_index.value == 4), None)
-            if re_m is not None:
-                return re_m.level_value
-        master = next(
-            (d for d in diffs if d.level_index == LevelIndex.MASTER), diffs[0]
-        )
-        return master.level_value
-
-    song_level = {sid: _chart_level(sid) for sid in all_slots}
+        song_rep[song_id] = slot_rep(master, re_m, use_remaster=is_wu)
+    song_level = {sid: rep.level for sid, rep in song_rep.items()}
     played: dict[str, dict[int, list]] = {}
     for song_id, level in song_level.items():
         played.setdefault(level, {}).setdefault(song_id, [None] * slot_num)
@@ -156,17 +146,13 @@ def draw_plate_table(
 
     # 舞/霸双页：与模板分页同规则（lv≥13 第 1 页，<13 第 2 页）
     if is_wu:
-
-        def _lv_key(lv: str) -> float:
-            return float(lv.rstrip("+")) + (0.3 if lv.endswith("+") else 0.0)
-
         played = {
             lv: group
             for lv, group in played.items()
-            if (_lv_key(lv) >= 13) == (page <= 1)
+            if (level_page_key(lv) >= 13) == (page <= 1)
         }
-    # 组序（等级降序）与组内序（Hoshino get_ds_sort_key：ReM 曲用 ReM 定数）
-    # 对齐模板 _plate_grid，否则叠章与底图格子错位
+    # 组序（等级降序）与组内序（代表谱面定数降序）同模板 _plate_grid，
+    # 否则叠章与底图格子错位
     played = dict(
         sorted(
             (
@@ -175,14 +161,14 @@ def draw_plate_table(
                     dict(
                         sorted(
                             group.items(),
-                            key=lambda kv: _slot_ds(kv[0]),
+                            key=lambda kv: song_rep[kv[0]].level_value,
                             reverse=True,
                         )
                     ),
                 )
                 for lv, group in played.items()
             ),
-            key=lambda kv: (float(kv[0].rstrip("+")), kv[0].endswith("+")),
+            key=lambda kv: level_page_key(kv[0]),
             reverse=True,
         )
     )
