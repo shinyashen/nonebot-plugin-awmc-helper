@@ -419,7 +419,8 @@ def test_new_best_score_baseline_from_version_side():
 
     from nonebot_plugin_awmc_helper.core.render.nb_chart import new_best_score
 
-    # _best_entry 为 new_best_score 所需字段的极简假对象（id/type/level_index/dx_rating）
+    # _best_entry 为 new_best_score 所需字段的极简假对象
+    # （id/type/level_index/dx_rating）
     b35 = cast(
         "list[ScoreExtend]",
         [

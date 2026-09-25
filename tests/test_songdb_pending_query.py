@@ -115,8 +115,10 @@ def test_parse_missing_fields_render_as_none():
     # 标级 "13+" 与 "13?" 均为可展示形态
     p_plus = parse_pending_item(_otoge_item(dx_lev_mas="13+"))
     p_q = parse_pending_item(_otoge_item(dx_lev_mas="13?"))
-    assert p_plus is not None and p_plus.charts[3].level == "13+"
-    assert p_q is not None and p_q.charts[3].level == "13?"
+    assert p_plus is not None
+    assert p_plus.charts[3].level == "13+"
+    assert p_q is not None
+    assert p_q.charts[3].level == "13?"
 
 
 def test_parse_notes_partial_missing():

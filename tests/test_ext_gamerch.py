@@ -203,7 +203,8 @@ async def test_page_inventory_kv_cache(db, tmp_path, monkeypatch):
     assert first_calls >= 1
     # kv 已入库
     raw = await store.kv_get("gamerch_page_inventory")
-    assert raw is not None and "testsongsd" in raw
+    assert raw is not None
+    assert "testsongsd" in raw
     # TTL 内重取：零网络
     monkeypatch.setattr(
         gamerch,
