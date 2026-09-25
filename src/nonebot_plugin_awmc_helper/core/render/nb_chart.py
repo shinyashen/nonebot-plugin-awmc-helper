@@ -7,7 +7,6 @@
 布局坐标与 NB 版完全一致，底图 1200×1300（宴会场 1200×1200）。
 """
 
-from typing import TYPE_CHECKING
 from pathlib import Path
 
 from PIL import Image
@@ -25,9 +24,6 @@ from ...constants import (
     display_song_id,
     chart_display_id,
 )
-
-if TYPE_CHECKING:
-    pass
 
 # NB base.py 的东亚字宽判定（截断用）
 _CHAR_WIDTHS = [

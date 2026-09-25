@@ -385,17 +385,9 @@ JP_VERSION_IMAGE: dict[int, str] = {
 }
 
 # Version 枚举 → 版本图文件名（pic/ 下，键与 maimai-py divingfish_to_version 一致）
-try:  # maimai-py 未公开导出该映射时的兜底
-    from maimai_py.enums import divingfish_to_version as _DF_TO_VERSION
+from maimai_py.enums import divingfish_to_version as _DF_TO_VERSION
 
-    VERSION_IMAGE = {v: k for k, v in _DF_TO_VERSION.items()}
-except ImportError:  # pragma: no cover
-    VERSION_IMAGE = {}
-
-
-def genre_zh(genre: Genre) -> str:
-    """Genre 枚举 → 中文分类名。"""
-    return GENRE_TO_ZH.get(genre, genre.value)
+VERSION_IMAGE = {v: k for k, v in _DF_TO_VERSION.items()}
 
 
 def version_zh(version: int) -> str:

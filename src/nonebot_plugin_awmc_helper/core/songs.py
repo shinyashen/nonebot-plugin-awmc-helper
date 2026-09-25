@@ -530,10 +530,6 @@ class SongService:
                 candidates.append((song, diff))
         return _random.choice(candidates) if candidates else None
 
-    def alias_ids_of(self, alias: str) -> set[int]:
-        """同步读别名索引（已就绪前提下）。"""
-        return self._alias_index.get(alias.lower(), set())
-
     @staticmethod
     def available_ids(song: Song) -> list[int]:
         """曲目的全部**可用** id（升序），按谱面组实际存在与否决定：

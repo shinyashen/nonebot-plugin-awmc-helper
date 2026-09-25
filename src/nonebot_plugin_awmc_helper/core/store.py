@@ -597,23 +597,8 @@ async def save_arcade(arcade: Arcade) -> None:
         await session.commit()
 
 
-async def upsert_arcade(arcade: Arcade) -> None:
-    """按主键存在则覆盖（华立官方数据同步用）。"""
-    async with _open_session() as session:
-        row = (await session.exec(select(Arcade).where(Arcade.id == arcade.id))).first()
-        if row:
-            # 保留本地标记、排卡人数与本地更新时间
-            arcade.is_custom = row.is_custom
-            arcade.person = row.person
-            arcade.updated_by = row.updated_by
-            arcade.updated_at = row.updated_at
-            await session.delete(row)
-        session.add(arcade)
-        await session.commit()
-
-
 async def upsert_arcades(arcades: list["Arcade"]) -> None:
-    """按主键批量覆盖（华立官方同步用；单事务，保留本地字段同 upsert_arcade）。"""
+    """按主键批量覆盖（华立官方同步用；单事务，保留本地字段）。"""
     async with _open_session() as session:
         for arcade in arcades:
             row = (
