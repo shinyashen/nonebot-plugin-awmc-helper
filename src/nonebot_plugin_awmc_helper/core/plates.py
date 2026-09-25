@@ -47,13 +47,15 @@ def major_type_of_plate(version: str) -> SongType:
     if version in _LEGACY_PLATES:
         return SongType.STANDARD
     pv = plate_to_version.get(version)
-    return SongType.DX if pv is not None and pv.value >= 20000 else SongType.STANDARD
+    return (
+        SongType.DX if pv is not None and pv >= Version.MAIMAI_DX else SongType.STANDARD
+    )
 
 
 def plate_version_range(version: str) -> tuple[int, int] | None:
     """牌子覆盖的谱面版本码闭区间（未知牌字返回 None）。"""
     if version in _LEGACY_PLATES:
-        vals = [v.value for v in plate_to_version.values() if v.value < 20000]
+        vals = [v.value for v in plate_to_version.values() if v < Version.MAIMAI_DX]
         return (min(vals), max(vals)) if vals else None
     pv = plate_to_version.get(version)
     if pv is None:

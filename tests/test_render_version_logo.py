@@ -77,7 +77,7 @@ def test_jp_logo_name_batch_codes_fall_back_to_base():
     assert _jp_version_logo_name(26500) == "CiRCLE PLUS"
     assert _jp_version_logo_name(26513) == "CiRCLE PLUS"  # 終幕の傀儡等追加批
     assert _jp_version_logo_name(27000) == "MAGiCAL"
-    assert _jp_version_logo_name(20506) == "DX PLUS"
+    assert _jp_version_logo_name(20506) == "PLUS"
     assert _jp_version_logo_name(25518) == "PRiSM PLUS"
     assert _jp_version_logo_name(19999) is None  # FiNALE 批次码：中日 logo 相同
 

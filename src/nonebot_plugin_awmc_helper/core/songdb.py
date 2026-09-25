@@ -89,13 +89,13 @@ def parse_level_float(level: str) -> float | None:
 
 
 def _source_version(name: str | None) -> int | None:
-    """数据源版本名 → 版本码（穷举映射；「未知」等返回 None）。"""
+    """数据源版本名 → 版本码（本地表优先、库表兜底；未知返回 None）。"""
     if not name:
         return None
-    if name in SOURCE_NAME_TO_VERSION:
-        return SOURCE_NAME_TO_VERSION[name]
-    ver = divingfish_to_version.get(name)
-    return ver.value if ver else None
+    ver = SOURCE_NAME_TO_VERSION.get(name)
+    if ver is None:
+        ver = divingfish_to_version.get(name)
+    return ver.value if ver is not None else None
 
 
 def _notes_tuple(raw: list, is_dx: bool) -> tuple[int, int, int, int, int]:
@@ -1910,7 +1910,7 @@ def _merge_current_level(
             )
             return False
         state.set_history(
-            song_id, kind, level_id, [(max(base, DX_VERSION_CODES[0]), value)]
+            song_id, kind, level_id, [(max(base, Version.MAIMAI_DX.value), value)]
         )
         return True
     last_version, last_value = history[-1]

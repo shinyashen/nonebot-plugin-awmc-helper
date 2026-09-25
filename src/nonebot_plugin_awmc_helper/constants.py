@@ -15,7 +15,12 @@ from maimai_py import (
     current_version,
     plate_to_version,
 )
-from maimai_py.enums import name_to_genre as _LIB_NAME_TO_GENRE
+from maimai_py.enums import (
+    name_to_genre as _LIB_NAME_TO_GENRE,
+)
+from maimai_py.enums import (
+    divingfish_to_version as _DF_TO_VERSION,
+)
 from maimai_py.utils.coefficient import SCORE_COEFFICIENT_TABLE
 
 # ---------------------------------------------------------------------------
@@ -86,38 +91,43 @@ RATE_TO_ZH: dict[RateType, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# 版本：枚举 → 中文显示名（用于查歌结果与版本过滤）
+# 版本名（DX 世代官方尾名为单一事实源：CN 显示名 / 日服 logo 文件名 / 数据源
+# 版本名均由此派生；旧框官方系列名复用库表 divingfish_to_version）
 # ---------------------------------------------------------------------------
-VERSION_TO_ZH: dict[Version, str] = {
-    Version.MAIMAI: "maimai",
-    Version.MAIMAI_PLUS: "maimai PLUS",
-    Version.MAIMAI_GREEN: "maimai GreeN",
-    Version.MAIMAI_GREEN_PLUS: "maimai GreeN PLUS",
-    Version.MAIMAI_ORANGE: "maimai ORANGE",
-    Version.MAIMAI_ORANGE_PLUS: "maimai ORANGE PLUS",
-    Version.MAIMAI_PINK: "maimai PiNK",
-    Version.MAIMAI_PINK_PLUS: "maimai PiNK PLUS",
-    Version.MAIMAI_MURASAKI: "maimai MURASAKi",
-    Version.MAIMAI_MURASAKI_PLUS: "maimai MURASAKi PLUS",
-    Version.MAIMAI_MILK: "maimai MiLK",
-    Version.MAIMAI_MILK_PLUS: "maimai MiLK PLUS",
-    Version.MAIMAI_FINALE: "maimai FiNALE",
-    Version.MAIMAI_DX: "舞萌DX",
-    Version.MAIMAI_DX_PLUS: "舞萌DX PLUS",
-    Version.MAIMAI_DX_SPLASH: "舞萌DX SPLASH",
-    Version.MAIMAI_DX_SPLASH_PLUS: "舞萌DX SPLASH PLUS",
-    Version.MAIMAI_DX_UNIVERSE: "舞萌DX UNiVERSE",
-    Version.MAIMAI_DX_UNIVERSE_PLUS: "舞萌DX UNiVERSE PLUS",
-    Version.MAIMAI_DX_FESTIVAL: "舞萌DX FESTiVAL",
-    Version.MAIMAI_DX_FESTIVAL_PLUS: "舞萌DX FESTiVAL PLUS",
-    Version.MAIMAI_DX_BUDDIES: "舞萌DX BUDDiES",
-    Version.MAIMAI_DX_BUDDIES_PLUS: "舞萌DX BUDDiES PLUS",
-    Version.MAIMAI_DX_PRISM: "舞萌DX PRiSM",
-    Version.MAIMAI_DX_PRISM_PLUS: "舞萌DX PRiSM PLUS",
-    Version.MAIMAI_DX_CIRCLE: "舞萌DX CiRCLE",
-    Version.MAIMAI_DX_CIRCLE_PLUS: "舞萌DX CiRCLE PLUS",
+
+# DX 世代枚举成员 → 官方尾名（CN 显示口径）。品牌名「舞萌DX」本身即初代版本名；
+# MAGiCAL 官方显示名不带前缀；FUTURE 为占位枚举、无实际版本，不入本表（显示名
+# 在 VERSION_TO_ZH 单独兜底）。素材包 pic/jp/ 的 logo 文件名与本表一致。
+_DX_VERSION_NAMES: dict[Version, str] = {
+    Version.MAIMAI_DX: "DX",
+    Version.MAIMAI_DX_PLUS: "PLUS",
+    Version.MAIMAI_DX_SPLASH: "SPLASH",
+    Version.MAIMAI_DX_SPLASH_PLUS: "SPLASH PLUS",
+    Version.MAIMAI_DX_UNIVERSE: "UNiVERSE",
+    Version.MAIMAI_DX_UNIVERSE_PLUS: "UNiVERSE PLUS",
+    Version.MAIMAI_DX_FESTIVAL: "FESTiVAL",
+    Version.MAIMAI_DX_FESTIVAL_PLUS: "FESTiVAL PLUS",
+    Version.MAIMAI_DX_BUDDIES: "BUDDiES",
+    Version.MAIMAI_DX_BUDDIES_PLUS: "BUDDiES PLUS",
+    Version.MAIMAI_DX_PRISM: "PRiSM",
+    Version.MAIMAI_DX_PRISM_PLUS: "PRiSM PLUS",
+    Version.MAIMAI_DX_CIRCLE: "CiRCLE",
+    Version.MAIMAI_DX_CIRCLE_PLUS: "CiRCLE PLUS",
     Version.MAIMAI_DX_MAGICAL: "MAGiCAL",
+}
+
+# 枚举 → 中文显示名（查歌结果/猜歌/版本过滤用）。旧框官方系列名 = 库表键；
+# DX 世代按「舞萌DX + 尾名」派生。显示名特例显式覆盖：MiLK PLUS（库表键缺
+# maimai 前缀）、MAGiCAL（官方不带前缀）；FUTURE 为占位枚举，仅留显示兜底
+VERSION_TO_ZH: dict[Version, str] = {
+    **{ver: name for name, ver in _DF_TO_VERSION.items() if ver < Version.MAIMAI_DX},
+    **{
+        ver: ("舞萌DX" if name == "DX" else f"舞萌DX {name}")
+        for ver, name in _DX_VERSION_NAMES.items()
+    },
     Version.MAIMAI_DX_FUTURE: "舞萌DX FUTURE",
+    Version.MAIMAI_DX_MAGICAL: "MAGiCAL",
+    Version.MAIMAI_MILK_PLUS: "maimai MiLK PLUS",
 }
 
 # 牌种达成条件说明（牌子条件 指令用）
@@ -140,38 +150,26 @@ PLATE_CHARS = "舞霸" + "".join(
 PLATE_KINDS = ("将", "者", "极", "神", "舞舞")
 
 # ---------------------------------------------------------------------------
-# 版本名 → 版本码（歌曲库日侧骨架用）
+# 版本名 → Version（歌曲库日侧骨架用；只收录库表 divingfish_to_version 之外的
+# 名字，重叠条目由 core/songdb._source_version 兜底查库表）
 # ---------------------------------------------------------------------------
 
-# 数据源版本名 → 版本码。只收录 maimai_py ``divingfish_to_version`` 之外的名字
-# （重叠条目由 core/songdb._source_version 的库表兜底命中，勿重复收录、勿凭记忆增删）：
-# - dschange 版本名 / __increments__.version：DX 时代英文名（"maimai DX*"），库表无此域
-# - all_data `from` 中库表缺收的 PLUS 名——国服 DX 时代 PLUS 不作独立版本，
-#   水鱼/库表不收是有意为之；另有 "maimai MiLK PLUS"（库表键缺 maimai 前缀）
-SOURCE_NAME_TO_VERSION: dict[str, int] = {
-    # —— dschange 系（maimaiinfo/static/dschange.json 实测命名）——
-    "maimai DX": 20000,
-    "maimai DX PLUS": 20500,
-    "maimai DX Splash": 21000,
-    "maimai DX Splash PLUS": 21500,
-    "maimai DX UNiVERSE": 22000,
-    "maimai DX UNiVERSE PLUS": 22500,
-    "maimai DX FESTiVAL": 23000,
-    "maimai DX FESTiVAL PLUS": 23500,
-    "maimai DX BUDDiES": 24000,
-    "maimai DX BUDDiES PLUS": 24500,
-    "maimai DX PRiSM": 25000,
-    "maimai DX PRiSM PLUS": 25500,
-    "maimai DX CiRCLE": 26000,
-    "maimai DX CiRCLE PLUS": 26500,
-    # —— all_data `from` 系库表缺收的名字 ——
-    "maimai MiLK PLUS": 19500,
-    "maimai でらっくす PLUS": 20500,
-    "maimai でらっくす Splash PLUS": 21500,
-    "maimai でらっくす UNiVERSE PLUS": 22500,
-    "maimai でらっくす FESTiVAL PLUS": 23500,
-    "maimai でらっくす BUDDiES PLUS": 24500,
-    "maimai でらっくす CiRCLE PLUS": 26500,
+# 数据源两域命名 = 「前缀 + 日式尾名」（穷举自 dschange.json / all_data `from`
+# 实测；初代无尾名），与官方尾名仅 Splash 一词大小写不同。MAGiCAL 段为按
+# 命名规律的预收（数据源尚未出现）；FUTURE 为占位枚举，不生成任何名字。
+_JP_SUFFIX: dict[Version, str] = {
+    ver: name.replace("SPLASH", "Splash") for ver, name in _DX_VERSION_NAMES.items()
+}
+SOURCE_NAME_TO_VERSION: dict[str, Version] = {
+    **{
+        name: ver
+        for ver, suffix in _JP_SUFFIX.items()
+        for prefix in ("maimai DX", "maimai でらっくす")
+        if (name := f"{prefix} {suffix}" if suffix != "DX" else prefix)
+        not in _DF_TO_VERSION
+    },
+    # 旧框 MiLK PLUS 库表键缺 maimai 前缀，以全名补收
+    "maimai MiLK PLUS": Version.MAIMAI_MILK_PLUS,
 }
 
 # DX 时代版本轴 = Version 枚举 MAIMAI_DX..MAIMAI_DX_CIRCLE_PLUS 的值切片：
@@ -179,9 +177,7 @@ SOURCE_NAME_TO_VERSION: dict[str, int] = {
 # 「不包含旧框版本的定数，均从 dx 初代版本开始统计」；MAGiCAL/FUTURE 不在轴上，
 # 导入侧由 songdb._points_from_flat 以枚举已知码 +500 递推扩展）
 DX_VERSION_CODES: list[int] = [
-    v.value
-    for v in Version
-    if Version.MAIMAI_DX.value <= v.value <= Version.MAIMAI_DX_CIRCLE_PLUS.value
+    v.value for v in Version if Version.MAIMAI_DX <= v <= Version.MAIMAI_DX_CIRCLE_PLUS
 ]
 
 
@@ -332,32 +328,11 @@ SERVICE_DISPLAY = {"divingfish": "Diving-Fish", "lxns": "Lxns-Network"}
 # 素材名把显示名的 + 写作小写 p，如 "SS+" → "SSp"）
 RATE_FILE = {m.name: zh.replace("+", "p") for m, zh in RATE_TO_ZH.items()}
 
-# Version 枚举 → 日服 logo 文件名（static/mai/pic/jp/ 下）。
-# 现有素材库的 DX 代 logo 为国服特有版本，日服视图渲染时改用本表；
-# 旧框（<MAIMAI_DX）中日 logo 相同，不在本表、走 VERSION_IMAGE 通用路径。
-# 追加批次码（基础码 + 批内序号，如 26513）的回落由 Version.from_value
-# 「≤ 取最近」语义承担（见 core/render/nb_chart._jp_version_logo_name）
-JP_VERSION_IMAGE: dict[Version, str] = {
-    Version.MAIMAI_DX: "DX",
-    Version.MAIMAI_DX_PLUS: "DX PLUS",
-    Version.MAIMAI_DX_SPLASH: "Splash",
-    Version.MAIMAI_DX_SPLASH_PLUS: "Splash PLUS",
-    Version.MAIMAI_DX_UNIVERSE: "UNiVERSE",
-    Version.MAIMAI_DX_UNIVERSE_PLUS: "UNiVERSE PLUS",
-    Version.MAIMAI_DX_FESTIVAL: "FESTiVAL",
-    Version.MAIMAI_DX_FESTIVAL_PLUS: "FESTiVAL PLUS",
-    Version.MAIMAI_DX_BUDDIES: "BUDDiES",
-    Version.MAIMAI_DX_BUDDIES_PLUS: "BUDDiES PLUS",
-    Version.MAIMAI_DX_PRISM: "PRiSM",
-    Version.MAIMAI_DX_PRISM_PLUS: "PRiSM PLUS",
-    Version.MAIMAI_DX_CIRCLE: "CiRCLE",
-    Version.MAIMAI_DX_CIRCLE_PLUS: "CiRCLE PLUS",
-    Version.MAIMAI_DX_MAGICAL: "MAGiCAL",
-}
+# Version 枚举 → 日服 logo 文件名（static/mai/pic/jp/，文件名 = _DX_VERSION_NAMES
+# 官方尾名）。旧框（<MAIMAI_DX）中日 logo 相同，不在本表、走 VERSION_IMAGE 通用路径。
+JP_VERSION_IMAGE: dict[Version, str] = dict(_DX_VERSION_NAMES)
 
 # Version 枚举 → 版本图文件名（pic/ 下，键与 maimai-py divingfish_to_version 一致）
-from maimai_py.enums import divingfish_to_version as _DF_TO_VERSION
-
 VERSION_IMAGE = {v: k for k, v in _DF_TO_VERSION.items()}
 
 

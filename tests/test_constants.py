@@ -82,28 +82,53 @@ def test_dx_version_codes_matches_enum_slice():
 
 
 def test_source_name_table_only_holds_lib_missing_names():
-    """与库 divingfish_to_version 重叠的名字不重复收录（songdb 查表兜底库表）。"""
+    """与库 divingfish_to_version 重叠的名字不重复收录（songdb 查表兜底库表）；
+    值为 Version 枚举成员；MAGiCAL 段为按命名规律的预收。"""
+    from maimai_py import Version
     from maimai_py.enums import divingfish_to_version
 
     from nonebot_plugin_awmc_helper.constants import SOURCE_NAME_TO_VERSION
 
     overlap = set(SOURCE_NAME_TO_VERSION) & set(divingfish_to_version)
     assert not overlap, f"应交给库表兜底的重复条目：{sorted(overlap)}"
+    assert all(isinstance(v, Version) for v in SOURCE_NAME_TO_VERSION.values())
     # 两个命名域的代表条目仍在：dschange 英文域 + でらっくす PLUS 补收
-    assert SOURCE_NAME_TO_VERSION["maimai DX Splash"] == 21000
-    assert SOURCE_NAME_TO_VERSION["maimai でらっくす PLUS"] == 20500
-    assert SOURCE_NAME_TO_VERSION["maimai MiLK PLUS"] == 19500
+    assert SOURCE_NAME_TO_VERSION["maimai DX Splash"] == Version.MAIMAI_DX_SPLASH
+    assert SOURCE_NAME_TO_VERSION["maimai でらっくす PLUS"] == Version.MAIMAI_DX_PLUS
+    assert SOURCE_NAME_TO_VERSION["maimai MiLK PLUS"] == Version.MAIMAI_MILK_PLUS
+    assert "maimai DX FUTURE" not in SOURCE_NAME_TO_VERSION  # 占位枚举不生成名字
 
 
-def test_jp_version_image_keyed_by_enum():
-    """日服 logo 表以 Version 枚举为键，MAGiCAL 在表；旧框版本不收。"""
+def test_jp_version_image_matches_dx_names():
+    """日服 logo 表 = _DX_VERSION_NAMES 官方尾名派生（文件名随表）；旧框版本不收。"""
     from maimai_py import Version
 
-    from nonebot_plugin_awmc_helper.constants import JP_VERSION_IMAGE
+    from nonebot_plugin_awmc_helper.constants import (
+        JP_VERSION_IMAGE,
+        _DX_VERSION_NAMES,
+    )
 
-    assert JP_VERSION_IMAGE[Version.MAIMAI_DX] == "DX"
+    assert JP_VERSION_IMAGE == dict(_DX_VERSION_NAMES)
+    assert JP_VERSION_IMAGE[Version.MAIMAI_DX_SPLASH] == "SPLASH"
+    assert JP_VERSION_IMAGE[Version.MAIMAI_DX_PLUS] == "PLUS"
     assert JP_VERSION_IMAGE[Version.MAIMAI_DX_MAGICAL] == "MAGiCAL"
     assert Version.MAIMAI_FINALE not in JP_VERSION_IMAGE
+    assert Version.MAIMAI_DX_FUTURE not in JP_VERSION_IMAGE  # 占位枚举无 logo
+
+
+def test_version_to_zh_covers_all_enum_members():
+    """显示名全覆盖枚举成员（派生改动防漏）；派生规则与特例抽查。"""
+    from maimai_py import Version
+
+    from nonebot_plugin_awmc_helper.constants import VERSION_TO_ZH
+
+    assert set(VERSION_TO_ZH) == set(Version)
+    assert VERSION_TO_ZH[Version.MAIMAI] == "maimai"
+    assert VERSION_TO_ZH[Version.MAIMAI_MILK_PLUS] == "maimai MiLK PLUS"
+    assert VERSION_TO_ZH[Version.MAIMAI_DX] == "舞萌DX"  # 品牌名即初代版本名
+    assert VERSION_TO_ZH[Version.MAIMAI_DX_SPLASH] == "舞萌DX SPLASH"
+    assert VERSION_TO_ZH[Version.MAIMAI_DX_MAGICAL] == "MAGiCAL"
+    assert VERSION_TO_ZH[Version.MAIMAI_DX_FUTURE] == "舞萌DX FUTURE"
 
 
 def test_rate_file_derived_from_rate_to_zh():
