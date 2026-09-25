@@ -50,6 +50,7 @@ from ...constants import (
     RATE_FILE,
     SYNC_FILE,
     COMBO_FILE,
+    DX_ID_OFFSET,
     DEFAULT_THEME,
     SERVICE_DISPLAY,
 )
@@ -185,9 +186,9 @@ _ITEM_GATE = DownloadGate()
 
 
 def game_song_id(score: ScoreExtend) -> int:
-    """游戏内曲目 ID：落雪成绩的 DX 谱 id 缺 10000 位（水鱼已是全 id），展示时补全。"""
-    if score.type == SongType.DX and score.id < 10000:
-        return score.id + 10000
+    """游戏内曲目 ID：落雪 DX 谱 id 缺 DX_ID_OFFSET 位（水鱼为全 id），展示时补全。"""
+    if score.type == SongType.DX and score.id < DX_ID_OFFSET:
+        return score.id + DX_ID_OFFSET
     return score.id
 
 

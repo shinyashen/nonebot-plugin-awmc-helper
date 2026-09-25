@@ -26,7 +26,7 @@ from .resolve import (
     _resolve_raw_id,
     _expand_alias_entries,
 )
-from ...constants import display_song_id
+from ...constants import UTAGE_ID_BASE, display_song_id
 from ...core.songs import song_service
 from ...core.types import SongType
 from ...core.utils import handle_errors
@@ -153,7 +153,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
         jp = flags[0]
-        if _entry_id >= 100000:
+        if _entry_id >= UTAGE_ID_BASE:
             # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；只画命中的那张。
             # 该张可能日服限定（国服宿主曲无此 diff_id，如悪戯センセーション
             # 宴[奏]）——保留 JP 宿主对象画日服卡，不回取国服对象

@@ -6,7 +6,7 @@
 
 from nonebot import logger
 
-from ...constants import CHART_TYPE_BY_PREFIX
+from ...constants import UTAGE_ID_BASE, CHART_TYPE_BY_PREFIX
 from ...core.songs import (
     song_service,
     chart_entries_many,
@@ -53,7 +53,7 @@ async def _resolve_raw_id(
     渲染走宴会卡；其余按查分器 id 形状推断偏好，5 位 DX 展示 id 回查国服
     对象定日服标注。别名/查歌的数字解析共用本函数。
     """
-    if raw_id > 99999:
+    if raw_id >= UTAGE_ID_BASE:
         utage_hit = await song_service.by_utage_id(raw_id)
         if utage_hit is None:
             return None

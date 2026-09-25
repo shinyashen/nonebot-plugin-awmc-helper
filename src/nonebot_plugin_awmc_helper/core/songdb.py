@@ -44,7 +44,9 @@ from . import store
 from .http import build_smart_transport
 from ..constants import (
     GENRE_TO_ZH,
+    UTAGE_ID_BASE,
     DX_VERSION_CODES,
+    UTAGE_LEVEL_STRIDE,
     SOURCE_NAME_TO_VERSION,
     level_from_value,
 )
@@ -76,7 +78,7 @@ def utage_ids(diff_id: int) -> tuple[int, int]:
 
 def utage_diff_id(song_id: int, level_id: int) -> int:
     """(song_id, level_id) → 宴谱 6 位机台内部 id（maimai_py diff_id 同规则）。"""
-    return 100000 + level_id * 10000 + song_id
+    return UTAGE_ID_BASE + level_id * UTAGE_LEVEL_STRIDE + song_id
 
 
 def parse_level_float(level: str) -> float | None:

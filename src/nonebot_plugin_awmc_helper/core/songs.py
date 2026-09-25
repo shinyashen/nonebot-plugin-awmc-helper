@@ -30,7 +30,7 @@ from .provider import (
     DivingFishCurveProvider,
     songs_list_digest,
 )
-from ..constants import normalize_text, strip_chart_prefix
+from ..constants import DX_ID_OFFSET, UTAGE_ID_BASE, normalize_text, strip_chart_prefix
 
 SNAPSHOT_KEY = "songs_snapshot"
 CN_POLL_STATE_KEY = "cn_poll_state"
@@ -143,7 +143,7 @@ def chart_entries(song: Song) -> "list[tuple[int, Song, SongType | None]]":
     if song.difficulties.standard:
         entries.append((song.id, song, SongType.STANDARD))
     if song.difficulties.dx:
-        entries.append((song.id + 10000, song, SongType.DX))
+        entries.append((song.id + DX_ID_OFFSET, song, SongType.DX))
     entries.extend(
         sorted(
             (
@@ -425,7 +425,7 @@ class SongService:
     async def jp_by_id(self, song_id: int) -> Song | None:
         """日服视图按根 id 取曲（id 搜索的 fallback）。"""
         jp = await self._jp_songs_map()
-        return jp.get(song_id % 10000)
+        return jp.get(song_id % DX_ID_OFFSET)
 
     # -- pending 兜底（id 未收录新曲，Q33）---------------------------------
 
@@ -741,8 +741,8 @@ def _poll_keys(items: list[dict]) -> set[songdb.DetectKey]:
     for s in items:
         if s.get("disabled"):
             continue
-        raw_id, base = int(s["id"]), int(s["id"]) % 10000
-        if raw_id > 99999:
+        raw_id, base = int(s["id"]), int(s["id"]) % DX_ID_OFFSET
+        if raw_id >= UTAGE_ID_BASE:
             continue
         diffs = s.get("difficulties", {})
         if diffs.get("standard"):
@@ -769,11 +769,13 @@ async def _hourly_cn_poll() -> None:
     df_keys: set[songdb.DetectKey] = set()
     for d in df:  # 水鱼 id 形状即类型：≤4 位 sd、5 位 dx（宴不触发）
         i = int(d["id"])
-        if i <= 9999:
+        if i < DX_ID_OFFSET:
             df_keys.add((i, "sd"))
-        elif i <= 99999:
-            df_keys.add((i % 10000, "dx"))
-    titles = {int(s["id"]) % 10000: s.get("title", "") for s in light.get("songs", [])}
+        elif i < UTAGE_ID_BASE:
+            df_keys.add((i % DX_ID_OFFSET, "dx"))
+    titles = {
+        int(s["id"]) % DX_ID_OFFSET: s.get("title", "") for s in light.get("songs", [])
+    }
     known = {
         (int(sid), kind)
         for sid, kind in (await store.kv_get(CN_POLL_STATE_KEY) or {}).get("known", [])

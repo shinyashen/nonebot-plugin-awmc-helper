@@ -25,7 +25,7 @@ from maimai_py.providers.yuzu import YuzuProvider
 
 from . import store, songdb
 from .songdb import Scope
-from ..constants import normalize_text, strip_chart_prefix
+from ..constants import DX_ID_OFFSET, normalize_text, strip_chart_prefix
 
 
 class ListSongProvider(ISongProvider):
@@ -154,7 +154,7 @@ class AwmcAliasProvider(IAliasProvider):
 
     async def _fetch_lxns(self, client) -> list[tuple[int, list[str]]]:
         raw = await self._lxns.get_aliases(client)
-        return [(int(sid) % 10000, aliases) for sid, aliases in raw.items()]
+        return [(int(sid) % DX_ID_OFFSET, aliases) for sid, aliases in raw.items()]
 
     def _hash(self) -> str:
         return self._fingerprint or "empty"
@@ -216,7 +216,7 @@ class DivingFishCurveProvider(ICurveProvider):
             return {}
         self._hash_value = self._OK_HASH
         return {
-            (int(idx) % 10000, SongType._from_id(int(idx))): [
+            (int(idx) % DX_ID_OFFSET, SongType._from_id(int(idx))): [
                 self._deser_curve(chart) for chart in curve_list if chart != {}
             ]
             for idx, curve_list in charts.items()

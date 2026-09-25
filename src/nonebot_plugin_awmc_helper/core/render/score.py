@@ -21,7 +21,7 @@ from .tools import (
 )
 from .assets import assets
 from .best50 import draw_score_row
-from ...constants import RATE_FILE, LEVEL_INDEX_EN, chart_display_id
+from ...constants import RATE_FILE, DX_ID_OFFSET, LEVEL_INDEX_EN, chart_display_id
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 同源，tools 单源）
 _DEFAULT_TEXT_COLOR = TEXT_BLUE
@@ -240,7 +240,7 @@ class DrawScore:
             y = start_y + row * step
             # Hoshino 图层序：先曲绘后难度框（框缘压住曲绘边一像素）
             self._im.alpha_composite(
-                assets.cover(song_id % 10000).resize((55, 55)), (x, y)
+                assets.cover(song_id % DX_ID_OFFSET).resize((55, 55)), (x, y)
             )
             self._im.alpha_composite(
                 assets.pic(f"border_progress_{LEVEL_INDEX_EN[li]}.png"), (x - 4, y - 4)

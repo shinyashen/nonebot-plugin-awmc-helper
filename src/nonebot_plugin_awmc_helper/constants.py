@@ -339,13 +339,28 @@ def version_zh(version: int) -> str:
     return VERSION_TO_ZH.get(ver, str(version)) if ver is not None else str(version)
 
 
+# ---------------------------------------------------------------------------
+# 机台内部 id 规则（单一来源 maimai_py：Song.get_divingfish_id / diff_id；
+# 展示与解析两端的手写算术一律引用本组常量，勿再写裸数字）
+# ---------------------------------------------------------------------------
+DX_ID_OFFSET = 10000
+"""DX 专用曲展示 id = 根 id + DX_ID_OFFSET（如 835 → 10835）。"""
+UTAGE_ID_BASE = 100000
+"""宴谱 diff id 空间下限。
+
+    id = UTAGE_ID_BASE + level_id × UTAGE_LEVEL_STRIDE + 根 id。
+    """
+UTAGE_LEVEL_STRIDE = 10000
+"""宴谱 diff id 中 level_id 的步进。"""
+
+
 def display_song_id(song) -> int:
-    """展示用曲目 id：DX 专用曲官方 id = 根 id + 10000（机台内部 id 规则），
+    """展示用曲目 id：DX 专用曲官方 id = 根 id + DX_ID_OFFSET，
     其余（含 SD 谱面/兼容谱曲）即根 id。"""
     if song.difficulties.standard:
         return song.id
     if song.difficulties.dx:
-        return song.id + 10000
+        return song.id + DX_ID_OFFSET
     return song.id
 
 

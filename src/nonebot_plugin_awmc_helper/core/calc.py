@@ -7,7 +7,7 @@ RA 计算直接使用 maimai-py 的 ``ScoreCoefficient``（单一事实来源）
 from maimai_py import Song, RateType, SongType, ScoreExtend, SongDifficulty
 from maimai_py.utils import ScoreCoefficient
 
-from ..constants import RATE_TO_ZH
+from ..constants import RATE_TO_ZH, UTAGE_ID_BASE
 
 # 推分试算的达成率档位（原版 RISE_ACHIEVEMENT_LIST）
 RISE_ACHIEVEMENTS = (99.0, 99.5, 100.0, 100.5)
@@ -112,7 +112,7 @@ def rise_recommend(
 
     results: list[dict] = []
     for song in songs:
-        if song.id >= 100000 or song.id in ignored_ids:  # 宴谱不推分
+        if song.id >= UTAGE_ID_BASE or song.id in ignored_ids:  # 宴谱不推分
             continue
         for diff in song.get_difficulties():
             if diff.type == SongType.UTAGE:
