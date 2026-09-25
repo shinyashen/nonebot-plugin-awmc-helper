@@ -142,6 +142,24 @@ def new_best_score(
     return value - lowest
 
 
+def notes_cell_text(value: int, col: int, *, is_dx: bool, row_has_notes: bool) -> str:
+    """物量单元格文本（「0 即 -」约定 + touch 例外，2026-09-25 用户口径）。
+
+    物量列序为 (tap, hold, slide, touch, break)，touch 即 col 3：
+
+    - 有值 → 数字；
+    - 0 且为 **DX 谱 touch 列**且行内其他物量非全 0 → ``"0"``——DX 谱确有
+      15 张无 touch 谱面（ローリンガール exp 等，实测 otoge 全量），真 0
+      如实显示；SD 谱 touch 恒 0（2336/2336，touch 为 DX 谱面机制）→ ``-``；
+    - 其余 0 → ``-``（含整行全 0 = 物量未收录，两种谱型均画 -）。
+    """
+    if value:
+        return str(value)
+    if col == 3 and is_dx and row_has_notes:
+        return "0"
+    return "-"
+
+
 def major_diffs(song: Song, prefer_type: SongType | None = None) -> list:
     """取主类型 5 档难度，按难度序。
 
@@ -256,8 +274,9 @@ def song_chart_info(
     ``id_text``/``genre_text``/``cover_path``：覆写 ID 行/分类行/封面——pending
     临时卡（id 未收录新曲）传 ``"ID —"``、分类名或 ``"-"``、payload 封面落盘
     路径；缺省按 song 自身绘制（封面按曲 id 候选链取）。
-    BPM 与物量遵循「0 即 -」约定（0 在真实数据中只代表未收录，或旧框移植谱
-    本就无该类物量——约定俗成，缺数据与真 0 均显示 -）。
+    BPM 与物量遵循「0 即 -」约定（0 只代表未收录）；touch 列例外——SD 谱
+    touch 恒 0（机制上无 touch）显示 ``-``，DX 谱 touch=0 为真实数据（确有
+    无 touch 的 DX 谱面）显示 ``0``，详见 :func:`notes_cell_text`。
     """
     from PIL import ImageDraw
 
@@ -389,10 +408,16 @@ def song_chart_info(
             fill=text_color,
             anchor="mm",
         )
+        row_has_notes = any(notes)
         for n, value in enumerate(notes):
             mr.text(
                 (602 + 122 * n, 590 + spacing),
-                str(value) if value else "-",
+                notes_cell_text(
+                    value,
+                    n,
+                    is_dx=diff.type == SongType.DX,
+                    row_has_notes=row_has_notes,
+                ),
                 font=font(25, FONT_RODIN),
                 fill=text_color,
                 anchor="mm",

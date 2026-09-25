@@ -137,6 +137,25 @@ def test_parse_notes_partial_missing():
     assert bas.notes is None  # tap 缺 → 整行无物量（物化为全 0，画 -）
 
 
+def test_notes_cell_text_touch_convention():
+    """物量单元格约定：SD touch 恒 -、DX 真 0 显示 0、整行全 0 恒 -（Q33 口径）。"""
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import notes_cell_text
+
+    # 有值 → 数字（两种谱型一致）
+    assert notes_cell_text(40, 3, is_dx=True, row_has_notes=True) == "40"
+    assert notes_cell_text(40, 3, is_dx=False, row_has_notes=True) == "40"
+    # touch=0：DX 谱真 0（实测 15 张，如ローリンガール exp）→ 0；
+    # SD 谱恒 -（touch 为 DX 谱面机制，SD 全量 2336 行无 touch）
+    assert notes_cell_text(0, 3, is_dx=True, row_has_notes=True) == "0"
+    assert notes_cell_text(0, 3, is_dx=False, row_has_notes=True) == "-"
+    # 整行全 0 = 物量未收录：两种谱型 touch 都画 -
+    assert notes_cell_text(0, 3, is_dx=True, row_has_notes=False) == "-"
+    assert notes_cell_text(0, 3, is_dx=False, row_has_notes=False) == "-"
+    # 其余列 0 → -（SD 旧框移植谱 hold=0 等按未收录口径）
+    assert notes_cell_text(0, 1, is_dx=True, row_has_notes=True) == "-"
+    assert notes_cell_text(0, 0, is_dx=False, row_has_notes=False) == "-"
+
+
 def test_pending_to_song_placeholder_fields():
     """物化为临时 Song：id=0、缺失字段按「0 即 -」约定、版本未知 logo 缺席。"""
     from maimai_py import SongType
@@ -159,12 +178,14 @@ def test_pending_to_song_placeholder_fields():
     assert all(d.version == 0 for d in song.difficulties.dx)
     assert [d.level for d in song.difficulties.dx] == ["4", "7", "10+", "13"]
     # 谱师仅 exp 有（base 条目只有 dx_lev_exp_designer），其余画 -
-    assert next(
-        d for d in song.difficulties.dx if d.level_index.value == 2
-    ).note_designer == "譜面作者X"
-    assert next(
-        d for d in song.difficulties.dx if d.level_index.value == 3
-    ).note_designer == "-"
+    assert (
+        next(d for d in song.difficulties.dx if d.level_index.value == 2).note_designer
+        == "譜面作者X"
+    )
+    assert (
+        next(d for d in song.difficulties.dx if d.level_index.value == 3).note_designer
+        == "-"
+    )
     assert all(
         d.type == SongType.DX and d.level_value > 0 for d in song.difficulties.dx
     )
