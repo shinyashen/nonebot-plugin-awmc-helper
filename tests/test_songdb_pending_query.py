@@ -113,8 +113,10 @@ def test_parse_missing_fields_render_as_none():
     exp = next(c for c in pending.charts if c.level_id == 2)
     assert exp.designer is None
     # 标级 "13+" 与 "13?" 均为可展示形态
-    assert parse_pending_item(_otoge_item(dx_lev_mas="13+")).charts[3].level == "13+"
-    assert parse_pending_item(_otoge_item(dx_lev_mas="13?")).charts[3].level == "13?"
+    p_plus = parse_pending_item(_otoge_item(dx_lev_mas="13+"))
+    p_q = parse_pending_item(_otoge_item(dx_lev_mas="13?"))
+    assert p_plus is not None and p_plus.charts[3].level == "13+"
+    assert p_q is not None and p_q.charts[3].level == "13?"
 
 
 def test_parse_notes_partial_missing():
@@ -371,6 +373,7 @@ async def _seed_pending():
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_search_pending_fallback_card(app: App, songs):
     """查歌：CN/JP 视图均 miss → pending 兜底出临时卡。"""
@@ -378,6 +381,7 @@ async def test_search_pending_fallback_card(app: App, songs):
     await _assert_pending_card(app, "search", "查歌 物語")
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_ds_search_pending_fallback_card(app: App, songs):
     """定数查歌：样例库无 7.5 定数 → pending 兜底出临时卡（定数揭晓即可查）。"""
@@ -385,6 +389,7 @@ async def test_ds_search_pending_fallback_card(app: App, songs):
     await _assert_pending_card(app, "search", "定数查歌 7.5")
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_alias_song_pending_fallback_card(app: App, songs, monkeypatch):
     """是什么歌：输入为新曲歌名（无别名）→ 投票提示落空后 pending 兜底。"""

@@ -3,8 +3,8 @@
 FOT = "FOT" # Fontworks 字体文件前缀（FOT-NewRodin Pro）
 GAM = "GAM" # maimai 素材命名（UI_GAM_Gauge_DXScoreIcon_*.png）
 
-# jp_cover.py 内嵌 PEM 证书的 base64 体：二字大写组合（UE/Iz/...）会随 typos
-# 字典更新持续产生新误报，逐词豁免是打地鼠，故整文件豁免；
-# 该文件注释以中文为主，英文漏检代价可忽略
+# core/http.py 内嵌 PEM 证书的 base64 体（2026-09-25 自 jp_cover.py 迁入）：
+# 二字大写组合（UE/Iz/...）会随 typos 字典更新持续产生新误报，逐词豁免是
+# 打地鼠，故整文件豁免；该文件注释以中文为主，英文漏检代价可忽略
 [files]
-extend-exclude = ["jp_cover.py"]
+extend-exclude = ["http.py"]

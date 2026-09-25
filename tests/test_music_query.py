@@ -413,15 +413,21 @@ def test_new_best_score_baseline_from_version_side():
     336 → +21；已在列表按自身既有 RA 差值；b35 里的 DX 条目既参与入线线、
     也不影响 SD 谱按 id+类型+难度精确匹配。
     """
-    from maimai_py import SongType, LevelIndex
+    from typing import cast
+
+    from maimai_py import SongType, LevelIndex, ScoreExtend
 
     from nonebot_plugin_awmc_helper.core.render.nb_chart import new_best_score
 
-    b35 = [
-        _best_entry(834, SongType.STANDARD, LevelIndex.MASTER, 340),
-        _best_entry(999, SongType.STANDARD, LevelIndex.MASTER, 320),
-        _best_entry(888, SongType.DX, LevelIndex.MASTER, 315),
-    ]
+    # _best_entry 为 new_best_score 所需字段的极简假对象（id/type/level_index/dx_rating）
+    b35 = cast(
+        "list[ScoreExtend]",
+        [
+            _best_entry(834, SongType.STANDARD, LevelIndex.MASTER, 340),
+            _best_entry(999, SongType.STANDARD, LevelIndex.MASTER, 320),
+            _best_entry(888, SongType.DX, LevelIndex.MASTER, 315),
+        ],
+    )
     # 未入线：相对入线线 315（DX 条目也是 b35 一员，若按 SD 过滤会误取 320）
     assert (
         new_best_score(900, LevelIndex.MASTER.value, 313, b35, SongType.STANDARD) == -2

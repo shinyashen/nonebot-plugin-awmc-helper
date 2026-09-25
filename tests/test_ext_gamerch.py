@@ -88,6 +88,7 @@ def test_parse_page_tables():
     assert [r[0] for r in gamerch._legend_free_rows(pt)] == ["3", "7", "10", "13"]
 
     page_std = gamerch.parse_page(PAGE_STD)
+    assert page_std is not None
     pt = page_std.tables[0]
     assert pt.touch is False
     # 旧框「Lv2 定数-」行剔除后恰 4 行
@@ -202,7 +203,7 @@ async def test_page_inventory_kv_cache(db, tmp_path, monkeypatch):
     assert first_calls >= 1
     # kv 已入库
     raw = await store.kv_get("gamerch_page_inventory")
-    assert "testsongsd" in raw
+    assert raw is not None and "testsongsd" in raw
     # TTL 内重取：零网络
     monkeypatch.setattr(
         gamerch,
