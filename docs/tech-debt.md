@@ -36,6 +36,31 @@
   `CIRCLE_PINK`/`DIFF_DISPLAY_NAMES`/`LEVEL_INDEX_EN` 单源、默认主题走
   `DEFAULT_THEME`、函数内 PIL/tools 导入全部上移。
 
+**已处理**（第二次审查第三/四批，2026-09-25 同日，原条目已删除）：
+
+- P0 速赢批：`songdb._genre_of` 删平行映射表改用 maimai_py `name_to_genre`；
+  info DX 星改取库算 `ScoreExtend.dx_star`（删 `calc.dx_star_ratio`）；store
+  会话入口统一 `session()`（删 `_open_session` 双名）；`Scope` 收敛 songdb
+  单源；gamerch 复用 `songdb.norm_title`；`binding.service_display()` 单源
+  （tables×3 + score_tools）；猜歌 `_hint_loop/_pic_loop` 合并 `_game_loop`；
+  `prefer_type_from_raw_id` 改 `SongType._from_id` 包装；`load()` 去重复
+  `get_all`（4→1）；机厅几人 N+1 改批量、别名推送标题回取并发化；
+  `reset_all_persons` 改单条 UPDATE；
+- P1 渲染批：行卡难度底图 `_score_row_bg` lru_cache；`text_to_image` 整行
+  快路径 + 增量测宽消 O(n²)（advance 口径，折行点最多差 1px）；三色渐变
+  1×N 线按高度缓存；info/nb_chart 全部素材走 assets 缓存与回退链——新增
+  `Assets.canvas()`（画布返回**副本**，防类级缓存被就地绘制污染，pic 结果
+  仅作只读源）；
+- P2/P3 结构批：maimaidx.jp 中间证书与 `maimaidx_ssl_context()`（lru_cache）
+  挪 `core/http.py`（渲染层不再持有会过期的运维数据）；CN/JP 双视图宴谱
+  `diff_id → 宿主 id` 索引（随视图缓存重建，`by_utage_id` 免线性扫描）；
+  `core.songs.chart_entries()` 单源派生 `available_ids` 与查歌条目展开
+  （`display_song_id`/`_display_card_id` 确认为曲级/卡级特例单源，见 §二）；
+  快照/注入改走 `ListSongProvider`（内容哈希）正规 `client.songs` 通道——
+  删 `_seed_versions` 与快照路径全部 `client._cache` 直写（AGENTS 规则 10
+  冲突消除；注入路径保留 stale 单曲键清理，待上游 `_configure` 清命名空间
+  行为落地后移除）。
+
 当前剩余待办如下；修复后请删除对应条目。行号会漂移，定位以符号名为准。
 
 ## 一、上游 maimai.py（方针不变，无库侧待办）
@@ -78,6 +103,14 @@
   `MaimaiPlates._configure/_major_type` 语义的本地复刻属**有意保留**：库侧逻辑
   绑死在实例方法（需 client + 全量成绩），无纯函数可调；若未来库内出现牌子
   纯函数再收编；
+- `render/stats.py` 曲线缺失的 `raise ValueError` 为**防御性断言**（ginfo
+  handler 已前置检查 `diff.curve`），静默降级无意义，维持现状；
+- `Assets.canvas(name, theme)` 为「会就地绘制的画布」专用入口（返回缓存
+  副本）；`pic()` 结果只能作只读源（alpha_composite 源 / resize / crop），
+  直接当画布会污染类级缓存——两次渲染间装饰叠加是典型症状；
+- `constants.display_song_id`（曲级展示 id）与 `nb_chart._display_card_id`
+  （卡片代表 id，跟随主类型谱面组）是 `chart_entries` 之外的**特例单源**，
+  语义不同勿强行合并；
 - 渲染层其余 `"prism_plus"` 字面量为**固定素材命名空间/字典键/用户文案**语义，
   非「默认主题」值，勿改 `DEFAULT_THEME`（改了会在 DEFAULT_THEME 变更时误切
   固定版式素材）：`score.py::DrawScore.__init__`（行卡画布固定版式）、
@@ -125,71 +158,20 @@
   据此收紧：`plate_kinds_of`（预渲染枚举）与 `is_valid_plate`（查询校验，
   舞者/霸将/霸极/霸神/霸舞舞 直接提示不存在）。
 
-## 三、待办（第二次审查遗留；修复后删除条目）
-
-### 3.1 性能与一致性
-
-- [ ] `render/info.py` `song_play_data`：全程裸 `Image.open` 绕过 `assets`
-  内存缓存（5 次难度循环内反复开 fcfs/ra_dx/评级图），且 `play_info.png/
-  logo.png` 无存在性检查（别处均走 pic/pic_optional 回退链）——统一走
-  assets + 静默降级。
-- [ ] `render/best50.py` `draw_score_row`：每行重开难度底图（B50 50 行、
-  score.whiledraw 复用时最坏 80 行；DX/SD 徽章已随 type_badge 走缓存），
-  照同文件 `_utage_score_bg` 的 lru_cache 范式进程级缓存。
-- [ ] `render/tools.py` `text_to_image`：逐字符全串 text_size 测宽 O(n²)，
-  长帮助文本明显劣化，按已有字宽表累增。
-- [ ] `render/tools.py` `tricolor_gradient_prism_plus` 逐像素 putpixel：
-  1×N 渐变常驻缓存后 resize。
-- [ ] `render/jp_cover.py` `_INTERMEDIATE_PEM`（2029-06 到期的 GlobalSign
-  中间证书）挪出渲染层独立模块（可配置覆盖 + 到期前提醒）；`_ssl_context()`
-  模块级缓存一次。
-- [ ] `core/songs.py` `load()`：一次加载对 `songs.get_all()` 调 4 次（判空/
-  计数/_apply/快照各一次全量 multi_get），取一次传引用。
-- [ ] `core/songs.py` `by_utage_id`：每次全库线性扫描找 diff_id，
-  `_apply_to_cache` 时建 `diff_id → (song_id, level_id)` 索引。
-- [ ] `plugins/arcade/__init__.py` 机厅几人：逐条 `get_arcade` N+1，改
-  `get_arcade_by_ids`；`plugins/alias/__init__.py` `push_apply` 循环内逐曲
-  串行 `by_id` 可并发。
-- [ ] `core/store.py` `reset_all_persons`：逐行 Python 循环换单条 UPDATE。
-- [ ] 渲染错误口径统一：`stats.py` 曲线缺失直接 raise vs 其余模块静默降级；
-  `info/nb_chart` 直开主题底图无检查 vs `table_template` 底图缺失 fallback
-  重建——统一为「回退链 + warning」。
-
-### 3.2 架构与下沉（中等工程量）
-
-- [ ] **快照/注入 provider 化**（§一定案）：`SnapshotSongProvider`（kv 快照
-  反序列化 + 内容哈希）+ 快照别名 provider，`_load_snapshot`/`inject` 走
-  `client.songs(provider=...)`；删 `_seed_versions`、删 `client._cache` 直写
-  （消除 AGENTS 规则 10 字面冲突与 tracks 命名空间 stale 残留）；stale 键
-  保证视上游讨论结果处理；测试注入路径同步迁移。
-- [ ] **per-type 条目/id 知识单源**：`music_query._type_entries`、
-  `song_service.available_ids`、`constants.display_song_id`、
-  `nb_chart._display_card_id` 四处同规则（SD=根 id / DX=+10000 / 宴=diff_id），
-  core 下沉 `chart_entries(song)` 派生其余。
-- [ ] `core/songdb.py` `_genre_of/_GENRE_ALIASES`：改用 maimai_py
-  `name_to_genre`（§一定案）。
-- [ ] `render/info.py` DX 星改取 `score.dx_star`（ScoreExtend 已带库算值，
-  None 即不画星，与现 `dx_star_ratio` 行为一致），删 `calc.dx_star_ratio`。
-- [ ] store 层整理：`session()`/`_open_session()` 双名统一；`Scope =
-  Literal["cn","jp"]` 在 songdb/provider 双定义收敛；`core/ext/gamerch.py`
-  `_norm_title` 复用 `songdb.norm_title`（songdb 对 ext 均为函数内延迟导入，
-  无环）。
-- [ ] 小合并：`SERVICE_DISPLAY.get(binding.service, binding.service)` 五处 →
-  `core/binding.service_display()`；猜歌 `_hint_loop/_pic_loop` 超时揭晓路径
-  合并；`songs.prefer_type_from_raw_id` 以 `SongType._from_id` 一行表达
-  （宴 → None）。
-
-### 3.3 暂缓（第一次审查遗留，维持）
+## 三、待办（暂缓项；修复后删除条目）
 
 - 分页大小各自硬编码（alias 25 / score_tools 50 / tables 80）。
 - best50 的 RA_THRESHOLD / RA_STAR_*（DXRating 展示口径）宜集中到 constants。
+- `core/songs.py` `inject` 的 stale 单曲键清理：上游 `MaimaiSongs._configure`
+  在 provider 哈希变化时清理 songs/tracks 命名空间后即可删除（§一待议项）。
 
 ## 四、建议批次（第二次审查）
 
 - ~~批次 A（缺陷 + 死代码）~~ ✅ 2026-09-25 完成；
 - ~~批次 B（收敛收尾，低风险）~~ ✅ 2026-09-25 完成；
 - ~~批次 C（渲染重构）~~ ✅ 2026-09-25 完成（ReM 收敛经渲染 MD5 等价验证）；
-- **批次 D（架构，单独排期）**：§3.2 全部——provider 化（根治 `_cache` 直写
-  与 tracks 残留）+ chart_entries 单源 + store 整理；provider 化落地前可与
-  上游讨论 `_configure` 清残留键一事（不阻塞）。§3.1 性能项可穿插在功能
-   开发的空档逐条清。
+- ~~批次 D（架构）~~ ✅ 2026-09-25 完成（provider 化、chart_entries、store
+  整理、PEM 迁移、宴谱索引、性能与口径统一全部落地；仅剩 §三暂缓项与
+  上游待议的 stale 键清理移除条件）。
+
+审查来源的剩余跟进面已收敛为：两条暂缓项 + 一条上游待议项。
