@@ -42,18 +42,23 @@ async def chart_card_bytes(
         if ident is not None:
             try:
                 bests = await score_service.get_b50(binding)
-                prefer_dx = (
-                    prefer_type == SongType.STANDARD and not song.difficulties.standard
-                ) or prefer_type != SongType.STANDARD
-                major_dx = prefer_dx and bool(song.difficulties.dx)
-                side_type = SongType.DX if major_dx else SongType.STANDARD
+                prefer_sd = prefer_type == SongType.STANDARD and bool(
+                    song.difficulties.standard
+                )
+                # b50 的 b35/b15 分段按谱面登场版本（旧版本→b35、当前版本→b15，
+                # SD/DX 均可，老曲补的 DX 谱也在 b35）：按谱面类型过滤拍平列表
+                # 会剔掉 b35 里的 DX 条目，is_full 误判 False、入线线失真，
+                # 加分预测全量虚高——侧别对齐 NB 的 song.isnew 选段语义
+                is_new_chart = nb_chart._is_new(
+                    nb_chart._chart_version(song, prefer_sd)
+                )
                 # 降序（NB b50 列表语义）
                 best_list = sorted(
-                    (s for s in bests.scores if s.type == side_type),
+                    bests.scores_b15 if is_new_chart else bests.scores_b35,
                     key=lambda s: s.dx_rating or 0,
                     reverse=True,
                 )
-                is_full = len(best_list) >= (15 if major_dx else 35)
+                is_full = len(best_list) >= (15 if is_new_chart else 35)
                 calc = True
                 theme = binding.theme or "prism_plus"
             except UserScoreError as e:

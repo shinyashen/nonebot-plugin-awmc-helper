@@ -295,6 +295,151 @@ async def test_render_smoke(songs):
     assert len(listing) > 1000
 
 
+def _best_entry(song_id: int, type_, level_index, ra: float):
+    """b50 成绩桩：侧别选择路径只消费 dx_rating（渲染语义另有单测锚定）。"""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=song_id, type=type_, level_index=level_index, dx_rating=ra
+    )
+
+
+async def _capture_chart_card(monkeypatch, song, binding, prefer_type, bests):
+    """打桩查分与渲染，捕获 chart_card_bytes 组装给渲染层的参数。"""
+    from nonebot_plugin_awmc_helper.core import score as score_mod
+    from nonebot_plugin_awmc_helper.core.render import nb_chart
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    captured = {}
+
+    async def fake_b50(_binding):
+        return bests
+
+    def fake_render(
+        song, calc, is_full, best_list, theme, prefer_type=None, jp=False, **kw
+    ):
+        captured.update(
+            calc=calc,
+            is_full=is_full,
+            best_list=list(best_list),
+            theme=theme,
+            prefer_type=prefer_type,
+            jp=jp,
+        )
+        return b"png"
+
+    monkeypatch.setattr(score_mod.score_service, "get_b50", fake_b50)
+    monkeypatch.setattr(nb_chart, "song_chart_info", fake_render)
+    assert await chart_card_bytes(song, binding, prefer_type) == b"png"
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_chart_card_b50_side_by_version(monkeypatch):
+    """查歌卡 b50 侧别按谱面组登场版本分段，不按 SD/DX 类型过滤。
+
+    b35 侧混含老曲 DX 谱（b50 版本口径）：修复前按类型过滤拍平列表会把
+    DX 条目剔出 b35 侧，is_full 误判 False，加分预测退化为「未满线全量
+    虚高」（用户实测 b35 满线仍全显 ↑原值）；老曲 DX 卡同样与 SD 谱
+    同池竞争 b35，而非 b15。
+    """
+    from types import SimpleNamespace
+
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+
+    song = make_song(231, "PENGUIN")  # 谱面组版本 25000 < 当前版本 → 旧曲
+    binding = UserBinding(platform="OneBot V11", user_id="12345678")
+    b35 = [
+        _best_entry(100 + i, SongType.STANDARD, LevelIndex.MASTER, 400 - i)
+        for i in range(30)
+    ] + [
+        _best_entry(200 + i, SongType.DX, LevelIndex.MASTER, 340 - i) for i in range(5)
+    ]
+    b15 = [
+        _best_entry(300 + i, SongType.DX, LevelIndex.MASTER, 500 - i) for i in range(15)
+    ]
+    # scores = 拍平视图（maimai_py b50_only 语义）：旧实现按类型过滤它，
+    # 保留本字段使修复前代码可运行并在 is_full 断言上失败
+    bests = SimpleNamespace(scores=b35 + b15, scores_b35=b35, scores_b15=b15)
+    expected_b35 = sorted(b35, key=lambda s: s.dx_rating or 0, reverse=True)
+
+    # 旧曲 SD 卡 → b35 侧满线（35 条，含 DX 条目；b15 不掺入）
+    captured = await _capture_chart_card(
+        monkeypatch, song, binding, SongType.STANDARD, bests
+    )
+    assert captured["calc"] is True
+    assert captured["is_full"] is True
+    assert captured["best_list"] == expected_b35
+
+    # 旧曲 DX 卡 → 同取 b35 侧（老曲 DX 谱进 b35 竞争）
+    captured = await _capture_chart_card(monkeypatch, song, binding, SongType.DX, bests)
+    assert captured["is_full"] is True
+    assert captured["best_list"] == expected_b35
+
+    # 当前版本新曲卡（谱面组 version ≥ 当前版本）→ b15 侧
+    new_song = make_song(
+        705,
+        "NEW SONG",
+        version=99999,
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.EXPERT,
+                version=25500,
+            ),
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                version=25500,
+            ),
+        ],
+    )
+    captured = await _capture_chart_card(
+        monkeypatch, new_song, binding, SongType.DX, bests
+    )
+    assert captured["is_full"] is True
+    assert captured["best_list"] == sorted(
+        b15, key=lambda s: s.dx_rating or 0, reverse=True
+    )
+
+
+def test_new_best_score_baseline_from_version_side():
+    """加分基线 = 版本分段列表的入线线（最低 RA，不分谱面类型）。
+
+    锚定用户案例（b35 最低 315）：未入线 313 无提升（负值由渲染层隐藏）、
+    336 → +21；已在列表按自身既有 RA 差值；b35 里的 DX 条目既参与入线线、
+    也不影响 SD 谱按 id+类型+难度精确匹配。
+    """
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import new_best_score
+
+    b35 = [
+        _best_entry(834, SongType.STANDARD, LevelIndex.MASTER, 340),
+        _best_entry(999, SongType.STANDARD, LevelIndex.MASTER, 320),
+        _best_entry(888, SongType.DX, LevelIndex.MASTER, 315),
+    ]
+    # 未入线：相对入线线 315（DX 条目也是 b35 一员，若按 SD 过滤会误取 320）
+    assert (
+        new_best_score(900, LevelIndex.MASTER.value, 313, b35, SongType.STANDARD) == -2
+    )
+    assert (
+        new_best_score(900, LevelIndex.MASTER.value, 336, b35, SongType.STANDARD) == 21
+    )
+    # 已在列表：按自身既有 RA 差值（低于旧 RA → 0）
+    assert (
+        new_best_score(834, LevelIndex.MASTER.value, 350, b35, SongType.STANDARD) == 10
+    )
+    assert (
+        new_best_score(834, LevelIndex.MASTER.value, 330, b35, SongType.STANDARD) == 0
+    )
+    # b35 里的 DX 谱按类型精确匹配（同曲双谱互不串）
+    assert new_best_score(888, LevelIndex.MASTER.value, 330, b35, SongType.DX) == 15
+
+
 def _utage_host_song():
     """纯宴曲宿主：title/别名含「牛奶」，宴谱 diff_id=100363。"""
     from mocks import make_song, make_utage
