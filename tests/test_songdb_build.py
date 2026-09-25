@@ -500,6 +500,44 @@ async def test_external_source_forced_reapply_after_rebuild(db, tmp_path, monkey
 
 
 @pytest.mark.asyncio
+async def test_external_source_none_fields_do_not_wipe(db, tmp_path, monkeypatch):
+    """回归（2026-09-25 封面全挂事故）：文档显式 None 的字段不得清空既有值。
+
+    机台源无官方封面哈希名，条目曾带 image_url: None——override 合并把它写进
+    既有行，导致全表封面被抹（此前每次上传后"封面消失又恢复"即此因）。
+    """
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    state = await songdb.State.load()
+    state.song(8).image_url = "cover.png"
+    await state.save()
+
+    doc = tmp_path / "magical.json"
+    doc.write_text(
+        json.dumps(
+            {
+                "8": {
+                    "title": "Test Song SD",
+                    "image_url": None,
+                    "sheets": {},
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(doc)],
+    )
+    summary = await songdb.apply_external_sources(force=True)
+    assert not summary["changed"]
+    state = await songdb.State.load()
+    assert state.songs[8].image_url == "cover.png"  # 未被 None 抹掉
+
+
+@pytest.mark.asyncio
 async def test_external_source_creates_missing_song(db, tmp_path, monkeypatch):
     """骨架外新曲（文档自带 id）直接创建日侧行，并经 extra 在列信号免于误删。"""
     from nonebot_plugin_awmc_helper.core import songdb

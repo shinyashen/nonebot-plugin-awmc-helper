@@ -1872,10 +1872,14 @@ def _merge_song_doc(
             "（日侧行，version_cn=NULL，骨架待常规管线补全）"
         )
     for field_name in ("title", "artist", "genre", "bpm", "image_url"):
-        if field_name in song_doc and (
-            mode == "override" or not getattr(row, field_name)
-        ):
-            new_value = song_doc[field_name]
+        if field_name not in song_doc:
+            continue
+        new_value = song_doc[field_name]
+        if new_value in (None, ""):
+            # 文档未提供该字段（如机台源无官方封面哈希名）：跳过而非清空，
+            # 否则 override 重放会把既有值整体抹掉（2026-09-25 封面全挂事故）
+            continue
+        if mode == "override" or not getattr(row, field_name):
             if getattr(row, field_name) != new_value:
                 changed += 1
             setattr(row, field_name, new_value)
