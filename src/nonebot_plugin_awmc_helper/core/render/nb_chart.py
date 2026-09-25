@@ -140,7 +140,10 @@ def _jp_version_logo_name(version: int) -> str | None:
     """
     if not version:
         return None
-    return JP_VERSION_IMAGE.get(Version.from_value(version))
+    ver = Version.from_value(version)
+    if ver is None:
+        return None
+    return JP_VERSION_IMAGE.get(ver)
 
 
 def version_image(version: int, jp: bool = False) -> Image.Image | None:
