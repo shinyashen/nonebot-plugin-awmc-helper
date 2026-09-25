@@ -46,6 +46,51 @@
 
 3. 在 `docs/commands.md` 补充指令表，并补 nonebug 测试。
 
+> 上方单文件骨架即下方[单文件豁免](#单文件豁免)形态；功能变大后按
+> [目录结构约定](#目录结构约定)拆分。
+
+## 目录结构约定
+
+子插件内部按「装配 / 指令入口 / 域模块」三层组织（2026-09-25 定案，与
+nonebot-plugin-maimaidx 等主流插件的 commands/ + core/ 组织方式一致）：
+
+```text
+plugins/
+└── my_feature/
+    ├── __init__.py     # 装配：PluginMetadata + 生命周期钩子注册 + matcher 导出，零业务
+    ├── matchers.py     # 指令入口：matcher 定义与 handler 同文件，matcher 私有小辅助可放此
+    └── resolve.py      # 域模块：跨指令的业务/编排/渲染逻辑，按域命名
+                        # （resolve / render / game / sheet / sync / push …均为先例）
+```
+
+- **`__init__.py` 只做三件事**：定义 `PluginMetadata`、注册生命周期钩子
+  （`on_startup`、apscheduler 定时任务等——生命周期注册一律收在装配层）、
+  从 `matchers.py` 导出全部 matcher（nonebug 测试按包属性取用 matcher，
+  依赖这一导出）；
+- **域模块无注册副作用**：不定义 matcher、不挂驱动钩子；matcher 在 import
+  时注册，装配层 import 即完成注册；域模块不得反向 import `matchers`
+  （禁止循环依赖）；
+- matcher 之间共享的编排/解析/渲染逻辑下沉域模块；多个子插件都要用的能力
+  下沉 core（硬性规则 2）；
+- 独立扩展插件包（`awmc_plugins/`，见文末）内部同样适用此分层，import
+  路径按[第三方差异](#与仓内嵌套子插件的差异)换成绝对导入。
+
+### 单文件豁免
+
+功能面小的子插件允许保持单文件 `__init__.py`（即「新建一个子插件」的骨架
+形态），判断口径为**同时满足**：
+
+1. 无独立域逻辑——没有状态机、定时任务、推送管线、多级兜底编排等需要独立
+   模块承载的内容；
+2. 全文件约 ≤250 行。
+
+越过口径（引入独立域，或体量自然增长）时，在**下次触碰该插件时**按本约定
+拆分即可，不要求专门开重构轮次。
+
+> 现状（2026-09-25）：12 个内置子插件中 music_query / guess / tables /
+> arcade / alias / score_query 已按三层拆分；base / songdb / fortune /
+> random_song / score_tools / bind 按豁免保持单文件。
+
 ## 硬性规则
 
 1. **禁止 `import maimai_py`**——数据访问一律走 `..core` 公开接口；
@@ -84,6 +129,8 @@ async def _(
 - HTTP 交互用 respx 拦截（水鱼/落雪/柚子/华立均不联网）；
 - 曲库数据用 `tests/mocks.py::seed_service` 注入；
 - 绘图函数做冒烟测试（非空 PNG）；
+- monkeypatch 插件内部符号时，patch 目标必须是**定义该名字的模块**——
+  patch 包命名空间（`__init__.py`）不影响模块内的全局名字查找；
 - `uv run poe test` 全绿 + `uv run ruff check .` 通过。
 
 ## 第三方独立扩展插件
