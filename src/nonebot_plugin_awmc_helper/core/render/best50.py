@@ -13,11 +13,9 @@
   全 ID（落雪成绩缺 10000 位，水鱼已是全 id），标题超宽省略号截断。
 """
 
-import asyncio
 import colorsys
 from io import BytesIO
 from bisect import bisect_right
-from pathlib import Path
 from functools import lru_cache
 from collections import Counter
 
@@ -34,7 +32,6 @@ from maimai_py import (
     ScoreExtend,
 )
 
-from ..http import build_smart_transport
 from .fonts import FONT_HAN, FONT_NUM, font
 from .tools import (
     TEXT_BLUE,
@@ -46,6 +43,7 @@ from .tools import (
 )
 from .assets import assets, online_item_cache_dir
 from ...config import plugin_config
+from .download import DownloadGate, download_to_file
 from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE, SERVICE_DISPLAY
 
 RA_THRESHOLD = [
@@ -164,8 +162,8 @@ FOOTER_COLORS = {
 _ITEM_HOST = "https://www.yuzuchan.moe/assets/maimaidx"
 """收藏品（牌子/头像）在线素材站，与 Hoshino 版同源。"""
 
-_inflight: dict[Path, asyncio.Task] = {}
-"""在线素材下载去重表（同文件并发只发一次请求）。"""
+_ITEM_GATE = DownloadGate()
+"""在线素材下载去重（同文件并发只发一次请求）。"""
 
 
 def game_song_id(score: ScoreExtend) -> int:
@@ -203,29 +201,6 @@ def ra_star_num(rating: int) -> str:
     return f"0{RA_STAR_NUMS[idx]}"
 
 
-async def _download_item(url: str, path: Path) -> bool:
-    transport = build_smart_transport()
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
-            follow_redirects=True,
-            transport=transport,
-        ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            content = resp.content
-
-        def _write() -> None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-
-        await asyncio.to_thread(_write)
-        return True
-    except Exception as e:
-        logger.warning(f"b50：在线素材拉取失败 {url}（{e}）")
-        return False
-
-
 async def fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
     """收藏品原图（kind: plate/icon）：本地缓存 → yuzuchan 在线（可关）。
 
@@ -236,20 +211,12 @@ async def fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
         return Image.open(path).convert("RGBA")
     if not plugin_config.awmc_assets_online:
         return None
-    task = _inflight.get(path)
-    if task is None:
-        url = f"{_ITEM_HOST}/{kind}/{path.name}"
-        task = asyncio.create_task(_download_item(url, path))
-        _inflight[path] = task
-    try:
-        ok = await task
-    finally:
-        # 失败任务也要出表：滞留会让该素材进程内永不重试且 dict 无界增长
-        if _inflight.get(path) is task:
-            _inflight.pop(path, None)
-    if ok:
-        return Image.open(path).convert("RGBA")
-    return None
+    url = f"{_ITEM_HOST}/{kind}/{path.name}"
+    if not await _ITEM_GATE.run(
+        path, lambda: download_to_file(url, path, subject="b50：在线素材")
+    ):
+        return None
+    return Image.open(path).convert("RGBA")
 
 
 async def _qq_avatar(qqid: int) -> Image.Image | None:

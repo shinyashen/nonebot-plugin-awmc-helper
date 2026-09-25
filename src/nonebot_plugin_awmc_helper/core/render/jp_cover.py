@@ -10,16 +10,11 @@
 """
 
 import ssl
-import asyncio
 from pathlib import Path
 
-import httpx
-from nonebot import logger
-
 from .. import store
-from ..http import build_smart_transport
-from .assets import jp_cache_dir
-from ...config import plugin_config
+from .assets import assets, jp_cache_dir
+from .download import DownloadGate, download_to_file
 
 # GlobalSign GCC R46 OV TLS CA 2025 中间证书（AIA: secure.globalsign.com/cacert/
 # gsgccr46ovtlsca2025.crt；有效期至 2029-06，链向系统内置的 GlobalSign Root R46）
@@ -58,11 +53,8 @@ la7ZYEqcc56eoPAiElhvrg==
 -----END CERTIFICATE-----
 """
 
-_inflight: dict[int | str, asyncio.Task[bool]] = {}
-
-
-def _static_cover(song_id: int) -> Path:
-    return Path(plugin_config.awmc_static_path) / "mai" / "cover" / f"{song_id}.png"
+_COVER_GATE = DownloadGate()
+"""曲绘下载去重（同曲/同键并发合并为单次下载）。"""
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -73,12 +65,14 @@ def _ssl_context() -> ssl.SSLContext:
 
 
 def _has_local(song_id: int, cache: Path) -> bool:
-    return _static_cover(song_id).exists() or cache.joinpath(f"{song_id}.png").exists()
+    # static 封面路径单源 assets.cover_candidates（首环）；缓存路径随调用方
+    return (
+        assets.cover_candidates(song_id)[0].exists()
+        or (cache / f"{song_id}.png").exists()
+    )
 
 
-def _write_cover(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
+_MUSIC_IMG_URL = "https://maimaidx.jp/maimai-mobile/img/Music/{image_url}"
 
 
 async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
@@ -92,12 +86,14 @@ async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
     image_url = await store.song_image_url(song_id)
     if not image_url:
         return False
-    task = _inflight.get(song_id)
-    if task is None:
-        path = cache / f"{song_id}.png"
-        task = asyncio.create_task(_download(song_id, image_url, path))
-        _inflight[song_id] = task
-    return await task
+    path = cache / f"{song_id}.png"
+    url = _MUSIC_IMG_URL.format(image_url=image_url)
+    return await _COVER_GATE.run(
+        song_id,
+        lambda: download_to_file(
+            url, path, subject=f"jp_cover：{song_id} 曲绘", verify=_ssl_context()
+        ),
+    )
 
 
 async def ensure_image(
@@ -112,30 +108,11 @@ async def ensure_image(
     path = cache / f"{key}.png"
     if path.exists():
         return path
-    task = _inflight.get(key)
-    if task is None:
-        task = asyncio.create_task(_download(key, image_url, path))
-        _inflight[key] = task
-    return path if await task else None
-
-
-async def _download(song_id: int | str, image_url: str, path: Path) -> bool:
-    url = f"https://maimaidx.jp/maimai-mobile/img/Music/{image_url}"
-    transport = build_smart_transport(verify=_ssl_context())
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
-            follow_redirects=True,
-            transport=transport,
-        ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            content = resp.content
-        await asyncio.to_thread(_write_cover, path, content)
-        logger.debug(f"jp_cover：{song_id} 曲绘已缓存（{len(content)}B）")
-        return True
-    except Exception as e:
-        logger.warning(f"jp_cover：{song_id} 曲绘拉取失败（{e}）")
-        return False
-    finally:
-        _inflight.pop(song_id, None)
+    url = _MUSIC_IMG_URL.format(image_url=image_url)
+    ok = await _COVER_GATE.run(
+        key,
+        lambda: download_to_file(
+            url, path, subject=f"jp_cover：{key} 曲绘", verify=_ssl_context()
+        ),
+    )
+    return path if ok else None
