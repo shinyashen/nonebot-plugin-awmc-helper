@@ -61,7 +61,22 @@ async def _is_pending_lxns_code(bot: Bot, event: Event) -> bool:
     return lxns_ext.extract_authorization_code(event.get_plaintext()) is not None
 
 
+async def _is_expired_lxns_code(bot: Bot, event: Event) -> bool:
+    """回填会话刚超时仍发码：给出重发指引而非静默。"""
+    from nonebot_plugin_uninfo import get_session
+
+    session = await get_session(bot, event)
+    if session is None:
+        return False
+    if pending_bindings.is_active(*session_keys(session), "lxns"):
+        return False
+    if not pending_bindings.expired_recently(*session_keys(session), "lxns"):
+        return False
+    return lxns_ext.extract_authorization_code(event.get_plaintext()) is not None
+
+
 bind_code = on_message(rule=Rule(_is_pending_lxns_code), priority=0, block=True)
+bind_code_expired = on_message(rule=Rule(_is_expired_lxns_code), priority=0, block=True)
 
 
 @bind_code.handle()
@@ -74,6 +89,18 @@ async def _(bot: Bot, event: Event):
     code = lxns_ext.extract_authorization_code(event.get_plaintext())
     assert code is not None
     await _complete_lxns(*session_keys(session), code)
+
+
+@bind_code_expired.handle()
+@handle_errors("绑定失败，请稍后再试")
+async def _(bot: Bot, event: Event):
+    from nonebot_plugin_uninfo import get_session
+
+    session = await get_session(bot, event)
+    assert session is not None
+    await UniMessage.text(
+        " 落雪授权已超时，请重新发送「绑定落雪」获取新的授权链接"
+    ).finish(at_sender=True)
 
 
 @df_bind.handle()
@@ -127,10 +154,9 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         if lxns_ext.oauth_configured():
             pending_bindings.start(platform, user_id, "lxns")
             await UniMessage.text(
-                "请点击以下链接完成落雪授权，\n"
-                "并将获得的授权码回复给机器人（20 分钟内有效）：\n"
+                "请点击以下链接完成落雪授权（授权码 90 秒内有效）：\n"
                 f"{lxns_ext.build_authorize_url()}\n\n"
-                "收到授权码后发送：落雪授权码 <授权码>"
+                "完成后请直接把授权码回复给我（无需任何前缀）"
             ).finish(at_sender=True)
         await UniMessage.text(
             "BOT 管理员尚未配置落雪 OAuth\n"

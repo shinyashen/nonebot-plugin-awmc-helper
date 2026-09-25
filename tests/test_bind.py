@@ -139,3 +139,75 @@ async def test_default_service_public_query(app: App, db):
     await _assert_reply(app, bind.my_bind, "我的绑定", "尚未绑定")
     binding = await binding_service.ensure("OneBot V11", "12345678")
     assert binding.service == "divingfish"  # 部署默认
+
+
+@pytest.mark.asyncio
+async def test_lxns_oauth_flow(app: App, db, monkeypatch):
+    """落雪 OAuth 授权流：发「绑定落雪」返回新文案（90 秒/直接回复）并开启回填会话。"""
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.ext import lxns as lxns_ext
+    from nonebot_plugin_awmc_helper.core.binding import pending_bindings
+
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_secret", "secret")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_redirect_uri", "oob")
+
+    link = lxns_ext.build_authorize_url()
+    await _assert_reply(
+        app,
+        bind.lx_bind,
+        "绑定落雪",
+        f"请点击以下链接完成落雪授权（授权码 90 秒内有效）：\n{link}\n\n"
+        "完成后请直接把授权码回复给我（无需任何前缀）",
+    )
+    assert pending_bindings.is_active("OneBot V11", "12345678", "lxns")
+
+
+@pytest.mark.asyncio
+async def test_lxns_pending_expiry_hint(app: App, db, monkeypatch):
+    """回填会话超时后仍发码 → 超时指引而非静默。"""
+    import time as _time
+    from types import SimpleNamespace
+
+    import nonebot
+    import nonebot_plugin_uninfo
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import pending_bindings
+
+    fake_sess = SimpleNamespace(
+        platform=None,
+        adapter=SimpleNamespace(value="OneBot V11"),
+        user=SimpleNamespace(id="12345678"),
+    )
+
+    async def fake_get_session(bot, event):
+        return fake_sess
+
+    monkeypatch.setattr(nonebot_plugin_uninfo, "get_session", fake_get_session)
+
+    pending_bindings.start("OneBot V11", "12345678", "lxns")
+    sess = pending_bindings._sessions[("OneBot V11", "12345678")]
+    sess.expires = _time.monotonic() - 1  # 置为已过期
+
+    event = fake_group_message_event_v11(message="X7TF-J3TU-AXSH")
+    async with app.test_matcher(bind.bind_code_expired) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at("12345678"),
+                    MessageSegment.text(
+                        " 落雪授权已超时，请重新发送「绑定落雪」获取新的授权链接"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )

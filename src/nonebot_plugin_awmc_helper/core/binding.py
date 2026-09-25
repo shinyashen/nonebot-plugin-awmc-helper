@@ -43,7 +43,7 @@ def session_keys(session: "Session") -> tuple[str, str]:
     return str(platform or "unknown").strip(), str(session.user.id)
 
 
-LXNS_PENDING_TTL = 1200  # 落雪授权码回填会话 20 分钟
+LXNS_PENDING_TTL = 90  # 落雪授权码回填会话无操作超时（秒）
 
 
 class BindingError(Exception):
@@ -60,10 +60,15 @@ class PendingBindingStore:
     """绑定回填会话表（进程内存；键 = (platform, user_id)）。
 
     不用 got 独占会话：群内其他指令不受影响（规划 §3.4）。
+    超时会话短暂留在 ``_expired``（``EXPIRED_HINT_WINDOW`` 秒内可查），
+    供拦截器对超时后仍发码的用户给出重发指引，避免静默无响应。
     """
+
+    EXPIRED_HINT_WINDOW = 300
 
     def __init__(self) -> None:
         self._sessions: dict[tuple[str, str], PendingSession] = {}
+        self._expired: dict[tuple[str, str], tuple[str, float]] = {}
 
     def start(
         self, platform: str, user_id: str, kind: str, ttl: int = LXNS_PENDING_TTL
@@ -71,6 +76,7 @@ class PendingBindingStore:
         self._sessions[(platform, user_id)] = PendingSession(
             kind=kind, expires=time.monotonic() + ttl
         )
+        self._expired.pop((platform, user_id), None)
 
     def is_active(self, platform: str, user_id: str, kind: str | None = None) -> bool:
         sess = self._sessions.get((platform, user_id))
@@ -78,11 +84,26 @@ class PendingBindingStore:
             return False
         if sess.expires < time.monotonic():
             del self._sessions[(platform, user_id)]
+            self._expired[(platform, user_id)] = (sess.kind, time.monotonic())
             return False
         return kind is None or sess.kind == kind
 
+    def expired_recently(
+        self, platform: str, user_id: str, kind: str | None = None
+    ) -> bool:
+        """是否存在刚过期（提示窗口内）的回填会话，用于超时指引。"""
+        entry = self._expired.get((platform, user_id))
+        if entry is None:
+            return False
+        expired_kind, at = entry
+        if time.monotonic() - at > self.EXPIRED_HINT_WINDOW:
+            del self._expired[(platform, user_id)]
+            return False
+        return kind is None or expired_kind == kind
+
     def discard(self, platform: str, user_id: str) -> None:
         self._sessions.pop((platform, user_id), None)
+        self._expired.pop((platform, user_id), None)
 
 
 pending_bindings = PendingBindingStore()
