@@ -13,7 +13,7 @@ from . import table_template
 from .fonts import FONT_NUM, FONT_RODIN, font
 from .tools import TEXT_BLUE
 from .assets import assets
-from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
+from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE, ACHIEVEMENT_LIST
 from .table_layout import (
     LV15_COLS,
     RATING_COLS,
@@ -70,13 +70,12 @@ SYNC_D_SP = ["fs", "fsp", "fsd", "fsdp"]
 _COMPLETED_BG = "complete_1.png"
 _UNFINISHED_BG = "unfinished_1.png"
 
-# 全曲达成徽章的评级阈值（升序 S→SSSP）：Hoshino ACHIEVEMENT_LIST[-6:] 同源，
-# 与 maimai_py RateType._from_achievement 的 S~SSSP 分界（97/98/99/99.5/100/
-# 100.5）一致；maimai_py 未导出列表常量（阈值内联在私有方法里），按值固化
-RANK_ACHIEVEMENT_THRESHOLDS = (97.0, 98.0, 99.0, 99.5, 100.0, 100.5)
+# 全曲达成徽章的评级阈值（升序 S→SSSP）：系数表推导阈值的末六档
+# （与 maimai_py RateType._from_achievement 的 S~SSSP 分界一致）
+RANK_ACHIEVEMENT_THRESHOLDS = tuple(ACHIEVEMENT_LIST[-6:])
 
 
-def _rate_only(ds: float, ach: float) -> str:
+def _rate_only(ach: float) -> str:
     """达成率 → 评级键（小写，NB compute_rating(onlyrate=True) 同义）。"""
     return RateType._from_achievement(ach).name.lower()
 
@@ -132,9 +131,7 @@ def draw_rating_table(
 
     stats = _Stats()
     played: dict[tuple[int, int], object] = {}
-    total_count = 0
-    for _song, diff in entries:
-        total_count += 1
+    total_count = len(entries)
     for score in play_result:
         if score.level != level:
             continue
@@ -142,7 +139,7 @@ def draw_rating_table(
         ach = score.achievements or 0
         if ach >= 80:
             stats.data["clear"] += 1
-        stats.add_rank(_rate_only(score.level_value or 0, ach))
+        stats.add_rank(_rate_only(ach))
         if score.fc:
             stats.add_combo(score.fc)
         if score.fs:
@@ -219,7 +216,7 @@ def draw_rating_table(
         qualified.append(COMBO_SP.index(score.fc.name.lower()))
         if lv15:
             # Hoshino lv15 计划分支：PlayBonus 大章 200×200，不画完成底
-            name = _combo_file(score.fc.name.lower())
+            name = COMBO_FILE[score.fc.name.lower()]
             p = assets.static_path() / "mai" / "pic" / f"UI_CHR_PlayBonus_{name}.png"
             if p.exists():
                 im.alpha_composite(
@@ -230,7 +227,7 @@ def draw_rating_table(
         im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
         im.alpha_composite(
             assets.pic(
-                f"UI_MSS_MBase_Icon_{_combo_file(score.fc.name.lower())}.png"
+                f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name.lower()]}.png"
             ).resize((50, 50)),
             (x + 15, y + 13),
         )
@@ -245,7 +242,7 @@ def draw_rating_table(
             im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
         im.alpha_composite(
             assets.pic(
-                f"UI_MSS_MBase_Icon_{_sync_file(score.fs.name.lower())}.png"
+                f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name.lower()]}.png"
             ).resize((50, 50)),
             (x + 15, y + 13),
         )
@@ -306,7 +303,7 @@ def draw_rating_table(
                 break
         if r != -1:
             if combo_mode:
-                name = _combo_file(COMBO_SP[r])
+                name = COMBO_FILE[COMBO_SP[r]]
             elif sync_mode:
                 name = _sync_allclear(SYNC_D_SP[r])
             else:
@@ -328,15 +325,7 @@ def draw_rating_table(
     return image_to_bytes(im)
 
 
-def _combo_file(key: str) -> str:
-    # UI_MSS_MBase_Icon_：FC/FCp/AP/APp（映射单源 constants）
-    return COMBO_FILE[key]
-
-
-def _sync_file(key: str) -> str:
-    return SYNC_FILE[key]
-
-
 def _sync_allclear(key: str) -> str:
-    # NB SYNC_MAP：fsd→FSD、fsdp→FSDp（Allclear 图无 FSp 档，回落 FSD 形态）
+    # NB SYNC_MAP：fsd→FSD、fsdp→FSDp（Allclear 图无 FSp 档，回落 FSD 形态；
+    # 与 SYNC_FILE 的差异仅 fsp 档——那里是 FSp，此处无素材退 FS）
     return {"fs": "FS", "fsp": "FS", "fsd": "FSD", "fsdp": "FSDp"}[key]

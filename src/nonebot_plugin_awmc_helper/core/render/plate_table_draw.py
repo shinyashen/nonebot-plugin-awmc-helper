@@ -13,7 +13,7 @@ from .fonts import FONT_RODIN, font
 from .tools import TEXT_BLUE, ID_TEXT_COLORS
 from .assets import assets
 from ..plates import major_type_of_plate
-from ...constants import RATE_FILE
+from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
 from .table_layout import (
     PLATE_COLS,
     PLATE_START_X,
@@ -62,7 +62,7 @@ def _plate_icon(kind: str, score):
         )
     if kind == "极":
         key = score.fc.name.lower() if score.fc else "fc"
-        name = {"fc": "FC", "fcp": "FCp", "ap": "AP", "app": "APp"}.get(key, "FC")
+        name = COMBO_FILE.get(key, "FC")
         return assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((60, 60)), (10, 12)
     if kind == "神":
         ok_ap = score.fc is not None and score.fc.value <= FCType.APP.value
@@ -71,9 +71,7 @@ def _plate_icon(kind: str, score):
     # 舞舞
     name = "FSDp"
     if score.fs is not None:
-        name = {"fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FSDp"}.get(
-            score.fs.name.lower(), "FSD"
-        )
+        name = SYNC_FILE.get(score.fs.name.lower(), "FSD")
     return assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((60, 60)), (10, 12)
 
 
