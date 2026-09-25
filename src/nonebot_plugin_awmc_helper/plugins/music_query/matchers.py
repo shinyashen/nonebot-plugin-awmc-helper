@@ -1,0 +1,277 @@
+"""查歌指令入口：查歌 / 是什么歌 / id 三个 matcher 及其 handler。"""
+
+import re
+import asyncio
+from re import Match
+
+from nonebot import on_regex
+from nonebot.params import RegexMatched
+from nonebot_plugin_uninfo import Session, UniSession
+from nonebot_plugin_alconna.uniseg import UniMessage
+
+from .render import (
+    NOT_FOUND,
+    JP_ONLY_NOTE,
+    _reply,
+    _banquet_card,
+    _list_jp_note,
+    _render_query_result,
+    _render_pending_result,
+)
+from .resolve import (
+    _is_float,
+    _vote_hint,
+    _split_page,
+    _entry_cn_flags,
+    _resolve_raw_id,
+    _expand_alias_entries,
+)
+from ...constants import display_song_id
+from ...core.songs import song_service
+from ...core.types import SongType
+from ...core.utils import handle_errors
+from ...core.render import song as song_render
+from ...core.binding import session_keys, binding_service
+from ...core.chart_card import chart_card_bytes
+
+search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
+search_alias_song = on_regex(r"(.+)是(?:什么|啥)歌[？?]?([0-9]+)?$", block=True)
+query_chart = on_regex(r"(?i)^id\s?([0-9]+)$", block=True)
+
+
+async def _binding_of(session):
+    return await binding_service.ensure(*session_keys(session))
+
+
+@search.handle()
+@handle_errors()
+async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
+    binding = await _binding_of(session)
+    cmd = match.group(1)
+    rest = (match.group(2) or "").strip()
+    if not cmd and not rest:
+        await _reply(NOT_FOUND).finish(at_sender=True)
+    a_list = rest.split()
+
+    if cmd == "定数":
+        page = 1
+        if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
+            ds1, ds2 = float(a_list[0]), float(a_list[1])
+            if len(a_list) >= 3 and a_list[2].isdigit():
+                page = int(a_list[2])
+        elif len(a_list) == 1 and _is_float(a_list[0]):
+            ds1 = ds2 = float(a_list[0])
+        else:
+            await _reply(
+                "定数查歌参数错误，请输入正确格式，页数为可选：\n"
+                "定数查歌「定数」「页数」\n"
+                "定数查歌「最小定数」「最大定数」「页数」"
+            ).finish(at_sender=True)
+        songs = await song_service.by_level_value(min(ds1, ds2), max(ds1, ds2))
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_level_value(min(ds1, ds2), max(ds1, ds2)),
+            page,
+            binding,
+            lambda: song_service.pending_by_level_value(min(ds1, ds2), max(ds1, ds2)),
+        )
+    elif cmd == "bpm":
+        page = 1
+        if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
+            b1, b2 = float(a_list[0]), float(a_list[1])
+            if len(a_list) >= 3 and a_list[2].isdigit():
+                page = int(a_list[2])
+        elif len(a_list) == 1 and _is_float(a_list[0]):
+            b1 = b2 = float(a_list[0])
+        else:
+            await _reply(
+                "bpm查歌参数错误，请输入正确格式，页数为可选：\n"
+                "bpm查歌「bpm」「页数」\n"
+                "bpm查歌「最小bpm」「最大bpm」「页数」"
+            ).finish(at_sender=True)
+        songs = await song_service.by_bpm(min(b1, b2), max(b1, b2))
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_bpm(min(b1, b2), max(b1, b2)),
+            page,
+            binding,
+        )
+    elif cmd == "曲师":
+        if not a_list:
+            await _reply("曲师查歌「曲师」「页数」").finish(at_sender=True)
+        name, page = _split_page(a_list)
+        songs = await song_service.by_artist(name)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_artist(name),
+            page,
+            binding,
+        )
+    elif cmd == "谱师":
+        if not a_list:
+            await _reply("谱师查歌「谱师」「页数」").finish(at_sender=True)
+        name, page = _split_page(a_list)
+        songs = await song_service.by_note_designer(name)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_note_designer(name),
+            page,
+            binding,
+        )
+    else:
+        if not a_list:
+            await _reply(NOT_FOUND).finish(at_sender=True)
+        title, page = _split_page(a_list)
+        songs = await song_service.by_title_fuzzy(title)
+        await _render_query_result(
+            songs,
+            lambda: song_service.jp_by_title_fuzzy(title),
+            page,
+            binding,
+            lambda: song_service.pending_by_title_fuzzy(title),
+        )
+
+
+@search_alias_song.handle()
+@handle_errors()
+async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
+    binding = await _binding_of(session)
+    name = match.group(1).strip()
+    page = int(match.group(2) or 1)
+
+    error_msg = (
+        f"未找到别名为「{name}」的歌曲\n"
+        "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
+        "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
+    )
+    entries = await _expand_alias_entries(name)
+    # SD/DX 条目同根曲共用一次查询：先去重再并发（原列表推导逐条串行且重复查）
+    _unique_ids = {s.id for _, s, _ in entries}
+    _hits = await asyncio.gather(*(song_service.by_id(i) for i in _unique_ids))
+    cn_songs = dict(zip(_unique_ids, _hits))
+    flags = _entry_cn_flags(entries, cn_songs)
+    if len(entries) == 1:
+        _entry_id, song, card_prefer = entries[0]
+        jp = flags[0]
+        if _entry_id >= 100000:
+            # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；只画命中的那张。
+            # 该张可能日服限定（国服宿主曲无此 diff_id，如悪戯センセーション
+            # 宴[奏]）——保留 JP 宿主对象画日服卡，不回取国服对象
+            cn_song = cn_songs[song.id]
+            cn_diff = (
+                next(
+                    (
+                        d
+                        for d in cn_song.get_difficulties(SongType.UTAGE)
+                        if getattr(d, "diff_id", None) == _entry_id
+                    ),
+                    None,
+                )
+                if cn_song is not None
+                else None
+            )
+            if cn_song is not None and cn_diff is not None:
+                song, utage_diff, jp = cn_song, cn_diff, False
+            else:
+                jp = True
+                utage_diff = next(
+                    (
+                        d
+                        for d in song.get_difficulties(SongType.UTAGE)
+                        if getattr(d, "diff_id", None) == _entry_id
+                    ),
+                    None,
+                )
+            png = await _banquet_card(song, utage_diff, jp)
+        else:
+            song = cn_songs[song.id] or song
+            png = await chart_card_bytes(song, binding, card_prefer, jp)
+        # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
+        msg = _reply(JP_ONLY_NOTE) if jp else UniMessage()
+        await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
+    if entries:
+        msg = f"找到{len(entries)}个谱面：\n"
+        msg += "".join(
+            f"{eid}：{s.title}{'（日服限定）' if f else ''}\n"
+            for (eid, s, _), f in zip(entries, flags)
+        )
+        msg += "※ 请使用「id xxxxx」查询指定谱面"
+        if list_note := _list_jp_note(flags):
+            msg += f"\n{list_note}"
+        await _reply(msg.rstrip("\n")).finish(at_sender=True)
+
+    # 柚子投票中提示（网络失败静默跳过）
+    vote_msg = await _vote_hint(name)
+    if vote_msg:
+        await _reply(vote_msg).finish(at_sender=True)
+
+    # 纯数字 → ID（查分器 id 形状推断谱面类型：≤4 位 SD、5 位 DX、6 位宴）
+    if name.isdigit():
+        hit = await _resolve_raw_id(int(name))
+        if hit is not None:
+            song, prefer, jp, utage_diff = hit
+            png = (
+                await _banquet_card(song, utage_diff, jp)
+                if utage_diff is not None
+                else await chart_card_bytes(song, binding, prefer, jp)
+            )
+            note = f"\n{JP_ONLY_NOTE}" if jp and utage_diff is None else ""
+            await (
+                UniMessage.image(raw=png)
+                .text(f"\n您要找的是不是这首？{note}")
+                .finish(at_sender=True)
+            )
+    if idm := re.match(r"^id\s?([0-9]+)$", name, re.IGNORECASE):
+        hit = await _resolve_raw_id(int(idm.group(1)))
+        if hit is None:
+            await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
+        song, prefer, jp_only, _utage_diff = hit
+        # 此别名入口不渲染宴会卡（与「id xxx」指令的口径差异属既有行为）
+        png = await chart_card_bytes(song, binding, prefer, jp_only)
+        msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
+        await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
+
+    # pending 兜底（Q33）：输入本身是新曲歌名（id 未收录，CN/JP 视图与
+    # 别名索引均不可见）——别名投票提示之后、相似标题兜底之前出临时卡
+    await _render_pending_result(await song_service.pending_by_title_fuzzy(name))
+
+    # 标题关键词兜底
+    result = await song_service.by_title_fuzzy(name)
+    if not result:
+        await _reply(error_msg).finish(at_sender=True)
+    if len(result) <= 5:
+        msg = (
+            f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
+        )
+        msg += "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in result)
+        msg += "※ 请使用「id xxxxx」查询指定曲目"
+        await _reply(msg.rstrip("\n")).finish(at_sender=True)
+    await (
+        _reply(
+            f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
+        )
+        .image(raw=song_render.song_list_bytes(result, page))
+        .finish(at_sender=True)
+    )
+
+
+@query_chart.handle()
+@handle_errors()
+async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
+    _id = match.group(1)
+    # 数字 id 解析单源 _resolve_raw_id（6 位宴 diff_id 定位 / DX 展示 id 回查 /
+    # 形状推类型，与「是什么歌」别名入口同口径）
+    hit = await _resolve_raw_id(int(_id))  # 正则 ^id\s?([0-9]+)$ 保证恒为数字
+    if hit is None:
+        await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
+    song, card_prefer, jp, utage_diff = hit
+    binding = await _binding_of(session)
+    png = (
+        await _banquet_card(song, utage_diff, jp)
+        if utage_diff is not None
+        else await chart_card_bytes(song, binding, card_prefer, jp)
+    )
+    reply = UniMessage.image(raw=png)
+    if jp:
+        reply = reply.text(f"\n{JP_ONLY_NOTE}")
+    await reply.finish(at_sender=True)

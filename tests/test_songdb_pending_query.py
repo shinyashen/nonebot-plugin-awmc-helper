@@ -326,11 +326,15 @@ async def _assert_pending_card(app: App, matcher_name: str, text: str):
 
     from nonebot_plugin_awmc_helper.plugins import music_query
     from nonebot_plugin_awmc_helper.core.songdb import pending_search
+    from nonebot_plugin_awmc_helper.plugins.music_query.render import (
+        PENDING_NOTE,
+        _pending_card,
+    )
 
     matcher = getattr(music_query, matcher_name)
     pending = (await pending_search(title="物語はここから"))[0]
-    png = await music_query._pending_card(pending)  # 与 handler 同源
-    note = music_query.PENDING_NOTE
+    png = await _pending_card(pending)  # 与 handler 同源
+    note = PENDING_NOTE
 
     event = fake_group_message_event_v11(message=text)
     async with app.test_matcher(matcher) as ctx:
@@ -414,6 +418,7 @@ async def test_search_pending_empty_falls_through(app: App, songs):
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.plugins.music_query.render import NOT_FOUND
 
     event = fake_group_message_event_v11(message="查歌 查無此曲XYZ")
     async with app.test_matcher(music_query.search) as ctx:
@@ -439,7 +444,7 @@ async def test_search_pending_empty_falls_through(app: App, songs):
                 "nickname": "t",
             },
         )
-        note = music_query.NOT_FOUND
+        note = NOT_FOUND
         expected = Message(
             [MessageSegment.at(12345678), MessageSegment.text(f" {note}")]
         )

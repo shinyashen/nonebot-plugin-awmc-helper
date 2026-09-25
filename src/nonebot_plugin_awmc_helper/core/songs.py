@@ -154,6 +154,16 @@ def chart_entries(song: Song) -> "list[tuple[int, Song, SongType | None]]":
     return entries
 
 
+def chart_entries_many(
+    songs: "list[Song]",
+) -> "list[tuple[int, Song, SongType | None]]":
+    """多曲 → 谱面类型条目平铺：保持曲目顺序，单曲内按 ``chart_entries`` 语义。
+
+    查歌侧条目展开（别名/搜索命中列表）的单一派生入口。
+    """
+    return [entry for song in songs for entry in chart_entries(song)]
+
+
 class SongService:
     """曲库服务单例（见模块级 ``song_service``）。"""
 
