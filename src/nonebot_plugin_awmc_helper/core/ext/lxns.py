@@ -9,7 +9,10 @@ from . import ExtError, ExtNetworkError, get_client
 from ...config import plugin_config
 
 LXNS_BASE = "https://maimai.lxns.net"
-SCOPE = "read_player read_user_profile"
+# write_player（2026-09-26 应作者要求追加）：绑定 token 兼作第三方传分插件的
+# 写凭据（落雪成绩上传），读权限之外多申请一项；存量绑定需重新 lxbind 授权
+# 才会升级到新 scope。
+SCOPE = "read_player read_user_profile write_player"
 
 
 async def fetch_song_list(notes: bool = True) -> dict:
@@ -62,7 +65,7 @@ def oauth_configured() -> bool:
 
 
 def build_authorize_url() -> str:
-    """构造落雪 OAuth 授权页链接（scope：读取玩家信息与成绩）。"""
+    """构造落雪 OAuth 授权页链接（scope：读玩家/成绩 + 上传成绩，见 SCOPE 注）。"""
     from urllib.parse import urlencode
 
     query = urlencode(
