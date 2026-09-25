@@ -235,23 +235,19 @@ def _list_jp_note(flags: list[bool]) -> str:
     return "列表中曲目均为日服限定歌曲" if all(flags) else "列表中包含日服限定歌曲"
 
 
-async def _jp_flags(songs: "list[Song]") -> list[bool]:
-    """逐曲判定是否仅日服可用（国服运行时视图无此曲）。"""
-    hits = await asyncio.gather(*(song_service.by_id(s.id) for s in songs))
-    return [hit is None for hit in hits]
-
-
 async def _render_jp_result(songs, page: int, binding=None) -> None:
     """日服 fallback 结果：逐曲判定日服限定，混合列表只标注限定曲。
 
     日服视图含国服也有的曲（标题子串、日服定数口径变更等场景可命中）：
     整列表国服都有时按普通结果渲染，混合时国服曲回取国服对象。
     """
-    flags = await _jp_flags(songs)
+    # 逐条目日服判定须回查国服视图：去重后一次并发建 map 复用（判定与回取共用）
+    unique_ids = {s.id for s in songs}
+    hits = await asyncio.gather(*(song_service.by_id(i) for i in unique_ids))
+    cn_songs = dict(zip(unique_ids, hits))
+    flags = [cn_songs[s.id] is None for s in songs]
     if not any(flags):
-        hits = await asyncio.gather(*(song_service.by_id(s.id) for s in songs))
-        songs = [hit or s for s, hit in zip(songs, hits)]
-        await _render_result(songs, page, binding)
+        await _render_result([cn_songs[s.id] or s for s in songs], page, binding)
         return
     note = _list_jp_note(flags)
     if len(songs) == 1:
@@ -514,7 +510,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 .text(f"\n您要找的是不是这首？{note}")
                 .finish(at_sender=True)
             )
-    if idm := re.match(r"^id([0-9]+)$", name, re.IGNORECASE):
+    if idm := re.match(r"^id\s?([0-9]+)$", name, re.IGNORECASE):
         hit = await _resolve_raw_id(int(idm.group(1)))
         if hit is None:
             await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
@@ -552,40 +548,18 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 @handle_errors()
 async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
     _id = match.group(1)
-    raw_id = int(_id)  # 正则 ^id\s?([0-9]+)$ 保证恒为数字
-    song = None
-    jp = False
-    card_prefer = None
-    is_utage_entry = False
-    utage_diff = None
-    if raw_id:
-        if raw_id > 99999:
-            # 6 位宴谱机台 id（diff_id）：必须按 diff_id 定位宿主曲——
-            # by_id 会取模 10000 错误匹配同号普通曲；且宿主曲即便有普通
-            # 谱也渲染宴会场卡（Hoshino 按 song_id ≥ 100000 路由）
-            utage_hit = await song_service.by_utage_id(raw_id)
-            if utage_hit is not None:
-                song, utage_diff = utage_hit
-                is_utage_entry = True
-                # 宴谱可能日服限定（国服宿主曲无此 diff_id）：日服卡渲染口径
-                # + 回复补「日服限定」标注（与其余查询路径同口径）
-                jp = await _utage_jp_only(song.id, utage_diff.diff_id)
-        else:
-            song = await song_service.by_id(raw_id)
-            if song is None:
-                song = await song_service.jp_by_id(raw_id)  # 国服 miss → 日服
-                if song is not None:
-                    # raw_id 可能是 DX 展示 id：回查国服对象与标注
-                    cn_song = await song_service.by_id(song.id)
-                    song, jp = cn_song or song, cn_song is None
-            card_prefer = prefer_type_from_raw_id(raw_id)
-    if not song:
+    # 数字 id 解析单源 _resolve_raw_id（6 位宴 diff_id 定位 / DX 展示 id 回查 /
+    # 形状推类型，与「是什么歌」别名入口同口径）
+    hit = await _resolve_raw_id(int(_id))  # 正则 ^id\s?([0-9]+)$ 保证恒为数字
+    if hit is None:
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
+    song, card_prefer, jp, utage_diff = hit
     binding = await _binding_of(session)
-    if is_utage_entry:
-        png = await _banquet_card(song, utage_diff, jp)
-    else:
-        png = await chart_card_bytes(song, binding, card_prefer, jp)
+    png = (
+        await _banquet_card(song, utage_diff, jp)
+        if utage_diff is not None
+        else await chart_card_bytes(song, binding, card_prefer, jp)
+    )
     reply = UniMessage.image(raw=png)
     if jp:
         reply = reply.text(f"\n{JP_ONLY_NOTE}")
