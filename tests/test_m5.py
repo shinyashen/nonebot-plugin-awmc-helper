@@ -158,6 +158,7 @@ async def test_genre_random_service(app: App, songs):
 
 
 @pytest.mark.asyncio
+@requires_assets
 async def test_genre_random_matcher(app: App, songs):
     """随个流行指令：命中渲染谱面卡（单曲种子保证确定性）、未命中给提示。"""
     import base64
@@ -177,8 +178,9 @@ async def test_genre_random_matcher(app: App, songs):
     # 仅留一曲舞萌 → 随机确定（901 宴会场 / 902 disabled 均不入舞萌池）
     await seed_service(song_service, [make_song(231, "PENGUIN")])
     binding = await binding_service.ensure("OneBot V11", "12345678")
-    song, _diff = await song_service.random(genre=Genre.maimai)
-    png = await chart_card_bytes(song, binding)
+    picked = await song_service.random(genre=Genre.maimai)
+    assert picked is not None
+    png = await chart_card_bytes(picked[0], binding)
 
     event = fake_group_message_event_v11(message="随个舞萌")
     expected = Message(
