@@ -376,11 +376,10 @@ async def _(session: Session = UniSession()):
     ids = await store.get_subscriptions(group_id) if group_id else []
     if not ids:
         await UniMessage.text(" 该群未订阅任何机厅").finish(at_sender=True)
-    lines = []
-    for i in ids:
-        a = await store.get_arcade(i)
-        if a:
-            lines.append(f"「{a.name}」排卡 {a.person} 人（机台 {a.machines}）")
+    lines = [
+        f"「{a.name}」排卡 {a.person} 人（机台 {a.machines}）"
+        for a in await store.get_arcade_by_ids(ids)
+    ]
     await UniMessage.text(" \n".join(lines)).finish(at_sender=True)
 
 

@@ -1,4 +1,4 @@
-"""自实现计算：RA/评级、分数线容错、推分推荐、DX 星。
+"""自实现计算：RA/评级、分数线容错、推分推荐。
 
 RA 计算直接使用 maimai-py 的 ``ScoreCoefficient``（单一事实来源），
 分数线与推分算法对齐原版 maimaiDX（core/utils/calc.py + handler.get_rise_score_list）。
@@ -61,24 +61,6 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, float] | None:
         "break_50_pct": break_50_reduce / total * 100,
         "breaks": diff.break_num,
     }
-
-
-def dx_star_ratio(dx_score: int, level_dx_score: int) -> int:
-    """DX 百分比 → 星数（0-5，阈值与 maimai-py 一致）。"""
-    if level_dx_score <= 0:
-        return 0
-    pct = dx_score / level_dx_score * 100
-    if pct <= 85:
-        return 0
-    if pct <= 90:
-        return 1
-    if pct <= 93:
-        return 2
-    if pct <= 95:
-        return 3
-    if pct <= 97:
-        return 4
-    return 5
 
 
 def rise_recommend(

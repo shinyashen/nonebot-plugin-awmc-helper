@@ -235,7 +235,7 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
 
         from nonebot_plugin_awmc_helper.core import store
 
-        async with store._open_session() as session:
+        async with store.session() as session:
             for table in (
                 store.SongChartLevel,
                 store.SongChart,

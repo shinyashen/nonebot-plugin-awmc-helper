@@ -188,7 +188,7 @@ async def test_jp_title_fallback(songs, tmp_path):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     # 日服限定曲仅入 DB 规范表（CN 运行时视图无此曲）；日服视图只收有谱面组的曲
-    async with store._open_session() as session:
+    async with store.session() as session:
         session.add(
             store.SongRow(
                 id=2019,
@@ -237,7 +237,7 @@ async def test_jp_attribute_fallbacks(songs):
     song_service._jp_fingerprint = None
     try:
         # 日服限定曲仅入 DB 规范表（CN 运行时视图无此曲）；日服视图只收有谱面组的曲
-        async with store._open_session() as session:
+        async with store.session() as session:
             session.add(
                 store.SongRow(
                     id=2019,

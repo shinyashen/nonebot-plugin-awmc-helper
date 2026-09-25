@@ -42,7 +42,7 @@ async def jp_env(tmp_path: Path, monkeypatch):
 
 
 async def _seed_song(store, song_id: int = 2019, image_url: str | None = "c4ec.png"):
-    async with store._open_session() as session:
+    async with store.session() as session:
         session.add(store.SongRow(id=song_id, title="Cryogenic", image_url=image_url))
         await session.commit()
 

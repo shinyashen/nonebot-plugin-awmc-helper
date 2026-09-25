@@ -24,7 +24,7 @@ from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import SongType
 from ...core.utils import paginate, parse_page, handle_errors
-from ...core.binding import session_keys, binding_service
+from ...core.binding import session_keys, binding_service, service_display
 from ...core.render.tools import text_to_image, image_to_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -106,7 +106,6 @@ async def _(message: Message = CommandArg()):
 @rise_score.handle()
 @handle_errors("推分推荐失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
-    from ...constants import SERVICE_DISPLAY
     from ...core.render.score import DrawScore
 
     level, target_raw = groups
@@ -140,7 +139,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     # 当前版本以前全部谱面（b35 侧），新版本 = 当前版本谱面（b15 侧）
     old_rec = [r for r in rec if r["side"] == "old"]
     new_rec = [r for r in rec if r["side"] == "new"]
-    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+    service = service_display(binding)
     card = DrawScore(960, service=service)
     png = card.draw_rise(old_rec, new_rec, 960)
     await UniMessage.image(raw=png).finish(at_sender=True)

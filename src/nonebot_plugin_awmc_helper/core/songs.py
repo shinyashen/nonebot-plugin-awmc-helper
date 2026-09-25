@@ -113,10 +113,11 @@ def prefer_type_from_raw_id(raw_id: int) -> SongType | None:
 
     数字查询（minfo/id 指令等）按用户输入的 id 形状推断其指向的谱面类型；
     供 music_query / score_query 共用（原 music_query._prefer_from_raw_id 下沉）。
+    ``SongType._from_id`` 的宴分支映射为 None（宴条目按 diff_id 定位，
+    无主类型偏好）。
     """
-    if raw_id > 99999:
-        return None
-    return SongType.DX if raw_id > 9999 else SongType.STANDARD
+    song_type = SongType._from_id(raw_id)
+    return None if song_type == SongType.UTAGE else song_type
 
 
 class SongService:
@@ -152,7 +153,8 @@ class SongService:
             songs = await client.songs(
                 provider=_SONG_PROVIDER, alias_provider=_ALIAS_PROVIDER
             )
-            if not await songs.get_all():
+            all_songs = await songs.get_all()
+            if not all_songs:
                 # 规范表未初始化（离线首启）等场景：空数据按失败处理走降级
                 raise RuntimeError("曲库数据源返回为空")
         except Exception:
@@ -163,12 +165,12 @@ class SongService:
                 else:
                     logger.error("曲库不可用且无快照，查询类指令将不可用")
             return False
-        await self._apply(songs)
-        await self._write_snapshot(songs)
+        await self._apply_to_cache(all_songs)
+        await self._write_snapshot(all_songs)
         # 日服视图与国服视图口径并列展示（CN 视图不含仅日服曲目）
         jp_count = len(await self._jp_songs_map())
         logger.info(
-            f"曲库加载完成：国服 {len(await songs.get_all())} 首，"
+            f"曲库加载完成：国服 {len(all_songs)} 首，"
             f"日服 {jp_count} 首（耗时 {time.monotonic() - started:.1f}s）"
         )
         return True
@@ -176,10 +178,6 @@ class SongService:
     async def refresh(self) -> bool:
         """刷新曲库：规范表指纹较上次加载有变化时 maimai_py 自动重建缓存。"""
         return await self.load()
-
-    async def _apply(self, songs: MaimaiSongs) -> None:
-        """刷新别名/标题索引并置就绪。"""
-        await self._apply_to_cache(await songs.get_all())
 
     async def reload_alias_index(self) -> None:
         """本地别名变更后热更新（只重读本地部分，避免重拉曲库）。"""
@@ -232,16 +230,12 @@ class SongService:
 
     # -- 快照 --------------------------------------------------------------
 
-    async def _write_snapshot(self, songs: MaimaiSongs) -> None:
+    async def _write_snapshot(self, all_songs: list[Song]) -> None:
         try:
-            all_songs = await songs.get_all()
-            aliases = {s.id: (s.aliases or []) for s in all_songs}
             await store.kv_set(
                 SNAPSHOT_KEY,
-                {
-                    "songs": [song_to_dict(s) for s in all_songs],
-                    "aliases": aliases,
-                },
+                # 曲对象自带 aliases（song_to_dict 落地），无需单独映射
+                {"songs": [song_to_dict(s) for s in all_songs]},
             )
         except Exception:
             logger.exception("曲库快照写入失败（不影响运行）")

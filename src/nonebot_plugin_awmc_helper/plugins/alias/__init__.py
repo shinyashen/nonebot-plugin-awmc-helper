@@ -314,8 +314,11 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
         f"点击下方链接查看详情：「{yuzu_ext.VOTE_URL}」\n"
         "如果不需要接收推送消息，请使用「关闭别名推送」指令关闭推送"
     ]
-    for item in push.status:
-        song = await song_service.by_id(item.song_id)
+    # 标题回取并发化（读运行时缓存，无远端请求）
+    hits = await asyncio.gather(
+        *(song_service.by_id(item.song_id) for item in push.status)
+    )
+    for item, song in zip(push.status, hits):
         title = song.title if song else str(item.song_id)
         lines.append(
             f"{item.tag}：\nID：{item.song_id}\n标题：{title}\n别名：{item.apply_alias}"

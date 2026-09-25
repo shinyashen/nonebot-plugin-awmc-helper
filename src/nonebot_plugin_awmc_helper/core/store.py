@@ -22,7 +22,7 @@ from datetime import datetime
 
 from pydantic import NaiveDatetime
 from sqlmodel import Field, SQLModel, col, delete, select
-from sqlalchemy import UniqueConstraint, or_, text, inspect
+from sqlalchemy import UniqueConstraint, or_, text, update, inspect
 from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
@@ -325,13 +325,9 @@ async def _migrate_columns() -> None:
                     await conn.execute(text(ddl))
 
 
-def _open_session() -> AsyncSession:
-    return AsyncSession(get_engine(), expire_on_commit=False)
-
-
 def session() -> AsyncSession:
-    """会话上下文（供 songdb 等 core 内模块批量读写；AsyncSession 本身即异步 CM）。"""
-    return _open_session()
+    """会话上下文（core 内模块与测试统一入口；AsyncSession 本身即异步 CM）。"""
+    return AsyncSession(get_engine(), expire_on_commit=False)
 
 
 # ---------------------------------------------------------------------------
@@ -340,9 +336,9 @@ def session() -> AsyncSession:
 
 
 async def get_binding(platform: str, user_id: str) -> UserBinding | None:
-    async with _open_session() as session:
+    async with session() as db:
         return (
-            await session.exec(
+            await db.exec(
                 select(UserBinding).where(
                     UserBinding.platform == platform, UserBinding.user_id == user_id
                 )
@@ -351,15 +347,15 @@ async def get_binding(platform: str, user_id: str) -> UserBinding | None:
 
 
 async def save_binding(binding: UserBinding) -> None:
-    async with _open_session() as session:
-        session.add(binding)
-        await session.commit()
+    async with session() as db:
+        db.add(binding)
+        await db.commit()
 
 
 async def delete_binding(platform: str, user_id: str) -> bool:
-    async with _open_session() as session:
+    async with session() as db:
         binding = (
-            await session.exec(
+            await db.exec(
                 select(UserBinding).where(
                     UserBinding.platform == platform, UserBinding.user_id == user_id
                 )
@@ -367,16 +363,16 @@ async def delete_binding(platform: str, user_id: str) -> bool:
         ).first()
         if binding is None:
             return False
-        await session.delete(binding)
-        await session.commit()
+        await db.delete(binding)
+        await db.commit()
         return True
 
 
 async def get_group_switch(group_id: str, feature: str) -> bool | None:
     """返回群级覆盖值；未覆盖返回 None（调用方取 .env 默认值）。"""
-    async with _open_session() as session:
+    async with session() as db:
         row = (
-            await session.exec(
+            await db.exec(
                 select(GroupSwitch).where(
                     GroupSwitch.group_id == group_id, GroupSwitch.feature == feature
                 )
@@ -392,9 +388,9 @@ async def get_switch(group_id: str, feature: str, default: bool) -> bool:
 
 
 async def set_group_switch(group_id: str, feature: str, enabled: bool) -> None:
-    async with _open_session() as session:
+    async with session() as db:
         row = (
-            await session.exec(
+            await db.exec(
                 select(GroupSwitch).where(
                     GroupSwitch.group_id == group_id, GroupSwitch.feature == feature
                 )
@@ -404,15 +400,15 @@ async def set_group_switch(group_id: str, feature: str, enabled: bool) -> None:
             row = GroupSwitch(group_id=group_id, feature=feature, enabled=enabled)
         else:
             row.enabled = enabled
-        session.add(row)
-        await session.commit()
+        db.add(row)
+        await db.commit()
 
 
 async def add_local_alias(song_id: int, alias: str, created_by: str) -> bool:
     """添加本地别名，重复返回 False。"""
-    async with _open_session() as session:
+    async with session() as db:
         exists = (
-            await session.exec(
+            await db.exec(
                 select(LocalAlias).where(
                     LocalAlias.song_id == song_id, LocalAlias.alias == alias
                 )
@@ -420,15 +416,15 @@ async def add_local_alias(song_id: int, alias: str, created_by: str) -> bool:
         ).first()
         if exists:
             return False
-        session.add(LocalAlias(song_id=song_id, alias=alias, created_by=created_by))
-        await session.commit()
+        db.add(LocalAlias(song_id=song_id, alias=alias, created_by=created_by))
+        await db.commit()
         return True
 
 
 async def remove_local_alias(song_id: int, alias: str) -> bool:
-    async with _open_session() as session:
+    async with session() as db:
         row = (
-            await session.exec(
+            await db.exec(
                 select(LocalAlias).where(
                     LocalAlias.song_id == song_id, LocalAlias.alias == alias
                 )
@@ -436,21 +432,21 @@ async def remove_local_alias(song_id: int, alias: str) -> bool:
         ).first()
         if row is None:
             return False
-        await session.delete(row)
-        await session.commit()
+        await db.delete(row)
+        await db.commit()
         return True
 
 
 async def get_local_aliases() -> list[LocalAlias]:
-    async with _open_session() as session:
-        return list((await session.exec(select(LocalAlias))).all())
+    async with session() as db:
+        return list((await db.exec(select(LocalAlias))).all())
 
 
 async def get_utage_kanji() -> dict[int, set[str]]:
     """宴谱汉字映射（根 id → {kanji}）：谱面类型前缀剥离的动态依据。"""
-    async with _open_session() as session:
+    async with session() as db:
         rows = (
-            await session.exec(
+            await db.exec(
                 select(SongChart.song_id, SongChart.kanji).where(
                     col(SongChart.kind) == "utage",
                     col(SongChart.kanji).is_not(None),  # type: ignore[arg-type]
@@ -470,35 +466,31 @@ async def save_song_aliases(source: str, items: dict[int, list[str]]) -> None:
     远端数据存在同曲完全重复的别名（柚子源实测），入库前按 (song_id, alias)
     精确去重，否则整源写入触发唯一约束整体失败。
     """
-    async with _open_session() as session:
-        # SQLModel 已弃用 session.execute，delete 一律走 exec
-        await session.exec(delete(SongAlias).where(col(SongAlias.source) == source))
+    async with session() as db:
+        # SQLModel 已弃用 db.execute，delete 一律走 exec
+        await db.exec(delete(SongAlias).where(col(SongAlias.source) == source))
         seen: set[tuple[int, str]] = set()
         for song_id, aliases in items.items():
             for alias in aliases:
                 if (song_id, alias) in seen:
                     continue
                 seen.add((song_id, alias))
-                session.add(SongAlias(source=source, song_id=song_id, alias=alias))
-        await session.commit()
+                db.add(SongAlias(source=source, song_id=song_id, alias=alias))
+        await db.commit()
 
 
 async def song_image_url(song_id: int) -> str | None:
     """曲绘文件名（otoge-db 官方图名；日服封面在线拉取用），无则 None。"""
-    async with _open_session() as session:
-        row = (
-            await session.exec(select(SongRow).where(col(SongRow.id) == song_id))
-        ).first()
+    async with session() as db:
+        row = (await db.exec(select(SongRow).where(col(SongRow.id) == song_id))).first()
     return row.image_url if row else None
 
 
 async def load_song_aliases(sources: list[str]) -> dict[int, list[str]]:
     """读取若干源的别名快照（根 id → 别名列表）。"""
-    async with _open_session() as session:
+    async with session() as db:
         rows = (
-            await session.exec(
-                select(SongAlias).where(col(SongAlias.source).in_(sources))
-            )
+            await db.exec(select(SongAlias).where(col(SongAlias.source).in_(sources)))
         ).all()
     merged: dict[int, list[str]] = {}
     for row in rows:
@@ -507,22 +499,22 @@ async def load_song_aliases(sources: list[str]) -> dict[int, list[str]]:
 
 
 async def kv_get(key: str) -> Any | None:
-    async with _open_session() as session:
-        row = (await session.exec(select(KvCache).where(KvCache.key == key))).first()
+    async with session() as db:
+        row = (await db.exec(select(KvCache).where(KvCache.key == key))).first()
         return json.loads(row.payload) if row else None
 
 
 async def kv_set(key: str, payload: Any) -> None:
-    async with _open_session() as session:
-        row = (await session.exec(select(KvCache).where(KvCache.key == key))).first()
+    async with session() as db:
+        row = (await db.exec(select(KvCache).where(KvCache.key == key))).first()
         data = json.dumps(payload, ensure_ascii=False)
         if row is None:
             row = KvCache(key=key, payload=data)
         else:
             row.payload = data
             row.updated_at = datetime.now()
-        session.add(row)
-        await session.commit()
+        db.add(row)
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -531,19 +523,17 @@ async def kv_set(key: str, payload: Any) -> None:
 
 
 async def get_arcade(arcade_id: int) -> Arcade | None:
-    async with _open_session() as session:
-        return (
-            await session.exec(select(Arcade).where(Arcade.id == arcade_id))
-        ).first()
+    async with session() as db:
+        return (await db.exec(select(Arcade).where(Arcade.id == arcade_id))).first()
 
 
 async def get_arcade_by_ids(ids: list[int]) -> list[Arcade]:
     """按 id 批量取机厅（保持入参顺序，缺失跳过）。"""
     if not ids:
         return []
-    async with _open_session() as session:
+    async with session() as db:
         rows = list(
-            (await session.exec(select(Arcade).where(col(Arcade.id).in_(ids)))).all()
+            (await db.exec(select(Arcade).where(col(Arcade.id).in_(ids)))).all()
         )
     by_id = {a.id: a for a in rows}
     return [by_id[i] for i in ids if i in by_id]
@@ -552,10 +542,10 @@ async def get_arcade_by_ids(ids: list[int]) -> list[Arcade]:
 async def get_arcades_by_name(keyword: str) -> list[Arcade]:
     """按名称/地址/别称模糊查找机厅（名称/地址/别称均走 SQL LIKE）。"""
     kw = keyword.lower()
-    async with _open_session() as session:
+    async with session() as db:
         rows = list(
             (
-                await session.exec(
+                await db.exec(
                     select(Arcade).where(
                         or_(
                             col(Arcade.name).ilike(f"%{kw}%"),
@@ -567,7 +557,7 @@ async def get_arcades_by_name(keyword: str) -> list[Arcade]:
         )
         alias_rows = list(
             (
-                await session.exec(
+                await db.exec(
                     select(ArcadeAlias).where(col(ArcadeAlias.alias).ilike(f"%{kw}%"))
                 )
             ).all()
@@ -578,7 +568,7 @@ async def get_arcades_by_name(keyword: str) -> list[Arcade]:
             if extra_ids:
                 rows += list(
                     (
-                        await session.exec(
+                        await db.exec(
                             select(Arcade).where(col(Arcade.id).in_(extra_ids))
                         )
                     ).all()
@@ -587,93 +577,89 @@ async def get_arcades_by_name(keyword: str) -> list[Arcade]:
 
 
 async def get_all_arcades() -> list[Arcade]:
-    async with _open_session() as session:
-        return list((await session.exec(select(Arcade))).all())
+    async with session() as db:
+        return list((await db.exec(select(Arcade))).all())
 
 
 async def save_arcade(arcade: Arcade) -> None:
-    async with _open_session() as session:
-        session.add(arcade)
-        await session.commit()
+    async with session() as db:
+        db.add(arcade)
+        await db.commit()
 
 
 async def upsert_arcades(arcades: list["Arcade"]) -> None:
     """按主键批量覆盖（华立官方同步用；单事务，保留本地字段）。"""
-    async with _open_session() as session:
+    async with session() as db:
         for arcade in arcades:
-            row = (
-                await session.exec(select(Arcade).where(Arcade.id == arcade.id))
-            ).first()
+            row = (await db.exec(select(Arcade).where(Arcade.id == arcade.id))).first()
             if row:
                 arcade.is_custom = row.is_custom
                 arcade.person = row.person
                 arcade.updated_by = row.updated_by
                 arcade.updated_at = row.updated_at
-                await session.delete(row)
-            session.add(arcade)
-        await session.commit()
+                await db.delete(row)
+            db.add(arcade)
+        await db.commit()
 
 
 async def delete_arcade(arcade_id: int) -> bool:
-    async with _open_session() as session:
-        row = (await session.exec(select(Arcade).where(Arcade.id == arcade_id))).first()
+    async with session() as db:
+        row = (await db.exec(select(Arcade).where(Arcade.id == arcade_id))).first()
         if row is None:
             return False
-        await session.delete(row)
+        await db.delete(row)
         for sub in (
-            await session.exec(
+            await db.exec(
                 select(ArcadeSubscription).where(
                     ArcadeSubscription.arcade_id == arcade_id
                 )
             )
         ).all():
-            await session.delete(sub)
+            await db.delete(sub)
         for al in (
-            await session.exec(
-                select(ArcadeAlias).where(ArcadeAlias.arcade_id == arcade_id)
-            )
+            await db.exec(select(ArcadeAlias).where(ArcadeAlias.arcade_id == arcade_id))
         ).all():
-            await session.delete(al)
-        await session.commit()
+            await db.delete(al)
+        await db.commit()
         return True
 
 
 async def remove_arcade_alias_by_name(alias: str) -> bool:
-    async with _open_session() as session:
+    async with session() as db:
         row = (
-            await session.exec(select(ArcadeAlias).where(ArcadeAlias.alias == alias))
+            await db.exec(select(ArcadeAlias).where(ArcadeAlias.alias == alias))
         ).first()
         if row is None:
             return False
-        await session.delete(row)
-        await session.commit()
+        await db.delete(row)
+        await db.commit()
         return True
 
 
 async def get_arcade_aliases(arcade_id: int | None = None) -> list[ArcadeAlias]:
-    async with _open_session() as session:
+    async with session() as db:
         stmt = select(ArcadeAlias)
         if arcade_id is not None:
             stmt = stmt.where(ArcadeAlias.arcade_id == arcade_id)
-        return list((await session.exec(stmt)).all())
+        return list((await db.exec(stmt)).all())
 
 
 async def add_arcade_alias(arcade_id: int, alias: str) -> bool:
-    async with _open_session() as session:
+    async with session() as db:
         exists = (
-            await session.exec(select(ArcadeAlias).where(ArcadeAlias.alias == alias))
+            await db.exec(select(ArcadeAlias).where(ArcadeAlias.alias == alias))
         ).first()
         if exists:
             return False
-        session.add(ArcadeAlias(arcade_id=arcade_id, alias=alias))
-        await session.commit()
+        db.add(ArcadeAlias(arcade_id=arcade_id, alias=alias))
+        await db.commit()
         return True
 
 
 async def get_subscriptions(group_id: str) -> list[int]:
-    async with _open_session() as session:
+    async with session() as db:
         rows = (
-            await session.exec(
+            await db.exec(
                 select(ArcadeSubscription).where(
                     ArcadeSubscription.group_id == group_id
                 )
@@ -683,9 +669,9 @@ async def get_subscriptions(group_id: str) -> list[int]:
 
 
 async def subscribe(group_id: str, arcade_id: int) -> None:
-    async with _open_session() as session:
+    async with session() as db:
         exists = (
-            await session.exec(
+            await db.exec(
                 select(ArcadeSubscription).where(
                     ArcadeSubscription.group_id == group_id,
                     ArcadeSubscription.arcade_id == arcade_id,
@@ -693,14 +679,14 @@ async def subscribe(group_id: str, arcade_id: int) -> None:
             )
         ).first()
         if not exists:
-            session.add(ArcadeSubscription(group_id=group_id, arcade_id=arcade_id))
-            await session.commit()
+            db.add(ArcadeSubscription(group_id=group_id, arcade_id=arcade_id))
+            await db.commit()
 
 
 async def unsubscribe(group_id: str, arcade_id: int) -> None:
-    async with _open_session() as session:
+    async with session() as db:
         row = (
-            await session.exec(
+            await db.exec(
                 select(ArcadeSubscription).where(
                     ArcadeSubscription.group_id == group_id,
                     ArcadeSubscription.arcade_id == arcade_id,
@@ -708,28 +694,27 @@ async def unsubscribe(group_id: str, arcade_id: int) -> None:
             )
         ).first()
         if row:
-            await session.delete(row)
-            await session.commit()
+            await db.delete(row)
+            await db.commit()
 
 
 async def reset_all_persons(operator: str = "自动清零") -> int:
     """全部机厅排卡人数清零（每日 4 点同步后调用），返回受影响机厅数。"""
-    async with _open_session() as session:
-        arcades = list((await session.exec(select(Arcade))).all())
-        for a in arcades:
-            a.person = 0
-            a.updated_by = operator
-            a.updated_at = datetime.now()
-            session.add(a)
-        await session.commit()
-        return len(arcades)
+    async with session() as db:
+        result = await db.exec(
+            update(Arcade).values(
+                person=0, updated_by=operator, updated_at=datetime.now()
+            )
+        )
+        await db.commit()
+        return result.rowcount
 
 
 async def add_count_log(
     arcade_id: int, delta: int, machines: int, operator_id: str
 ) -> None:
-    async with _open_session() as session:
-        session.add(
+    async with session() as db:
+        db.add(
             ArcadeCountLog(
                 arcade_id=arcade_id,
                 delta=delta,
@@ -737,4 +722,4 @@ async def add_count_log(
                 operator_id=operator_id,
             )
         )
-        await session.commit()
+        await db.commit()

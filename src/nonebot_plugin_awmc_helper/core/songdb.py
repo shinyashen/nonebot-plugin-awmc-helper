@@ -25,7 +25,13 @@ from dataclasses import field, dataclass
 from nonebot import logger
 from sqlmodel import col, delete, select
 from maimai_py import Version, current_version
-from maimai_py.enums import Genre, SongType, LevelIndex, divingfish_to_version
+from maimai_py.enums import (
+    Genre,
+    SongType,
+    LevelIndex,
+    name_to_genre,
+    divingfish_to_version,
+)
 from maimai_py.models import (
     Song,
     BuddyNotes,
@@ -1080,22 +1086,10 @@ async def _archive_raw(payloads: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-# 国服口径的分类名（落雪/水鱼）→ maimai_py Genre 值：两套叫法并存，构建曲对象前归一
-_GENRE_ALIASES: dict[str, str] = {
-    "流行&动漫": "POPSアニメ",
-    "niconico & VOCALOID": "niconicoボーカロイド",
-    "东方Project": "東方Project",
-    "其他游戏": "ゲームバラエティ",
-    "音击&中二节奏": "オンゲキCHUNITHM",
-    "舞萌": "maimai",
-}
-
-
 def _genre_of(name: str) -> Genre:
-    try:
-        return Genre(_GENRE_ALIASES.get(name, name))
-    except ValueError:
-        return Genre.maimai
+    """分类名 → Genre：国服叫法经 maimai_py ``name_to_genre`` 归一
+    （库表与日文名双向齐全），未知值回落 maimai。"""
+    return name_to_genre.get(name) or Genre.maimai
 
 
 def _song_version(groups: list[store.SongSheetGroup], key: str) -> int:

@@ -74,7 +74,7 @@ async def test_merge_fold_and_persist(db, provider, remote_mock, maimai_client):
     assert merged[363] == ["牛奶猫", "iidx"]
     assert provider._hash() != "empty"
     # 快照入库（按源）
-    async with store._open_session() as session:
+    async with store.session() as session:
         all_rows = list((await session.exec(select(store.SongAlias))).all())
     by_source = {(r.source, r.song_id, r.alias) for r in all_rows}
     # 快照存原始形态（无损），去前后缀统一在合并层发生

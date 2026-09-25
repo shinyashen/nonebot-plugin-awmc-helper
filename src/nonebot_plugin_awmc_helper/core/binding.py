@@ -14,7 +14,7 @@ from maimai_py import PlayerIdentifier
 from . import store
 from .store import UserBinding
 from ..config import plugin_config
-from ..constants import THEMES
+from ..constants import THEMES, SERVICE_DISPLAY
 
 if TYPE_CHECKING:
     from nonebot_plugin_uninfo import Session
@@ -87,6 +87,11 @@ class PendingBindingStore:
 
 pending_bindings = PendingBindingStore()
 """绑定回填会话单例。"""
+
+
+def service_display(binding: "UserBinding") -> str:
+    """绑定数据源 → 查分器站点显示名（未知键原样返回，各卡面共用）。"""
+    return SERVICE_DISPLAY.get(binding.service, binding.service)
 
 
 class BindingService:

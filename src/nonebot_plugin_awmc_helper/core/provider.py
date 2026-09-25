@@ -15,7 +15,6 @@ import json
 import time
 import asyncio
 import hashlib
-from typing import Literal
 
 from nonebot import logger
 from maimai_py.models import Song
@@ -24,9 +23,8 @@ from maimai_py.providers.lxns import LXNSProvider
 from maimai_py.providers.yuzu import YuzuProvider
 
 from . import store, songdb
+from .songdb import Scope
 from ..constants import normalize_text, strip_chart_prefix
-
-Scope = Literal["cn", "jp"]
 
 
 class AwmcSongProvider(ISongProvider):

@@ -228,7 +228,7 @@ async def test_pending_and_flush(db):
     await songdb.rebuild(full_payloads())
     from sqlmodel import select
 
-    async with store._open_session() as session:
+    async with store.session() as session:
         pending = list((await session.exec(select(store.SongPending))).all())
     assert {p.key for p in pending} == {
         "title:[狂]Otoge Only Uta",
@@ -258,7 +258,7 @@ async def test_pending_and_flush(db):
     assert merged == 1  # 仅拿到 id 的「Otoge Only Uta」归并；其余仍无 id 保留
     state = await songdb.State.load()
     assert 999 in state.songs
-    async with store._open_session() as session:
+    async with store.session() as session:
         remain = list((await session.exec(select(store.SongPending))).all())
     assert {p.key for p in remain} == {"title:[宴]Rotated Out", "title:Link"}
 
@@ -727,7 +727,7 @@ async def test_otoge_fills_external_created_row(db, tmp_path, monkeypatch):
         chart.notes_break,
     ) == (1000, 100, 80, 0, 25)
     assert state.groups[(2041, "dx")].date == 250918
-    async with store._open_session() as session:
+    async with store.session() as session:
         pend = list((await session.exec(select(store.SongPending))).all())
     assert all("Test Song First" not in p.key for p in pend)
 

@@ -168,8 +168,8 @@ async def _reveal(game: GuessGame, prefix: str) -> None:
     )
 
 
-async def _hint_loop(game: GuessGame) -> None:
-    """提示循环：逐条发提示 → 裁剪曲绘 → 计时揭晓。"""
+async def _game_loop(game: GuessGame) -> None:
+    """对局循环：猜歌逐条提示 → 裁剪曲绘 → 计时揭晓；猜曲绘直接计时揭晓。"""
     # 开局「开始」发送期间可能已被抢先揭晓（答对/重置），届时本局已出 _games
     if _games.get(game.group_id) is not game:
         return
@@ -177,37 +177,23 @@ async def _hint_loop(game: GuessGame) -> None:
     assert game.bot is not None
     assert game.event is not None
     try:
-        while True:
-            hint = game.next_hint()
-            if hint is not None:
+        if not game.pic_mode:
+            while (hint := game.next_hint()) is not None:
                 await UniMessage.text(hint).send(game.event, game.bot, at_sender=True)
                 await asyncio.sleep(plugin_config.awmc_guess_interval)
-                continue
             await (
                 UniMessage.image(raw=await _cover_hint_bytes(game.song))
                 .text("\n最后提示：曲绘裁剪")
                 .send(game.event, game.bot, at_sender=True)
             )
-            await asyncio.sleep(plugin_config.awmc_guess_duration)
-            await _reveal(game, "时间到！")
-            return
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("猜歌提示循环异常")
-        if _games.get(game.group_id) is game:
-            _games.pop(game.group_id)
-
-
-async def _pic_loop(game: GuessGame) -> None:
-    """猜曲绘循环：计时揭晓（曲绘已在开局发出）。"""
-    if _games.get(game.group_id) is not game:
-        return
-    try:
         await asyncio.sleep(plugin_config.awmc_guess_duration)
         await _reveal(game, "时间到！")
     except asyncio.CancelledError:
         raise
+    except Exception:
+        logger.exception("猜歌对局循环异常")
+        if _games.get(game.group_id) is game:
+            _games.pop(game.group_id)
 
 
 async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) -> None:
@@ -240,9 +226,7 @@ async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) 
             await UniMessage.image(raw=await _cover_hint_bytes(song)).send(
                 at_sender=True
             )
-        game.task = asyncio.create_task(
-            _pic_loop(game) if pic_mode else _hint_loop(game)
-        )
+        game.task = asyncio.create_task(_game_loop(game))
 
 
 async def _handle_answer(session: Session, text: str) -> bool:

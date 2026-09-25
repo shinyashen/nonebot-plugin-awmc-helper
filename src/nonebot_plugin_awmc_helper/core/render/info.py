@@ -12,7 +12,6 @@
 from PIL import Image, ImageDraw
 from maimai_py import Song, Genre, SongType, ScoreExtend
 
-from ..calc import dx_star_ratio
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
     TEXT_BLUE,
@@ -153,7 +152,8 @@ def song_play_data(
             Image.open(base / theme / "ra_dx.png").resize((102, 44)), (850, 272 + y)
         )
         dx_score = score.dx_score or 0
-        star = dx_star_ratio(dx_score, score.level_dx_score)
+        # DX 星取库算值（ScoreExtend.dx_star，阈值同现算；0 分为 None → 不画星）
+        star = score.dx_star or 0
         if star:
             im.alpha_composite(
                 Image.open(base / f"UI_GAM_Gauge_DXScoreIcon_0{star}.png").resize(

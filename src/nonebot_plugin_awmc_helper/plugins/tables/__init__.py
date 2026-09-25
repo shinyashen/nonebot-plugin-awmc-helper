@@ -22,7 +22,6 @@ from ...constants import (
     LEVEL_LIST,
     PLATE_CHARS,
     DEFAULT_THEME,
-    SERVICE_DISPLAY,
     chart_display_id,
 )
 from ...core.score import UserScoreError, score_service
@@ -35,7 +34,7 @@ from ...core.plates import (
     major_type_of_plate,
     plate_version_range,
 )
-from ...core.binding import session_keys, binding_service
+from ...core.binding import session_keys, binding_service, service_display
 from ...core.render.score import DrawScore
 from ...core.render.tools import text_to_image, image_to_bytes
 from ...core.render.plate_progress import plate_progress_bytes
@@ -248,7 +247,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     unfinished.sort(key=_sort_key, reverse=True)
     notplayed.sort(key=lambda x: x[2], reverse=True)
 
-    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+    service = service_display(binding)
 
     def played_rows(count: int) -> int:
         return max(4, -(-count // 5))
@@ -386,7 +385,7 @@ async def _plate_progress_overview(
             }
         )
     slots = slots[::-1]
-    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+    service = service_display(binding)
     png = plate_progress_bytes(
         version,
         kind,
@@ -458,7 +457,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         multiplier = (to_page + 19) // 20
         actual_line = 4 if to_page <= 20 else line
         plc = actual_line * 109 + 130 * multiplier
-    service = SERVICE_DISPLAY.get(binding.service, binding.service)
+    service = service_display(binding)
     card = DrawScore(280 + plc, service=service)
     png = card.draw_score_list(title, matched, real, end_page)
     await UniMessage.image(raw=png).finish(at_sender=True)
