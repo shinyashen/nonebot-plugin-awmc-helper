@@ -8,8 +8,9 @@ B50 收藏品（best50）与日服曲绘（jp_cover）共用同一套行为：�
 
 import ssl
 import asyncio
+from typing import Any
 from pathlib import Path
-from collections.abc import Callable, Hashable, Awaitable
+from collections.abc import Callable, Hashable, Coroutine
 
 import httpx
 from nonebot import logger
@@ -59,7 +60,9 @@ class DownloadGate:
     def __init__(self) -> None:
         self._tasks: dict[Hashable, asyncio.Task] = {}
 
-    async def run(self, key: Hashable, factory: Callable[[], Awaitable[bool]]) -> bool:
+    async def run(
+        self, key: Hashable, factory: Callable[[], Coroutine[Any, Any, bool]]
+    ) -> bool:
         task = self._tasks.get(key)
         if task is None:
             task = asyncio.create_task(factory())

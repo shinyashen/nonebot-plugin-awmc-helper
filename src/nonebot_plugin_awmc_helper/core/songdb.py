@@ -1710,10 +1710,12 @@ def parse_pending_item(payload: dict) -> PendingSong | None:
             if kind == "dx" and suffix == "rem":
                 continue  # rem 仅 SD 存在（与 _fill_row_from_otoge 同口径）
             raw_value = payload.get(f"{prefix}_{suffix}_i")
+            if raw_value is None:
+                continue  # 无定数（缺）：该谱面暂不展示
             try:
                 level_value = float(raw_value)
             except (TypeError, ValueError):
-                continue  # 无定数（? / 空 / 缺）：该谱面暂不展示
+                continue  # 无定数（? / 空）：该谱面暂不展示
             # 标级串接受 13 / 13+ / 13? / 13+? 形态，其余（空、?）视为未知
             raw_level = str(payload.get(f"{prefix}_{suffix}") or "").strip()
             level = raw_level if re.fullmatch(r"\d+\+?\??", raw_level) else None
@@ -1724,10 +1726,10 @@ def parse_pending_item(payload: dict) -> PendingSong | None:
                 # 「0 即 -」约定：缺失列填 0，渲染层画 -
                 notes = (
                     tap,
-                    *(
-                        _safe_int(payload.get(f"{prefix}_{suffix}_notes_{k}")) or 0
-                        for k in _NOTE_KEYS[1:]
-                    ),
+                    _safe_int(payload.get(f"{prefix}_{suffix}_notes_hold")) or 0,
+                    _safe_int(payload.get(f"{prefix}_{suffix}_notes_slide")) or 0,
+                    _safe_int(payload.get(f"{prefix}_{suffix}_notes_touch")) or 0,
+                    _safe_int(payload.get(f"{prefix}_{suffix}_notes_break")) or 0,
                 )
             charts.append(
                 PendingChart(
@@ -1741,7 +1743,7 @@ def parse_pending_item(payload: dict) -> PendingSong | None:
             )
     if not charts:
         return None
-    version = payload.get("version")
+    version_raw = str(payload.get("version") or "").strip()
     genre_name = OTOGE_CATCODE_TO_GENRE.get(payload.get("catcode") or "")
     return PendingSong(
         source="otoge-db",
@@ -1750,7 +1752,7 @@ def parse_pending_item(payload: dict) -> PendingSong | None:
         artist=(payload.get("artist") or "").strip() or None,
         bpm=str(payload.get("bpm") or "").strip() or None,
         genre=genre_name or None,
-        version=int(version) if str(version or "").isdigit() else None,
+        version=int(version_raw) if version_raw.isdigit() else None,
         image_url=payload.get("image_url") or None,
         charts=charts,
     )
@@ -1886,7 +1888,7 @@ def _merge_current_level(
     value: float,
     debut: int | None,
     anchor: int | None,
-) -> None:
+) -> bool:
     """单元素 level 列表（快照源的「当前定数」）合并进定数历史（§7.5-C）。
 
     - 无历史：退化为登场版本单行（§6 口径，登场地板到 DX 初代）；

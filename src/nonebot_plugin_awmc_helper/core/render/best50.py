@@ -16,6 +16,7 @@
 import colorsys
 from io import BytesIO
 from bisect import bisect_right
+from typing import cast
 from functools import lru_cache
 from collections import Counter
 
@@ -107,7 +108,8 @@ def _utage_score_bg() -> Image.Image:
     alpha = src.getchannel("A")
     hsv = src.convert("RGB").convert("HSV")
     # 源主色取高饱和像素的众数（避开白色留白与抗锯齿边缘）
-    pixels = hsv.get_flattened_data()
+    # HSV 像素实为 (h, s, v) 三元组；stub 联合含 float 分支，显式收窄
+    pixels = cast("tuple[tuple[int, int, int], ...]", hsv.get_flattened_data())
     dominant = Counter(
         px for px in pixels if px[1] >= 128 and px[2] >= 128
     ).most_common(1)[0][0]

@@ -23,7 +23,6 @@ import unicodedata
 from pathlib import Path
 from dataclasses import field, dataclass
 
-import httpx
 from bs4 import BeautifulSoup
 
 from . import get_client
@@ -118,13 +117,12 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
 
     await asyncio.sleep(_FETCH_DELAY)
     # 首请求可能被 202 反爬（无 Cookie），Cookie 入共享客户端 jar 后重试一次
-    resp: httpx.Response | None = None
+    resp = await http.get(url, headers=_REQUEST_HEADERS)
     for _ in range(2):
-        resp = await http.get(url, headers=_REQUEST_HEADERS)
         if resp.status_code == 200:
             break
         await asyncio.sleep(1.0)
-    assert resp is not None
+        resp = await http.get(url, headers=_REQUEST_HEADERS)
     resp.raise_for_status()
     text = resp.text
     if page_id:
@@ -168,7 +166,7 @@ async def build_page_inventory(http, *, max_age: int) -> dict[str, int]:
             continue
         soup = BeautifulSoup(html, "html.parser")
         for a in soup.find_all("a", href=True):
-            m = re.match(r"^(?:https://gamerch\.com)?/maimai/(\d+)/?$", a["href"])
+            m = re.match(r"^(?:https://gamerch\.com)?/maimai/(\d+)/?$", str(a["href"]))
             if not m:
                 continue
             target = int(m.group(1))
@@ -183,7 +181,7 @@ async def build_page_inventory(http, *, max_age: int) -> dict[str, int]:
                 stripped = _norm_title(strip_variants(text))
                 if stripped != _norm_title(text):
                     mapping.setdefault(stripped, target)
-    payload = dict(mapping)
+    payload: dict[str, int | float] = dict(mapping)
     payload["__fetched_at__"] = time.time()
     await store.kv_set(INVENTORY_KV, json.dumps(payload, ensure_ascii=False))
     n_pages = len(visited)
@@ -194,7 +192,7 @@ async def build_page_inventory(http, *, max_age: int) -> dict[str, int]:
 def parse_page(html: str) -> ParsedPage | None:
     """gamerch 页面 → 结构化谱面表（版式解耦：不依赖颜色/列位置）。"""
     soup = BeautifulSoup(html, "html.parser")
-    h1 = soup.find("h1", "content-head")
+    h1 = soup.find("h1", class_="content-head")
     if h1 is None:
         return None
     # 清理脚注引用（物量数字旁的 * 上标）
@@ -349,7 +347,8 @@ def _build_song_entry(state, song_id: int, page: ParsedPage) -> dict | None:
                 parts = _parts(pt_hit.head, cells, with_touch=True)
                 if parts is None:
                     continue
-                content: dict = {"level_id": lid, "notes": parts}
+                # 首个 content 声明已确立 dict 形状，此处不再重复注解
+                content = {"level_id": lid, "notes": parts}
                 right = row_entry.get("right")
                 if right is not None:
                     right_insert = list(right)
