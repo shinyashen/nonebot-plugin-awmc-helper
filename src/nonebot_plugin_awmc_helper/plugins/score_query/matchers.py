@@ -205,7 +205,7 @@ async def _(
         score_service.get_minfo(song, binding), _safe_b50()
     )
     if info is None:
-        await UniMessage.text(" 尚未游玩该曲目（或无权限查看）").finish(at_sender=True)
+        await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
 
     # R1：按基准 info.py 版式渲染真实成绩卡；数字 id 按其形状推断卡片主类型
     prefer = prefer_type_from_raw_id(int(key)) if key.isdigit() else None
@@ -240,7 +240,7 @@ async def _(groups: tuple = RegexGroup()):
         await UniMessage.text(" 该曲目没有此难度谱面").finish(at_sender=True)
     if diff.curve is None:
         await UniMessage.text(
-            "暂无该谱面的游玩统计（需部署配置水鱼开发者 Token 以启用曲线数据）"
+            "该谱面暂无游玩统计（新谱样本不足或曲线数据未加载）"
         ).finish(at_sender=True)
     # R2：与查歌同源富谱面卡（渲染器在 core/render，无跨插件问题）；
     # 卡片主类型跟随所选谱面（选 SD 色谱显示 SD 卡）

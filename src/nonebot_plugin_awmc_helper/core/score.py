@@ -125,12 +125,17 @@ class ScoreService:
     async def get_minfo(
         self, song: Song, binding: UserBinding | None
     ) -> PlayerSong | None:
-        """单曲成绩（未绑定时仅谱面信息）。"""
+        """单曲成绩（未绑定时仅谱面信息）。
+
+        已绑定且有凭据但任何难度都无成绩时返回 None（= 未游玩，对齐 Hoshino
+        原版 ``MusicNotPlayError`` →「您未游玩过曲目」语义）；未绑定时成绩为空
+        的 PlayerSong 原样返回，供纯谱面视图渲染。
+        """
         ident: PlayerIdentifier | None = None
         if binding is not None:
             ident = binding_service.identifier_or_none(binding)
         await song_service.ensure_loaded()
-        return await self._run(
+        result = await self._run(
             binding,
             lambda: client.minfo(
                 song,
@@ -140,6 +145,9 @@ class ScoreService:
                 else binding_service.provider(binding),  # type: ignore[arg-type]
             ),
         )
+        if ident is not None and result is not None and not result.scores:
+            return None
+        return result
 
     async def get_plates(self, binding: UserBinding, plate: str) -> MaimaiPlates:
         """牌子进度（判牌语义在 maimai-py 内置）。"""

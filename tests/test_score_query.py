@@ -206,9 +206,7 @@ async def test_ginfo_sd_chart_without_curve(app: App, db, songs):
     expected = Message(
         [
             MessageSegment.at(12345678),
-            MessageSegment.text(
-                " 暂无该谱面的游玩统计（需部署配置水鱼开发者 Token 以启用曲线数据）"
-            ),
+            MessageSegment.text(" 该谱面暂无游玩统计（新谱样本不足或曲线数据未加载）"),
         ]
     )
     await _send_image_reply(
@@ -475,3 +473,46 @@ async def test_b50_rise_tips(db, songs):
     assert len(tips) == 1
     assert "MASTER" in tips[0]
     assert "+38" in tips[0]
+
+
+@pytest.mark.asyncio
+async def test_get_minfo_unplayed_maps_to_none(songs, monkeypatch):
+    """core 契约：已绑定且全难度无成绩 → None（未游玩）；未绑定 → 空成绩 PlayerSong。"""
+    from maimai_py import PlayerSong
+
+    from nonebot_plugin_awmc_helper.core import client as client_mod
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    async def fake_minfo(song, identifier, provider=None):
+        return PlayerSong(song, [])
+
+    monkeypatch.setattr(client_mod.client, "minfo", fake_minfo)
+    song = await song_service.by_id(231)
+    assert song is not None
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    assert binding_service.identifier_or_none(binding) is not None
+    assert await score_service.get_minfo(song, binding) is None
+    # 未绑定：纯谱面视图（PlayerSong 原样返回，scores 为空）
+    unbound = await score_service.get_minfo(song, None)
+    assert unbound is not None
+    assert unbound.scores == []
+
+
+@pytest.mark.asyncio
+async def test_minfo_unplayed_hint(app: App, db, songs, monkeypatch):
+    """已绑定但全难度无成绩 → 不渲染成绩卡，提示未游玩（对齐 Hoshino 原版）。"""
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+
+    async def fake_minfo(song, binding):
+        return None
+
+    async def fake_b50(binding):
+        raise UserScoreError("测试桩：不触发 B50 查询")
+
+    monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
+    monkeypatch.setattr(score_service, "get_b50", fake_b50)
+    await _assert_reply(app, score_query.minfo, "minfo 231", "尚未游玩过该曲目")
