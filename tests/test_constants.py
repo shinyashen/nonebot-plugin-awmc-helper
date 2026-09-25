@@ -27,12 +27,13 @@ def test_achievement_list_from_coefficient_table():
 
 
 def test_version_display_names_incl_magical():
-    """MAGiCAL(27000) 已入库枚举，显示名走 VERSION_TO_ZH 精确命中。"""
+    """MAGiCAL(27000) 已入库枚举，显示名走 VERSION_TO_ZH 精确命中（带前缀）。"""
     from nonebot_plugin_awmc_helper.constants import version_zh
 
-    assert version_zh(27000) == "MAGiCAL"
+    assert version_zh(27000) == "舞萌DX MAGiCAL"
     assert version_zh(26500) == "舞萌DX CiRCLE PLUS"
     assert version_zh(26000) == "舞萌DX CiRCLE"
+    assert version_zh(30000) == "30000"  # FUTURE 占位枚举不设显示名，回落原码
 
 
 def test_zh_to_genre_covers_official_and_aliases():
@@ -116,19 +117,19 @@ def test_jp_version_image_matches_dx_names():
     assert Version.MAIMAI_DX_FUTURE not in JP_VERSION_IMAGE  # 占位枚举无 logo
 
 
-def test_version_to_zh_covers_all_enum_members():
-    """显示名全覆盖枚举成员（派生改动防漏）；派生规则与特例抽查。"""
+def test_version_to_zh_covers_all_real_members():
+    """显示名覆盖除 FUTURE 占位外的全部枚举成员（派生改动防漏）；规则与特例抽查。"""
     from maimai_py import Version
 
     from nonebot_plugin_awmc_helper.constants import VERSION_TO_ZH
 
-    assert set(VERSION_TO_ZH) == set(Version)
+    assert set(VERSION_TO_ZH) == set(Version) - {Version.MAIMAI_DX_FUTURE}
+    assert Version.MAIMAI_DX_FUTURE not in VERSION_TO_ZH  # 占位枚举无显示名
     assert VERSION_TO_ZH[Version.MAIMAI] == "maimai"
     assert VERSION_TO_ZH[Version.MAIMAI_MILK_PLUS] == "maimai MiLK PLUS"
     assert VERSION_TO_ZH[Version.MAIMAI_DX] == "舞萌DX"  # 品牌名即初代版本名
     assert VERSION_TO_ZH[Version.MAIMAI_DX_SPLASH] == "舞萌DX SPLASH"
-    assert VERSION_TO_ZH[Version.MAIMAI_DX_MAGICAL] == "MAGiCAL"
-    assert VERSION_TO_ZH[Version.MAIMAI_DX_FUTURE] == "舞萌DX FUTURE"
+    assert VERSION_TO_ZH[Version.MAIMAI_DX_MAGICAL] == "舞萌DX MAGiCAL"
 
 
 def test_rate_file_derived_from_rate_to_zh():

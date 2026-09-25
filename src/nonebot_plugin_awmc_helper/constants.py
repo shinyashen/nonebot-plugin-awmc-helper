@@ -95,9 +95,10 @@ RATE_TO_ZH: dict[RateType, str] = {
 # 版本名均由此派生；旧框官方系列名复用库表 divingfish_to_version）
 # ---------------------------------------------------------------------------
 
-# DX 世代枚举成员 → 官方尾名（CN 显示口径）。品牌名「舞萌DX」本身即初代版本名；
-# MAGiCAL 官方显示名不带前缀；FUTURE 为占位枚举、无实际版本，不入本表（显示名
-# 在 VERSION_TO_ZH 单独兜底）。素材包 pic/jp/ 的 logo 文件名与本表一致。
+# DX 世代枚举成员 → 官方尾名（CN 显示口径）。品牌名「舞萌DX」本身即初代版本名。
+# 尾名取官方 logo 主体词（如 MAGiCAL 全称 maimai DX MAGiCAL，显示名与其他世代
+# 同带前缀）。FUTURE 为占位枚举、无实际版本，不入本表、不设显示名。
+# 素材包 pic/jp/ 的 logo 文件名与本表一致。
 _DX_VERSION_NAMES: dict[Version, str] = {
     Version.MAIMAI_DX: "DX",
     Version.MAIMAI_DX_PLUS: "PLUS",
@@ -117,16 +118,15 @@ _DX_VERSION_NAMES: dict[Version, str] = {
 }
 
 # 枚举 → 中文显示名（查歌结果/猜歌/版本过滤用）。旧框官方系列名 = 库表键；
-# DX 世代按「舞萌DX + 尾名」派生。显示名特例显式覆盖：MiLK PLUS（库表键缺
-# maimai 前缀）、MAGiCAL（官方不带前缀）；FUTURE 为占位枚举，仅留显示兜底
+# DX 世代按「舞萌DX + 尾名」全量派生（MAGiCAL 同样带前缀，官方 logo 全称
+# maimai DX MAGiCAL）。唯一特例：MiLK PLUS（库表键缺 maimai 前缀），显式覆盖。
+# FUTURE 为占位枚举、无实际版本，不设显示名（version_zh 回落原码）
 VERSION_TO_ZH: dict[Version, str] = {
     **{ver: name for name, ver in _DF_TO_VERSION.items() if ver < Version.MAIMAI_DX},
     **{
         ver: ("舞萌DX" if name == "DX" else f"舞萌DX {name}")
         for ver, name in _DX_VERSION_NAMES.items()
     },
-    Version.MAIMAI_DX_FUTURE: "舞萌DX FUTURE",
-    Version.MAIMAI_DX_MAGICAL: "MAGiCAL",
     Version.MAIMAI_MILK_PLUS: "maimai MiLK PLUS",
 }
 
