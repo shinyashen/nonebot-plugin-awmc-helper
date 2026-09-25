@@ -7,6 +7,9 @@
 布局坐标与 NB 版完全一致，底图 1200×1300（宴会场 1200×1200）。
 """
 
+from typing import TYPE_CHECKING
+from pathlib import Path
+
 from PIL import Image
 from maimai_py import Song, Version, SongType, ScoreExtend
 
@@ -23,6 +26,9 @@ from ...constants import (
     display_song_id,
     chart_display_id,
 )
+
+if TYPE_CHECKING:
+    pass
 
 # NB base.py 的东亚字宽判定（截断用）
 _CHAR_WIDTHS = [
@@ -237,12 +243,21 @@ def song_chart_info(
     theme: str = "prism_plus",
     prefer_type: SongType | None = None,
     jp: bool = False,
+    *,
+    id_text: str | None = None,
+    genre_text: str | None = None,
+    cover_path: Path | None = None,
 ) -> bytes:
     """查歌卡（含可选的用户成绩/加分预测），布局坐标对齐 NB 版。
 
     ``prefer_type=STANDARD``：双谱歌曲显示 SD 徽章与 SD 难度表（前缀「标准/标」
     搜索）；其余按 NB 默认（有 DX 用 DX）。
     ``jp=True``：日服视图渲染，版本 logo 用日服世代图（pic/jp/）。
+    ``id_text``/``genre_text``/``cover_path``：覆写 ID 行/分类行/封面——pending
+    临时卡（id 未收录新曲）传 ``"ID —"``、分类名或 ``"-"``、payload 封面落盘
+    路径；缺省按 song 自身绘制（封面按曲 id 候选链取）。
+    BPM 与物量遵循「0 即 -」约定（0 在真实数据中只代表未收录，或旧框移植谱
+    本就无该类物量——约定俗成，缺数据与真 0 均显示 -）。
     """
     from PIL import ImageDraw
 
@@ -267,8 +282,11 @@ def song_chart_info(
             Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (842, 100),
         )
-    cover = assets.cover(song.id).resize((242, 242))
-    im.alpha_composite(cover, (133, 197))
+    if cover_path is not None and cover_path.exists():
+        cover = Image.open(cover_path).convert("RGBA")
+    else:
+        cover = assets.cover(song.id)
+    im.alpha_composite(cover.resize((242, 242)), (133, 197))
     version_img = version_image(chart_version, jp)
     if version_img is not None:
         logo = fit_version_logo(version_img)
@@ -306,25 +324,21 @@ def song_chart_info(
     )
     mr.text(
         (460, 345),
-        str(song.bpm),
+        str(song.bpm) if song.bpm else "-",
         font=font(24, FONT_RODIN),
         fill=text_color,
         anchor="lm",
     )
     mr.text(
         (405, 435),
-        f"ID {_display_card_id(song, prefer_sd)}",
+        id_text or f"ID {_display_card_id(song, prefer_sd)}",
         font=font(22, FONT_RODIN),
         fill=text_color,
         anchor="lm",
     )
-    mr.text(
-        (665, 435),
-        GENRE_TO_ZH.get(song.genre, song.genre.value),
-        font=f_han,
-        fill=text_color,
-        anchor="mm",
-    )
+    if genre_text is None:
+        genre_text = GENRE_TO_ZH.get(song.genre, song.genre.value)
+    mr.text((665, 435), genre_text, font=f_han, fill=text_color, anchor="mm")
 
     diffs = major_diffs(song, prefer_type)
     for index, diff in enumerate(diffs):
@@ -359,7 +373,7 @@ def song_chart_info(
             fill=text_color,
             anchor="mm",
         )
-        # TOTAL 列 = 五项 notes 之和（对齐 NB 六列布局）
+        # TOTAL 列 = 五项 notes 之和（对齐 NB 六列布局）；0 即 -（约定俗成）
         notes = (
             diff.tap_num,
             diff.hold_num,
@@ -367,9 +381,10 @@ def song_chart_info(
             diff.touch_num,
             diff.break_num,
         )
+        total = sum(notes)
         mr.text(
             (480, 590 + spacing),
-            str(sum(notes)),
+            str(total) if total else "-",
             font=font(25, FONT_RODIN),
             fill=text_color,
             anchor="mm",
@@ -377,7 +392,7 @@ def song_chart_info(
         for n, value in enumerate(notes):
             mr.text(
                 (602 + 122 * n, 590 + spacing),
-                str(value),
+                str(value) if value else "-",
                 font=font(25, FONT_RODIN),
                 fill=text_color,
                 anchor="mm",
