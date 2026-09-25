@@ -43,9 +43,10 @@ async def _():
         await UniMessage.text(
             f"补充数据已重载并重建底图（源 {summary['sources']} 个{wiki_msg}）。"
         ).finish(at_sender=True)
+    wiki_msg = f"，wiki 补充 {g_applied} 处" if g_applied else "，wiki 无缺口"
     await UniMessage.text(
         f"补充数据无变化（源 {summary['sources']} 个，"
-        f"本次应用 {summary.get('applied', 0)} 处）。"
+        f"本次应用 {summary.get('applied', 0)} 处{wiki_msg}）。"
     ).finish(at_sender=True)
 
 

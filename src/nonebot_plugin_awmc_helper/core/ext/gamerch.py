@@ -23,6 +23,7 @@ import unicodedata
 from pathlib import Path
 from dataclasses import field, dataclass
 
+import httpx
 from bs4 import BeautifulSoup
 
 from . import get_client
@@ -31,6 +32,15 @@ from .. import store
 logger = logging.getLogger("nonebot_plugin_awmc_helper.songdb")
 
 WIKI_BASE = "https://gamerch.com/maimai/"
+# gamerch 有 UA 反爬：非浏览器 UA 返回 202 空页；必须带浏览器 UA，
+# 且首请求的 Set-Cookie 入 jar 后再访问即稳定 200
+_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) "
+        "Gecko/20100101 Firefox/121.0"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
 # 配信順リスト根页（MAGiCAL；页内互链全部前代リスト，可自发现全曲页面编号）
 LIST_ROOT_IDS = [1011740]
 INVENTORY_KV = "gamerch_page_inventory"
@@ -112,7 +122,14 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
     import asyncio
 
     await asyncio.sleep(_FETCH_DELAY)
-    resp = await http.get(url, headers={"User-Agent": "nonebot-plugin-awmc-helper/0.1"})
+    # 首请求可能被 202 反爬（无 Cookie），Cookie 入共享客户端 jar 后重试一次
+    resp: httpx.Response | None = None
+    for _ in range(2):
+        resp = await http.get(url, headers=_REQUEST_HEADERS)
+        if resp.status_code == 200:
+            break
+        await asyncio.sleep(1.0)
+    assert resp is not None
     resp.raise_for_status()
     text = resp.text
     if page_id:
