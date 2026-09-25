@@ -6,7 +6,15 @@ maimai-py 的 `Genre` 枚举值是日文分类，库未公开导出中文映射�
 
 import re
 
-from maimai_py import Genre, Version, RateType, SongType, LevelIndex
+from maimai_py import (
+    Genre,
+    Version,
+    RateType,
+    SongType,
+    LevelIndex,
+    current_version,
+    plate_to_version,
+)
 from maimai_py.enums import name_to_genre as _LIB_NAME_TO_GENRE
 from maimai_py.utils.coefficient import SCORE_COEFFICIENT_TABLE
 
@@ -38,43 +46,26 @@ ZH_TO_GENRE: dict[str, Genre] = dict(_LIB_NAME_TO_GENRE) | {
 }
 
 # ---------------------------------------------------------------------------
-# 难度（LevelIndex）→ 颜色/名称
+# 难度（LevelIndex）元表：中文名/颜色字/英文小写/显示名 四表同轴（枚举序）合一
 # ---------------------------------------------------------------------------
+_LEVEL_INDEX_META: dict[LevelIndex, tuple[str, str, str, str]] = {
+    LevelIndex.BASIC: ("基础", "绿", "basic", "Basic"),
+    LevelIndex.ADVANCED: ("高级", "黄", "advanced", "Advanced"),
+    LevelIndex.EXPERT: ("专家", "红", "expert", "Expert"),
+    LevelIndex.MASTER: ("大师", "紫", "master", "Master"),
+    LevelIndex.ReMASTER: ("宗师", "白", "remaster", "Re:Master"),
+}
+LEVEL_INDEX_ZH: dict[LevelIndex, str] = {k: v[0] for k, v in _LEVEL_INDEX_META.items()}
 LEVEL_INDEX_COLOR: dict[LevelIndex, str] = {
-    LevelIndex.BASIC: "绿",
-    LevelIndex.ADVANCED: "黄",
-    LevelIndex.EXPERT: "红",
-    LevelIndex.MASTER: "紫",
-    LevelIndex.ReMASTER: "白",
+    k: v[1] for k, v in _LEVEL_INDEX_META.items()
 }
 COLOR_TO_LEVEL_INDEX: dict[str, LevelIndex] = {
-    v: k for k, v in LEVEL_INDEX_COLOR.items()
+    v[1]: k for k, v in _LEVEL_INDEX_META.items()
 }
-
-LEVEL_INDEX_ZH: dict[LevelIndex, str] = {
-    LevelIndex.BASIC: "基础",
-    LevelIndex.ADVANCED: "高级",
-    LevelIndex.EXPERT: "专家",
-    LevelIndex.MASTER: "大师",
-    LevelIndex.ReMASTER: "宗师",
-}
-
-# 难度英文小写名（素材名后缀：border_*/b50_score_*/rise_score_* 等）与
-# 显示名（统计卡/进度总览表头），渲染模块共用
-LEVEL_INDEX_EN: tuple[str, ...] = (
-    "basic",
-    "advanced",
-    "expert",
-    "master",
-    "remaster",
-)
-DIFF_DISPLAY_NAMES: tuple[str, ...] = (
-    "Basic",
-    "Advanced",
-    "Expert",
-    "Master",
-    "Re:Master",
-)
+# 英文小写名 = 素材名后缀（border_*/b50_score_*/rise_score_* 等），渲染模块共用
+LEVEL_INDEX_EN: tuple[str, ...] = tuple(v[2] for v in _LEVEL_INDEX_META.values())
+# 显示名 = 统计卡/进度总览表头
+DIFF_DISPLAY_NAMES: tuple[str, ...] = tuple(v[3] for v in _LEVEL_INDEX_META.values())
 
 # 达成率评级（RateType）→ 显示名，值越小评级越高
 RATE_TO_ZH: dict[RateType, str] = {
@@ -139,17 +130,24 @@ PLATE_KIND_ZH: dict[str, str] = {
 }
 
 # 完成表预渲染枚举（SUPERUSER 指令与国服更新自动触发共用，song-db-design §7.3）。
-# 牌字与版本的对应以 maimai_py plate_to_version 为准（「回」= CiRCLE PLUS）
-PLATE_CHARS = "舞霸真超檄橙晓桃樱紫堇白雪辉熊华爽煌星宙祭祝双宴镜彩丸回"
+# 牌子需求只算国服：舞/霸为旧作全集特牌（库表无映射，置首），其余牌字由
+# maimai_py ``plate_to_version`` 键序（=发售序）按「版本 ≤ 国服当前版本
+# ``current_version``」派生——库推进 current_version 后新代牌字自动纳入，
+# 未实装代（如 CiRCLE 的丸/回）不进；「初」不在牌单（M4 定表以来即无，国服牌单自真起）。
+PLATE_CHARS = "舞霸" + "".join(
+    ch for ch, ver in plate_to_version.items() if ver <= current_version and ch != "初"
+)
 PLATE_KINDS = ("将", "者", "极", "神", "舞舞")
 
 # ---------------------------------------------------------------------------
-# 版本名 → 版本码（歌曲库日侧骨架用；穷举自 maimai_py Version 枚举，勿凭记忆增删）
+# 版本名 → 版本码（歌曲库日侧骨架用）
 # ---------------------------------------------------------------------------
 
-# 数据源版本名 → 版本码。两套命名并存（穷举自真实数据，勿凭记忆增删）：
-# - all_data `from`：旧框英文名 + DX 时代日文名（"maimai でらっくす*"，同 maimai_py）；
-# - dschange 版本名 / __increments__.version：DX 时代英文名（"maimai DX*"）
+# 数据源版本名 → 版本码。只收录 maimai_py ``divingfish_to_version`` 之外的名字
+# （重叠条目由 core/songdb._source_version 的库表兜底命中，勿重复收录、勿凭记忆增删）：
+# - dschange 版本名 / __increments__.version：DX 时代英文名（"maimai DX*"），库表无此域
+# - all_data `from` 中库表缺收的 PLUS 名——国服 DX 时代 PLUS 不作独立版本，
+#   水鱼/库表不收是有意为之；另有 "maimai MiLK PLUS"（库表键缺 maimai 前缀）
 SOURCE_NAME_TO_VERSION: dict[str, int] = {
     # —— dschange 系（maimaiinfo/static/dschange.json 实测命名）——
     "maimai DX": 20000,
@@ -166,55 +164,24 @@ SOURCE_NAME_TO_VERSION: dict[str, int] = {
     "maimai DX PRiSM PLUS": 25500,
     "maimai DX CiRCLE": 26000,
     "maimai DX CiRCLE PLUS": 26500,
-    # —— all_data `from` 系（maimaiinfo 命名域含 PLUS，按枚举本地补全；
-    #    水鱼 from 域不含——国服 DX 时代 PLUS 不作独立版本，库表不收是有意为之）——
-    "maimai": 10000,
-    "maimai PLUS": 11000,
-    "maimai GreeN": 12000,
-    "maimai GreeN PLUS": 13000,
-    "maimai ORANGE": 14000,
-    "maimai ORANGE PLUS": 15000,
-    "maimai PiNK": 16000,
-    "maimai PiNK PLUS": 17000,
-    "maimai MURASAKi": 18000,
-    "maimai MURASAKi PLUS": 18500,
-    "maimai MiLK": 19000,
+    # —— all_data `from` 系库表缺收的名字 ——
     "maimai MiLK PLUS": 19500,
-    "maimai FiNALE": 19900,
-    "maimai でらっくす": 20000,
     "maimai でらっくす PLUS": 20500,
-    "maimai でらっくす Splash": 21000,
     "maimai でらっくす Splash PLUS": 21500,
-    "maimai でらっくす UNiVERSE": 22000,
     "maimai でらっくす UNiVERSE PLUS": 22500,
-    "maimai でらっくす FESTiVAL": 23000,
     "maimai でらっくす FESTiVAL PLUS": 23500,
-    "maimai でらっくす BUDDiES": 24000,
     "maimai でらっくす BUDDiES PLUS": 24500,
-    "maimai でらっくす PRiSM": 25000,
-    "maimai でらっくす PRiSM PLUS": 25500,
-    "maimai でらっくす CiRCLE": 26000,
     "maimai でらっくす CiRCLE PLUS": 26500,
 }
 
-# DX 时代版本轴（穷举自 Version 枚举 MAIMAI_DX..MAIMAI_DX_CIRCLE_PLUS，勿凭记忆增删）：
-# 01 文档标准 JSON 的 sd/dx `level` 扁平列表即按此轴逐版本对齐
-# （「不包含旧框版本的定数，均从 dx 初代版本开始统计」）
+# DX 时代版本轴 = Version 枚举 MAIMAI_DX..MAIMAI_DX_CIRCLE_PLUS 的值切片：
+# 01 文档标准 JSON 的 sd/dx `level` 扁平列表即按此轴逐版本对齐（导出固定 14 列，
+# 「不包含旧框版本的定数，均从 dx 初代版本开始统计」；MAGiCAL/FUTURE 不在轴上，
+# 导入侧由 songdb._points_from_flat 以枚举已知码 +500 递推扩展）
 DX_VERSION_CODES: list[int] = [
-    20000,  # maimai でらっくす
-    20500,  # maimai でらっくす PLUS
-    21000,  # maimai でらっくす Splash
-    21500,  # maimai でらっくす Splash PLUS
-    22000,  # maimai でらっくす UNiVERSE
-    22500,  # maimai でらっくす UNiVERSE PLUS
-    23000,  # maimai でらっくす FESTiVAL
-    23500,  # maimai でらっくす FESTiVAL PLUS
-    24000,  # maimai でらっくす BUDDiES
-    24500,  # maimai でらっくす BUDDiES PLUS
-    25000,  # maimai でらっくす PRiSM
-    25500,  # maimai でらっくす PRiSM PLUS
-    26000,  # maimai でらっくす CiRCLE
-    26500,  # maimai でらっくす CiRCLE PLUS
+    v.value
+    for v in Version
+    if Version.MAIMAI_DX.value <= v.value <= Version.MAIMAI_DX_CIRCLE_PLUS.value
 ]
 
 
@@ -361,44 +328,31 @@ SYNC_FILE = {"sync": "Sync", "fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FS
 # 数据源 → 署名显示名（查分器站点品牌名，各卡面共用）
 SERVICE_DISPLAY = {"divingfish": "Diving-Fish", "lxns": "Lxns-Network"}
 
-# RateType 枚举名 → UI_TTR_Rank_*.png 文件名后缀
-RATE_FILE = {
-    "SSSP": "SSSp",
-    "SSS": "SSS",
-    "SSP": "SSp",
-    "SS": "SS",
-    "SP": "Sp",
-    "S": "S",
-    "AAA": "AAA",
-    "AA": "AA",
-    "A": "A",
-    "BBB": "BBB",
-    "BB": "BB",
-    "B": "B",
-    "C": "C",
-    "D": "D",
-}
+# RateType 枚举名 → UI_TTR_Rank_*.png 文件名后缀（由 RATE_TO_ZH 派生：
+# 素材名把显示名的 + 写作小写 p，如 "SS+" → "SSp"）
+RATE_FILE = {m.name: zh.replace("+", "p") for m, zh in RATE_TO_ZH.items()}
 
-# 日服 DX 世代版本码 → 日服 logo 文件名（static/mai/pic/jp/ 下）。
+# Version 枚举 → 日服 logo 文件名（static/mai/pic/jp/ 下）。
 # 现有素材库的 DX 代 logo 为国服特有版本，日服视图渲染时改用本表；
-# 旧框（<20000）中日 logo 相同，走 VERSION_IMAGE 通用路径。
-# MAGiCAL(27000) 等超出 maimai_py 枚举的版本同样在此映射（song-db-design §7.4）
-JP_VERSION_IMAGE: dict[int, str] = {
-    20000: "DX",
-    20500: "DX PLUS",
-    21000: "Splash",
-    21500: "Splash PLUS",
-    22000: "UNiVERSE",
-    22500: "UNiVERSE PLUS",
-    23000: "FESTiVAL",
-    23500: "FESTiVAL PLUS",
-    24000: "BUDDiES",
-    24500: "BUDDiES PLUS",
-    25000: "PRiSM",
-    25500: "PRiSM PLUS",
-    26000: "CiRCLE",
-    26500: "CiRCLE PLUS",
-    27000: "MAGiCAL",
+# 旧框（<MAIMAI_DX）中日 logo 相同，不在本表、走 VERSION_IMAGE 通用路径。
+# 追加批次码（基础码 + 批内序号，如 26513）的回落由 Version.from_value
+# 「≤ 取最近」语义承担（见 core/render/nb_chart._jp_version_logo_name）
+JP_VERSION_IMAGE: dict[Version, str] = {
+    Version.MAIMAI_DX: "DX",
+    Version.MAIMAI_DX_PLUS: "DX PLUS",
+    Version.MAIMAI_DX_SPLASH: "Splash",
+    Version.MAIMAI_DX_SPLASH_PLUS: "Splash PLUS",
+    Version.MAIMAI_DX_UNIVERSE: "UNiVERSE",
+    Version.MAIMAI_DX_UNIVERSE_PLUS: "UNiVERSE PLUS",
+    Version.MAIMAI_DX_FESTIVAL: "FESTiVAL",
+    Version.MAIMAI_DX_FESTIVAL_PLUS: "FESTiVAL PLUS",
+    Version.MAIMAI_DX_BUDDIES: "BUDDiES",
+    Version.MAIMAI_DX_BUDDIES_PLUS: "BUDDiES PLUS",
+    Version.MAIMAI_DX_PRISM: "PRiSM",
+    Version.MAIMAI_DX_PRISM_PLUS: "PRiSM PLUS",
+    Version.MAIMAI_DX_CIRCLE: "CiRCLE",
+    Version.MAIMAI_DX_CIRCLE_PLUS: "CiRCLE PLUS",
+    Version.MAIMAI_DX_MAGICAL: "MAGiCAL",
 }
 
 # Version 枚举 → 版本图文件名（pic/ 下，键与 maimai-py divingfish_to_version 一致）

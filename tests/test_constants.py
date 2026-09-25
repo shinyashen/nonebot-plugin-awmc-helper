@@ -49,16 +49,89 @@ def test_zh_to_genre_covers_official_and_aliases():
 
 
 def test_plate_chars_align_with_library():
-    """牌字穷举与库 plate_to_version 对齐（舞/霸为旧作全集特判，回 = CiRCLE PLUS）。"""
-    from maimai_py import Version, plate_to_version
+    """牌单派生口径：舞/霸特牌置首 + plate_to_version 键序（=发售序）×
+    「版本 ≤ current_version」× 排除初——库推进 current_version 后新牌自动纳入。"""
+    from maimai_py import Version, current_version, plate_to_version
 
     from nonebot_plugin_awmc_helper.constants import PLATE_CHARS
 
-    for ch in PLATE_CHARS:
-        if ch in ("舞", "霸"):
-            continue
-        assert ch in plate_to_version, f"牌字 {ch} 不在库 plate_to_version 中"
+    derived = "舞霸" + "".join(
+        ch
+        for ch, ver in plate_to_version.items()
+        if ver <= current_version and ch != "初"
+    )
+    assert PLATE_CHARS == derived
+    assert PLATE_CHARS.startswith("舞霸")
+    # 当前国服（PRiSM PLUS）未实装的 CiRCLE 代与无牌的 初/未 不在牌单
+    assert not ({"初", "丸", "回", "未"} & set(PLATE_CHARS))
     assert plate_to_version["回"] == Version.MAIMAI_DX_CIRCLE_PLUS
+
+
+def test_dx_version_codes_matches_enum_slice():
+    """DX 版本轴 = 枚举 MAIMAI_DX..MAIMAI_DX_CIRCLE_PLUS 值切片（01 文档 14 列）。"""
+    from maimai_py import Version
+
+    from nonebot_plugin_awmc_helper.constants import DX_VERSION_CODES
+
+    assert DX_VERSION_CODES == [
+        v.value
+        for v in Version
+        if Version.MAIMAI_DX.value <= v.value <= Version.MAIMAI_DX_CIRCLE_PLUS.value
+    ]
+    assert len(DX_VERSION_CODES) == 14
+
+
+def test_source_name_table_only_holds_lib_missing_names():
+    """与库 divingfish_to_version 重叠的名字不重复收录（songdb 查表兜底库表）。"""
+    from maimai_py.enums import divingfish_to_version
+
+    from nonebot_plugin_awmc_helper.constants import SOURCE_NAME_TO_VERSION
+
+    overlap = set(SOURCE_NAME_TO_VERSION) & set(divingfish_to_version)
+    assert not overlap, f"应交给库表兜底的重复条目：{sorted(overlap)}"
+    # 两个命名域的代表条目仍在：dschange 英文域 + でらっくす PLUS 补收
+    assert SOURCE_NAME_TO_VERSION["maimai DX Splash"] == 21000
+    assert SOURCE_NAME_TO_VERSION["maimai でらっくす PLUS"] == 20500
+    assert SOURCE_NAME_TO_VERSION["maimai MiLK PLUS"] == 19500
+
+
+def test_jp_version_image_keyed_by_enum():
+    """日服 logo 表以 Version 枚举为键，MAGiCAL 在表；旧框版本不收。"""
+    from maimai_py import Version
+
+    from nonebot_plugin_awmc_helper.constants import JP_VERSION_IMAGE
+
+    assert JP_VERSION_IMAGE[Version.MAIMAI_DX] == "DX"
+    assert JP_VERSION_IMAGE[Version.MAIMAI_DX_MAGICAL] == "MAGiCAL"
+    assert Version.MAIMAI_FINALE not in JP_VERSION_IMAGE
+
+
+def test_rate_file_derived_from_rate_to_zh():
+    """素材名后缀表由 RATE_TO_ZH 派生：显示名的 + 写作小写 p。"""
+    from nonebot_plugin_awmc_helper.constants import RATE_FILE, RATE_TO_ZH
+
+    assert RATE_FILE == {m.name: zh.replace("+", "p") for m, zh in RATE_TO_ZH.items()}
+    assert RATE_FILE["SSSP"] == "SSSp"
+    assert RATE_FILE["SSP"] == "SSp"
+
+
+def test_level_index_tables_share_axis():
+    """难度四表同轴：元表派生的键集/顺序/反向映射一致。"""
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.constants import (
+        LEVEL_INDEX_EN,
+        LEVEL_INDEX_ZH,
+        LEVEL_INDEX_COLOR,
+        DIFF_DISPLAY_NAMES,
+        COLOR_TO_LEVEL_INDEX,
+    )
+
+    assert list(LEVEL_INDEX_ZH) == list(LevelIndex)
+    assert list(LEVEL_INDEX_COLOR) == list(LevelIndex)
+    assert COLOR_TO_LEVEL_INDEX == {v: k for k, v in LEVEL_INDEX_COLOR.items()}
+    assert LEVEL_INDEX_EN == ("basic", "advanced", "expert", "master", "remaster")
+    assert DIFF_DISPLAY_NAMES == ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 
 def test_wu_plate_kinds_and_validity():

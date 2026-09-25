@@ -135,16 +135,17 @@ def _jp_version_logo_name(version: int) -> str | None:
     """日服版本码 → 日服 logo 文件名；追加批次码回落基础码。
 
     追加批次码 = 基础版本码（500 的倍数）+ 批内序号（如 26513 = CiRCLE PLUS + 13），
-    精确匹配落空时按 500 取整回基础码；旧框（<20000）中日 logo 相同，交由通用路径。
+    ``Version.from_value``「≤ 取最近」语义天然完成回落；旧框版本不在
+    JP_VERSION_IMAGE，落空走通用路径。
     """
-    if name := JP_VERSION_IMAGE.get(version):
-        return name
-    return JP_VERSION_IMAGE.get(version // 500 * 500) if version >= 20000 else None
+    if not version:
+        return None
+    return JP_VERSION_IMAGE.get(Version.from_value(version))
 
 
 def version_image(version: int, jp: bool = False) -> Image.Image | None:
     if jp:
-        # 日服视图：DX 世代用日服 logo（pic/jp/，含 MAGiCAL 等超枚举版本）
+        # 日服视图：DX 世代用日服 logo（pic/jp/，含 MAGiCAL）
         jp_name = _jp_version_logo_name(version)
         if jp_name:
             path = assets.static_path() / "mai" / "pic" / "jp" / f"{jp_name}.png"
