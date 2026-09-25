@@ -4,7 +4,7 @@
 （CN 口径：华/煌/宙/祝/宴并 PLUS，回 = CiRCLE PLUS，舞/霸为旧作全集特判）。
 """
 
-from maimai_py import Song, SongType, SongDifficulty, plate_to_version
+from maimai_py import Song, Version, SongType, SongDifficulty, plate_to_version
 
 _LEGACY_PLATES = ("舞", "霸")
 """旧作全集牌：横跨全部旧框版本，主类型为 SD。"""
@@ -59,11 +59,15 @@ def plate_version_range(version: str) -> tuple[int, int] | None:
     if pv is None:
         return None
     nxt = [v.value for v in plate_to_version.values() if v.value > pv.value]
-    # 末段上界 = 当前最新版本码（FUTURE 30000 为未实装占位，不计）
+    # 末段上界 = 当前最新版本码（FUTURE 为未实装占位版本，不计）
     hi = (
         (min(nxt) - 1)
         if nxt
-        else max(v.value for v in plate_to_version.values() if v.value < 30000)
+        else max(
+            v.value
+            for v in plate_to_version.values()
+            if v.value < Version.MAIMAI_DX_FUTURE.value
+        )
     )
     return (pv.value, hi)
 

@@ -1298,7 +1298,9 @@ def _points_from_flat(
     axis = list(DX_VERSION_CODES)
     # 枚举已收录、DX 轴尚未收录的新版本码（如 MAGiCAL 27000；FUTURE 占位不计）
     top = max(DX_VERSION_CODES)
-    extras = [v.value for v in Version if top < v.value < 30000]
+    extras = [
+        v.value for v in Version if top < v.value < Version.MAIMAI_DX_FUTURE.value
+    ]
     while len(axis) < n:  # 扩展轴：先已知新版本码，再 +500 递推
         axis.append(
             extras[len(axis) - len(DX_VERSION_CODES)]

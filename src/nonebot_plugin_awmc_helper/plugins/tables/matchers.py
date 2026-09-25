@@ -13,7 +13,7 @@ from .sheet import (
     _plate_completion_sheet,
     _plate_progress_overview,
 )
-from ...constants import PLATE_CHARS, DEFAULT_THEME, chart_display_id
+from ...constants import PLATE_CHARS, PLATE_KINDS, DEFAULT_THEME, chart_display_id
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import parse_page, handle_errors
@@ -22,8 +22,9 @@ from ...core.binding import session_keys, binding_service, service_display
 from ...core.render.score import DrawScore
 from ...core.render.tools import text_to_image, image_to_bytes
 
-# 牌种正则（牌子字符 PLATE_CHARS 与 core 预渲染共用 constants 一份）
-PLATE_KINDS = "舞舞|将|者|极|神"
+# 牌种正则（牌子字符与牌种均取自 constants——PLATE_CHARS/PLATE_KINDS 与 core
+# 预渲染共用一份；正则交替最长优先，防将来新增牌种被单字牌种遮蔽）
+PLATE_KIND_ALT = "|".join(sorted(PLATE_KINDS, key=len, reverse=True))
 
 LEVEL_RE = r"([0-9]+\+?)"
 DS_RE = r"([0-9]+(?:\.[0-9]+)?\+?)"
@@ -36,7 +37,7 @@ progress_cmd = on_regex(
     block=True,
 )
 plate_cmd = on_regex(
-    rf"^([{PLATE_CHARS}])({PLATE_KINDS})(完成表|进度)\s?([0-9]+)?$",
+    rf"^([{PLATE_CHARS}])({PLATE_KIND_ALT})(完成表|进度)\s?([0-9]+)?$",
     block=True,
 )
 plate_help = on_fullmatch("牌子条件", block=True)
