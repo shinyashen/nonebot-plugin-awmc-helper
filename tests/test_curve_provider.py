@@ -99,7 +99,7 @@ async def test_get_curves_maps_ids_and_filters_empty():
         _client = _FakeHttp()
 
     provider = DivingFishCurveProvider()
-    curves = await provider.get_curves(_FakeClient())
+    curves = await provider.get_curves(_FakeClient())  # type: ignore[arg-type]
     assert set(curves) == {(8, SongType.STANDARD), (999, SongType.DX)}
     # {} 过滤后不占位：SD 列表 4 项、DX 列表 1 项
     assert len(curves[(8, SongType.STANDARD)]) == 4
@@ -121,5 +121,5 @@ async def test_get_curves_failure_degrades():
         _client = _BrokenHttp()
 
     provider = DivingFishCurveProvider()
-    assert await provider.get_curves(_FakeClient()) == {}
+    assert await provider.get_curves(_FakeClient()) == {}  # type: ignore[arg-type]
     assert provider._hash() != DivingFishCurveProvider._OK_HASH
