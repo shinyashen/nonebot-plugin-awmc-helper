@@ -316,7 +316,6 @@ async def _plate_progress_overview(
 ) -> None:
     """进度总览（R7：NB DrawPlateProgress 版式总览图）。"""
     cleared_plates = await plates.get_cleared()
-    cleared_plates = await plates.get_cleared()
     remained = await plates.get_remained()
 
     # song_id → (song, 剩余槽集, 达成槽集)；remained ∪ cleared = 牌子范围内全部曲
