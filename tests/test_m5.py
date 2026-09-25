@@ -262,19 +262,19 @@ async def test_guess_crop_smoke(songs):
 @pytest.mark.asyncio
 async def test_guess_manager(songs, monkeypatch):
     """猜歌对局管理：开局→提示序列→答对揭晓→清理；答案判定不区分大小写。"""
-    from nonebot_plugin_awmc_helper.plugins import guess as guess_plugin
     from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.guess import game as guess_game
 
-    monkeypatch.setattr(guess_plugin.plugin_config, "awmc_guess_interval", 60)
-    monkeypatch.setattr(guess_plugin.plugin_config, "awmc_guess_duration", 60)
+    monkeypatch.setattr(guess_game.plugin_config, "awmc_guess_interval", 60)
+    monkeypatch.setattr(guess_game.plugin_config, "awmc_guess_duration", 60)
 
-    song = await guess_plugin._pick_song()
+    song = await guess_game._pick_song()
     assert song is not None
-    game = guess_plugin.GuessGame(
+    game = guess_game.GuessGame(
         song, pic_mode=False, group_id="g1", bot=None, event=None
     )
-    guess_plugin._games["g1"] = game
-    assert guess_plugin._game_of("g1") is game
+    guess_game._games["g1"] = game
+    assert guess_game._game_of("g1") is game
     assert len(game.hints) == 6
     # 6 条提示后进入曲绘阶段
     for i in range(6):
@@ -297,24 +297,24 @@ async def test_guess_answer_flow(app: App, songs, monkeypatch):
     """on_message 答案拦截：命中后揭晓并清理对局。"""
     from nonebot_plugin_uninfo import User, Scene, Session, SceneType
 
-    from nonebot_plugin_awmc_helper.plugins import guess as guess_plugin
+    from nonebot_plugin_awmc_helper.plugins.guess import game as guess_game
 
-    monkeypatch.setattr(guess_plugin.plugin_config, "awmc_guess_duration", 60)
+    monkeypatch.setattr(guess_game.plugin_config, "awmc_guess_duration", 60)
 
     revealed: list[str] = []
 
     async def fake_reveal(game, prefix):
         revealed.append(prefix)
-        guess_plugin._games.pop(game.group_id, None)
+        guess_game._games.pop(game.group_id, None)
 
-    monkeypatch.setattr(guess_plugin, "_reveal", fake_reveal)
+    monkeypatch.setattr(guess_game, "_reveal", fake_reveal)
 
-    song = await guess_plugin._pick_song()
+    song = await guess_game._pick_song()
     assert song is not None
-    game = guess_plugin.GuessGame(
+    game = guess_game.GuessGame(
         song, pic_mode=True, group_id="g2", bot=None, event=None
     )
-    guess_plugin._games["g2"] = game
+    guess_game._games["g2"] = game
 
     session = Session(
         self_id="test",
@@ -327,12 +327,12 @@ async def test_guess_answer_flow(app: App, songs, monkeypatch):
         platform="unknown",
     )
     # 错误答案不触发
-    assert not await guess_plugin._handle_answer(session, "乱答的")
-    assert guess_plugin._game_of("g2") is game
+    assert not await guess_game._handle_answer(session, "乱答的")
+    assert guess_game._game_of("g2") is game
     # 正确答案揭晓
-    assert await guess_plugin._handle_answer(session, song.title)
+    assert await guess_game._handle_answer(session, song.title)
     assert revealed
-    assert guess_plugin._game_of("g2") is None
+    assert guess_game._game_of("g2") is None
 
 
 @pytest.mark.asyncio
@@ -340,7 +340,7 @@ async def test_guess_reveal_idempotent(songs, monkeypatch):
     """揭晓幂等：答对与超时并发时 _reveal 只生效一次，且取消提示循环 task。"""
     import asyncio
 
-    from nonebot_plugin_awmc_helper.plugins import guess as guess_plugin
+    from nonebot_plugin_awmc_helper.plugins.guess import game as guess_game
 
     sends: list[str] = []
 
@@ -358,21 +358,21 @@ async def test_guess_reveal_idempotent(songs, monkeypatch):
         async def send(self, *a, **kw):
             sends.append("".join(self.parts))
 
-    monkeypatch.setattr(guess_plugin, "UniMessage", _FakeUniMsg)
+    monkeypatch.setattr(guess_game, "UniMessage", _FakeUniMsg)
 
-    song = await guess_plugin._pick_song()
+    song = await guess_game._pick_song()
     assert song is not None
-    game = guess_plugin.GuessGame(
+    game = guess_game.GuessGame(
         song, pic_mode=True, group_id="g9", bot=None, event=None
     )
     game.task = asyncio.create_task(asyncio.sleep(60))
-    guess_plugin._games["g9"] = game
+    guess_game._games["g9"] = game
     try:
-        await guess_plugin._reveal(game, "时间到！")
-        await guess_plugin._reveal(game, "时间到！")  # 第二次应被 settled 挡掉
+        await guess_game._reveal(game, "时间到！")
+        await guess_game._reveal(game, "时间到！")  # 第二次应被 settled 挡掉
         assert len(sends) == 1
         assert "时间到" in sends[0]
-        assert guess_plugin._game_of("g9") is None
+        assert guess_game._game_of("g9") is None
         await asyncio.sleep(0)  # 让循环 task 处理 cancel
         assert game.task.cancelled()
     finally:
