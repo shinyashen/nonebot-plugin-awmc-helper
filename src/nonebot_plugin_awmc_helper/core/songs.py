@@ -376,6 +376,18 @@ class SongService:
         jp = await self._jp_songs_map()
         return jp.get(song_id % 10000)
 
+    # -- pending 兜底（id 未收录新曲，Q33）---------------------------------
+
+    async def pending_by_title_fuzzy(self, title: str) -> "list[songdb.PendingSong]":
+        """pending 曲标题子串匹配（CN/JP 视图与别名全 miss 后的最终兜底）。"""
+        return await songdb.pending_search(title=title)
+
+    async def pending_by_level_value(
+        self, min_ds: float, max_ds: float
+    ) -> "list[songdb.PendingSong]":
+        """pending 曲定数查歌（闭区间，新曲在定数揭晓后即可被查到）。"""
+        return await songdb.pending_search(ds_range=(min_ds, max_ds))
+
     async def by_utage_id(
         self, diff_id: int
     ) -> "tuple[Song, SongDifficultyUtage] | None":

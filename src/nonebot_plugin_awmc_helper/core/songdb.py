@@ -37,6 +37,7 @@ from maimai_py.models import (
 from . import store
 from .http import build_smart_transport
 from ..constants import (
+    GENRE_TO_ZH,
     DX_VERSION_CODES,
     SOURCE_NAME_TO_VERSION,
     level_from_value,
@@ -1588,6 +1589,219 @@ async def upsert_pending(source: str, key: str, reason: str, payload: dict) -> N
         row.attempts += 1
         session.add(row)
         await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# 待归并曲目可查（§7.4-7 / Q33）：id 未到位的 pending 曲以「仅展示」形式参与
+# 查歌兜底——不进运行时视图/别名索引/id 键路径。搜索侧用轻量结构（PendingSong，
+# 携带封面 URL 等模型没有的字段），渲染时经 :func:`pending_to_song` 物化为
+# maimai_py Song 走既有查歌卡（用户拍板「0 即 -」约定：bpm/物量的 0 在卡面
+# 画 -，真实数据中 0 只代表未收录或旧框移植谱本就无该类物量）。
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PendingChart:
+    """pending 曲的谱面行：只收**有具体定数**的 sd/dx 谱面，缺失字段为 None。
+
+    物量按「0 即 -」约定填 0（渲染层画 -）；tap 缺整行视为无物量 → None。
+    """
+
+    kind: str  # "sd" / "dx"
+    level_id: int  # 0-4（rem 仅 sd）
+    level: str | None  # 标级串（如 "13+"），缺 → None
+    level_value: float  # 定数（可查 gate 保证可得）
+    designer: str | None  # 谱师，缺 → None
+    notes: tuple[int, int, int, int, int] | None  # (tap, hold, slide, touch, break)
+
+    @property
+    def is_dx(self) -> bool:
+        return self.kind == "dx"
+
+
+@dataclass
+class PendingSong:
+    """``song_pending`` 曲目的可查表示（仅展示，不参与以 id 为键的功能）。"""
+
+    source: str
+    key: str
+    title: str
+    artist: str | None
+    bpm: str | None
+    genre: str | None  # Genre 枚举值域（catcode 映射），映射不到 → None
+    version: int | None  # 组级日服版本码
+    image_url: str | None  # 官方封面哈希名（maimaidx.jp 直取）
+    charts: list[PendingChart]
+
+    @property
+    def cover_key(self) -> str:
+        """封面缓存键：标题摘要（pending 曲无 id，不能按 id 缓存）。"""
+        return hashlib.md5(norm_title(self.title).encode()).hexdigest()[:16]
+
+    @property
+    def genre_display(self) -> str | None:
+        """分类中文展示名；未知分类返回 None（卡面画 -，不猜 Genre 枚举）。"""
+        if not self.genre:
+            return None
+        try:
+            return GENRE_TO_ZH.get(Genre(self.genre), self.genre)
+        except ValueError:
+            return self.genre
+
+    def major_charts(self) -> list[PendingChart]:
+        """卡片难度行：有 DX 用 DX（major_diffs 同口径），按难度序。"""
+        charts = [c for c in self.charts if c.is_dx] or [
+            c for c in self.charts if not c.is_dx
+        ]
+        return sorted(charts, key=lambda c: c.level_id)
+
+
+def pending_to_song(pending: PendingSong) -> Song:
+    """PendingSong → 临时 maimai_py ``Song``（走既有查歌卡渲染，仅展示）。
+
+    - id 恒 0：不进任何运行时缓存/id 键路径，卡面 ID 行由调用方以「ID —」覆写；
+    - 缺失字段按「0 即 -」约定：bpm/物量缺 → 0、曲师/标级缺 → "-"；
+    - version 未知填 0（``Version.from_value(0)`` 为 None，版本 logo 自然缺席）。
+    """
+    standard, dx = [], []
+    for chart in pending.charts:
+        tap, hold, slide, touch, brk = chart.notes or (0, 0, 0, 0, 0)
+        diff = SongDifficulty(
+            type=SongType.DX if chart.is_dx else SongType.STANDARD,
+            level_index=LevelIndex(chart.level_id),
+            level=chart.level or "-",
+            level_value=chart.level_value,
+            note_designer=chart.designer or "-",
+            version=pending.version or 0,
+            tap_num=tap,
+            hold_num=hold,
+            slide_num=slide,
+            touch_num=touch,
+            break_num=brk,
+            curve=None,
+        )
+        (dx if chart.is_dx else standard).append(diff)
+    try:
+        bpm = int(float(pending.bpm)) if pending.bpm else 0
+    except ValueError:
+        bpm = 0
+    return Song(
+        id=0,
+        title=pending.title,
+        artist=pending.artist or "-",
+        genre=_genre_of(pending.genre or ""),
+        bpm=bpm,
+        map=None,
+        version=pending.version or 0,
+        rights=None,
+        aliases=None,
+        disabled=False,
+        difficulties=SongDifficulties(standard=standard, dx=dx, utage=[]),
+    )
+
+
+def parse_pending_item(payload: dict) -> PendingSong | None:
+    """otoge 条目 → :class:`PendingSong`；**可查 gate** 不满足返回 None。
+
+    gate（Q33 用户口径）：标题非空且至少一张 sd/dx 谱面的定数（``*_i``）
+    可解析为浮点——``?``/空/缺都不算；不满足说明该曲还没有可展示的核心
+    信息，继续留在 pending 等 otoge/官方补数。
+    """
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return None
+    charts: list[PendingChart] = []
+    for prefix, kind in (("lev", "sd"), ("dx_lev", "dx")):
+        for suffix, level_id in _OTOLEVEL_IDS.items():
+            if kind == "dx" and suffix == "rem":
+                continue  # rem 仅 SD 存在（与 _fill_row_from_otoge 同口径）
+            raw_value = payload.get(f"{prefix}_{suffix}_i")
+            try:
+                level_value = float(raw_value)
+            except (TypeError, ValueError):
+                continue  # 无定数（? / 空 / 缺）：该谱面暂不展示
+            # 标级串接受 13 / 13+ / 13? / 13+? 形态，其余（空、?）视为未知
+            raw_level = str(payload.get(f"{prefix}_{suffix}") or "").strip()
+            level = raw_level if re.fullmatch(r"\d+\+?\??", raw_level) else None
+            tap = _safe_int(payload.get(f"{prefix}_{suffix}_notes_tap"))
+            if tap is None:
+                notes = None  # tap 是物量锚点（与 _fill_row_from_otoge 同口径）
+            else:
+                # 「0 即 -」约定：缺失列填 0，渲染层画 -
+                notes = (
+                    tap,
+                    *(
+                        _safe_int(payload.get(f"{prefix}_{suffix}_notes_{k}")) or 0
+                        for k in _NOTE_KEYS[1:]
+                    ),
+                )
+            charts.append(
+                PendingChart(
+                    kind=kind,
+                    level_id=level_id,
+                    level=level,
+                    level_value=level_value,
+                    designer=payload.get(f"{prefix}_{suffix}_designer") or None,
+                    notes=notes,
+                )
+            )
+    if not charts:
+        return None
+    version = payload.get("version")
+    genre_name = OTOGE_CATCODE_TO_GENRE.get(payload.get("catcode") or "")
+    return PendingSong(
+        source="otoge-db",
+        key=f"title:{title}",
+        title=title,
+        artist=(payload.get("artist") or "").strip() or None,
+        bpm=str(payload.get("bpm") or "").strip() or None,
+        genre=genre_name or None,
+        version=int(version) if str(version or "").isdigit() else None,
+        image_url=payload.get("image_url") or None,
+        charts=charts,
+    )
+
+
+async def pending_search(
+    *,
+    title: str | None = None,
+    ds_range: tuple[float, float] | None = None,
+) -> list[PendingSong]:
+    """查 ``song_pending``（reason=missing_id）中满足可查 gate 的曲目。
+
+    ``title``：归一化子串匹配；``ds_range``：任一谱面定数落在闭区间。
+    均不传则返回全部可查 pending 曲。按版本降序（新曲在前）。
+    """
+    from ..constants import normalize_text
+
+    keyword = normalize_text(title) if title else None
+    async with store.session() as session:
+        rows = (
+            await session.exec(
+                select(store.SongPending).where(
+                    store.SongPending.reason == "missing_id"
+                )
+            )
+        ).all()
+    result: list[PendingSong] = []
+    for row in rows:
+        try:
+            payload = json.loads(row.payload)
+        except json.JSONDecodeError:
+            continue
+        pending = parse_pending_item(payload)
+        if pending is None:
+            continue
+        pending.source, pending.key = row.source, row.key
+        if keyword and keyword not in normalize_text(pending.title):
+            continue
+        if ds_range and not any(
+            ds_range[0] <= c.level_value <= ds_range[1] for c in pending.charts
+        ):
+            continue
+        result.append(pending)
+    result.sort(key=lambda p: (-(p.version or 0), p.title))
+    return result
 
 
 async def _load_extra_docs() -> list[tuple[str, str, dict]]:

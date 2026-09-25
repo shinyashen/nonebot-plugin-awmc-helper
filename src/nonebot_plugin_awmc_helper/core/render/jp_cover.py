@@ -58,7 +58,7 @@ la7ZYEqcc56eoPAiElhvrg==
 -----END CERTIFICATE-----
 """
 
-_inflight: dict[int, asyncio.Task[bool]] = {}
+_inflight: dict[int | str, asyncio.Task[bool]] = {}
 
 
 def _static_cover(song_id: int) -> Path:
@@ -100,7 +100,26 @@ async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
     return await task
 
 
-async def _download(song_id: int, image_url: str, path: Path) -> bool:
+async def ensure_image(
+    image_url: str, key: str, cache_dir: Path | None = None
+) -> Path | None:
+    """按**显式封面文件名**拉取曲绘（pending 曲无 id，不能走 song 表查 URL）。
+
+    ``key`` 为缓存文件名（不含扩展名）——调用方保证无 id 冲突（如标题摘要）。
+    成功返回落盘路径；失败返回 None（渲染走占位图）。
+    """
+    cache = cache_dir or jp_cache_dir()
+    path = cache / f"{key}.png"
+    if path.exists():
+        return path
+    task = _inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(_download(key, image_url, path))
+        _inflight[key] = task
+    return path if await task else None
+
+
+async def _download(song_id: int | str, image_url: str, path: Path) -> bool:
     url = f"https://maimaidx.jp/maimai-mobile/img/Music/{image_url}"
     transport = build_smart_transport(verify=_ssl_context())
     try:

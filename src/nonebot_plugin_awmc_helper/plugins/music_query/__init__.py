@@ -25,6 +25,7 @@ from ...core.types import Song, SongType, SongDifficultyUtage
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart
+from ...core.songdb import PendingSong
 from ...core.binding import session_keys, binding_service
 from ...core.chart_card import chart_card_bytes
 
@@ -168,6 +169,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             lambda: song_service.jp_by_level_value(min(ds1, ds2), max(ds1, ds2)),
             page,
             binding,
+            lambda: song_service.pending_by_level_value(min(ds1, ds2), max(ds1, ds2)),
         )
     elif cmd == "bpm":
         page = 1
@@ -222,6 +224,7 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
             lambda: song_service.jp_by_title_fuzzy(title),
             page,
             binding,
+            lambda: song_service.pending_by_title_fuzzy(title),
         )
 
 
@@ -267,8 +270,11 @@ async def _render_jp_result(songs, page: int, binding=None) -> None:
     )
 
 
-async def _render_query_result(songs, jp_fetch, page: int, binding=None) -> None:
-    """查询结果渲染：国服命中走普通结果，未命中走日服 fallback（Q32）。
+async def _render_query_result(
+    songs, jp_fetch, page: int, binding=None, pending_fetch=None
+) -> None:
+    """查询结果渲染：国服命中走普通结果，未命中走日服 fallback（Q32），
+    日服也未命中走 pending 兜底（id 未收录新曲，Q33）。
 
     返回值驱动：fallback 未命中明确落到「未找到」，不再依赖
     ``_render_jp_result`` 内部必 finish 的控制流（避免未来加 return 路径双发）。
@@ -278,7 +284,58 @@ async def _render_query_result(songs, jp_fetch, page: int, binding=None) -> None
         if songs:
             await _render_jp_result(songs, page, binding)
             return
+        if pending_fetch is not None and await _render_pending_result(
+            await pending_fetch()
+        ):
+            return
     await _render_result(songs, page, binding)
+
+
+PENDING_NOTE = "※ 该曲机台 id 尚未收录，为新曲暂存信息（缺项以 - 显示）"
+
+
+async def _pending_card(pending: PendingSong) -> bytes:
+    """pending 临时卡：物化为临时 Song 走共享查歌卡渲染（「0 即 -」约定）。
+
+    ID 行覆写为「ID —」（不猜 id）；分类行用 catcode 映射（未知画 -）；
+    封面按 payload 的官方文件名在线拉取，缺则占位图。
+    """
+    from ...core.songdb import pending_to_song
+
+    cover = None
+    if pending.image_url:
+        cover = await jp_cover.ensure_image(pending.image_url, pending.cover_key)
+    return nb_chart.song_chart_info(
+        pending_to_song(pending),
+        calc=False,
+        is_full=False,
+        best_list=[],
+        jp=True,
+        id_text="ID —",
+        genre_text=pending.genre_display or "-",
+        cover_path=cover,
+    )
+
+
+async def _render_pending_result(pending: "list[PendingSong]") -> bool:
+    """pending 结果渲染：单首出临时卡，多首文本列表。
+
+    返回是否已发送（finish）；空列表返回 False 交回调用方继续兜底。
+    """
+    if not pending:
+        return False
+    if len(pending) == 1:
+        png = await _pending_card(pending[0])
+        await _reply(PENDING_NOTE).image(raw=png).finish(at_sender=True)
+    lines = []
+    for p in pending:
+        charts = p.major_charts()
+        ds = "、".join(
+            f"{'DX' if c.is_dx else 'SD'}{c.level_id + 1} {c.level_value:.1f}"
+            for c in charts
+        )
+        lines.append(f"「{p.title}」 {ds}" if ds else f"「{p.title}」")
+    await _reply("\n".join(lines) + f"\n{PENDING_NOTE}").finish(at_sender=True)
 
 
 async def _resolve_raw_id(
@@ -466,6 +523,10 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         png = await chart_card_bytes(song, binding, prefer, jp_only)
         msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
+
+    # pending 兜底（Q33）：输入本身是新曲歌名（id 未收录，CN/JP 视图与
+    # 别名索引均不可见）——别名投票提示之后、相似标题兜底之前出临时卡
+    await _render_pending_result(await song_service.pending_by_title_fuzzy(name))
 
     # 标题关键词兜底
     result = await song_service.by_title_fuzzy(name)
