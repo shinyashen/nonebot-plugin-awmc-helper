@@ -142,20 +142,24 @@ def test_rate_file_derived_from_rate_to_zh():
 
 
 def test_level_index_tables_share_axis():
-    """难度四表同轴：元表派生的键集/顺序/反向映射一致。"""
+    """难度表同轴：元表派生的键集/顺序/反向映射一致。"""
     from maimai_py import LevelIndex
 
     from nonebot_plugin_awmc_helper.constants import (
         LEVEL_INDEX_EN,
         LEVEL_INDEX_ZH,
-        LEVEL_INDEX_COLOR,
         DIFF_DISPLAY_NAMES,
         COLOR_TO_LEVEL_INDEX,
     )
 
     assert list(LEVEL_INDEX_ZH) == list(LevelIndex)
-    assert list(LEVEL_INDEX_COLOR) == list(LevelIndex)
-    assert COLOR_TO_LEVEL_INDEX == {v: k for k, v in LEVEL_INDEX_COLOR.items()}
+    assert COLOR_TO_LEVEL_INDEX == {
+        "绿": LevelIndex.BASIC,
+        "黄": LevelIndex.ADVANCED,
+        "红": LevelIndex.EXPERT,
+        "紫": LevelIndex.MASTER,
+        "白": LevelIndex.ReMASTER,
+    }
     assert LEVEL_INDEX_EN == ("basic", "advanced", "expert", "master", "remaster")
     assert DIFF_DISPLAY_NAMES == ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 

@@ -61,9 +61,6 @@ _LEVEL_INDEX_META: dict[LevelIndex, tuple[str, str, str, str]] = {
     LevelIndex.ReMASTER: ("宗师", "白", "remaster", "Re:Master"),
 }
 LEVEL_INDEX_ZH: dict[LevelIndex, str] = {k: v[0] for k, v in _LEVEL_INDEX_META.items()}
-LEVEL_INDEX_COLOR: dict[LevelIndex, str] = {
-    k: v[1] for k, v in _LEVEL_INDEX_META.items()
-}
 COLOR_TO_LEVEL_INDEX: dict[str, LevelIndex] = {
     v[1]: k for k, v in _LEVEL_INDEX_META.items()
 }

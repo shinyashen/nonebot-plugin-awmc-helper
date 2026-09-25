@@ -58,8 +58,6 @@ async def test_local_alias_unique(tmp_db):
     assert await store.add_local_alias(500, "企鹅", "u1")  # 同别名不同曲允许
     aliases = await store.get_local_aliases()
     assert len(aliases) == 2
-    assert await store.remove_local_alias(231, "企鹅")
-    assert not await store.remove_local_alias(231, "企鹅")
 
 
 @pytest.mark.asyncio

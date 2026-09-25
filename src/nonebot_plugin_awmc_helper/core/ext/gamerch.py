@@ -48,7 +48,6 @@ _MAX_LIST_PAGES = 30
 _FETCH_DELAY = 0.5
 # 难度行 Lv 单元格形状：3 / 13+ / 14?（宴谱行带 kanji 前缀，不会 fullmatch）
 _LV_RE = re.compile(r"\d{1,2}\+?\??")
-_UTAGE_PARTS = ("", "_tap", "_hold", "_slide", "_touch", "_break")
 _HEADER_WORDS = {"Lv", "Tap", "Hold", "Slide", "Touch", "Break", "総数", "内訳"}
 
 

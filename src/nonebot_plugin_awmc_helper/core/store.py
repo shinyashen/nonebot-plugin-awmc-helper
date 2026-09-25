@@ -421,22 +421,6 @@ async def add_local_alias(song_id: int, alias: str, created_by: str) -> bool:
         return True
 
 
-async def remove_local_alias(song_id: int, alias: str) -> bool:
-    async with session() as db:
-        row = (
-            await db.exec(
-                select(LocalAlias).where(
-                    LocalAlias.song_id == song_id, LocalAlias.alias == alias
-                )
-            )
-        ).first()
-        if row is None:
-            return False
-        await db.delete(row)
-        await db.commit()
-        return True
-
-
 async def get_local_aliases() -> list[LocalAlias]:
     async with session() as db:
         return list((await db.exec(select(LocalAlias))).all())
