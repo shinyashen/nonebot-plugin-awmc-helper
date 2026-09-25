@@ -140,6 +140,90 @@ async def test_random_chart_no_match(app: App, songs):
 
 
 @pytest.mark.asyncio
+async def test_genre_random_service(app: App, songs):
+    """随个流行服务层：分类过滤 + 宴会场含宴谱 + 无分类提示。"""
+    from maimai_py import Genre
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    got = await song_service.random(genre=Genre.maimai)
+    assert got is not None
+    assert got[0].id in (231, 500)  # disabled 902 不入池
+    assert await song_service.random(genre=Genre.東方Project) is None
+    got = await song_service.random(genre=Genre.宴会場, exclude_utage=False)
+    assert got is not None
+    assert got[0].id == 901
+    # 其余分类的宴谱排除口径下，宴会場必然落空（指令侧因此对該分类放行）
+    assert await song_service.random(genre=Genre.宴会場, exclude_utage=True) is None
+
+
+@pytest.mark.asyncio
+async def test_genre_random_matcher(app: App, songs):
+    """随个流行指令：命中渲染谱面卡（单曲种子保证确定性）、未命中给提示。"""
+    import base64
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from mocks import make_song, seed_service
+    from maimai_py import Genre
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import random_song
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    # 仅留一曲舞萌 → 随机确定（901 宴会场 / 902 disabled 均不入舞萌池）
+    await seed_service(song_service, [make_song(231, "PENGUIN")])
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    song, _diff = await song_service.random(genre=Genre.maimai)
+    png = await chart_card_bytes(song, binding)
+
+    event = fake_group_message_event_v11(message="随个舞萌")
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+        ]
+    )
+    async with app.test_matcher(random_song.genre_random) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+    # 已知分类无曲给提示
+    await _assert_reply(
+        app,
+        random_song.genre_random,
+        "随个东方",
+        "没有符合条件的谱面，换一个试试吧",
+        with_session=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_random_service_and_card(songs, monkeypatch):
     """mai什么底层：随机选曲 + 曲目卡渲染（matcher 仅 3 行薄封装）。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service

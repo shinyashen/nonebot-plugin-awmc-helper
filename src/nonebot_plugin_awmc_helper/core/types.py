@@ -5,6 +5,7 @@
 
 from maimai_py import (
     Song,
+    Genre,
     FCType,
     FSType,
     SongType,
@@ -17,6 +18,7 @@ from maimai_py.models import SongDifficultyUtage
 __all__ = [
     "FCType",
     "FSType",
+    "Genre",
     "LevelIndex",
     "ScoreExtend",
     "Song",
