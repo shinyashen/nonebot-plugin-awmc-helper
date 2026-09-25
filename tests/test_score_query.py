@@ -171,6 +171,7 @@ async def test_ginfo_rich_chart_card(app: App, db, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import stats as stats_render
     from nonebot_plugin_awmc_helper.core.render import nb_chart
+    from nonebot_plugin_awmc_helper.plugins.score_query.render import _ginfo_image
 
     seeded = await seed_service(song_service, [_curve_song()])
     song = seeded[0]
@@ -180,9 +181,7 @@ async def test_ginfo_rich_chart_card(app: App, db, songs):
 
     # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（R9 统计卡）
     card = nb_chart.song_chart_info(song, False, False, [], "prism_plus", None)
-    expected_png = score_query._ginfo_image(
-        card, stats_render.song_global_data(song, diff)
-    )
+    expected_png = _ginfo_image(card, stats_render.song_global_data(song, diff))
     expected = Message(
         [
             MessageSegment.at(12345678),
@@ -232,6 +231,7 @@ async def test_b50_username_lookup(app: App, db, songs):
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
     from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
+    from nonebot_plugin_awmc_helper.plugins.score_query.matchers import _display_name
 
     payload = {
         "username": "someone",
@@ -261,7 +261,7 @@ async def test_b50_username_lookup(app: App, db, songs):
         # 与 handler 相同的调用路径 → 相同数据 → 相同渲染
         player, bests = await score_service.get_b50_by_username("someone")
         expected_png = await best50_bytes(
-            score_query._display_name(player),
+            _display_name(player),
             bests.rating,
             bests.rating_b35,
             bests.rating_b15,
@@ -430,7 +430,7 @@ async def test_b50_rise_tips(db, songs):
     from maimai_py import SongType, LevelIndex
 
     from nonebot_plugin_awmc_helper.core.binding import binding_service
-    from nonebot_plugin_awmc_helper.plugins.score_query import _b50_rise_tips
+    from nonebot_plugin_awmc_helper.plugins.score_query.render import _b50_rise_tips
 
     binding = await binding_service.ensure("OneBot V11", "12345678")
     # B50：231 的 SD EXPERT 槽（ra 312 入线，须命中曲库存在的谱面）；
