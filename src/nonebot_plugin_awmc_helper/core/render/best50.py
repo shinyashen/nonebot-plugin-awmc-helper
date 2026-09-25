@@ -40,10 +40,9 @@ from .tools import (
     TEXT_BLUE,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
-    char_width,
     credit_text,
-    column_width,
     image_to_bytes,
+    truncate_hoshino,
 )
 from .assets import assets, online_item_cache_dir
 from ...config import plugin_config
@@ -176,16 +175,9 @@ def game_song_id(score: ScoreExtend) -> int:
     return score.id
 
 
-def truncate_title(s: str, limit: int = 18, keep: int = 17) -> str:
-    """标题超宽截断：按显示宽度保留前 keep 列再加省略号（Hoshino 同款规则）。"""
-    if column_width(s) <= limit:
-        return s
-    res, out = 0, []
-    for ch in s:
-        res += char_width(ord(ch))
-        if res <= keep:
-            out.append(ch)
-    return "".join(out) + "..."
+def truncate_title(s: str, limit: int = 18) -> str:
+    """标题超宽截断（Hoshino 双参数规则：>limit 才截、截后 ≤limit-1 列）。"""
+    return truncate_hoshino(s, limit)
 
 
 def dani_plate_num(course_rank: int) -> str:

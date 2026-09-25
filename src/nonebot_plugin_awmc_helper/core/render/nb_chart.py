@@ -13,7 +13,12 @@ from PIL import Image
 from maimai_py import Song, Version, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_RODIN, font
-from .tools import TEXT_BLUE, credit_text, image_to_bytes
+from .tools import (
+    TEXT_BLUE,
+    credit_text,
+    image_to_bytes,
+    truncate_hoshino,
+)
 from .assets import assets
 from ...constants import (
     GENRE_TO_ZH,
@@ -24,83 +29,6 @@ from ...constants import (
     display_song_id,
     chart_display_id,
 )
-
-# NB base.py 的东亚字宽判定（截断用）
-_CHAR_WIDTHS = [
-    (126, 1),
-    (159, 0),
-    (687, 1),
-    (710, 0),
-    (711, 1),
-    (727, 0),
-    (733, 1),
-    (879, 0),
-    (1154, 1),
-    (1161, 0),
-    (4347, 1),
-    (4447, 2),
-    (7467, 1),
-    (7521, 0),
-    (8369, 1),
-    (8426, 0),
-    (9000, 1),
-    (9002, 2),
-    (11021, 1),
-    (12350, 2),
-    (12351, 1),
-    (12438, 2),
-    (12442, 0),
-    (19893, 2),
-    (19967, 1),
-    (55203, 2),
-    (63743, 1),
-    (64106, 2),
-    (65039, 1),
-    (65059, 0),
-    (65131, 2),
-    (65279, 1),
-    (65376, 2),
-    (65500, 1),
-    (65510, 2),
-    (120831, 1),
-    (262141, 2),
-    (1114109, 1),
-]
-
-
-def column_width(text: str) -> int:
-    res = 0
-    for ch in text:
-        o = ord(ch)
-        if o in (0xE, 0xF):
-            continue
-        for num, wid in _CHAR_WIDTHS:
-            if o <= num:
-                res += wid
-                break
-        else:
-            res += 1
-    return res
-
-
-def truncate_by_width(text: str, limit: int) -> str:
-    if column_width(text) <= limit:
-        return text
-    res = 0
-    out = []
-    for ch in text:
-        o = ord(ch)
-        w = 1
-        for num, wid in _CHAR_WIDTHS:
-            if o <= num:
-                w = wid
-                break
-        if res + w <= limit:
-            out.append(ch)
-            res += w
-        else:
-            break
-    return "".join(out) + "..."
 
 
 def get_best_rating(level_value: float) -> list[int]:
@@ -311,12 +239,7 @@ def song_chart_info(
     if type_path.exists():
         im.alpha_composite(Image.open(type_path).resize((80, 30)), (295, 410))
 
-    # Hoshino 截断规则：宽 >L 才截、截后保留 ≤L-1 列再加省略号（下同）
-    title = (
-        song.title
-        if column_width(song.title) <= 40
-        else truncate_by_width(song.title, 39)
-    )
+    title = truncate_hoshino(song.title, 40)
     mr.text(
         (405, 220),
         title,
@@ -324,11 +247,7 @@ def song_chart_info(
         fill=text_color,
         anchor="lm",
     )
-    artist = (
-        song.artist
-        if column_width(song.artist) <= 50
-        else truncate_by_width(song.artist, 49)
-    )
+    artist = truncate_hoshino(song.artist, 50)
     mr.text(
         (407, 265),
         artist,
@@ -375,11 +294,7 @@ def song_chart_info(
             fill=color,
             anchor="mm",
         )
-        designer = (
-            diff.note_designer
-            if column_width(diff.note_designer) <= 19
-            else truncate_by_width(diff.note_designer, 18)
-        )
+        designer = truncate_hoshino(diff.note_designer, 19)
         mr.text(
             (310, 590 + spacing),
             designer,
@@ -551,17 +466,9 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     # 标题 / 曲师 / BPM / ID / 分类（白字紫描边；截断规则同 song_chart_info）
     kanji = getattr(first, "kanji", "") if first else ""
     t((216, p_y - 28), kanji, 18)
-    ban_title = (
-        song.title
-        if column_width(song.title) <= 36
-        else truncate_by_width(song.title, 35)
-    )
+    ban_title = truncate_hoshino(song.title, 36)
     t((405, 265), ban_title, 28, anchor="lm", sw=3)
-    ban_artist = (
-        song.artist
-        if column_width(song.artist) <= 50
-        else truncate_by_width(song.artist, 49)
-    )
+    ban_artist = truncate_hoshino(song.artist, 50)
     t((407, 320), ban_artist, 20, anchor="lm", sw=3)
     t((460, 393), str(song.bpm), 24, anchor="lm", sw=3)
     utage_id = next((getattr(d, "diff_id", None) for d in utage_diffs), None)

@@ -15,10 +15,9 @@ from .tools import (
     fit_text,
     text_size,
     credit_text,
-    column_width,
     rounded_mask,
     image_to_bytes,
-    truncate_by_width,
+    truncate_hoshino,
     generate_frosted_card,
     tricolor_gradient_prism_plus,
 )
@@ -208,11 +207,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
             fill=TEXT_BLUE,
             anchor="mm",
         )
-        title = (
-            song.title
-            if column_width(song.title) <= 20
-            else truncate_by_width(song.title, 19)
-        )
+        title = truncate_hoshino(song.title, 20)
         draw.text(
             (x + 100, y + 25),
             title,
@@ -220,11 +215,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
             fill=TEXT_BLUE,
             anchor="lm",
         )
-        artist = (
-            song.artist
-            if column_width(song.artist) <= 26
-            else truncate_by_width(song.artist, 25)
-        )
+        artist = truncate_hoshino(song.artist, 26)
         draw.text(
             (x + 100, y + 50),
             artist,

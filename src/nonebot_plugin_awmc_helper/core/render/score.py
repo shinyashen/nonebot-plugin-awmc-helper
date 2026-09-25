@@ -15,13 +15,12 @@ from .tools import (
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     credit_text,
-    column_width,
     image_to_bytes,
+    truncate_hoshino,
     generate_prism_bg,
 )
 from .assets import assets
 from .best50 import draw_score_row
-from .nb_chart import truncate_by_width
 from ...constants import RATE_FILE, chart_display_id
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 同源，tools 单源）
@@ -108,9 +107,7 @@ class DrawScore:
             id_color = ID_TEXT_COLORS[li]
 
             # Hoshino 截断规则：宽 >26 才截，截后保留 ≤25 列再加省略号
-            title = song.title
-            if column_width(title) > 26:
-                title = truncate_by_width(title, 25)
+            title = truncate_hoshino(song.title, 26)
             dr.text(
                 (x + 142, y + 44),
                 title,

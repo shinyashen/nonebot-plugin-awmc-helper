@@ -16,9 +16,8 @@ from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
     TEXT_BLUE,
     credit_text,
-    column_width,
     image_to_bytes,
-    truncate_by_width,
+    truncate_hoshino,
 )
 from .assets import assets
 from .nb_chart import major_diffs, version_image, fit_version_logo
@@ -97,22 +96,14 @@ def song_play_data(
     # 曲目信息（截断规则对齐 Hoshino：宽 >L 才截、截后保留 ≤L-1 列）
     dr.text(
         (255, 595),
-        (
-            song.artist
-            if column_width(song.artist) <= 58
-            else truncate_by_width(song.artist, 57)
-        ),
+        truncate_hoshino(song.artist, 58),
         font=font(12, FONT_HAN),
         fill=color,
         anchor="mm",
     )
     dr.text(
         (255, 622),
-        (
-            song.title
-            if column_width(song.title) <= 38
-            else truncate_by_width(song.title, 37)
-        ),
+        truncate_hoshino(song.title, 38),
         font=font(18, FONT_HAN),
         fill=color,
         anchor="mm",

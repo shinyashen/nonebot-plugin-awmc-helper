@@ -132,6 +132,17 @@ def truncate_by_width(text: str, limit: int) -> str:
     return "".join(out) + "..."
 
 
+def truncate_hoshino(text: str, limit: int) -> str:
+    """Hoshino 截断规则：显示宽度 >limit 才截，截后保留 ≤limit-1 列再加省略号。
+
+    NB/Hoshino 各卡面（标题/曲师/谱师）统一该双参数语义——直接写
+    ``truncate_by_width(text, limit - 1)`` 会把宽度恰为 limit 的文本也截掉。
+    """
+    if column_width(text) <= limit:
+        return text
+    return truncate_by_width(text, limit - 1)
+
+
 def image_to_bytes(img: Image.Image, fmt: Literal["PNG", "JPEG"] = "PNG") -> bytes:
     """Image → bytes（机器人发送统一出口）。"""
     buf = io.BytesIO()
