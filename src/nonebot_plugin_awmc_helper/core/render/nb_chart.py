@@ -203,17 +203,14 @@ def song_chart_info(
     touch 恒 0（机制上无 touch）显示 ``-``，DX 谱 touch=0 为真实数据（确有
     无 touch 的 DX 谱面）显示 ``0``，详见 :func:`notes_cell_text`。
     """
-    im = Image.open(
-        assets.static_path() / "mai" / "pic" / theme / "chart_info.png"
-    ).convert("RGBA")
+    im = assets.canvas("chart_info.png", theme)
     mr = ImageDraw.Draw(im)
     f_han = font(24, FONT_HAN)
     f_rodin = font(28, FONT_RODIN)
     text_color = CIRCLE_PINK if theme == "circle" else TEXT_BLUE
 
-    base = assets.static_path() / "mai" / "pic"
     im.alpha_composite(
-        Image.open(base / theme / "logo.png").resize((249, 120)), (65, 25)
+        assets.pic("logo.png", theme).resize((249, 120)), (65, 25)
     )
     prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
     type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
@@ -221,7 +218,7 @@ def song_chart_info(
     # 日服视图与国服新曲标无关：统一不渲染「新曲だよ!」徽章
     if _is_new(chart_version) and not jp:
         im.alpha_composite(
-            Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
+            assets.pic("UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (842, 100),
         )
     if cover_path is not None and cover_path.exists():
@@ -387,8 +384,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     ``jp=True``：宿主曲为日服限定（JP 视图对象）——「新曲だよ!」徽章是
     国服当前版本口径，日服曲不渲染（同 :func:`song_chart_info` 的 jp 口径）。
     """
-    base = assets.static_path() / "mai" / "pic"
-    im = Image.open(base / "chart_info_enkaijou.png").convert("RGBA")
+    im = assets.canvas("chart_info_enkaijou.png")
     mr = ImageDraw.Draw(im)
     stroke = (210, 57, 174, 255)
     white = (255, 255, 255, 255)
@@ -405,25 +401,25 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
 
     # kanji 牌底、双人宴标记与玩家牌
     im.alpha_composite(
-        Image.open(base / "utg_kanji.png").convert("RGBA"),
+        assets.pic("utg_kanji.png"),
         (140, 660 if is_buddy else 730),
     )
     if is_buddy:
         # 底图 utg_2p 自带 TOTAL..BREAK 表头与 1P/2P 两条数据行，行位 820/920
         p_y, base_y, step_y = 715, 820, 100
         im.alpha_composite(
-            Image.open(base / "utg_buddy.png").convert("RGBA"), (255, 660)
+            assets.pic("utg_buddy.png"), (255, 660)
         )
-        player_path = base / "utg_2p.png"
+        player_file = "utg_2p.png"
     else:
         # 底图 utg_1p 只有一条 1P 数据行，行位 890
         p_y, base_y, step_y = 785, 890, 0
-        player_path = base / "utg_1p.png"
-    im.alpha_composite(Image.open(player_path).convert("RGBA"), (98, p_y))
+        player_file = "utg_1p.png"
+    im.alpha_composite(assets.pic(player_file), (98, p_y))
 
     # logo / 新曲标
     im.alpha_composite(
-        Image.open(base / "prism_plus" / "logo.png").resize((249, 120)), (10, 35)
+        assets.pic("logo.png", "prism_plus").resize((249, 120)), (10, 35)
     )
     # 版本/新曲标口径 = 宴谱组自己的登场版本：宿主曲整曲最小版本常由普通谱
     # 决定（悪戯センセーション DX 21000 / 宴[奏] 26509），按整曲取会画错世代；
@@ -432,7 +428,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     # 「新曲」标是国服当前版本口径：日服限定曲不渲染（对齐 song_chart_info）
     if _is_new(chart_version) and not jp:
         im.alpha_composite(
-            Image.open(base / "UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
+            assets.pic("UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (950, 165),
         )
 

@@ -2,6 +2,7 @@
 
 import io
 from typing import Literal
+from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -182,13 +183,22 @@ def text_to_image(
     line_spacing = int(size * 0.4)
     lines: list[str] = []
     for raw in text.splitlines() or [""]:
+        # 整行可容纳则直取（advance 宽一次量完）；超长行才逐字符增量测宽，
+        # 消除逐字符全串重测的 O(n²)
+        if f.getlength(raw) <= max_width:
+            lines.append(raw)
+            continue
         current = ""
+        width = 0.0
         for ch in raw:
-            if text_size(current + ch, f)[0] > max_width:
+            w = f.getlength(ch)
+            if width + w > max_width:
                 lines.append(current)
                 current = ch
+                width = w
             else:
                 current += ch
+                width += w
         lines.append(current)
     width = max((text_size(line, f)[0] for line in lines), default=0)
     height = len(lines) * size + (len(lines) - 1) * line_spacing
@@ -210,11 +220,9 @@ def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
     return mask
 
 
-def tricolor_gradient_prism_plus(width: int, height: int) -> Image.Image:
-    """垂直 PRiSM PLUS 三色渐变底（NB core/image/tools.py 同源移植）。
-
-    先逐行放样 1×height 再拉伸到目标宽，避免逐像素画大图。
-    """
+@lru_cache(maxsize=128)
+def _gradient_line(height: int) -> Image.Image:
+    """1×height 渐变线（按高度缓存，同一底图高度多次渲染零重算；只读共用）。"""
     colors_list = [
         (0.00, (255, 255, 255)),
         (0.14, (255, 255, 255)),
@@ -237,7 +245,15 @@ def tricolor_gradient_prism_plus(width: int, height: int) -> Image.Image:
                 rgb = tuple(int(c1[j] + (c2[j] - c1[j]) * rel) for j in range(3))
                 line.putpixel((0, y), rgb)
                 break
-    return line.resize((width, height), Image.Resampling.BICUBIC)
+    return line
+
+
+def tricolor_gradient_prism_plus(width: int, height: int) -> Image.Image:
+    """垂直 PRiSM PLUS 三色渐变底（NB core/image/tools.py 同源移植）。
+
+    先逐行放样 1×height 再拉伸到目标宽，避免逐像素画大图。
+    """
+    return _gradient_line(height).resize((width, height), Image.Resampling.BICUBIC)
 
 
 def generate_frosted_card(

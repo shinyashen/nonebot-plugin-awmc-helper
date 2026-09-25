@@ -75,6 +75,14 @@ DIFF_BG = {
     LevelIndex.ReMASTER: "b50_score_remaster.png",
 }
 
+
+@lru_cache(maxsize=5)
+def _score_row_bg(level_index: LevelIndex) -> Image.Image:
+    """难度行卡底图（进程级缓存，B50/进度卡 50~80 行共用；返回值只读共用）。"""
+    return Image.open(
+        assets.static_path() / "mai" / "pic" / DIFF_BG[level_index]
+    ).convert("RGBA")
+
 UTAGE_BAND_COLOR = (235, 119, 237)
 """宴谱行卡主色 #EB77ED（粉紫，区别于 BASIC 绿）。"""
 
@@ -405,14 +413,10 @@ def draw_score_row(
     换用程序染色的 #EB77ED 宴谱底图，ID 文字同色，其余版式不变。
     """
     diff = score.level_index.value  # LevelIndex.value 恰为 DIFF_*_COLORS 下标 0-4
-    pic = assets.static_path() / "mai" / "pic"
     if score.type == SongType.UTAGE:
         im.alpha_composite(_utage_score_bg(), (x, y))
     else:
-        im.alpha_composite(
-            Image.open(pic / DIFF_BG[score.level_index]).convert("RGBA"),
-            (x, y),
-        )
+        im.alpha_composite(_score_row_bg(score.level_index), (x, y))
     cover = assets.cover(score.id % 10000).resize((75, 75))
     im.alpha_composite(cover, (x + 12, y + 12))
     type_abbr = "DX" if score.type.name == "DX" else "SD"

@@ -61,6 +61,12 @@ class Assets:
         return cls.get(base / name)
 
     @classmethod
+    def canvas(cls, name: str, theme: str = DEFAULT_THEME) -> Image.Image:
+        """画布素材：同 pic，但返回**副本**——调用方会就地绘制（alpha_composite/
+        ImageDraw），不得污染类级缓存；缺失仍抛 FileNotFoundError。"""
+        return cls.pic(name, theme).copy()
+
+    @classmethod
     def pic_optional(cls, name: str, theme: str = DEFAULT_THEME) -> Image.Image | None:
         """同 pic，但主题子目录与根目录都不存在时返回 None（调用方走回退/跳过）。"""
         base = cls.static_path() / "mai" / "pic"

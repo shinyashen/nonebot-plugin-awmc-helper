@@ -9,7 +9,7 @@
 - 难度槽定数小字统一 21pt 垂直居中（Hoshino 已玩 20pt/未玩 25pt 两档）。
 """
 
-from PIL import Image, ImageDraw
+from PIL import ImageDraw
 from maimai_py import Song, Genre, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
@@ -58,21 +58,20 @@ def song_play_data(
     ``play_result``：该曲成绩（maimai_py ``PlayerSong.scores``）；只取主类型
     谱面的成绩入槽，未游玩槽画灰行。``service``：数据源署名（未绑定省略）。
     """
-    base = assets.static_path() / "mai" / "pic"
     color = _CIRCLE_COLOR if theme == "circle" else _TEXT_COLOR
-    im = Image.open(base / theme / "play_info.png").convert("RGBA")
+    im = assets.canvas("play_info.png", theme)
     dr = ImageDraw.Draw(im)
 
     # logo
     im.alpha_composite(
-        Image.open(base / theme / "logo.png").resize((249, 120)), (42, 34)
+        assets.pic("logo.png", theme).resize((249, 120)), (42, 34)
     )
     # 曲绘（assets.cover 自带回退链）
     im.alpha_composite(assets.cover(song.id).resize((300, 300)), (100, 260))
     # 分类徽章（素材缺失时跳过，如宴会場）
     genre_file = _GENRE_FILE.get(song.genre)
-    if genre_file and (base / genre_file).exists():
-        im.alpha_composite(Image.open(base / genre_file).convert("RGBA"), (100, 260))
+    if genre_file and (genre_img := assets.pic_optional(genre_file)):
+        im.alpha_composite(genre_img, (100, 260))
     # 版本 logo（等比适配槽位，项目内既定做法）
     diffs = major_diffs(song, prefer_type)
     chart_version = diffs[0].version if diffs and diffs[0].version else song.version
@@ -127,7 +126,7 @@ def song_play_data(
     for num, level_index in enumerate(slots):
         y = step_y * num
         im.alpha_composite(
-            Image.open(base / f"d_{num}.png").convert("RGBA"), (650, 235 + y)
+            assets.pic(f"d_{num}.png"), (650, 235 + y)
         )
         score = by_slot.get(level_index)
         diff = next(d for d in diffs if d.level_index == level_index)
@@ -149,14 +148,14 @@ def song_play_data(
             )
             continue
         im.alpha_composite(
-            Image.open(base / theme / "ra_dx.png").resize((102, 44)), (850, 272 + y)
+            assets.pic("ra_dx.png", theme).resize((102, 44)), (850, 272 + y)
         )
         dx_score = score.dx_score or 0
         # DX 星取库算值（ScoreExtend.dx_star，阈值同现算；0 分为 None → 不画星）
         star = score.dx_star or 0
         if star:
             im.alpha_composite(
-                Image.open(base / f"UI_GAM_Gauge_DXScoreIcon_0{star}.png").resize(
+                assets.pic(f"UI_GAM_Gauge_DXScoreIcon_0{star}.png").resize(
                     (32, 19)
                 ),
                 (851, 296 + y),
@@ -169,26 +168,25 @@ def song_play_data(
             anchor="mm",
         )
         im.alpha_composite(
-            Image.open(base / "fcfs.png").convert("RGBA"), (965, 265 + y)
+            assets.pic("fcfs.png"), (965, 265 + y)
         )
         if score.fc:
             im.alpha_composite(
-                Image.open(
-                    base / f"UI_CHR_PlayBonus_{COMBO_FILE[score.fc.name.lower()]}.png"
+                assets.pic(
+                    f"UI_CHR_PlayBonus_{COMBO_FILE[score.fc.name.lower()]}.png"
                 ).resize((65, 65)),
                 (960, 261 + y),
             )
         if score.fs:
             im.alpha_composite(
-                Image.open(
-                    base / f"UI_CHR_PlayBonus_{SYNC_FILE[score.fs.name.lower()]}.png"
+                assets.pic(
+                    f"UI_CHR_PlayBonus_{SYNC_FILE[score.fs.name.lower()]}.png"
                 ).resize((65, 65)),
                 (1025, 261 + y),
             )
         rate_name = RATE_FILE.get(score.rate.name, "D") if score.rate else "D"
-        rank_path = base / theme / f"UI_TTR_Rank_{rate_name}.png"
-        if rank_path.exists():
-            im.alpha_composite(Image.open(rank_path).resize((100, 45)), (737, 272 + y))
+        if rank_img := assets.pic_optional(f"UI_TTR_Rank_{rate_name}.png", theme):
+            im.alpha_composite(rank_img.resize((100, 45)), (737, 272 + y))
         dr.text(
             (500, 295 + y),
             f"{score.achievements or 0:.4f}%",
