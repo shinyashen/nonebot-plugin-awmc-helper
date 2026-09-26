@@ -8,7 +8,9 @@ NapCat 等实现读 ``messages``、LLOneBot 部分版本只读 ``message``，两
 返回 False 由调用方降级为普通消息。
 """
 
+import json
 import asyncio
+from pathlib import Path
 from collections.abc import Sequence
 
 from nonebot import logger
@@ -90,12 +92,29 @@ async def try_send_forward(
             exported = await UniMessage(entry).export(
                 bot, fallback=FallbackStrategy.forbid
             )
+            # 节点构造对齐 Hoshino 实测可用形态（2026-09-26 升级）：data 用
+            # name/uin 键、content 为裸 dict 数组，图片段 file 统一 file:///
+            # URI——node_custom 生成的 user_id/nickname 键与图片段其他 file
+            # 形式在 LLOneBot 转发卡片下会渲染为「消息类型暂不支持查看」
+            content = [
+                {"type": seg.type, "data": dict(seg.data)} for seg in exported
+            ]
+            for seg in content:
+                if seg["type"] == "image":
+                    file = str(seg["data"].get("file", ""))
+                    if file.startswith("/"):
+                        seg["data"]["file"] = Path(file).as_uri()
             nodes.append(
-                OB11Segment.node_custom(
-                    int(bot.self_id), NODE_NICKNAME, OB11Message(exported)
-                )
+                {
+                    "type": "node",
+                    "data": {
+                        "name": NODE_NICKNAME,
+                        "uin": str(bot.self_id),
+                        "content": content,
+                    },
+                }
             )
-        forward = OB11Message(nodes)
+        forward = nodes
         if group_id is not None:
             await asyncio.wait_for(
                 bot.call_api(
