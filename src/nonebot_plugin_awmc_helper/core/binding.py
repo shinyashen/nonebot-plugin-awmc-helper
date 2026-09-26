@@ -317,12 +317,15 @@ class BindingService:
                 token = await lxns_ext.refresh_token(binding.lxns_refresh_token)
             except Exception:
                 return False
-        binding.lxns_token = token.access_token
-        if token.refresh_token:
-            binding.lxns_refresh_token = token.refresh_token
-        if token.friend_code:
-            binding.lxns_friend_code = token.friend_code
-        await store.save_binding(binding)
+            binding.lxns_token = token.access_token
+            if token.refresh_token:
+                binding.lxns_refresh_token = token.refresh_token
+            if token.friend_code:
+                binding.lxns_friend_code = token.friend_code
+            # 落库必须在锁内完成（save 的 commit 与后到者的锁内重读走不同
+            # 连接，先释放锁会让重读赶在 commit 生效前看到旧 token，误判
+            # 「没人刷新过」而重放已轮换作废的旧 rt → invalid_grant）
+            await store.save_binding(binding)
         return True
 
     def provider(self, binding: UserBinding):

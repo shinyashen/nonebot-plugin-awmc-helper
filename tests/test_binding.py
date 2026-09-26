@@ -337,7 +337,9 @@ async def test_lxns_refresh_failure_falls_through(db, songs, monkeypatch):
 @pytest.mark.asyncio
 async def test_lxns_refresh_concurrent_single_call(db, songs, monkeypatch):
     """并发续期对拍：同用户两协程同时 401 → 落雪 refresh 只调一次，
-    后到者经锁内重读采用新凭据直接返回（不重放旧 rt）。"""
+    后到者经锁内重读采用新凭据直接返回（不重放旧 rt）。
+    回归保护：落库必须在锁内完成——先释放锁再落库时，save 的 commit 与
+    后到者的重读走不同池化连接，全量压测下本测试偶发抓到双次续期。"""
     import asyncio
 
     from nonebot_plugin_awmc_helper.core import store
