@@ -229,6 +229,27 @@ async def test_build_b50_sorted_and_capped(net_service, jp_view):
     assert ratings == sorted(ratings, reverse=True)
 
 
+    ratings = [s.dx_rating for s in bests.scores_b35]
+    assert ratings == sorted(ratings, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_title_index_with_none_fingerprint(net_service, jp_view, monkeypatch):
+    """指纹为 None（重启后未重建）时索引不得误命中空缓存——服务器实测回归：
+
+    CURRENT_FINGERPRINT 仅在重建管线赋值，重启后为 None；命中判定若不检查
+    索引非空，初始空缓存（None == None）直接返回 → 全部记录未匹配。
+    """
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    monkeypatch.setattr(songdb, "CURRENT_FINGERPRINT", None)
+    net_service._title_index = (None, {})  # 模拟重启后的初始态
+    index = await net_service._title_index_map()
+    assert index  # 空索引未误命中：已按 JP 视图构建
+    chart = net_service._resolve_chart(index, _records()[0])
+    assert chart is not None  # 「旧曲テスト」可匹配
+
+
 @pytest.mark.asyncio
 async def test_window_cache_and_backoff(net_service, jp_view, monkeypatch):
     """窗口缓存：首查抓取、窗口内复用（0 请求）；抓取失败进入短退避。"""

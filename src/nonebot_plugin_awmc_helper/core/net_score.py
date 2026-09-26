@@ -186,11 +186,17 @@ class NetScoreService:
     # -- 内部 ---------------------------------------------------------------
 
     async def _title_index_map(self) -> dict[str, list[Song]]:
-        """日服视图标题索引：归一化标题 → Song 列表（随曲库指纹缓存）。"""
+        """日服视图标题索引：归一化标题 → Song 列表（随曲库指纹缓存）。
+
+        命中判定必须带「索引非空」：``CURRENT_FINGERPRINT`` 仅在规范表重建
+        管线中赋值，重启后到下次重建前为 None——与初始空缓存的键相同，
+        无非空保护会把空索引误判为命中（服务器实测 2026-09-26：35 条全部
+        未匹配即此因；对齐 songs._jp_songs_map 的 ``and 非空`` 模式）。
+        """
         from . import songdb
 
         fp = songdb.CURRENT_FINGERPRINT
-        if self._title_index[0] == fp:
+        if self._title_index[1] and self._title_index[0] == fp:
             return self._title_index[1]
         songs = await song_service.jp_all()
         index: dict[str, list[Song]] = {}
