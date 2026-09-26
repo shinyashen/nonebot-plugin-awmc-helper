@@ -42,7 +42,8 @@ b50 [水鱼用户名] / ap50 / minfo <曲> / ginfo <[色]曲>
 来个/随个/给个 <谱面> / mai什么 / 今日mai
 猜歌 / 猜曲绘 / 重置猜歌 / 开启|关闭mai猜歌
 ──────────── 排卡 ────────────
-添加/删除/修改机厅 / 订阅机厅 / 查找机厅
+开启|关闭排卡（群管，默认关） / 订阅机厅
+添加/删除/修改机厅 / 查找机厅
 XX店+2人 / 机厅几人 / 帮助maimaiDX排卡"""
 
 REPO_URL = "项目地址：https://github.com/shinyashen/nonebot-plugin-awmc-helper"

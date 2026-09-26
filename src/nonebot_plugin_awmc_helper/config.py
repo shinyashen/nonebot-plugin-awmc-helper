@@ -49,6 +49,9 @@ class Config(BaseModel):
     awmc_guess_duration: int = 30
     # 机厅人数单次变更上限
     awmc_arcade_max_delta: int = 30
+    # 排卡功能部署级默认态（群可用 开启/关闭排卡 覆盖；默认关对齐原版按群显式开通，
+    # 规避宽正则（XX店+2人/XX店有几人）在未开通群的日常聊天误触）
+    awmc_arcade_enabled: bool = False
     # 启动时是否执行后台任务（曲库预热、别名 SSE）；测试/CI 置 false
     awmc_startup_tasks: bool = True
     # 国服曲库轮询间隔（分钟，0=禁用）；检测到国服更新时自动重建规范表并刷新运行时

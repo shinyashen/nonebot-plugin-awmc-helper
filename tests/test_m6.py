@@ -88,6 +88,14 @@ async def arcade_seed(db):
     return
 
 
+@pytest.fixture
+async def arcade_enabled(arcade_seed):
+    """排卡部署默认关：群内流程测试先显式开通本群（等价 开启排卡）。"""
+    from nonebot_plugin_awmc_helper.core import store
+
+    await store.set_group_switch("87654321", "arcade", True)
+
+
 async def _run(
     app: App,
     matcher,
@@ -136,8 +144,47 @@ async def _run(
         ctx.should_finished()
 
 
+async def _run_silent(app: App, matcher, text: str, *, with_session=True):
+    """开关拦截路径：rule 建会话判开关后静默返回——无回复、无 finished。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+    from nonebot.adapters.onebot.v11.event import Sender
+
+    event = fake_group_message_event_v11(
+        message=text,
+        user_id=12345678,
+        sender=Sender(card="", nickname="t", role="member"),
+    )
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        if with_session:
+            ctx.should_call_api(
+                "get_group_info",
+                {"group_id": 87654321},
+                result={
+                    "group_id": 87654321,
+                    "group_name": "g",
+                    "member_count": 1,
+                    "max_member_count": 10,
+                },
+            )
+            ctx.should_call_api(
+                "get_group_member_info",
+                {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+                result={
+                    "user_id": 12345678,
+                    "role": "member",
+                    "card": "",
+                    "nickname": "t",
+                },
+            )
+
+
 @pytest.mark.asyncio
-async def test_search_arcade(app: App, arcade_seed):
+async def test_search_arcade(app: App, arcade_enabled):
     from nonebot_plugin_awmc_helper.plugins import arcade
 
     await _run(
@@ -146,13 +193,12 @@ async def test_search_arcade(app: App, arcade_seed):
         "查找机厅 游戏",
         "为您找到以下机厅：\n==========\n店名：游戏厅\n"
         "    - 地址：某路 2 号\n    - ID：10000\n    - 机台：4\n    - 排卡：0 人",
-        with_session=False,
     )
 
 
 @pytest.mark.asyncio
-async def test_add_person_flow(app: App, arcade_seed):
-    """订阅 → 加人 → 减人 → 超限拒绝。"""
+async def test_add_person_flow(app: App, arcade_enabled):
+    """订阅 → 加人 → 减人 → 超限拒绝；排卡操作人人可用（对齐原版，无权限限制）。"""
     from nonebot_plugin_awmc_helper.plugins import arcade
 
     await _run(
@@ -168,16 +214,14 @@ async def test_add_person_flow(app: App, arcade_seed):
         arcade.arcade_add_person,
         "游戏厅+2人",
         "「游戏厅」当前排卡 2 人",
-        role="admin",
-        session_fetches=2,
+        session_fetches=1,
     )
     await _run(
         app,
         arcade.arcade_add_person,
         "Game-1人",
         "「游戏厅」当前排卡 1 人",
-        role="admin",
-        session_fetches=2,
+        session_fetches=1,
     )
     # 退订后再操作 → 拒绝
     await _run(
@@ -193,13 +237,12 @@ async def test_add_person_flow(app: App, arcade_seed):
         arcade.arcade_add_person,
         "游戏厅+2人",
         "该群未订阅机厅，无法更改机厅人数",
-        role="admin",
-        session_fetches=2,
+        session_fetches=1,
     )
 
 
 @pytest.mark.asyncio
-async def test_add_person_multi_alias(app: App, arcade_seed):
+async def test_add_person_multi_alias(app: App, arcade_enabled):
     """多别称机厅：任一别称都须命中（回归：曾按机厅折叠字典只剩最后一条别称）。"""
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import arcade
@@ -218,40 +261,119 @@ async def test_add_person_multi_alias(app: App, arcade_seed):
         arcade.arcade_add_person,
         "Game+2人",
         "「游戏厅」当前排卡 2 人",
-        role="admin",
-        session_fetches=2,
+        session_fetches=1,
     )
     await _run(
         app,
         arcade.arcade_add_person,
         "Hall-1人",
         "「游戏厅」当前排卡 1 人",
-        role="admin",
-        session_fetches=2,
+        session_fetches=1,
     )
 
 
 @pytest.mark.asyncio
-async def test_person_query(app: App, arcade_seed):
-    import nonebot
+async def test_person_query(app: App, arcade_enabled):
+    from nonebot_plugin_awmc_helper.plugins import arcade
 
-    # on_regex 版本：通过正则分组取店名
-    from fake import fake_group_message_event_v11
+    await _run(app, arcade.arcade_person_num_2, "游戏厅有几人", "「游戏厅」排卡 0 人")
+
+
+@pytest.mark.asyncio
+async def test_jtj_unsubscribed(app: App, arcade_enabled):
+    from nonebot_plugin_awmc_helper.plugins import arcade
+
+    await _run(app, arcade.arcade_person_num, "机厅几人", "该群未订阅任何机厅")
+
+
+@pytest.mark.asyncio
+async def test_switch_default_off(app: App, arcade_seed):
+    """部署默认关：未覆盖群一切排卡指令在 rule 层静默拦截（含宽正则），帮助除外。"""
+    from nonebot_plugin_awmc_helper.plugins import arcade
+
+    await _run_silent(app, arcade.arcade_search, "查找机厅 游戏")
+    await _run_silent(app, arcade.arcade_person_num_2, "游戏厅有几人")
+    await _run_silent(app, arcade.arcade_add_person, "游戏厅+2人")
+    await _run_silent(app, arcade.arcade_person_num, "机厅几人")
+
+
+@pytest.mark.asyncio
+async def test_switch_toggle(app: App, arcade_seed):
+    """开启/关闭排卡：成员拒绝；管理员开启后群级覆盖部署默认；关闭回归静默。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import arcade
+
+    await _run(
+        app,
+        arcade.arcade_switch,
+        "开启排卡",
+        "权限不足：仅群管理员可用",
+        role="member",
+        session_fetches=2,
+    )
+    await _run(
+        app,
+        arcade.arcade_switch,
+        "开启排卡",
+        "已开启本群排卡",
+        role="admin",
+        session_fetches=2,
+    )
+    assert await store.get_switch("87654321", "arcade", False) is True
+    await _run(
+        app,
+        arcade.arcade_search,
+        "查找机厅 游戏",
+        "为您找到以下机厅：\n==========\n店名：游戏厅\n"
+        "    - 地址：某路 2 号\n    - ID：10000\n    - 机台：4\n    - 排卡：0 人",
+    )
+    await _run(
+        app,
+        arcade.arcade_switch,
+        "关闭排卡",
+        "已关闭本群排卡",
+        role="admin",
+        session_fetches=2,
+    )
+    assert await store.get_switch("87654321", "arcade", False) is False
+    await _run_silent(app, arcade.arcade_search, "查找机厅 游戏")
+
+
+@pytest.mark.asyncio
+async def test_switch_private_follows_default(app: App, arcade_seed, monkeypatch):
+    """私聊取部署默认：默认关静默；AWMC_ARCADE_ENABLED=true 后可用。"""
+    import nonebot
+    from fake import fake_private_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
+    from nonebot_plugin_awmc_helper.config import plugin_config
     from nonebot_plugin_awmc_helper.plugins import arcade
 
-    event = fake_group_message_event_v11(message="游戏厅有几人")
-    async with app.test_matcher(arcade.arcade_person_num_2) as ctx:
+    def _private_event():
+        return fake_private_message_event_v11(message="查找机厅 游戏", user_id=12345678)
+
+    # 部署默认关：rule 判私聊取默认 False → 静默（私聊会话构建零 API）
+    event = _private_event()
+    async with app.test_matcher(arcade.arcade_search) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
+
+    monkeypatch.setattr(plugin_config, "awmc_arcade_enabled", True)
+    event = _private_event()
+    async with app.test_matcher(arcade.arcade_search) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        # 私聊：无 at，发送层去前导空格
         ctx.should_call_send(
             event,
             Message(
                 [
-                    MessageSegment.at(12345678),
-                    MessageSegment.text(" 「游戏厅」排卡 0 人"),
+                    MessageSegment.text(
+                        "为您找到以下机厅：\n==========\n店名：游戏厅\n"
+                        "    - 地址：某路 2 号\n    - ID：10000\n"
+                        "    - 机台：4\n    - 排卡：0 人"
+                    )
                 ]
             ),
             result=None,
@@ -261,7 +383,19 @@ async def test_person_query(app: App, arcade_seed):
 
 
 @pytest.mark.asyncio
-async def test_jtj_unsubscribed(app: App, db):
+async def test_add_person_silent_no_name(app: App, arcade_enabled):
+    """无店名消息（如「+2」「=5」）静默忽略，对齐 Hoshino 原版
+    （if match.group(1) 无 else）。「1+1」的店名为「1」，属有店名路径：
+    未订阅时与原版一样拒绝（不静默）。
+    """
     from nonebot_plugin_awmc_helper.plugins import arcade
 
-    await _run(app, arcade.arcade_person_num, "机厅几人", "该群未订阅任何机厅")
+    await _run_silent(app, arcade.arcade_add_person, "+2")
+    await _run_silent(app, arcade.arcade_add_person, "=5")
+    await _run(
+        app,
+        arcade.arcade_add_person,
+        "1+1",
+        "该群未订阅机厅，无法更改机厅人数",
+        session_fetches=1,
+    )

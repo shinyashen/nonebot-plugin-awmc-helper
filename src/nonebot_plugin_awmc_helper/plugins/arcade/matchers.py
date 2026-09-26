@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 
 from nonebot import on_regex, on_command, on_fullmatch
+from nonebot.rule import Rule
 from nonebot.params import Command, CommandArg, RegexGroup
 from nonebot.adapters import Bot, Event, Message
 from nonebot.permission import SUPERUSER
@@ -17,6 +18,7 @@ from ...core.render.tools import text_to_image, image_to_bytes
 
 ARCADE_HELP = (
     "排卡指令如下：\n"
+    "开启排卡/关闭排卡 群管开关本群排卡（部署默认关）\n"
     "添加机厅 <店名> <地址> <机台数量> 添加机厅信息\n"
     "删除机厅 <店名> 删除机厅信息\n"
     "修改机厅 <店名> 数量 <数量> 修改机厅信息\n"
@@ -55,31 +57,71 @@ DECREASE_OPS = ("减少", "降低", "减", "－", "-")
 # 与原手写正则等价），漏改 regex 导致「减」落成「加」的问题不再可能
 _ARCADE_OP_RE = "|".join(re.escape(op) for op in SET_OPS + INCREASE_OPS + DECREASE_OPS)
 
+ARCADE_FEATURE = "arcade"
+"""group_switch 表中的排卡特征名。"""
+
+
+async def _arcade_enabled(session: Session = UniSession()) -> bool:
+    """排卡群级门禁：群内取群级覆盖（缺省部署默认），私聊取部署默认。
+
+    放在 rule 而非 handler 开头：关闭群中匹配失败即不消费事件，
+    宽正则（XX店+2人/XX店有几人）不会吞掉本属于其他插件的消息。
+    """
+    group_id = group_id_of(session)
+    if group_id is None:
+        return plugin_config.awmc_arcade_enabled
+    return await store.get_switch(
+        group_id, ARCADE_FEATURE, plugin_config.awmc_arcade_enabled
+    )
+
+
+# 对齐 Hoshino 原版 Service(…, enable_on_default=False) 的按群显式开通；
+# 同一事件的依赖缓存贯穿 权限→rule→handler（nonebot handle_event 级），
+# 此处构建的 Session 与 handler 的 UniSession 共享，无额外 API 开销
+arcade_gate = Rule(_arcade_enabled)
+
+# 帮助不设门禁：精确全文匹配无误触风险，未开通群可经此发现「开启排卡」入口
 arcade_help = on_fullmatch(("帮助maimaiDX排卡", "帮助maimaidx排卡"), block=True)
 arcade_add = on_command(
-    "添加机厅", aliases={"新增机厅"}, permission=SUPERUSER, block=True
+    "添加机厅",
+    aliases={"新增机厅"},
+    permission=SUPERUSER,
+    block=True,
+    rule=arcade_gate,
 )
 arcade_del = on_command(
-    "删除机厅", aliases={"移除机厅"}, permission=SUPERUSER, block=True
+    "删除机厅", aliases={"移除机厅"}, permission=SUPERUSER, block=True, rule=arcade_gate
 )
-arcade_alias_set = on_command("添加机厅别名", aliases={"删除机厅别名"}, block=True)
-arcade_set = on_command("修改机厅", aliases={"编辑机厅"}, block=True)
-arcade_sub = on_command("订阅机厅", aliases={"取消订阅机厅", "取消订阅"}, block=True)
-arcade_show_sub = on_fullmatch(("查看订阅", "查看订阅机厅"), block=True)
+arcade_alias_set = on_command(
+    "添加机厅别名", aliases={"删除机厅别名"}, block=True, rule=arcade_gate
+)
+arcade_set = on_command("修改机厅", aliases={"编辑机厅"}, block=True, rule=arcade_gate)
+arcade_sub = on_command(
+    "订阅机厅",
+    aliases={"取消订阅机厅", "取消订阅"},
+    block=True,
+    rule=arcade_gate,
+)
+arcade_show_sub = on_fullmatch(
+    ("查看订阅", "查看订阅机厅"), block=True, rule=arcade_gate
+)
 arcade_search = on_command(
-    SEARCH_PREFIXES[0], aliases=set(SEARCH_PREFIXES[1:]), block=True
+    SEARCH_PREFIXES[0], aliases=set(SEARCH_PREFIXES[1:]), block=True, rule=arcade_gate
 )
 arcade_add_person = on_regex(
     rf"^(.+)?\s?({_ARCADE_OP_RE})\s?([0-9]+|＋|\+|－|-)(人|卡)?$",
     block=True,
     priority=3,
+    rule=arcade_gate,
 )
-arcade_person_num = on_fullmatch(("机厅几人", "jtj"), block=True)
+arcade_person_num = on_fullmatch(("机厅几人", "jtj"), block=True, rule=arcade_gate)
 arcade_person_num_2 = on_regex(
     r"^(.+?)(?:" + "|".join(PERSON_SUFFIXES) + r")$",
     block=True,
     priority=3,
+    rule=arcade_gate,
 )
+arcade_switch = on_regex(r"^(开启|关闭)排卡$", block=True)
 
 
 async def _find_arcade(keyword: str) -> store.Arcade | None:
@@ -111,6 +153,25 @@ async def _():
     await UniMessage.image(raw=image_to_bytes(text_to_image(ARCADE_HELP))).finish(
         at_sender=True
     )
+
+
+@arcade_switch.handle()
+@handle_errors()
+async def _(
+    bot: Bot,
+    event: Event,
+    session: Session = UniSession(),
+    groups: tuple = RegexGroup(),
+):
+    group_id = group_id_of(session)
+    if group_id is None:
+        await UniMessage.text(" 排卡开关仅群聊可用").finish(at_sender=True)
+    if not await group_admin()(bot, event):
+        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
+    enabled = groups[0] == "开启"
+    await store.set_group_switch(group_id, ARCADE_FEATURE, enabled)
+    state = "开启" if enabled else "关闭"
+    await UniMessage.text(f" 已{state}本群排卡").finish(at_sender=True)
 
 
 @arcade_add.handle()
@@ -260,21 +321,17 @@ async def _(message: Message = CommandArg()):
 @arcade_add_person.handle()
 @handle_errors()
 async def _(
-    bot: Bot,
-    event: Event,
     session: Session = UniSession(),
     groups: tuple = RegexGroup(),
 ):
     group_id = group_id_of(session)
     if group_id is None:
         await UniMessage.text(" 排卡操作仅群聊可用").finish(at_sender=True)
-    if not await group_admin()(bot, event):
-        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
     name_raw, op, amount_raw, unit = groups
     if not name_raw:
-        await UniMessage.text(" 格式：<店名|别称>设置/=/+/- <人数>").finish(
-            at_sender=True
-        )
+        # 无店名（如「+1」「=5」）静默忽略，对齐 Hoshino 原版（逻辑全在
+        # if match.group(1) 内）；「1+1」属有店名路径，照常查订阅机厅
+        return
     sub_ids = await store.get_subscriptions(group_id)
     if not sub_ids:
         await UniMessage.text(" 该群未订阅机厅，无法更改机厅人数").finish(
