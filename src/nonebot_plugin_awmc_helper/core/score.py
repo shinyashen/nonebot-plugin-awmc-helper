@@ -7,7 +7,6 @@
 import asyncio
 
 import httpx
-from nonebot import logger
 from maimai_py import (
     Song,
     PlayerSong,
@@ -26,7 +25,6 @@ from maimai_py import (
 from .ext import ExtError
 from .songs import song_service
 from .client import client, divingfish_provider
-from ..config import plugin_config
 from .binding import (
     SERVICE_NET,
     NET_UNSUPPORTED_HINT,
@@ -35,6 +33,7 @@ from .binding import (
     binding_service,
 )
 from .ext.net import NET_ERROR_MESSAGES, NetError
+from .net_score import NetScoreError, net_score_service
 
 
 class UserScoreError(Exception):
@@ -110,29 +109,11 @@ class ScoreService:
         )
 
     async def _get_b50_net(self, binding: UserBinding) -> PlayerBests:
-        """日服 B50：NET 抓取 → JP 视图组装（冷却在 core.net_score 维护）。"""
-        from .net_score import net_score_service
-
-        platform, user_id = binding.platform, binding.user_id
-        remain = net_score_service.cooldown.try_acquire(platform, user_id)
-        if remain > 0:
-            minutes = plugin_config.awmc_net_cooldown_minutes
-            raise UserScoreError(
-                f"日服查询过于频繁，请约 {remain // 60 + 1} 分钟后再试"
-                f"（NET 数据源冷却 {minutes} 分钟，防止官方风控）"
-            )
+        """日服 B50：窗口缓存优先（core.net_score），真实抓取按需触发。"""
         try:
-            records = await net_score_service.fetch_records(binding)
-        except Exception:
-            # 抓取失败不占冷却（成功才留 15 分钟窗口）
-            net_score_service.cooldown.release(platform, user_id)
-            raise
-        bests = await net_score_service.build_b50(records)
-        if bests.rating <= 0:
-            logger.warning(
-                "net-score：NET 记录组装后 rating 为 0（登录态可能已失效或页面改版）"
-            )
-        return bests
+            return await net_score_service.get_b50(binding)
+        except NetScoreError as e:
+            raise UserScoreError(str(e)) from e
 
     async def get_b50(self, binding: UserBinding) -> "MaimaiScores | PlayerBests":
         """B50（b35 + b15 与总 rating）；NET 数据源走日服组装链路。
@@ -149,6 +130,21 @@ class ScoreService:
                 provider=binding_service.provider(binding),
             ),
         )
+
+    async def get_minfo_net(
+        self, binding: UserBinding, song: Song
+    ) -> PlayerSong | None:
+        """日服单曲成绩：NET 窗口缓存过滤组装 PlayerSong（未游玩 None）。
+
+        仅 service=net 时由 minfo 调用；score/JP 视图口径，与 CN minfo 语义一致。
+        """
+        try:
+            hit = await net_score_service.get_minfo_scores(binding, song)
+        except NetScoreError as e:
+            raise UserScoreError(str(e)) from e
+        if hit is None:
+            return None
+        return PlayerSong(song=song, scores=hit)
 
     async def get_scores_all(self, binding: UserBinding) -> MaimaiScores:
         """全量成绩（牌子 / ap50 / 表格的基础）。"""
@@ -186,7 +182,8 @@ class ScoreService:
         """
         ident: PlayerIdentifier | None = None
         if binding is not None:
-            self._guard_cn(binding)
+            if binding.service == SERVICE_NET:
+                return await self.get_minfo_net(binding, song)
             ident = binding_service.identifier_or_none(binding)
         await song_service.ensure_loaded()
         result = await self._run(

@@ -17,12 +17,13 @@ from ...core.utils import handle_errors
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
 from ...core.render import best50 as b50_render
-from ...core.render import nb_chart
+from ...core.render import jp_cover, nb_chart
 from ...core.binding import (
     SERVICE_NET,
     session_keys,
     binding_service,
 )
+from ...core.net_score import net_score_service
 from ...core.render.tools import text_to_image, image_to_bytes
 
 AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
@@ -88,6 +89,63 @@ async def _resolve_song(key: str):
     return songs[0]
 
 
+async def _resolve_song_jp(key: str):
+    """net 数据源：JP 视图解析曲目（数字 id 折根 / 别名 / 标题）。"""
+    if key.isdigit():
+        song = await song_service.jp_by_id(int(key))
+        if song is not None:
+            return song
+    songs, _ = await song_service.jp_by_alias_detail(key)
+    if len(songs) == 1:
+        return songs[0]
+    if not songs:
+        songs = await song_service.jp_by_title_fuzzy(key)
+    if not songs:
+        await UniMessage.text(f" 没有找到「{key}」对应的乐曲").finish(at_sender=True)
+    if len(songs) > 1:
+        msg = f"找到{len(songs)}首相关乐曲：\n"
+        msg += "".join(f"{s.id}：{s.title}\n" for s in songs[:10])
+        msg += "※ 请使用「minfo <ID>」指定曲目"
+        await UniMessage.text(msg.rstrip(" \n")).finish(at_sender=True)
+    return songs[0]
+
+
+async def _minfo_net(key: str, binding) -> None:
+    """日服 minfo：JP 视图曲解析 + NET 窗口缓存成绩 + 日服谱面卡。
+
+    与 CN minfo 的差异：曲走 JP 视图（数字 id 折根/别名/标题）、成绩来自
+    NET 抓取缓存（窗口内 b50/minfo 共享一份）、渲染前补拉日服曲绘。
+    顺序调用 b50（缓存命中 0 请求），避免与成绩查询并发触发双抓取。
+    """
+    song = await _resolve_song_jp(key)
+    if net_score_service.needs_fetch(binding):
+        await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
+            at_sender=True
+        )
+    info = await score_service.get_minfo(song, binding)
+    if info is None:
+        await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
+    try:
+        bests = await score_service.get_b50(binding)
+    except UserScoreError:
+        bests = None  # B50 失败不阻断成绩卡，仅省略上分提示
+    prefer = prefer_type_from_raw_id(int(key)) if key.isdigit() else None
+    await jp_cover.ensure(song.id)
+    png = info_render.song_play_data(
+        song,
+        info.scores,
+        service=binding.service,
+        theme=binding.theme or DEFAULT_THEME,
+        prefer_type=prefer,
+    )
+    tips = await _b50_rise_tips(info.scores, binding, bests=bests)
+    msg = UniMessage.image(raw=png)
+    if tips:
+        tips_img = text_to_image("\n".join(tips), size=22, padding=14)
+        msg = msg.image(raw=image_to_bytes(tips_img))
+    await msg.finish(at_sender=True)
+
+
 def _display_name(player) -> str:
     """卡片显示名：水鱼 Player.name 是账号用户名，展示用昵称（原版 df_to_player
     同款）；落雪 Player 无 nickname 字段，回退 name。"""
@@ -117,8 +175,12 @@ async def _(
     else:
         binding = await _get_binding(session, event)
         if binding.service == SERVICE_NET:
-            # 日服 NET：无 player 概念（NET 首页玩家名结构未考证，先显示
-            # SEGA ID），b50 由 score_service 内部分派抓取与 JP 组装
+            # 日服 NET：窗口缓存优先（首次/过期时真实抓取，约 5-15 秒）；
+            # 无 player 概念（NET 首页玩家名结构未考证，先显示 SEGA ID）
+            if net_score_service.needs_fetch(binding):
+                await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
+                    at_sender=True
+                )
             bests = await score_service.get_b50(binding)
             png = await b50_render.best50_bytes(
                 player_name=binding.net_sega_id or "maimai NET",
@@ -213,8 +275,10 @@ async def _(
     key = str(message).strip()
     if not key:
         await UniMessage.text(" 用法：minfo <曲目ID|曲名|别名>").finish(at_sender=True)
-    song = await _resolve_song(key)
     binding = await _get_binding(session, event, required=False)
+    if binding is not None and binding.service == SERVICE_NET:
+        await _minfo_net(key, binding)
+    song = await _resolve_song(key)
 
     async def _safe_b50():
         # B50 拉取失败（未绑定/无权限）不阻断成绩卡，仅省略上分提示

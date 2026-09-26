@@ -56,36 +56,13 @@ _FS_TO_ENUM = {
 # DX 星阈值（maimai_py MaimaiScores._calcuate_dx_star 同源）
 _DX_STAR_THRESHOLDS = (0.85, 0.90, 0.93, 0.95, 0.97)
 
-# B50 排序键（dx_rating, dx_score, achievements 降序，maimai_py 同口径）
+# 抓取失败后的短退避（秒）：窗口缓存由成功抓取填充，失败不占窗口，
+# 但也不允许立刻重试轰炸官方（凭据错误连续重试是最典型场景）
+FETCH_FAIL_BACKOFF_SECONDS = 60
 
 
-class NetCooldownBook:
-    """per-user NET 查询冷却（进程内存；重启清零，无需持久化）。"""
-
-    def __init__(self) -> None:
-        self._last: dict[tuple[str, str], float] = {}
-
-    def try_acquire(self, platform: str, user_id: str) -> int:
-        """尝试占用一次查询窗口；返回 0 = 成功，>0 = 距下次可查秒数。
-
-        抓取失败由调用方 :meth:`release` 释放（失败不占冷却）。
-        """
-        from ..config import plugin_config
-
-        cooldown = max(0, plugin_config.awmc_net_cooldown_minutes) * 60
-        if cooldown <= 0:  # 部署侧显式置 0 关闭冷却
-            return 0
-        now = time.monotonic()
-        last = self._last.get((platform, user_id), 0.0)
-        remain = int(last + cooldown - now)
-        if remain <= 0:
-            self._last[(platform, user_id)] = now
-            return 0
-        return remain
-
-    def release(self, platform: str, user_id: str) -> None:
-        """释放冷却占用（抓取失败时调用，成功后保持冷却生效）。"""
-        self._last.pop((platform, user_id), None)
+class NetScoreError(Exception):
+    """NET 查分业务错误（message 面向用户；score 层统一转 UserScoreError）。"""
 
 
 @dataclass
@@ -97,18 +74,42 @@ class _Chart:
 
 
 class NetScoreService:
-    """日服 NET 查分：抓取 + JP 视图映射 + B50 组装。"""
+    """日服 NET 查分：抓取 + JP 视图映射 + 组装 + 窗口缓存。
+
+    交互模型（2026-09-26 重设计）：一次抓取拿到全量成绩后，在冷却窗口内
+    b50 / minfo 等指令共享同一份组装结果（0 请求秒回）——即冷却语义是
+    「两次**抓取**的最小间隔」而非「两次查询的间隔」。进程内存态，重启清零。
+    """
 
     def __init__(self) -> None:
-        self.cooldown = NetCooldownBook()
-        # per-user 抓取冷却（成功生效、失败释放，core.score 分派处检查）
+        self._window_cache: dict[tuple[str, str], tuple[float, list[ScoreExtend]]] = {}
+        # (platform, user_id) → (fetched_at, 组装后的全量成绩)
+        self._fail_until: dict[tuple[str, str], float] = {}
+        # 抓取失败短退避，窗口内重试防轰炸
         self._title_index: tuple[str | None, dict[str, list[Song]]] = (None, {})
         # 标题索引随曲库指纹缓存：(fingerprint, {归一化标题: [Song]})
 
-    # -- 抓取 ---------------------------------------------------------------
+    def _window(self) -> int:
+        from ..config import plugin_config
+
+        return max(0, plugin_config.awmc_net_cooldown_minutes) * 60
+
+    @staticmethod
+    def _key(binding) -> tuple[str, str]:
+        return (binding.platform, binding.user_id)
+
+    def needs_fetch(self, binding) -> bool:
+        """窗口内是否需要真实抓取（handler 据此先发「正在抓取」提示）。"""
+        window = self._window()
+        if window <= 0:
+            return True
+        entry = self._window_cache.get(self._key(binding))
+        return entry is None or time.monotonic() - entry[0] >= window
+
+    # -- 抓取与组装 -----------------------------------------------------------
 
     async def fetch_records(self, binding) -> list[NetRecord]:
-        """按绑定凭据登录 NET 并抓全曲记录（调用方负责冷却检查与错误转文案）。"""
+        """按绑定凭据登录 NET 并抓全曲记录（错误透传 ext 层语义）。"""
         creds = NetCredentials(
             sega_id=binding.net_sega_id or "", password=binding.net_password or ""
         )
@@ -119,10 +120,35 @@ class NetScoreService:
         finally:
             await client.aclose()
 
-    # -- B50 组装 -----------------------------------------------------------
+    async def get_scores(self, binding) -> tuple[list[ScoreExtend], bool]:
+        """窗口内全量成绩（缓存优先）；返回 (scores, from_cache)。
 
-    async def build_b50(self, records: list[NetRecord]) -> PlayerBests:
-        """NET 记录 → 日服 B50（纯组装，不触发抓取，供测试与未来复用）。"""
+        缓存未命中时真实抓取：失败进入短退避（NetError 等异常原样透传），
+        成功写窗口缓存并清除退避标记。
+        """
+        key = self._key(binding)
+        window = self._window()
+        entry = self._window_cache.get(key)
+        if window > 0 and entry is not None and time.monotonic() - entry[0] < window:
+            return entry[1], True
+        until = self._fail_until.get(key)
+        if until is not None and time.monotonic() < until:
+            remain = int(until - time.monotonic()) + 1
+            raise NetScoreError(f"日服 NET 刚刚查询失败，请约 {remain} 秒后再重试")
+        try:
+            records = await self.fetch_records(binding)
+        except Exception:
+            self._fail_until[key] = time.monotonic() + FETCH_FAIL_BACKOFF_SECONDS
+            raise
+        scores = await self.assemble(records)
+        if window > 0:
+            self._window_cache[key] = (time.monotonic(), scores)
+        else:
+            self._window_cache.pop(key, None)
+        return scores, False
+
+    async def assemble(self, records: list[NetRecord]) -> list[ScoreExtend]:
+        """NET 记录 → 组装成绩（JP 视图匹配 + ra/rate/DX 星；未匹配 log warning）。"""
         index = await self._title_index_map()
         unmatched: list[str] = []
         scores: list[ScoreExtend] = []
@@ -138,7 +164,24 @@ class NetScoreService:
                 f"（数据滞后或官方改名）：{unmatched[:10]}"
                 f"{'…' if len(unmatched) > 10 else ''}"
             )
+        return scores
+
+    # -- 指令接口（core.score 分派；窗口缓存内 0 请求） ------------------------
+
+    async def get_b50(self, binding) -> PlayerBests:
+        """日服 B50（b35 + b15 与总 rating）。"""
+        scores, _ = await self.get_scores(binding)
         return self._bests_of(scores)
+
+    async def get_minfo_scores(self, binding, song: Song) -> list[ScoreExtend] | None:
+        """该曲全部谱面成绩（未游玩返回 None）；随窗口缓存复用。"""
+        scores, _ = await self.get_scores(binding)
+        hit = [s for s in scores if s.id % DX_ID_OFFSET == song.id]
+        return hit or None
+
+    async def build_b50(self, records: list[NetRecord]) -> PlayerBests:
+        """NET 记录 → 日服 B50（纯组装，不触发抓取，供测试与未来复用）。"""
+        return self._bests_of(await self.assemble(records))
 
     # -- 内部 ---------------------------------------------------------------
 

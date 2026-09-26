@@ -1,7 +1,8 @@
 """日服 NET 数据源测试：B50 组装（JP 视图映射）+ 绑定/切换/查询命令流。
 
+绑定日服仅限私聊（SEGA 密码不进聊天记录），命令流用例均走私聊事件；
 组装层不触发抓取（fetch_records 由命令流测试 monkeypatch），JP 视图
-注入用 make_song/make_diff 构造 + monkeypatch song_service.jp_all。
+注入用 make_song/make_diff 构造 + monkeypatch song_service 内部视图。
 """
 
 import respx
@@ -94,17 +95,24 @@ def jp_view(monkeypatch):
     async def fake_jp_all():
         return songs
 
+    async def fake_jp_map():
+        return {s.id: s for s in songs}
+
     monkeypatch.setattr(song_service, "jp_all", fake_jp_all)
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
     monkeypatch.setattr(songdb, "CURRENT_FINGERPRINT", "net-test-fp")
     return songs
 
 
 @pytest.fixture
-def net_service():
+def net_service(monkeypatch):
+    from nonebot_plugin_awmc_helper.config import plugin_config
     from nonebot_plugin_awmc_helper.core.net_score import net_score_service
 
-    net_score_service.cooldown = type(net_score_service.cooldown)()  # 全新冷却表
+    net_score_service._window_cache.clear()
+    net_score_service._fail_until.clear()
     net_score_service._title_index = (None, {})
+    monkeypatch.setattr(plugin_config, "awmc_net_cooldown_minutes", 15)
     return net_score_service
 
 
@@ -112,7 +120,7 @@ def _records():
     from nonebot_plugin_awmc_helper.core.ext.net import NetRecord
 
     return [
-        # 旧曲 100.5% → ra = int(22.4 * 13.0 * 100.5/100) = 292（b35）
+        # 旧曲 100.5% → ra = int(22.4 * 13.0 * 1.005)（b35）
         NetRecord(
             title="旧曲テスト",
             type="dx",
@@ -123,7 +131,7 @@ def _records():
             fc="ap",
             fs=None,
         ),
-        # 新曲 100.0% → ra = int(21.6 * 14.0) = 302（b15）
+        # 新曲 100.0% → ra = int(21.6 * 14.0)（b15）
         NetRecord(
             title="新曲テスト",
             type="dx",
@@ -134,7 +142,7 @@ def _records():
             fc=None,
             fs="fsd",
         ),
-        # 折曲 DX master 13.7（v=27000 → b15）100.5% → int(22.4 * 13.7 * 1.005)
+        # 折曲 DX master 13.7（v=27000 → b15）+ SD master 12.0（v=24000 → b35）
         NetRecord(
             title="折曲",
             type="dx",
@@ -145,7 +153,6 @@ def _records():
             fc=None,
             fs=None,
         ),
-        # 折曲 SD master 12.0（v=24000 → b35）98.0% → int(20.3 * 12.0)
         NetRecord(
             title="折曲",
             type="standard",
@@ -212,7 +219,7 @@ async def test_build_b50_sorted_and_capped(net_service, jp_view):
             dx_score=100 + i,
             dx_score_total=2000,
         )
-        for i in range(40)  # 同一谱面同记录重复：去重键在 dxrating 侧，这里 40 条同名
+        for i in range(40)
     ]
     bests = await net_service.build_b50(records)
     # 全部映射到同一谱面（标题相同）→ b35 35 条（v=24000），b15 空
@@ -223,75 +230,84 @@ async def test_build_b50_sorted_and_capped(net_service, jp_view):
 
 
 @pytest.mark.asyncio
-async def test_cooldown_book(net_service, monkeypatch):
-    """冷却书：首次 0、窗口内返剩余秒、release 清零、配置 0 关闭。"""
-    import pytest_asyncio  # noqa: F401
+async def test_window_cache_and_backoff(net_service, jp_view, monkeypatch):
+    """窗口缓存：首查抓取、窗口内复用（0 请求）；抓取失败进入短退避。"""
+    import time as _time
 
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.net import NetError
+    from nonebot_plugin_awmc_helper.core.net_score import NetScoreError
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+
+    calls = []
+
+    async def fake_fetch(b):
+        calls.append(1)
+        return _records()
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
+
+    assert net_service.needs_fetch(binding)  # 无缓存 → 需要抓取
+    scores, from_cache = await net_service.get_scores(binding)
+    assert not from_cache
+    assert len(scores) == 4
+    assert not net_service.needs_fetch(binding)  # 窗口内不再抓取
+    again, from_cache = await net_service.get_scores(binding)
+    assert from_cache
+    assert again is scores
+    assert len(calls) == 1
+
+    # 过期 → 重新抓取
+    fetched_at, cached = net_service._window_cache[(binding.platform, binding.user_id)]
+    net_service._window_cache[(binding.platform, binding.user_id)] = (
+        fetched_at - 16 * 60,
+        cached,
+    )
+    assert net_service.needs_fetch(binding)
+    _, from_cache = await net_service.get_scores(binding)
+    assert not from_cache
+    assert len(calls) == 2
+
+    # 抓取失败（清缓存后触发）→ 透传异常 + 短退避：退避内不再发起真实抓取
+    net_service._window_cache.clear()
+
+    async def fail_fetch(b):
+        calls.append(1)
+        raise NetError("invalid_credentials")
+
+    monkeypatch.setattr(net_service, "fetch_records", fail_fetch)
+    with pytest.raises(NetError):
+        await net_service.get_scores(binding)
+    assert len(calls) == 3
+    with pytest.raises(NetScoreError):
+        await net_service.get_scores(binding)
+    assert len(calls) == 3  # 退避窗口内未再抓取
+    # 退避过期后恢复
+    net_service._fail_until[(binding.platform, binding.user_id)] = _time.monotonic() - 1
+    with pytest.raises(NetError):
+        await net_service.get_scores(binding)
+    assert len(calls) == 4
+
+    # 冷却窗口置 0：每次都视为需要抓取（禁用缓存）
     from nonebot_plugin_awmc_helper.config import plugin_config
-    from nonebot_plugin_awmc_helper.core.net_score import NetCooldownBook
-
-    book = NetCooldownBook()
-    monkeypatch.setattr(plugin_config, "awmc_net_cooldown_minutes", 15)
-    assert book.try_acquire("p", "u") == 0
-    assert 0 < book.try_acquire("p", "u") <= 900
-    assert book.try_acquire("p", "other") == 0  # 用户间互不影响
-    book.release("p", "u")
-    assert book.try_acquire("p", "u") == 0
 
     monkeypatch.setattr(plugin_config, "awmc_net_cooldown_minutes", 0)
-    book2 = NetCooldownBook()
-    assert book2.try_acquire("p", "u") == 0
-    assert book2.try_acquire("p", "u") == 0
+    assert net_service.needs_fetch(binding)
 
 
 # ---------------------------------------------------------------------------
-# 命令流：绑定日服 / 数据源 2 / b50（nonebug + respx）
+# 命令流：绑定日服（仅私聊）/ 数据源 2 / b50 / minfo（nonebug + respx）
 # ---------------------------------------------------------------------------
 
 
-async def _mock_net_login_success(m):
+def _mock_net_login_success(m):
     m.get(f"{MOBILE}/").respond(text=LOGIN_PAGE)
     m.post(f"{MOBILE}/submit/").respond(302, headers={"location": f"{MOBILE}/home"})
     m.get(f"{MOBILE}/aimeList/").respond(text="ok")
     m.get(f"{MOBILE}/aimeList/submit/", params={"idx": "0"}).respond(text="ok")
     m.get(f"{MOBILE}/home/").respond(text="ok")
-
-
-async def _assert_reply(app, matcher, text, reply, *, user_id=12345678):
-    from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
-
-    event = fake_group_message_event_v11(message=text, user_id=user_id)
-    async with app.test_matcher(matcher) as ctx:
-        bot = ctx.create_bot(base=Bot, adapter=nonebot_get_adapter())
-        ctx.receive_event(bot, event)
-        ctx.should_call_api(
-            "get_group_info",
-            {"group_id": 87654321},
-            result={
-                "group_id": 87654321,
-                "group_name": "g",
-                "member_count": 1,
-                "max_member_count": 10,
-            },
-        )
-        ctx.should_call_api(
-            "get_group_member_info",
-            {"group_id": 87654321, "user_id": user_id, "no_cache": True},
-            result={
-                "user_id": user_id,
-                "role": "member",
-                "card": "",
-                "nickname": "t",
-            },
-        )
-        ctx.should_call_send(
-            event,
-            Message([MessageSegment.at(user_id), MessageSegment.text(f" {reply}")]),
-            result=None,
-            bot=bot,
-        )
-        ctx.should_finished()
 
 
 def nonebot_get_adapter():
@@ -300,16 +316,82 @@ def nonebot_get_adapter():
     return nonebot.get_adapter(OnebotV11Adapter)
 
 
+async def _assert_reply(
+    app: App,
+    matcher,
+    text: str,
+    reply: str,
+    *,
+    user_id=12345678,
+    private: bool = True,
+):
+    """断言单条文本回复；私聊（默认）：无 at、发送层去前导空格。"""
+    from fake import (
+        fake_group_message_event_v11,
+        fake_private_message_event_v11,
+    )
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+
+    event = (
+        fake_private_message_event_v11(message=text, user_id=user_id)
+        if private
+        else fake_group_message_event_v11(message=text, user_id=user_id)
+    )
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot_get_adapter())
+        ctx.receive_event(bot, event)
+        if not private:
+            ctx.should_call_api(
+                "get_group_info",
+                {"group_id": 87654321},
+                result={
+                    "group_id": 87654321,
+                    "group_name": "g",
+                    "member_count": 1,
+                    "max_member_count": 10,
+                },
+            )
+            ctx.should_call_api(
+                "get_group_member_info",
+                {"group_id": 87654321, "user_id": user_id, "no_cache": True},
+                result={
+                    "user_id": user_id,
+                    "role": "member",
+                    "card": "",
+                    "nickname": "t",
+                },
+            )
+            expected = Message(
+                [MessageSegment.at(user_id), MessageSegment.text(f" {reply}")]
+            )
+        else:
+            expected = Message([MessageSegment.text(reply)])
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_net_bind_group_rejected(app: App, db):
+    """群内绑定日服 → 直接拒绝（密码不进聊天记录），不触发网络。"""
+    from nonebot_plugin_awmc_helper.plugins import bind
+
+    await _assert_reply(
+        app,
+        bind.net_bind,
+        "绑定日服 sega_user password123",
+        "绑定日服需要提交 SEGA 账号密码，请私聊机器人操作",
+        private=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_net_bind_command(app: App, db, net_service):
-    """绑定日服：respx 登录成功 → 凭据落库 + service=net。"""
-    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter  # noqa: F401
-
+    """私聊绑定日服：respx 登录成功 → 凭据落库 + service=net。"""
     from nonebot_plugin_awmc_helper.plugins import bind
     from nonebot_plugin_awmc_helper.core.binding import SERVICE_NET, binding_service
 
     with respx.mock(assert_all_called=False) as m:
-        await _mock_net_login_success(m)
+        _mock_net_login_success(m)
         await _assert_reply(
             app,
             bind.net_bind,
@@ -356,8 +438,8 @@ async def test_net_bind_usage_hint(app: App, db):
     usage = (
         "用法：绑定日服 <SEGA ID> <密码>\n\n"
         "⚠️ 该数据源需提供 SEGA 账号密码（仅存于本机数据库，用于登录"
-        "官方 maimai NET 抓取成绩，仅支持 b50）。密码级别敏感，"
-        "建议私聊机器人操作，且不要使用与其他服务相同的密码。"
+        "官方 maimai NET 抓取成绩）。密码级别敏感，不要使用与其他服务"
+        "相同的密码。"
     )
     await _assert_reply(app, bind.net_bind, "绑定日服", usage)
 
@@ -397,10 +479,10 @@ async def test_b50_net_unsupported_commands(app: App, db, net_service, jp_view):
 @requires_assets
 @pytest.mark.asyncio
 async def test_b50_net_command(app: App, db, net_service, jp_view, monkeypatch):
-    """b50 全链路：NET 数据源 → 抓取（mock）→ JP 组装 → B50 图渲染。"""
+    """b50 全链路（私聊）：抓取提示 → NET 组装 → B50 图渲染 → 窗口缓存生效。"""
     import base64
 
-    from fake import fake_group_message_event_v11
+    from fake import fake_private_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 
     from nonebot_plugin_awmc_helper.plugins import score_query
@@ -428,44 +510,98 @@ async def test_b50_net_command(app: App, db, net_service, jp_view, monkeypatch):
         service="net",
         theme="prism_plus",
     )
-    event = fake_group_message_event_v11(message="b50", user_id=12345678)
+    event = fake_private_message_event_v11(message="b50", user_id=12345678)
     async with app.test_matcher(score_query.b50) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot_get_adapter())
         ctx.receive_event(bot, event)
-        ctx.should_call_api(
-            "get_group_info",
-            {"group_id": 87654321},
-            result={
-                "group_id": 87654321,
-                "group_name": "g",
-                "member_count": 1,
-                "max_member_count": 10,
-            },
-        )
-        ctx.should_call_api(
-            "get_group_member_info",
-            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
-            result={
-                "user_id": 12345678,
-                "role": "member",
-                "card": "",
-                "nickname": "t",
-            },
+        # 首查先发抓取提示，再发 B50 图（私聊无 at、去前导空格）
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.text("正在登录日服 NET 抓取成绩，请稍候…")]),
+            result=None,
+            bot=bot,
         )
         ctx.should_call_send(
             event,
             Message(
                 [
-                    MessageSegment.at(12345678),
                     MessageSegment.image(
                         f"base64://{base64.b64encode(expected_png).decode()}"
-                    ),
+                    )
                 ]
             ),
             result=None,
             bot=bot,
         )
         ctx.should_finished()
-    # 成功查询后冷却生效：再次查询提示冷却
-    remain = net_service.cooldown.try_acquire("OneBot V11", "12345678")
-    assert remain > 0
+    # 窗口缓存生效：再次查询不触发抓取
+    scores, from_cache = await net_service.get_scores(binding)
+    assert from_cache
+    assert len(scores) == 4
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_minfo_net_command(app: App, db, net_service, jp_view, monkeypatch):
+    """minfo 全链路（私聊）：JP 视图曲解析 + 窗口缓存成绩 → 日服谱面卡。"""
+    import base64
+
+    from fake import fake_private_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.render.info import song_play_data
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+
+    async def fake_fetch(b):
+        return _records()
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
+
+    async def fake_ensure(song_id, cache_dir=None):
+        return True  # 测试不拉日服封面
+
+    monkeypatch.setattr(jp_cover, "ensure", fake_ensure)
+
+    # JP 别名/标题解析路径会 ensure_loaded（真实环境触发曲库预热）：
+    # 测试注入静态视图后 no-op，避免联网
+    async def fake_noop():
+        return None
+
+    monkeypatch.setattr(song_service, "ensure_loaded", fake_noop)
+
+    scores, from_cache = await net_service.get_scores(binding)  # 预填窗口缓存
+    assert not from_cache
+    _scores2, from_cache2 = await net_service.get_scores(binding)
+    assert from_cache2  # minfo 查询时命中缓存（不发抓取提示、0 请求）
+    song = next(s for s in jp_view if s.title == "旧曲テスト")
+    expected_png = song_play_data(
+        song,
+        [s for s in scores if s.id % 10000 == song.id],
+        service="net",
+        theme="prism_plus",
+        prefer_type=None,
+    )
+    event = fake_private_message_event_v11(message="minfo 旧曲テスト", user_id=12345678)
+    async with app.test_matcher(score_query.minfo) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot_get_adapter())
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.image(
+                        f"base64://{base64.b64encode(expected_png).decode()}"
+                    )
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    assert any(t.name == "SSSP" for t in [s.rate for s in scores])  # 组装口径未回归

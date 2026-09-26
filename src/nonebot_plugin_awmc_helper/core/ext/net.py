@@ -29,6 +29,10 @@ _ERROR_PATH_MARK = "maimai-mobile/error/"
 # 维护文案（dxrating URLS.CHECKLIST.MAINTENANCE）
 _MAINTENANCE_MARKS = ("定期メンテナンス中です",)
 
+# 记录页块标识（实测 2026-09-26）：未游玩的难度页仍返回全曲块，
+# 只是块内无成绩字段；页面缺失该标识即改版或登录态丢失
+_RECORD_BLOCK_MARK = "w_450 m_15 p_r f_0"
+
 # 浏览器指纹头（dxrating COMMON_HEADERS 全量照抄；NET 对非浏览器 UA 有风控）
 COMMON_HEADERS = {
     "Accept": (
@@ -182,7 +186,12 @@ class MaimaiNetClient:
         await self._request("GET", f"{BASE}/home/")
 
     async def fetch_music_records(self) -> list[NetRecord]:
-        """逐难度抓全曲记录页并解析（B50 参与：standard/dx 全难度）。"""
+        """逐难度抓全曲记录页并解析（B50 参与：standard/dx 全难度）。
+
+        实测（2026-09-26，Q37）：未游玩该难度的账号页面仍返回全曲块，
+        只是块内无成绩字段 → 单页解析 0 条是**合法状态**，不报错；
+        页面连记录块都缺失（改版/登录态丢失回登录页）才判 parse_error。
+        """
         records: list[NetRecord] = []
         for diff in B50_DIFF_PARAMS:
             resp = await self._request(
@@ -191,9 +200,7 @@ class MaimaiNetClient:
                 params={"genre": "99", "diff": str(diff)},
             )
             page_records = _parse_music_records(resp.text)
-            if not page_records:
-                # 有登录会话的记录页不可能为空（未登录会被重定向到错误页）：
-                # 空结果即页面结构变化，宁可报错不给空 B50
+            if not page_records and _RECORD_BLOCK_MARK not in resp.text:
                 raise NetError("parse_error")
             records.extend(page_records)
         return records

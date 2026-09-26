@@ -14,7 +14,7 @@ from nonebot.rule import Rule
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Bot, Event, Message
-from nonebot_plugin_uninfo import Session, UniSession
+from nonebot_plugin_uninfo import Session, SceneType, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.ext import lxns as lxns_ext
@@ -211,9 +211,13 @@ async def _complete_lxns(platform: str, user_id: str, code: str) -> None:
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     """绑定日服 NET：`绑定日服 <SEGA ID> <密码>`（一次完成，绑定即验证登录）。
 
-    SEGA 账号密码敏感级别高于查分器 token：消息引导里始终提示私聊风险；
-    凭据本体不回显、不在完成消息中出现。
+    仅限私聊：SEGA 账号密码敏感级别高于查分器 token，群内提交会把密码
+    留在聊天记录（协议端也有留存），凭据本体不回显、不在完成消息中出现。
     """
+    if session.scene and session.scene.type == SceneType.GROUP:
+        await UniMessage.text(
+            " 绑定日服需要提交 SEGA 账号密码，请私聊机器人操作"
+        ).finish(at_sender=True)
     platform, user_id = session_keys(session)
     arg = str(message).strip()
     sega_id, sep, password = arg.partition(" ")
@@ -221,8 +225,8 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         await UniMessage.text(
             "用法：绑定日服 <SEGA ID> <密码>\n\n"
             "⚠️ 该数据源需提供 SEGA 账号密码（仅存于本机数据库，用于登录"
-            "官方 maimai NET 抓取成绩，仅支持 b50）。密码级别敏感，"
-            "建议私聊机器人操作，且不要使用与其他服务相同的密码。"
+            "官方 maimai NET 抓取成绩）。密码级别敏感，不要使用与其他服务"
+            "相同的密码。"
         ).finish(at_sender=True)
     binding = await binding_service.ensure(platform, user_id)
     password = password.strip()
