@@ -1,17 +1,14 @@
 """查歌解析链：数字 id / 别名 → 谱面类型条目。
 
-指令无关的解析编排：查分器 id 形状推断、宴谱按 diff_id 定位、别名查询链
-（国服 → 日服 → 标题兜底）与谱面前缀过滤。
+指令无关的解析编排：查分器 id 形状推断、宴谱按 diff_id 定位、别名查询链。
+别名/曲名 → 谱面条目的链条（含前缀收敛）在 core ``song_service.entries_for_name``
+（查分 minfo 共用，格式与语义单一来源）。
 """
 
 from nonebot import logger
 
-from ...constants import UTAGE_ID_BASE, CHART_TYPE_BY_PREFIX
-from ...core.songs import (
-    song_service,
-    chart_entries_many,
-    prefer_type_from_raw_id,
-)
+from ...constants import UTAGE_ID_BASE
+from ...core.songs import song_service, prefer_type_from_raw_id
 from ...core.types import Song, SongType, SongDifficultyUtage
 
 
@@ -85,48 +82,3 @@ async def _vote_hint(name: str) -> str | None:
         msg += f"- {s.tag}\n    ID {s.song_id}: {s.apply_alias}\n"
     msg += "※ 可以使用指令「同意别名 XXXXX」进行投票"
     return msg
-
-
-async def _expand_alias_entries(name: str) -> list:
-    """别名解析 → 谱面类型条目（查询链 + 前缀偏好过滤 + 宴重查）。
-
-    查询链：国服别名 → 日服别名 → 日服标题兜底（Q32）；带谱面前缀（dx/
-    标准/标/宴）时定位到对应类型条目。条目单源 core ``chart_entries``
-    （SD/DX/宴三族 id 语义与其升序排列均以它为准）。
-    """
-    songs, strip_info = await song_service.by_alias_detail(name)
-    if not songs:
-        # 国服视图未命中 → 日服视图 fallback（Q32：日服作为国服查歌的兜底）
-        songs, strip_info = await song_service.jp_by_alias_detail(name)
-    if not songs:
-        # 别名全网未命中：输入本身可能就是曲目名（如新曲尚无人录别名），
-        # 日服标题兜底（国服侧标题按设计走「查歌」指令）——日服视图含国服
-        # 也有的曲（标题子串命中，如实测 ROND），混合列表按逐曲标注区分
-        songs = await song_service.jp_by_title_fuzzy(name)
-    hit_word = strip_info[1].lower() if strip_info else None
-    prefer_type = CHART_TYPE_BY_PREFIX.get(hit_word) if hit_word else None
-    entries = chart_entries_many(songs)
-    if strip_info:
-        if prefer_type is not None:
-            typed = [e for e in entries if e[2] == prefer_type]
-            if typed:
-                entries = typed
-        elif strip_info[1] == "宴":
-            ut_only = [e for e in entries if e[2] is None]
-            if ut_only:
-                entries = ut_only
-            else:
-                # 剥「宴」后命中的曲无宴谱：按关键词在含宴谱的曲中再查
-                # （如「宴牛奶」的牛奶是宴曲别名而非普通曲别名）
-                ut_songs = await song_service.utage_by_keyword(strip_info[0])
-                if ut_songs:
-                    entries = [e for e in chart_entries_many(ut_songs) if e[2] is None]
-    return entries
-
-
-def _entry_cn_flags(
-    entries: list,
-    cn_songs: dict[int, Song | None],
-) -> list[bool]:
-    """逐条目日服限定标注：国服也有的曲回取国服对象（定数口径/封面/B50 一致）。"""
-    return [cn_songs[s.id] is None for _, s, _ in entries]

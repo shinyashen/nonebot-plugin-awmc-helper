@@ -1,7 +1,6 @@
 """查歌指令入口：查歌 / 是什么歌 / id 三个 matcher 及其 handler。"""
 
 import re
-import asyncio
 from re import Match
 
 from nonebot import on_regex
@@ -14,7 +13,6 @@ from .render import (
     JP_ONLY_NOTE,
     _reply,
     _banquet_card,
-    _list_jp_note,
     _render_query_result,
     _render_pending_result,
 )
@@ -22,12 +20,10 @@ from .resolve import (
     _is_float,
     _vote_hint,
     _split_page,
-    _entry_cn_flags,
     _resolve_raw_id,
-    _expand_alias_entries,
 )
 from ...constants import UTAGE_ID_BASE, display_song_id
-from ...core.songs import song_service
+from ...core.songs import cn_song_map, song_service, entries_list_text
 from ...core.types import SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
@@ -144,20 +140,18 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
         "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
         "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
     )
-    entries = await _expand_alias_entries(name)
-    # SD/DX 条目同根曲共用一次查询：先去重再并发（原列表推导逐条串行且重复查）
-    _unique_ids = {s.id for _, s, _ in entries}
-    _hits = await asyncio.gather(*(song_service.by_id(i) for i in _unique_ids))
-    cn_songs = dict(zip(_unique_ids, _hits))
-    flags = _entry_cn_flags(entries, cn_songs)
+    entries = await song_service.entries_for_name(name)
+    # 逐条目回查国服视图：日服限定判定与国服对象回取共用一份 map（core 单源）
+    cn_songs = await cn_song_map([s for _, s, _ in entries])
+    flags = [cn_songs[s.id] is None for _, s, _ in entries]
     if len(entries) == 1:
         _entry_id, song, card_prefer = entries[0]
         jp = flags[0]
+        cn_song = cn_songs[song.id]
         if _entry_id >= UTAGE_ID_BASE:
             # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；只画命中的那张。
             # 该张可能日服限定（国服宿主曲无此 diff_id，如悪戯センセーション
             # 宴[奏]）——保留 JP 宿主对象画日服卡，不回取国服对象
-            cn_song = cn_songs[song.id]
             cn_diff = (
                 next(
                     (
@@ -184,21 +178,14 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
                 )
             png = await _banquet_card(song, utage_diff, jp)
         else:
-            song = cn_songs[song.id] or song
+            song = cn_song or song
             png = await chart_card_bytes(song, binding, card_prefer, jp)
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
         msg = _reply(JP_ONLY_NOTE) if jp else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
     if entries:
-        msg = f"找到{len(entries)}个谱面：\n"
-        msg += "".join(
-            f"{eid}：{s.title}{'（日服限定）' if f else ''}\n"
-            for (eid, s, _), f in zip(entries, flags)
-        )
-        msg += "※ 请使用「id xxxxx」查询指定谱面"
-        if list_note := _list_jp_note(flags):
-            msg += f"\n{list_note}"
-        await _reply(msg.rstrip("\n")).finish(at_sender=True)
+        msg = entries_list_text(entries, flags, hint="※ 请使用「id xxxxx」查询指定谱面")
+        await _reply(msg).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
     vote_msg = await _vote_hint(name)

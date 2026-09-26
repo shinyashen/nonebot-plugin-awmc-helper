@@ -3,12 +3,10 @@
 1 首出卡片、≤5 首文本、更多列表图（25/页）；各链路收口到 ``finish``。
 """
 
-import asyncio
-
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import display_song_id
-from ...core.songs import song_service
+from ...core.songs import cn_song_map, list_jp_note
 from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart
 from ...core.songdb import PendingSong
@@ -22,7 +20,7 @@ def _reply(text: str) -> UniMessage:
 
 NOT_FOUND = "没有找到这样的乐曲。\n※ 如果是别名请使用「XXX是什么歌」指令进行查询哦。"
 JP_ONLY_NOTE = "此歌曲为日服限定"
-"""单结果命中的日服限定标注；多结果列表用 _list_jp_note 的列表级措辞。"""
+"""单结果命中的日服限定标注；多结果列表用 core ``list_jp_note`` 的列表级措辞。"""
 
 
 async def _banquet_card(song, utage_diff=None, jp: bool = False) -> bytes:
@@ -56,28 +54,19 @@ async def _render_result(songs, page: int, binding=None) -> None:
     )
 
 
-def _list_jp_note(flags: list[bool]) -> str:
-    """多结果列表的日服限定说明：混合列表与全日服列表措辞不同。"""
-    if not any(flags):
-        return ""
-    return "列表中曲目均为日服限定歌曲" if all(flags) else "列表中包含日服限定歌曲"
-
-
 async def _render_jp_result(songs, page: int, binding=None) -> None:
     """日服 fallback 结果：逐曲判定日服限定，混合列表只标注限定曲。
 
     日服视图含国服也有的曲（标题子串、日服定数口径变更等场景可命中）：
     整列表国服都有时按普通结果渲染，混合时国服曲回取国服对象。
     """
-    # 逐条目日服判定须回查国服视图：去重后一次并发建 map 复用（判定与回取共用）
-    unique_ids = {s.id for s in songs}
-    hits = await asyncio.gather(*(song_service.by_id(i) for i in unique_ids))
-    cn_songs = dict(zip(unique_ids, hits))
+    # 逐曲日服判定须回查国服视图：去重后一次并发建 map（判定与回取共用，见 core）
+    cn_songs = await cn_song_map(songs)
     flags = [cn_songs[s.id] is None for s in songs]
     if not any(flags):
         await _render_result([cn_songs[s.id] or s for s in songs], page, binding)
         return
-    note = _list_jp_note(flags)
+    note = list_jp_note(flags)
     if len(songs) == 1:
         png = await chart_card_bytes(songs[0], None, None, True)
         await _reply(JP_ONLY_NOTE).image(raw=png).finish(at_sender=True)

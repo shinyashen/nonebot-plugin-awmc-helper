@@ -30,7 +30,13 @@ from .provider import (
     DivingFishCurveProvider,
     songs_list_digest,
 )
-from ..constants import DX_ID_OFFSET, UTAGE_ID_BASE, normalize_text, strip_chart_prefix
+from ..constants import (
+    DX_ID_OFFSET,
+    UTAGE_ID_BASE,
+    CHART_TYPE_BY_PREFIX,
+    normalize_text,
+    strip_chart_prefix,
+)
 
 SNAPSHOT_KEY = "songs_snapshot"
 CN_POLL_STATE_KEY = "cn_poll_state"
@@ -128,7 +134,11 @@ def prefer_type_from_raw_id(raw_id: int) -> SongType | None:
     return None if song_type == SongType.UTAGE else song_type
 
 
-def chart_entries(song: Song) -> "list[tuple[int, Song, SongType | None]]":
+ChartEntry = tuple[int, Song, "SongType | None"]
+"""谱面类型条目：(展示 id, 宿主曲, 卡片主类型偏好)；宴条目偏好为 None。"""
+
+
+def chart_entries(song: Song) -> list[ChartEntry]:
     """曲目 → 谱面类型条目（NB 双条目语义的单一事实来源）。
 
     - SD 条目 id = 曲 id、DX 条目 id = 曲 id + 10000（查分器 id 形状）；
@@ -139,7 +149,7 @@ def chart_entries(song: Song) -> "list[tuple[int, Song, SongType | None]]":
     （``constants.display_song_id``）与卡片代表 id（``nb_chart._display_card_id``）
     属各自特例，另有单源。
     """
-    entries: list[tuple[int, Song, SongType | None]] = []
+    entries: list[ChartEntry] = []
     if song.difficulties.standard:
         entries.append((song.id, song, SongType.STANDARD))
     if song.difficulties.dx:
@@ -157,14 +167,57 @@ def chart_entries(song: Song) -> "list[tuple[int, Song, SongType | None]]":
     return entries
 
 
-def chart_entries_many(
-    songs: "list[Song]",
-) -> "list[tuple[int, Song, SongType | None]]":
+def chart_entries_many(songs: "list[Song]") -> list[ChartEntry]:
     """多曲 → 谱面类型条目平铺：保持曲目顺序，单曲内按 ``chart_entries`` 语义。
 
     查歌侧条目展开（别名/搜索命中列表）的单一派生入口。
     """
     return [entry for song in songs for entry in chart_entries(song)]
+
+
+def list_jp_note(flags: list[bool]) -> str:
+    """多结果列表的日服限定说明：混合列表与全日服列表措辞不同。"""
+    if not any(flags):
+        return ""
+    return "列表中曲目均为日服限定歌曲" if all(flags) else "列表中包含日服限定歌曲"
+
+
+async def cn_song_map(songs: "list[Song]") -> dict[int, Song | None]:
+    """根 id → 国服视图曲对象（国服无此曲为 None）：逐曲「日服限定」判定的共用查询。
+
+    同根曲的多个条目（SD/DX）共用一次查询；命中曲回取国服对象用于定数口径/
+    封面/B50 一致。查歌列表/日服 fallback 列表/查分 minfo 条目列表的逐曲标注
+    与国服回取均由此派生（``flags = [m[s.id] is None for s in songs]``）。
+    """
+    unique_ids = {s.id for s in songs}
+    hits = await asyncio.gather(*(song_service.by_id(i) for i in unique_ids))
+    return dict(zip(unique_ids, hits))
+
+
+def entries_list_text(
+    entries: list[ChartEntry],
+    flags: list[bool],
+    *,
+    hint: str,
+    limit: int | None = None,
+) -> str:
+    """谱面条目列表文本（查歌「是什么歌」/ 查分 minfo 的歧义提示共用格式）。
+
+    双谱曲（或关键词命中多曲）无法唯一确定要出哪张谱面卡时列出 id 让用户指定：
+    ``hint`` 为末行完整提示句（各指令自填「id xxxxx」/「minfo <ID>」）；
+    ``limit`` 截断条目数（超出时表头注明总数），日服限定按 flags 逐条标注。
+    """
+    shown = entries if limit is None else entries[:limit]
+    omitted = "" if len(shown) == len(entries) else f"（以下仅列出前 {len(shown)} 个）"
+    lines = [f"找到{len(entries)}个谱面：{omitted}"]
+    lines += [
+        f"{eid}：{s.title}{'（日服限定）' if f else ''}"
+        for (eid, s, _), f in zip(shown, flags)
+    ]
+    lines.append(hint)
+    if note := list_jp_note(flags[: len(shown)]):
+        lines.append(note)
+    return "\n".join(lines)
 
 
 class SongService:
@@ -538,6 +591,49 @@ class SongService:
             if song := await self.by_id(song_id):
                 result.append(song)
         return result
+
+    async def entries_for_name(
+        self, name: str, *, scope: Scope = "cn", cn_title: bool = False
+    ) -> list[ChartEntry]:
+        """非数字查询键（别名/曲名）→ 谱面类型条目（查歌/查分共用的定位链）。
+
+        链：``scope="cn"`` 国服别名 → 日服别名 →（``cn_title`` 时）国服标题 →
+        日服标题兜底（Q32）；``scope="jp"`` 只走日服视图——NET 数据源以日服
+        口径出卡，混入国服曲对象会带错定数与版本。
+
+        末尾按谱面前缀（dx/标准/标/宴）把条目收敛到对应类型：双谱曲不带前缀时
+        保留 SD/DX 双条目交调用方列出 id 让用户指定，带前缀时直接定位该类型
+        （Q31 的社区惯用写法）。``cn_title`` 供以曲名为主要输入的指令（minfo）
+        使用；「是什么歌」按设计不查国服标题（输入是别名，曲名走其后的兜底措辞）。
+        """
+        songs: list[Song] = []
+        strip_info: tuple[str, str, str] | None = None
+        if scope == "cn":
+            songs, strip_info = await self.by_alias_detail(name)
+        if not songs:
+            songs, strip_info = await self.jp_by_alias_detail(name)
+        if not songs and cn_title and scope == "cn":
+            songs = await self.by_title_fuzzy(name)
+        if not songs:
+            songs = await self.jp_by_title_fuzzy(name)
+        entries = chart_entries_many(songs)
+        if not strip_info:
+            return entries
+        hit_word = strip_info[1].lower()
+        if (prefer_type := CHART_TYPE_BY_PREFIX.get(hit_word)) is not None:
+            typed = [e for e in entries if e[2] == prefer_type]
+            return typed or entries
+        if strip_info[1] == "宴":
+            ut_only = [e for e in entries if e[2] is None]
+            if ut_only:
+                return ut_only
+            # 剥「宴」后命中的曲无宴谱：按关键词在含宴谱的曲中再查
+            # （如「宴牛奶」的牛奶是宴曲别名而非普通曲别名）；再查无果时
+            # 保留原条目（交调用方按各自兜底措辞处理）
+            ut_songs = await self.utage_by_keyword(strip_info[0])
+            if ut_songs:
+                return [e for e in chart_entries_many(ut_songs) if e[2] is None]
+        return entries
 
     async def by_artist(self, artist: str, scope: Scope = "cn") -> list[Song]:
         """曲师查歌（大小写不敏感精确匹配）。"""
