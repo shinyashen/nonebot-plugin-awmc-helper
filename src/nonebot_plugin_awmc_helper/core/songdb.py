@@ -230,7 +230,13 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
                 chart.is_buddy = True
                 chart.left = list(_utage_notes(utage_charts[0].get("notes") or []))
                 chart.right = list(_utage_notes(utage_charts[1].get("notes") or []))
-                chart.notes = tuple(a + b for a, b in zip(chart.left, chart.right))
+                chart.notes = (
+                    chart.left[0] + chart.right[0],
+                    chart.left[1] + chart.right[1],
+                    chart.left[2] + chart.right[2],
+                    chart.left[3] + chart.right[3],
+                    chart.left[4] + chart.right[4],
+                )
             elif len(utage_charts) == 1:
                 chart.notes = _utage_notes(utage_charts[0].get("notes") or [])
             group[level_id] = chart
