@@ -20,6 +20,7 @@ from ...core.render import best50 as b50_render
 from ...core.render import jp_cover, nb_chart
 from ...core.binding import (
     SERVICE_NET,
+    UserBinding,
     session_keys,
     binding_service,
 )
@@ -51,18 +52,43 @@ def _at_target(event: Event | None) -> str | None:
     return None
 
 
-async def _get_binding(session: Session, event: Event | None, *, required: bool = True):
-    """取（@目标 或 发送者的）绑定；required 时无可用凭据则提示。
+async def _resolve_target(
+    session: Session, event: Event | None
+) -> tuple["UserBinding | None", str | None]:
+    """解析查询目标（@目标 或 发送者）→ (绑定或 None, at 目标)。
 
-    凭据判断用 has_usable_credentials（NET 数据源无 PlayerIdentifier）。
+    代查链（binding_service.resolve_query）：目标绑定行只读 → QQ 平台
+    水鱼按 at 的 QQ 公开查询（无需对方绑定）→ 其余降级。发送者路径保持
+    ensure 自动建行。
     """
     platform = session_keys(session)[0]
-    user_id = _at_target(event) or str(session.user.id)
-    binding = await binding_service.ensure(platform, user_id)
-    if required and not binding_service.has_usable_credentials(binding):
+    at_target = _at_target(event)
+    binding = await binding_service.resolve_query(
+        platform, str(session.user.id), at_target
+    )
+    return binding, at_target
+
+
+async def _get_binding(session: Session, event: Event | None) -> UserBinding:
+    """b50/ap50 入口：无可用凭据则按「代查 / 自身」分别提示并终止。"""
+    binding, at_target = await _resolve_target(session, event)
+    if binding is None or not binding_service.has_usable_credentials(binding):
+        if at_target is not None and binding is None:
+            await UniMessage.text(
+                " 对方尚未绑定查分器，无法代查"
+                "（水鱼可使用「b50 <水鱼用户名>」公开代查）"
+            ).finish(at_sender=True)
         await UniMessage.text(
             " 尚未绑定查分器，请先使用「绑定水鱼」「绑定落雪」或「绑定日服」进行绑定"
         ).finish(at_sender=True)
+    return binding
+
+
+async def _get_binding_or_none(
+    session: Session, event: Event | None
+) -> UserBinding | None:
+    """minfo 入口：不强制已绑定（未绑定降级纯谱面卡）。"""
+    binding, _ = await _resolve_target(session, event)
     return binding
 
 
@@ -159,8 +185,9 @@ async def _(
     event: Event | None = None,
     message: Message = CommandArg(),
 ):
-    username = str(message).strip()
-    if username:  # 水鱼公开代查：b50 <水鱼用户名>
+    username = message.extract_plain_text().strip()
+    if username:  # 水鱼公开代查：b50 <水鱼用户名>（extract_plain_text 丢弃 at 段，
+        # 纯 at 触发下方绑定链；对齐 Hoshino 的参数取法）
         player, bests = await score_service.get_b50_by_username(username)
         png = await b50_render.best50_bytes(
             player_name=_display_name(player),
@@ -272,10 +299,11 @@ async def _(
     event: Event = None,  # type: ignore[assignment]
     message: Message = CommandArg(),  # type: ignore[assignment]
 ):
-    key = str(message).strip()
+    # extract_plain_text 丢弃 at 段：minfo 231 @某人 → 代查某人该曲成绩
+    key = message.extract_plain_text().strip()
     if not key:
         await UniMessage.text(" 用法：minfo <曲目ID|曲名|别名>").finish(at_sender=True)
-    binding = await _get_binding(session, event, required=False)
+    binding = await _get_binding_or_none(session, event)
     if binding is not None and binding.service == SERVICE_NET:
         await _minfo_net(key, binding)
     song = await _resolve_song(key)

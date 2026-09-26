@@ -172,7 +172,13 @@ class BindingService:
         return None
 
     def identifier(self, binding: UserBinding) -> PlayerIdentifier:
-        """按绑定装配 maimai-py PlayerIdentifier（不可查时抛 BindingError）。
+        """装配 maimai-py PlayerIdentifier（**公开查询键**语义：bests/players/minfo）。
+
+        水鱼公开键优先级：绑定用户名 > QQ 号——maimai_py 的
+        ``PlayerIdentifier._as_diving_fish`` 中 qq 优先于 username，同时携带
+        会在「聊天 QQ ≠ 水鱼账号 QQ」时静默查错账号，故有用户名时不带 qq。
+        Import-Token 不是公开查询键（水鱼 b50/单曲接口无 token 形态），
+        全量成绩请用 :meth:`full_identifier`。
 
         NET 数据源不走 maimai-py（官方站直连），到此即说明上游未拦截，
         给出能力边界提示而非「尚未绑定」的误导文案。
@@ -181,11 +187,10 @@ class BindingService:
             raise BindingError(NET_UNSUPPORTED_HINT)
         qq = self.qq_of(binding)
         if binding.service == SERVICE_DIVINGFISH:
-            ident = PlayerIdentifier(
-                qq=qq,
-                username=binding.divingfish_username,
-                credentials=binding.divingfish_import_token or None,
-            )
+            if binding.divingfish_username:
+                ident = PlayerIdentifier(username=binding.divingfish_username)
+            else:
+                ident = PlayerIdentifier(qq=qq)
         else:
             ident = PlayerIdentifier(
                 friend_code=binding.lxns_friend_code,
@@ -193,10 +198,38 @@ class BindingService:
                 credentials=binding.lxns_token or None,
             )
         if ident._is_empty():
+            if (
+                binding.service == SERVICE_DIVINGFISH
+                and binding.divingfish_import_token
+            ):
+                # 仅绑 Import-Token 且非 QQ 平台：全量可查，但 b50/单曲无公开键
+                raise BindingError(
+                    "水鱼 b50/单曲查询需要用户名或 QQ 号：请使用「绑定水鱼 <用户名>」"
+                    "补充绑定，或使用「b50 <水鱼用户名>」查询"
+                )
             raise BindingError(
                 "尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定"
             )
         return ident
+
+    def full_identifier(self, binding: UserBinding) -> PlayerIdentifier:
+        """装配**全量成绩**查询键（scores/plates 等 records 类查询）。
+
+        与公开键的差异在水鱼：Import-Token 优先——maimai_py 把
+        ``username + credentials`` 组合视为「用户名 + 密码」登录水鱼，
+        Import-Token 并存必触发错误登录（score-updater 的 credentials-only
+        用法同理），故有 token 时不得携带 username；b50/单曲公开查询
+        不经本方法。落雪与公开键相同（token 优先的语义已含在 identifier）。
+        """
+        if binding.service == SERVICE_NET:
+            raise BindingError(NET_UNSUPPORTED_HINT)
+        if binding.service == SERVICE_DIVINGFISH and binding.divingfish_import_token:
+            ident = PlayerIdentifier(
+                qq=self.qq_of(binding),
+                credentials=binding.divingfish_import_token,
+            )
+            return ident
+        return self.identifier(binding)
 
     def identifier_or_none(self, binding: UserBinding) -> PlayerIdentifier | None:
         """同 identifier，但无凭据时返回 None（不抛错）。"""
@@ -210,10 +243,35 @@ class BindingService:
 
         指令入口的「先绑定」检查用这个，不要用 identifier_or_none——
         它对 NET 恒为 None（NET 不走 maimai-py identifier），会误判未绑定。
+        水鱼仅绑 Import-Token 也算可用（全量可查；b50/单曲公开键缺失时
+        由 identifier 的专项文案引导，见上）。
         """
         if binding.service == SERVICE_NET:
             return bool(binding.net_sega_id)
+        if binding.service == SERVICE_DIVINGFISH and binding.divingfish_import_token:
+            return True
         return self.identifier_or_none(binding) is not None
+
+    async def resolve_query(
+        self, platform: str, sender_id: str, at_target: str | None
+    ) -> UserBinding | None:
+        """代查目标绑定解析（score_query b50/minfo 等按人查分入口共用）。
+
+        - 无 at：发送者绑定，``ensure`` 自动建行（对齐原版 auto_create）；
+        - 有 at：目标绑定行**只读**（代查不给对方落库建行）；目标无行且
+          平台 user_id 可作 QQ 号时，回退「水鱼按 QQ 公开查询」的临时绑定
+          （对齐 Hoshino：at 未绑定用户 → 默认水鱼凭 QQ 直查，无需对方
+          在本 bot 绑定）；其余（非 QQ 平台）返回 None，由调用方降级。
+        临时绑定不落库：仅内存对象，查询即弃。
+        """
+        if at_target is None:
+            return await self.ensure(platform, sender_id)
+        binding = await self.get(platform, at_target)
+        if binding is None and platform in QQ_PLATFORMS:
+            binding = UserBinding(
+                platform=platform, user_id=at_target, service=SERVICE_DIVINGFISH
+            )
+        return binding
 
     async def refresh_lxns_if_expired(
         self, binding: UserBinding, exc: Exception

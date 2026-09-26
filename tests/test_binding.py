@@ -380,3 +380,92 @@ async def test_lxns_refresh_concurrent_single_call(db, songs, monkeypatch):
     assert calls == ["rt-old"]  # 落雪只被消耗一次
     assert b1.lxns_token == "new-token"
     assert b2.lxns_token == "new-token"  # 后到者经锁内重读采用新凭据
+
+
+@pytest.mark.asyncio
+async def test_divingfish_identifier_shapes(db):
+    """水鱼凭据装配形状（2026-09-26 at 代查定案）：
+
+    - 公开键（identifier，bests/players/minfo）：绑定用户名优先且不带 qq——
+      maimai_py 的 ``_as_diving_fish`` 中 qq 优先，同时携带会在
+      「聊天 QQ ≠ 水鱼账号 QQ」时查错账号；
+    - 全量键（full_identifier，scores/plates）：Import-Token 优先且不带
+      username——maimai_py 把 username+credentials 当「账号+密码」登录水鱼；
+    - 仅 Import-Token：公开键缺失（非 QQ 平台给专项文案），全量键
+      credentials-only（对齐 score-updater 的用法），has_usable 仍为可用。
+    """
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+    from nonebot_plugin_awmc_helper.core.binding import (
+        SERVICE_DIVINGFISH,
+        BindingError,
+        binding_service,
+    )
+
+    # 用户名绑定：公开键 = 用户名（不带 qq）
+    b = UserBinding(
+        platform="OneBot V11",
+        user_id="10001",
+        service=SERVICE_DIVINGFISH,
+        divingfish_username="fish",
+    )
+    ident = binding_service.identifier(b)
+    assert ident.username == "fish"
+    assert ident.qq is None
+    assert ident.credentials is None
+
+    # 用户名 + Import-Token 并存：公开键仍为用户名；全量键走 Import-Token
+    b.divingfish_import_token = "tok"
+    ident_full = binding_service.full_identifier(b)
+    assert ident_full.credentials == "tok"
+    assert ident_full.username is None
+
+    # 仅 Import-Token（非 QQ 平台）：公开键缺失 → 专项文案；全量可查
+    b2 = UserBinding(
+        platform="telegram",
+        user_id="u1",
+        service=SERVICE_DIVINGFISH,
+        divingfish_import_token="tok",
+    )
+    with pytest.raises(BindingError, match="用户名或 QQ"):
+        binding_service.identifier(b2)
+    full = binding_service.full_identifier(b2)
+    assert full.credentials == "tok"
+    assert full.qq is None
+    assert binding_service.has_usable_credentials(b2)
+
+    # 无任何凭据（QQ 平台）：公开键 = QQ 兜底
+    b3 = UserBinding(platform="OneBot V11", user_id="10002", service=SERVICE_DIVINGFISH)
+    assert binding_service.identifier(b3).qq == 10002
+
+
+@pytest.mark.asyncio
+async def test_resolve_query_at_chain(db):
+    """代查目标解析链：无 at → ensure 发送者；有 at → 目标行只读 →
+    QQ 平台水鱼临时绑定（不落库）→ 非 QQ 平台 None（调用方降级）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.binding import (
+        SERVICE_DIVINGFISH,
+        binding_service,
+    )
+
+    # 无 at：发送者 ensure（落库，对齐 auto_create）
+    b = await binding_service.resolve_query("OneBot V11", "10001", None)
+    assert b.user_id == "10001"
+    assert await store.get_binding("OneBot V11", "10001") is not None
+
+    # at 有行：只读复用目标行，不新建
+    await binding_service.bind_divingfish_username(b, "fishuser")
+    b2 = await binding_service.resolve_query("OneBot V11", "10002", "10001")
+    assert b2 is not None
+    assert b2.divingfish_username == "fishuser"
+    assert await store.get_binding("OneBot V11", "10002") is None  # 发送者未落库
+
+    # at 无行（QQ 平台）：临时水鱼绑定，查询后不落库
+    b3 = await binding_service.resolve_query("OneBot V11", "10002", "10003")
+    assert b3 is not None
+    assert b3.service == SERVICE_DIVINGFISH
+    assert b3.user_id == "10003"
+    assert await store.get_binding("OneBot V11", "10003") is None
+
+    # at 无行（非 QQ 平台）：None → 由调用方给出「无法代查」降级
+    assert await binding_service.resolve_query("telegram", "u1", "u2") is None

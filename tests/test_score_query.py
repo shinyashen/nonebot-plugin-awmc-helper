@@ -1,5 +1,7 @@
 """awmc.score_query 查分子插件测试。"""
 
+import asyncio
+
 import pytest
 from mocks import requires_assets
 from nonebug import App
@@ -516,3 +518,275 @@ async def test_minfo_unplayed_hint(app: App, db, songs, monkeypatch):
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
     monkeypatch.setattr(score_service, "get_b50", fake_b50)
     await _assert_reply(app, score_query.minfo, "minfo 231", "尚未游玩过该曲目")
+
+
+_B50_PAYLOAD = {
+    "username": "someone",
+    "rating": 350,
+    "nickname": "昵称酱",
+    "plate": "彩将",
+    "additional_rating": 1,
+    "charts": {
+        "sd": [],
+        "dx": [
+            {
+                "song_id": 10231,
+                "level": "13",
+                "level_index": 3,
+                "achievements": 100.5,
+                "fc": "ap",
+                "fs": "fsd",
+                "dxScore": 2000,
+                "rate": "sssp",
+                "ra": 350,
+            }
+        ],
+    },
+}
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_b50_at_unbound_target_qq_fallback(app: App, db, songs):
+    """b50 @未绑定目标（OneBot）：at 段不得进用户名参数（CQ 码污染回归）；
+    QQ 平台回退「水鱼按目标 QQ 公开查询」（Hoshino 同款），且不给目标落库建行。"""
+    import json
+    import base64
+
+    import respx
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
+    from nonebot_plugin_awmc_helper.plugins.score_query.matchers import _display_name
+
+    with respx.mock(assert_all_called=False) as m:
+        route = m.post(f"{BASE_DF}/query/player").respond(json=_B50_PAYLOAD)
+
+        # 与 handler 相同调用路径（临时绑定 → QQ 公开查询）构造期望图
+        from nonebot_plugin_awmc_helper.core.store import UserBinding
+
+        transient = UserBinding(
+            platform="OneBot V11", user_id="99999999", service="divingfish"
+        )
+        player, bests = await asyncio.gather(
+            score_service.get_player(transient), score_service.get_b50(transient)
+        )
+        expected_png = await best50_bytes(
+            _display_name(player),
+            bests.rating,
+            bests.rating_b35,
+            bests.rating_b15,
+            bests.scores_b35,
+            bests.scores_b15,
+            player=player,
+            qqid=99999999,
+            service="divingfish",
+        )
+        # 公开查询键 = 目标 QQ（而非 at 段的 CQ 码字符串）
+        for call in route.calls:
+            body = json.loads(call.request.content)
+            assert body.get("qq") == "99999999"
+
+        event = fake_group_message_event_v11(
+            message=Message([MessageSegment.text("b50 "), MessageSegment.at(99999999)]),
+            user_id=12345678,
+        )
+        expected = Message(
+            [
+                MessageSegment.at(12345678),
+                MessageSegment.image(
+                    f"base64://{base64.b64encode(expected_png).decode()}"
+                ),
+            ]
+        )
+        async with app.test_matcher(score_query.b50) as ctx:
+            bot = ctx.create_bot(
+                base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+            )
+            ctx.receive_event(bot, event)
+            ctx.should_call_api(
+                "get_group_info",
+                {"group_id": 87654321},
+                result={
+                    "group_id": 87654321,
+                    "group_name": "g",
+                    "member_count": 1,
+                    "max_member_count": 10,
+                },
+            )
+            ctx.should_call_api(
+                "get_group_member_info",
+                {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+                result={
+                    "user_id": 12345678,
+                    "role": "member",
+                    "card": "",
+                    "nickname": "t",
+                },
+            )
+            ctx.should_call_send(event, expected, result=None, bot=bot)
+            ctx.should_finished()
+    # 代查不给目标落库建行（resolve_query 只读）
+    assert await store.get_binding("OneBot V11", "99999999") is None
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_b50_at_bound_username_target(app: App, db, songs):
+    """b50 @已绑用户名目标：公开键 = 目标绑定行的水鱼用户名（优先于 QQ）。"""
+    import json
+    import base64
+
+    import respx
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
+    from nonebot_plugin_awmc_helper.plugins.score_query.matchers import _display_name
+
+    binding = await binding_service.ensure("OneBot V11", "99999999")
+    await binding_service.bind_divingfish_username(binding, "fishuser")
+
+    with respx.mock(assert_all_called=False) as m:
+        route = m.post(f"{BASE_DF}/query/player").respond(json=_B50_PAYLOAD)
+        player, bests = await asyncio.gather(
+            score_service.get_player(binding), score_service.get_b50(binding)
+        )
+        expected_png = await best50_bytes(
+            _display_name(player),
+            bests.rating,
+            bests.rating_b35,
+            bests.rating_b15,
+            bests.scores_b35,
+            bests.scores_b15,
+            player=player,
+            qqid=99999999,
+            service="divingfish",
+            theme=binding.theme or "prism_plus",
+        )
+        for call in route.calls:
+            body = json.loads(call.request.content)
+            assert body.get("username") == "fishuser"
+            assert "qq" not in body  # 用户名优先，不带聊天 QQ
+
+        event = fake_group_message_event_v11(
+            message=Message([MessageSegment.text("b50 "), MessageSegment.at(99999999)]),
+            user_id=12345678,
+        )
+        expected = Message(
+            [
+                MessageSegment.at(12345678),
+                MessageSegment.image(
+                    f"base64://{base64.b64encode(expected_png).decode()}"
+                ),
+            ]
+        )
+        async with app.test_matcher(score_query.b50) as ctx:
+            bot = ctx.create_bot(
+                base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+            )
+            ctx.receive_event(bot, event)
+            ctx.should_call_api(
+                "get_group_info",
+                {"group_id": 87654321},
+                result={
+                    "group_id": 87654321,
+                    "group_name": "g",
+                    "member_count": 1,
+                    "max_member_count": 10,
+                },
+            )
+            ctx.should_call_api(
+                "get_group_member_info",
+                {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+                result={
+                    "user_id": 12345678,
+                    "role": "member",
+                    "card": "",
+                    "nickname": "t",
+                },
+            )
+            ctx.should_call_send(event, expected, result=None, bot=bot)
+            ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypatch):
+    """minfo 231 @某人：曲目键不混入 at 段（CQ 码污染回归），成绩按目标绑定查询。"""
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+
+    captured: dict = {}
+
+    async def fake_minfo(song, binding):
+        captured["platform"] = binding.platform
+        captured["user_id"] = binding.user_id
+        return None  # 未游玩 → 提示文案
+
+    async def fake_b50(binding):
+        raise UserScoreError("测试桩：不触发 B50 查询")
+
+    monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
+    monkeypatch.setattr(score_service, "get_b50", fake_b50)
+
+    event = fake_group_message_event_v11(
+        message=Message(
+            [MessageSegment.text("minfo 231 "), MessageSegment.at(99999999)]
+        ),
+        user_id=12345678,
+    )
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    async with app.test_matcher(score_query.minfo) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(12345678),
+                    MessageSegment.text(" 尚未游玩过该曲目"),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    assert captured["platform"] == "OneBot V11"
+    assert captured["user_id"] == "99999999"  # 代查目标而非发送者

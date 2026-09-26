@@ -147,13 +147,13 @@ class ScoreService:
         return PlayerSong(song=song, scores=hit)
 
     async def get_scores_all(self, binding: UserBinding) -> MaimaiScores:
-        """全量成绩（牌子 / ap50 / 表格的基础）。"""
+        """全量成绩（牌子 / ap50 / 表格的基础）：Import-Token 优先。"""
         self._guard_cn(binding)
         await song_service.ensure_loaded()
         return await self._run(
             binding,
             lambda: client.scores(
-                binding_service.identifier(binding),
+                binding_service.full_identifier(binding),
                 provider=binding_service.provider(binding),
             ),
         )
@@ -201,13 +201,13 @@ class ScoreService:
         return result
 
     async def get_plates(self, binding: UserBinding, plate: str) -> MaimaiPlates:
-        """牌子进度（判牌语义在 maimai-py 内置）。"""
+        """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，Import-Token 优先。"""
         self._guard_cn(binding)
         await song_service.ensure_loaded()
         return await self._run(
             binding,
             lambda: client.plates(
-                binding_service.identifier(binding),
+                binding_service.full_identifier(binding),
                 plate,
                 provider=binding_service.provider(binding),
             ),

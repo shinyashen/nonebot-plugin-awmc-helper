@@ -228,7 +228,6 @@ async def test_build_b50_sorted_and_capped(net_service, jp_view):
     ratings = [s.dx_rating for s in bests.scores_b35]
     assert ratings == sorted(ratings, reverse=True)
 
-
     ratings = [s.dx_rating for s in bests.scores_b35]
     assert ratings == sorted(ratings, reverse=True)
 
@@ -626,3 +625,97 @@ async def test_minfo_net_command(app: App, db, net_service, jp_view, monkeypatch
         )
         ctx.should_finished()
     assert any(t.name == "SSSP" for t in [s.rate for s in scores])  # 组装口径未回归
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_b50_at_net_target(app: App, db, net_service, jp_view, monkeypatch):
+    """b50 @NET 目标（群聊代查）：走目标 NET 凭据抓取，窗口缓存按目标键控，
+    与发送者/其他人的缓存互不干扰。"""
+    import base64
+
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
+
+    binding = await binding_service.ensure("OneBot V11", "99999999")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+
+    async def fake_fetch(b):
+        assert (b.platform, b.user_id) == ("OneBot V11", "99999999")
+        return _records()
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
+
+    bests = await net_service.build_b50(_records())
+    expected_png = await best50_bytes(
+        "sid",
+        bests.rating,
+        bests.rating_b35,
+        bests.rating_b15,
+        bests.scores_b35,
+        bests.scores_b15,
+        player=None,
+        qqid=99999999,
+        service="net",
+        theme="prism_plus",
+    )
+    event = fake_group_message_event_v11(
+        message=Message([MessageSegment.text("b50 "), MessageSegment.at(99999999)]),
+        user_id=12345678,
+    )
+    async with app.test_matcher(score_query.b50) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot_get_adapter())
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        # 代查触发目标凭据的真实抓取：先提示，再出图（at 发送者）
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(12345678),
+                    MessageSegment.text(" 正在登录日服 NET 抓取成绩，请稍候…"),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(12345678),
+                    MessageSegment.image(
+                        f"base64://{base64.b64encode(expected_png).decode()}"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    # 窗口缓存按目标键控
+    _, from_cache = await net_service.get_scores(binding)
+    assert from_cache

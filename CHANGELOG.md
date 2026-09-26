@@ -22,6 +22,17 @@
 - 完整 nonebug + respx 测试（80 例）与入库文档（docs/ 7 篇 + CONTRIBUTING）。
 ### Fixed
 
+- b50/minfo：@ 代查他人成绩不可用（服务器实测）——`CommandArg()` 未过滤 at 段，
+  `b50 @某人` 的 at 变成 CQ 码字符串被当水鱼用户名查询；参数改取
+  `extract_plain_text`，代查目标经 `binding_service.resolve_query` 解析
+  （目标绑定行只读 → QQ 平台水鱼按 at QQ 公开查询（对齐 Hoshino，不落库）→
+  非 QQ 平台降级提示），NET 数据源同样支持 @ 代查（走目标凭据，窗口缓存按
+  目标键控）。
+- 水鱼凭据装配拆两档：公开键（b50/players/minfo）绑定用户名优先且不带 QQ
+  （maimai_py 中 QQ 优先于用户名，聊天 QQ ≠ 水鱼账号 QQ 时会查错账号）；
+  全量键（scores/plates）Import-Token 优先且不带用户名（maimai_py 把
+  `username+credentials` 组合视为「用户名+密码」登录水鱼，「用户名+token
+  双绑定」的全量查询此前必失败）。
 - 机厅排卡：多别称机厅仅最后一条别称能命中（别称集合按机厅折叠所致），补回归测试。
 - 查歌：`id` 指令解析收编 `_resolve_raw_id` 单源（6 位宴 id / DX 展示 id 回查与
   别名入口同口径），「是什么歌」入口的 `id 数字` 分支接受空格。
