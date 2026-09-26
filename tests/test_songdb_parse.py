@@ -2,6 +2,7 @@
 
 from songdb_fixtures import (
     make_lxns,
+    _info_basic,
     make_all_data,
     make_dschange,
     make_otoge_live,
@@ -63,6 +64,42 @@ def test_parse_maimaiinfo_skeleton_and_history():
     assert utage_chart.kanji == "宴"
     # 宴条目保留自身标题（带前缀、≠ 基曲标题）：otoge join 与 pending 判定的依据
     assert utage_chart.title == "[宴]Test Party"
+    # 宴谱物量（入库即存主物量五元组）：5 元组含 touch
+    assert utage_chart.notes == (200, 40, 30, 0, 10)
+    # 宴 buddy：charts 2 张 = 左右两组，主物量入库即存左右合计；
+    # 4 元组末位是 break（SD 约定，otoge 同谱面交叉验证 21:0）
+    buddy_data = {
+        "110019": {
+            "id": "110019",
+            "title": "[帯]Test Buddy",
+            "type": "DX",
+            "ds": [13.7],
+            "level": ["13+?"],
+            "charts": [
+                {"notes": [10, 2, 3, 4, 5], "charter": "-"},
+                {"notes": [20, 4, 6, 8, 10], "charter": "-"},
+            ],
+            "basic_info": _info_basic("[帯]Test Buddy"),
+        },
+        "100020": {
+            "id": "100020",
+            "title": "[宴]Test Four",
+            "type": "SD",
+            "ds": [12.7],
+            "level": ["12+?"],
+            "charts": [{"notes": [51, 0, 292, 6], "charter": "-"}],
+            "basic_info": _info_basic("[宴]Test Four"),
+        },
+    }
+    buddy_jp = parse_maimaiinfo(buddy_data, {})
+    buddy = buddy_jp[19].charts["utage"][1]
+    assert buddy.is_buddy
+    assert buddy.left == [10, 2, 3, 4, 5]
+    assert buddy.right == [20, 4, 6, 8, 10]
+    assert buddy.notes == (30, 6, 9, 12, 15)  # 左右合计入库
+    four = buddy_jp[20].charts["utage"][0]
+    assert not four.is_buddy
+    assert four.notes == (51, 0, 292, 0, 6)
     # from=未知 且无 dschange → 版本不可知
     assert jp[12].versions["sd"] is None
     assert jp[12].charts["sd"][0].history == []

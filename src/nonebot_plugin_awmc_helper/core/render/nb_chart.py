@@ -473,9 +473,9 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     # 等级（玩家牌内）
     t((180, p_y + 28), f"Lv. {first.level if first else '?'}", 24, sw=3)
     # 六列 notes（total/tap/hold/slide/touch/brak）：卡片只画一张宴谱；
-    # buddy 谱物量在 buddy_notes 左右手两组（谱面行顶层五项恒 0），按底图
-    # 1P/2P 行各占一行（NB 原版同款展开）；buddy_notes 缺失（快照降级回填
-    # 为 None）时回退顶层行
+    # buddy 谱物量在 buddy_notes 左右手两组（主物量列入库即存左右合计），
+    # 按底图 1P/2P 行各占一行（NB 原版同款展开）；buddy_notes 缺失（快照降级
+    # 回填为 None）时回退顶层行（此时为合计值）
     if first is not None:
         buddy = getattr(first, "buddy_notes", None)
         if getattr(first, "is_buddy", False) and buddy is not None:

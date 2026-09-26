@@ -115,6 +115,12 @@ def _notes_tuple(raw: list, is_dx: bool) -> tuple[int, int, int, int, int]:
     )
 
 
+def _utage_notes(raw: list) -> tuple[int, int, int, int, int]:
+    """宴谱 notes 数组 → 五元组：宽度定语义——4 元组末位是 break（SD 约定，
+    otoge 同谱面交叉验证 21:0），5 元组才含 touch（DX 约定）。"""
+    return _notes_tuple(raw, len(raw) >= 5)
+
+
 def _utage_kanji(title: str) -> str | None:
     """宴标题 ``[X]…`` 前缀 → kanji（两源标题同构）。"""
     return title[1] if title.startswith("[") and len(title) > 1 else None
@@ -215,6 +221,18 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
             derived = parse_level_float((item.get("level") or [""])[0])
             if derived is not None and version is not None:
                 chart.history = [(version, derived)]
+            # 宴谱物量：charts 1 张 = 普通谱，2 张 = buddy（[0]=左、[1]=右，
+            # 与 maimai_py 自带 provider 的 charts 形态约定一致）。主物量列
+            # 入库即存合计（buddy = 左右之和）：dx 星按主物量算 max DX，留 0
+            # 会除零（2026-09-26 线上实测）；左右明细另存 notes_left/right
+            utage_charts = item.get("charts") or []
+            if len(utage_charts) == 2:
+                chart.is_buddy = True
+                chart.left = list(_utage_notes(utage_charts[0].get("notes") or []))
+                chart.right = list(_utage_notes(utage_charts[1].get("notes") or []))
+                chart.notes = tuple(a + b for a, b in zip(chart.left, chart.right))
+            elif len(utage_charts) == 1:
+                chart.notes = _utage_notes(utage_charts[0].get("notes") or [])
             group[level_id] = chart
             continue
 
@@ -486,6 +504,7 @@ class State:
         行对象按值重建（load 出的 ORM 实例附着在旧 session 上，跨 session 复用
         会被当作 persistent 走 UPDATE 而撞上刚 DELETE 掉的空表）。
         """
+        _normalize_utage_notes(self)
         async with store.session() as session:
             # SQLModel 已弃用 session.execute，delete/insert 一律走 exec
             await session.exec(delete(store.SongChartLevel))
@@ -561,10 +580,48 @@ def _fill_song_basics(state: State, song_id: int, entry) -> store.SongRow:
     return row
 
 
+def _notes_left_empty(raw: str | None) -> bool:
+    """buddy 左右物量 JSON 是否「未填」：None 或全零（全零是历史写入的
+    垃圾值——真实 buddy 谱两侧物量不可能同时为 0，按空对待允许修复）。"""
+    if raw is None:
+        return True
+    return not any(json.loads(raw))
+
+
 def _fill_utage_fields(target: store.SongChart, chart) -> None:
-    """宴谱 kanji/is_buddy「列从空变满」回填（apply_jp/apply_cn 共用）。"""
+    """宴谱 kanji/is_buddy/左右物量「列从空变满」回填（apply_jp/apply_cn 共用）。"""
     target.kanji = target.kanji or chart.kanji
     target.is_buddy = target.is_buddy or chart.is_buddy
+    if chart.left is not None and _notes_left_empty(target.notes_left):
+        target.notes_left = json.dumps(chart.left)
+        target.notes_right = json.dumps(chart.right or [])
+
+
+def _normalize_utage_notes(state: State) -> None:
+    """buddy 宴谱主物量不变式：主列 ≡ 左右两组之和（入库即正确）。
+
+    dx 星按主物量算 max DX，buddy 行主列留 0 会在 maimai_py `_get_extended`
+    除零（2026-09-26 线上实测）；各来源只保证左右明细与主列其一，主列在此
+    统一归一，旧库行随下次写回一并修正。挂载点为 State.save，重建/外部源
+    补充全部经过。左右全零（垃圾值）时不动主列——主列可能已由其他源填对，
+    左右待 `_fill_utage_fields` 的全零修复补齐后下轮归一。
+    """
+    for (_song_id, kind, _level_id), row in state.charts.items():
+        if kind != "utage" or not row.is_buddy or row.notes_left is None:
+            continue
+        left = json.loads(row.notes_left)
+        right = json.loads(row.notes_right) if row.notes_right else [0] * 5
+        combined = (
+            left[0] + right[0],
+            left[1] + right[1],
+            left[2] + right[2],
+            left[3] + right[3],
+            left[4] + right[4],
+        )
+        if any(combined):
+            row.notes_tap, row.notes_hold = combined[0], combined[1]
+            row.notes_slide, row.notes_touch = combined[2], combined[3]
+            row.notes_break = combined[4]
 
 
 def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> None:
@@ -696,13 +753,27 @@ def _apply_otoge_utage(
     chart.comment = chart.comment or (item.get("comment") or None)
     buddy = item.get("buddy") == "○"
     chart.is_buddy = chart.is_buddy or buddy
-    if buddy and chart.notes_left is None:
+    main_empty = not (
+        chart.notes_tap
+        or chart.notes_hold
+        or chart.notes_slide
+        or chart.notes_touch
+        or chart.notes_break
+    )
+    if buddy and _notes_left_empty(chart.notes_left):
         chart.notes_left = json.dumps(
             [_safe_int(item.get(f"lev_utage_left_notes_{k}")) or 0 for k in _NOTE_KEYS]
         )
         chart.notes_right = json.dumps(
             [_safe_int(item.get(f"lev_utage_right_notes_{k}")) or 0 for k in _NOTE_KEYS]
         )
+    elif not buddy and not chart.is_buddy and main_empty:
+        # 非 buddy 平铺物量（otoge 时效支柱：新宴谱常先于机台源更新）
+        flat = [_safe_int(item.get(f"lev_utage_notes_{k}")) or 0 for k in _NOTE_KEYS]
+        if any(flat):
+            chart.notes_tap, chart.notes_hold = flat[0], flat[1]
+            chart.notes_slide, chart.notes_touch = flat[2], flat[3]
+            chart.notes_break = flat[4]
     # 无历史源的宴谱退化为登场版本单行（§6）；标级推导值
     if not state.history_of(song_id, "utage", level_id):
         derived = parse_level_float(item.get("lev_utage", "") or "")
@@ -820,9 +891,6 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                     target.notes_break = chart.notes[4]
                 if kind == "utage":
                     _fill_utage_fields(target, chart)
-                    if chart.left is not None and target.notes_left is None:
-                        target.notes_left = json.dumps(chart.left)
-                        target.notes_right = json.dumps(chart.right or [])
                 # §5.3 校验：推导国服定数 vs 落雪实测（偏差 > 0.05 记警告）；
                 # 宴定数是标级推导的代理值（§3），与实测必然有差，不参与校验
                 if chart.cn_level_value and chart.history and kind != "utage":
@@ -1997,13 +2065,14 @@ def _merge_chart_content(
         target.notes_tap, target.notes_hold = new_notes[0], new_notes[1]
         target.notes_slide, target.notes_touch = new_notes[2], new_notes[3]
         target.notes_break = new_notes[4]
-    # 01 文档双人谱口径：宴 buddy 左右手物量（JSON 存 notes_left/right）
+    # 01 文档双人谱口径：宴 buddy 左右手物量（JSON 存 notes_left/right）；
+    # 全零视为未填（历史垃圾值，override 除外——人工即权威）
     for key in ("notes_left", "notes_right"):
         val = content.get(key)
         if (
             isinstance(val, list)
             and len(val) == 5
-            and (mode == "override" or getattr(target, key) is None)
+            and (mode == "override" or _notes_left_empty(getattr(target, key)))
         ):
             new_json = json.dumps([int(v) for v in val])
             if getattr(target, key) != new_json:

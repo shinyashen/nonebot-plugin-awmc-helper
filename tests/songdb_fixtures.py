@@ -93,14 +93,17 @@ def make_all_data() -> dict[str, dict]:
                 "Increment Song", **{"from": "maimai でらっくす CiRCLE PLUS"}
             ),
         },
-        # buddy 宴（左右物量来自 otoge-db）
+        # buddy 宴（maimaiinfo 真实形态：charts 2 张 = 左右两组，实测 24/24）
         "110355": {
             "id": "100355",
             "title": "[協]Rotate Together",
             "type": "SD",
             "ds": [13.9],
             "level": ["13+"],
-            "charts": [{"notes": [300, 50, 40, 10, 15], "charter": "B-A"}],
+            "charts": [
+                {"notes": [150, 20, 25, 0, 5], "charter": "B-A"},
+                {"notes": [130, 25, 20, 0, 5], "charter": "B-A"},
+            ],
             "basic_info": _info_basic(
                 "[協]Rotate Together", **{"from": "maimai でらっくす BUDDiES PLUS"}
             ),

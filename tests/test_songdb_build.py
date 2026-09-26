@@ -81,6 +81,14 @@ async def test_rebuild_full_union(db):
     assert buddy.notes_right is not None
     assert json.loads(buddy.notes_left) == [150, 20, 25, 0, 5]
     assert json.loads(buddy.notes_right) == [130, 25, 20, 0, 5]
+    # 主物量不变式：buddy 行主列 ≡ 左右之和（dx 星按主物量算 max DX）
+    assert (
+        buddy.notes_tap,
+        buddy.notes_hold,
+        buddy.notes_slide,
+        buddy.notes_touch,
+        buddy.notes_break,
+    ) == (280, 45, 45, 0, 10)
     # 定数历史（变化点）与宴推导值
     assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5)]
     assert state.history_of(18, "utage", 0) == [(24000, 12.0)]
@@ -778,4 +786,12 @@ async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
     assert json.loads(chart.notes_left) == [10, 2, 3, 4, 5]
     assert chart.notes_right is not None
     assert json.loads(chart.notes_right) == [20, 4, 6, 8, 10]
+    # 主物量入库即存左右合计（dx 星按主物量算 max DX，留 0 会除零）
+    assert (
+        chart.notes_tap,
+        chart.notes_hold,
+        chart.notes_slide,
+        chart.notes_touch,
+        chart.notes_break,
+    ) == (30, 6, 9, 12, 15)
     assert state.groups[(1903, "utage")].version == 27000
