@@ -4,8 +4,7 @@
 - 未绑定时按部署默认源以 QQ 公开查询（仅水鱼、QQ 平台）；
 - ap50 为本地过滤实现（maimai-py 无 AP50 端点）：全量成绩中取 FC=AP/APP 的 RA 前 50。
 
-内部结构：``matchers`` 定义指令入口；``render`` 为结果增强渲染
-（minfo 上分提示 / ginfo 统计卡拼接）。
+内部结构：``matchers`` 定义指令入口；``render`` 为结果增强渲染（ginfo 统计卡拼接）。
 """
 
 from nonebot.plugin import PluginMetadata

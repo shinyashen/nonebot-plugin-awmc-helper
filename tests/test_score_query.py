@@ -423,58 +423,22 @@ def test_minfo_card_unplayed_all_slots(db):
     assert Image.open(io.BytesIO(png)).size == (1200, 900)
 
 
-@pytest.mark.asyncio
-async def test_b50_rise_tips(db, songs):
-    """「可进 B50」提示（增强保留）：仅对未入 B50 且 RA 高于入线的成绩提示。"""
-    import respx
+@requires_assets
+def test_minfo_card_renders_given_prefer_type(db):
+    """成绩卡只按传入的偏好渲染（渲染层不猜类型）：偏好切换即换卡片主类型。"""
     from maimai_py import SongType, LevelIndex
 
-    from nonebot_plugin_awmc_helper.core.binding import binding_service
-    from nonebot_plugin_awmc_helper.plugins.score_query.render import _b50_rise_tips
+    from nonebot_plugin_awmc_helper.core.render import info as info_render
 
-    binding = await binding_service.ensure("OneBot V11", "12345678")
-    # B50：231 的 SD EXPERT 槽（ra 312 入线，须命中曲库存在的谱面）；
-    # 候选：DX MASTER 350（应提示）/ DX BASIC 120（低于入线不提示）
-    payload = {
-        "username": "someone",
-        "rating": 312,
-        "charts": {
-            "sd": [
-                {
-                    "song_id": 231,
-                    "level": "10",
-                    "level_index": 2,
-                    "achievements": 100.0,
-                    "fc": None,
-                    "fs": None,
-                    "dxScore": 600,
-                    "rate": "sss",
-                    "ra": 312,
-                }
-            ],
-            "dx": [],
-        },
-    }
-    with respx.mock(assert_all_called=False) as m:
-        m.post(f"{BASE_DF}/query/player").respond(json=payload)
-        tips = await _b50_rise_tips(
-            [
-                _score_extend(231, SongType.DX, LevelIndex.MASTER, dx_rating=350),
-                _score_extend(
-                    231,
-                    SongType.DX,
-                    LevelIndex.BASIC,
-                    level="6",
-                    level_value=6.0,
-                    dx_rating=120,
-                    rate="sss",
-                ),
-            ],
-            binding,
-        )
-    assert len(tips) == 1
-    assert "MASTER" in tips[0]
-    assert "+38" in tips[0]
+    song = _curve_song()  # SD EXPERT + DX MASTER
+    sd_score = _score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)
+    # 主类型由指令侧定好后传入（数字 id 形状 / 条目类型），未指定偏好时 DX 优先
+    assert info_render.song_play_data(song, [sd_score]) == info_render.song_play_data(
+        song, [sd_score], prefer_type=SongType.DX
+    )
+    assert info_render.song_play_data(
+        song, [sd_score], prefer_type=SongType.STANDARD
+    ) != info_render.song_play_data(song, [sd_score])
 
 
 @pytest.mark.asyncio
@@ -507,17 +471,125 @@ async def test_get_minfo_unplayed_maps_to_none(songs, monkeypatch):
 async def test_minfo_unplayed_hint(app: App, db, songs, monkeypatch):
     """已绑定但全难度无成绩 → 不渲染成绩卡，提示未游玩（对齐 Hoshino 原版）。"""
     from nonebot_plugin_awmc_helper.plugins import score_query
-    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.score import score_service
 
     async def fake_minfo(song, binding):
         return None
 
-    async def fake_b50(binding):
-        raise UserScoreError("测试桩：不触发 B50 查询")
+    monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
+    await _assert_reply(app, score_query.minfo, "minfo 231", "尚未游玩过该曲目")
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_minfo_alias_lists_entry_ids(app: App, db, songs, monkeypatch):
+    """别名查双谱曲（回归）：不猜卡片主类型，列出 SD/DX 条目 id 交用户指定。
+
+    「相信彩虹」场景——此前固定按 DX 出卡，标准谱的成绩被整卡滤成「未游玩」；
+    现与「是什么歌」同格式同语义（对齐 Hoshino 基准 info 的多 id 分支）。
+    """
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.score import score_service
+
+    async def fake_minfo(song_key, binding_key):  # pragma: no cover - 不应触达
+        raise AssertionError("双条目应列 id 列表，不得查成绩出卡")
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
-    monkeypatch.setattr(score_service, "get_b50", fake_b50)
-    await _assert_reply(app, score_query.minfo, "minfo 231", "尚未游玩过该曲目")
+    await _assert_reply(
+        app,
+        score_query.minfo,
+        "minfo 企鹅舞",
+        "找到2个谱面："
+        "\n231：PENGUIN"
+        "\n10231：PENGUIN"
+        "\n※ 请使用「minfo <ID>」查询指定谱面",
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_minfo_entry_prefix_pins_card_type(app: App, db, songs, monkeypatch):
+    """minfo 带谱面前缀（dx/标）时条目收敛到该类型 → 直接出对应类型成绩卡。"""
+    import base64
+
+    from maimai_py import SongType, LevelIndex, PlayerSong
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import info as info_render
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    song = await song_service.by_id(231)
+    assert song is not None
+    # 标准谱有分、DX 谱没分：dx 前缀查询即用户明确要 DX 卡（全「未游玩」是对的）
+    sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
+
+    async def fake_minfo(song_key, binding_key):
+        return PlayerSong(song_key, sd_scores)
+
+    monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
+    expected_png = info_render.song_play_data(
+        song,
+        sd_scores,
+        service=binding.service,
+        theme=binding.theme or DEFAULT_THEME,
+        prefer_type=SongType.DX,
+    )
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(expected_png).decode()}"),
+        ]
+    )
+    await _send_image_reply(app, score_query.minfo, "minfo dx企鹅舞", expected)
+
+
+@requires_assets
+@pytest.mark.parametrize(("key", "prefer"), [("231", "STANDARD"), ("10231", "DX")])
+@pytest.mark.asyncio
+async def test_minfo_digit_id_pins_card_type(
+    app: App, db, songs, monkeypatch, key, prefer
+):
+    """数字 id 按其形状定卡片主类型：根 id → SD 卡，+10000 → DX 卡。"""
+    import base64
+
+    from maimai_py import SongType, LevelIndex, PlayerSong
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import info as info_render
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    song = await song_service.by_id(231)
+    assert song is not None
+    dx_score = _score_extend(231, SongType.DX, LevelIndex.MASTER)
+
+    async def fake_minfo(song_key, binding_key):
+        return PlayerSong(song, [dx_score])
+
+    monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
+    expected_png = info_render.song_play_data(
+        song,
+        [dx_score],
+        service=binding.service,
+        theme=binding.theme or DEFAULT_THEME,
+        prefer_type=SongType[prefer],
+    )
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(expected_png).decode()}"),
+        ]
+    )
+    await _send_image_reply(app, score_query.minfo, f"minfo {key}", expected)
 
 
 _B50_PAYLOAD = {
@@ -728,7 +800,7 @@ async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypa
     from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
     from nonebot_plugin_awmc_helper.plugins import score_query
-    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.score import score_service
 
     captured: dict = {}
 
@@ -737,11 +809,7 @@ async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypa
         captured["user_id"] = binding.user_id
         return None  # 未游玩 → 提示文案
 
-    async def fake_b50(binding):
-        raise UserScoreError("测试桩：不触发 B50 查询")
-
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
-    monkeypatch.setattr(score_service, "get_b50", fake_b50)
 
     event = fake_group_message_event_v11(
         message=Message(

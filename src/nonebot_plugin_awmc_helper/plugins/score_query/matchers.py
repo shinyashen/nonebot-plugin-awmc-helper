@@ -1,23 +1,27 @@
 """查分指令入口：b50 / ap50 / minfo / ginfo。"""
 
-import asyncio
-
 from nonebot import on_regex, on_command
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.adapters import Event, Message
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from .render import _ginfo_image, _b50_rise_tips
+from .render import _ginfo_image
 from ...constants import DEFAULT_THEME, COLOR_TO_LEVEL_INDEX
 from ...core.score import UserScoreError, score_service
-from ...core.songs import song_service, prefer_type_from_raw_id
-from ...core.types import FCType, SongType, LevelIndex
+from ...core.songs import (
+    cn_song_map,
+    song_service,
+    entries_list_text,
+    prefer_type_from_raw_id,
+)
+from ...core.types import Song, FCType, SongType, LevelIndex
 from ...core.utils import handle_errors
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
 from ...core.render import best50 as b50_render
 from ...core.render import jp_cover, nb_chart
+from ...core.songdb import Scope
 from ...core.binding import (
     SERVICE_NET,
     UserBinding,
@@ -25,7 +29,6 @@ from ...core.binding import (
     binding_service,
 )
 from ...core.net_score import net_score_service
-from ...core.render.tools import text_to_image, image_to_bytes
 
 AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
@@ -93,7 +96,7 @@ async def _get_binding_or_none(
 
 
 async def _resolve_song(key: str):
-    """按 ID/别名/标题 解析曲目（多条时提示用 ID）。"""
+    """按 ID/别名/标题 解析曲目（ginfo 用；同一曲的多条谱面按所选难度定类型）。"""
     key = key.strip()
     if key.isdigit():
         song = await song_service.by_id(int(key))
@@ -115,25 +118,41 @@ async def _resolve_song(key: str):
     return songs[0]
 
 
-async def _resolve_song_jp(key: str):
-    """net 数据源：JP 视图解析曲目（数字 id 折根 / 别名 / 标题）。"""
+async def _minfo_target(key: str, scope: Scope) -> tuple[Song, SongType | None]:
+    """minfo 曲目定位 → (曲, 卡片主类型偏好)；无法唯一确定时列出 id 并终止。
+
+    数字 id 按其形状定类型（≤4 位 SD、5 位 DX）；名称走 core 条目链——命中
+    SD/DX 双条目时不猜主类型，列出 id 列表交用户指定（与「是什么歌」同格式
+    同语义，对齐 Hoshino 基准 info 的多 id 分支）；带谱面前缀（dx/标准/标）
+    时条目收敛到该类型，直接出卡。
+    """
     if key.isdigit():
-        song = await song_service.jp_by_id(int(key))
-        if song is not None:
-            return song
-    songs, _ = await song_service.jp_by_alias_detail(key)
-    if len(songs) == 1:
-        return songs[0]
-    if not songs:
-        songs = await song_service.jp_by_title_fuzzy(key)
-    if not songs:
+        raw_id = int(key)
+        song = (
+            await song_service.jp_by_id(raw_id)
+            if scope == "jp"
+            else await song_service.by_id(raw_id)
+        )
+        if song is None:
+            await UniMessage.text(f" 未找到ID为「{key}」的乐曲").finish(at_sender=True)
+        return song, prefer_type_from_raw_id(raw_id)
+    entries = await song_service.entries_for_name(
+        key, scope=scope, cn_title=scope == "cn"
+    )
+    if not entries:
         await UniMessage.text(f" 没有找到「{key}」对应的乐曲").finish(at_sender=True)
-    if len(songs) > 1:
-        msg = f"找到{len(songs)}首相关乐曲：\n"
-        msg += "".join(f"{s.id}：{s.title}\n" for s in songs[:10])
-        msg += "※ 请使用「minfo <ID>」指定曲目"
-        await UniMessage.text(msg.rstrip(" \n")).finish(at_sender=True)
-    return songs[0]
+    if len(entries) > 1:
+        cn_songs = await cn_song_map([s for _, s, _ in entries])
+        flags = [cn_songs[s.id] is None for _, s, _ in entries]
+        text = entries_list_text(
+            entries,
+            flags,
+            hint="※ 请使用「minfo <ID>」查询指定谱面",
+            limit=10,
+        )
+        await UniMessage.text(f" {text}").finish(at_sender=True)
+    _entry_id, song, prefer = entries[0]
+    return song, prefer
 
 
 async def _minfo_net(key: str, binding) -> None:
@@ -141,9 +160,8 @@ async def _minfo_net(key: str, binding) -> None:
 
     与 CN minfo 的差异：曲走 JP 视图（数字 id 折根/别名/标题）、成绩来自
     NET 抓取缓存（窗口内 b50/minfo 共享一份）、渲染前补拉日服曲绘。
-    顺序调用 b50（缓存命中 0 请求），避免与成绩查询并发触发双抓取。
     """
-    song = await _resolve_song_jp(key)
+    song, prefer = await _minfo_target(key, "jp")
     if net_score_service.needs_fetch(binding):
         await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
             at_sender=True
@@ -151,11 +169,6 @@ async def _minfo_net(key: str, binding) -> None:
     info = await score_service.get_minfo(song, binding)
     if info is None:
         await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
-    try:
-        bests = await score_service.get_b50(binding)
-    except UserScoreError:
-        bests = None  # B50 失败不阻断成绩卡，仅省略上分提示
-    prefer = prefer_type_from_raw_id(int(key)) if key.isdigit() else None
     await jp_cover.ensure(song.id)
     png = info_render.song_play_data(
         song,
@@ -164,12 +177,7 @@ async def _minfo_net(key: str, binding) -> None:
         theme=binding.theme or DEFAULT_THEME,
         prefer_type=prefer,
     )
-    tips = await _b50_rise_tips(info.scores, binding, bests=bests)
-    msg = UniMessage.image(raw=png)
-    if tips:
-        tips_img = text_to_image("\n".join(tips), size=22, padding=14)
-        msg = msg.image(raw=image_to_bytes(tips_img))
-    await msg.finish(at_sender=True)
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 def _display_name(player) -> str:
@@ -306,25 +314,13 @@ async def _(
     binding = await _get_binding_or_none(session, event)
     if binding is not None and binding.service == SERVICE_NET:
         await _minfo_net(key, binding)
-    song = await _resolve_song(key)
-
-    async def _safe_b50():
-        # B50 拉取失败（未绑定/无权限）不阻断成绩卡，仅省略上分提示
-        if binding is None:
-            return None
-        try:
-            return await score_service.get_b50(binding)
-        except UserScoreError:
-            return None
-
-    info, bests = await asyncio.gather(
-        score_service.get_minfo(song, binding), _safe_b50()
-    )
+    song, prefer = await _minfo_target(key, "cn")
+    info = await score_service.get_minfo(song, binding)
     if info is None:
         await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
 
-    # R1：按基准 info.py 版式渲染真实成绩卡；数字 id 按其形状推断卡片主类型
-    prefer = prefer_type_from_raw_id(int(key)) if key.isdigit() else None
+    # R1：按基准 info.py 版式渲染真实成绩卡（主类型由 _minfo_target 定：
+    # 数字 id 按形状、名称命中单条目按其类型，双条目已在上方列出 id 终止）
     png = info_render.song_play_data(
         song,
         info.scores,
@@ -334,12 +330,7 @@ async def _(
         else DEFAULT_THEME,
         prefer_type=prefer,
     )
-    tips = await _b50_rise_tips(info.scores, binding, bests=bests)
-    msg = UniMessage.image(raw=png)
-    if tips:
-        tips_img = text_to_image("\n".join(tips), size=22, padding=14)
-        msg = msg.image(raw=image_to_bytes(tips_img))
-    await msg.finish(at_sender=True)
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @ginfo.handle()
