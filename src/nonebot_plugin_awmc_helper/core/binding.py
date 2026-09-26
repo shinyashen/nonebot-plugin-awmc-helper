@@ -7,7 +7,7 @@
 
 import time
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from dataclasses import dataclass
 
 from maimai_py import PlayerIdentifier
