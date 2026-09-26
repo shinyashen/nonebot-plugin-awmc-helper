@@ -282,12 +282,21 @@ def _parse_achievement(text: str) -> float | None:
     return rate if 0 <= rate <= 101 else None
 
 
+def _attr_text(tag: Tag, name: str) -> str:
+    """bs4 属性值展平为 str：stub 类型是 ``str | AttributeValueList | None``，
+    而 ``re.search`` 只收 str；src 等单值属性实际恒为 str，list 分支仅为类型完备。"""
+    value = tag.get(name)
+    if isinstance(value, list):
+        return " ".join(value)
+    return value or ""
+
+
 def _parse_type(block: Tag) -> str | None:
     """谱面类型：图标 src 优先，toggle 按钮 ``_btn_on`` 状态覆盖。"""
     type_ = None
     icon = block.select_one(".music_kind_icon")
     if icon is not None:
-        m = re.search(r"music_(standard|dx)\.png", icon.get("src") or "")
+        m = re.search(r"music_(standard|dx)\.png", _attr_text(icon, "src"))
         type_ = m.group(1) if m else None
     for selector, value in (
         (".music_kind_icon_dx", "dx"),
@@ -303,7 +312,7 @@ def _parse_type(block: Tag) -> str | None:
 def _parse_difficulty(block: Tag) -> str | None:
     icon = block.select_one(".h_20.f_l")
     m = (
-        re.search(r"diff_(\w+)\.png", icon.get("src") or "")
+        re.search(r"diff_(\w+)\.png", _attr_text(icon, "src"))
         if icon is not None
         else None
     )
