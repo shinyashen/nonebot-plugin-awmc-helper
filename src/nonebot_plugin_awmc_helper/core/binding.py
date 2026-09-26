@@ -6,6 +6,7 @@
 """
 
 import time
+import asyncio
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
@@ -118,6 +119,13 @@ def service_display(binding: "UserBinding") -> str:
 class BindingService:
     """绑定表操作 + 凭据装配。"""
 
+    # 落雪续期按用户互斥：refresh_token 一次性轮换，并发续期的后到者
+    # 重放旧 rt 会 invalid_grant（落雪甚至可能据此撤销授权）
+    _lxns_refresh_locks: ClassVar[dict[tuple[str, str], asyncio.Lock]] = {}
+
+    def _lxns_refresh_lock(self, platform: str, user_id: str) -> asyncio.Lock:
+        return self._lxns_refresh_locks.setdefault((platform, user_id), asyncio.Lock())
+
     async def get(self, platform: str, user_id: str) -> UserBinding | None:
         return await store.get_binding(platform, user_id)
 
@@ -209,10 +217,26 @@ class BindingService:
             return False
         if not binding.lxns_refresh_token or not lxns_ext.oauth_configured():
             return False
-        try:
-            token = await lxns_ext.refresh_token(binding.lxns_refresh_token)
-        except Exception:
-            return False
+        # 锁内重读库中凭据：并发场景另一协程可能刚完成续期（rt 一次性轮换），
+        # 库中 token 与进入时不同即说明已刷新——直接采用新凭据返回，
+        # 不重放旧 rt
+        entry_token = binding.lxns_token
+        async with self._lxns_refresh_lock(binding.platform, binding.user_id):
+            fresh = await self.get(binding.platform, binding.user_id)
+            if (
+                fresh is not None
+                and fresh.lxns_token
+                and fresh.lxns_token != entry_token
+            ):
+                binding.lxns_token = fresh.lxns_token
+                binding.lxns_refresh_token = fresh.lxns_refresh_token
+                if fresh.lxns_friend_code:
+                    binding.lxns_friend_code = fresh.lxns_friend_code
+                return True
+            try:
+                token = await lxns_ext.refresh_token(binding.lxns_refresh_token)
+            except Exception:
+                return False
         binding.lxns_token = token.access_token
         if token.refresh_token:
             binding.lxns_refresh_token = token.refresh_token

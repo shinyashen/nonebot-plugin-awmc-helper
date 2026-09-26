@@ -5,6 +5,7 @@ from pathlib import Path
 import respx
 import pytest
 from mocks import requires_assets
+from maimai_py.exceptions import InvalidPlayerIdentifierError
 
 BASE_DF = "https://www.diving-fish.com/api/maimaidxprober"
 
@@ -331,3 +332,51 @@ async def test_lxns_refresh_failure_falls_through(db, songs, monkeypatch):
         )
         with pytest.raises(UserScoreError):
             await score_service.get_scores_all(binding)
+
+
+@pytest.mark.asyncio
+async def test_lxns_refresh_concurrent_single_call(db, songs, monkeypatch):
+    """并发续期对拍：同用户两协程同时 401 → 落雪 refresh 只调一次，
+    后到者经锁内重读采用新凭据直接返回（不重放旧 rt）。"""
+    import asyncio
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.ext import lxns as lxns_ext
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_secret", "sec")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_redirect_uri", "http://localhost/cb")
+
+    binding = await binding_service.ensure("OneBot V11", "30007")
+    await binding_service.bind_lxns(binding, token="old-token", friend_code=123)
+    binding.lxns_refresh_token = "rt-old"
+    await store.save_binding(binding)
+
+    calls = []
+
+    async def fake_refresh(rt):
+        calls.append(rt)
+        await asyncio.sleep(0.05)  # 制造并发窗口
+
+        class _T:
+            access_token = "new-token"
+            refresh_token = "rt-new"
+            friend_code = 123
+
+        return _T()
+
+    monkeypatch.setattr(lxns_ext, "refresh_token", fake_refresh)
+
+    b1 = await binding_service.get("OneBot V11", "30007")
+    b2 = await binding_service.get("OneBot V11", "30007")
+    exc = InvalidPlayerIdentifierError("401")
+    results = await asyncio.gather(
+        binding_service.refresh_lxns_if_expired(b1, exc),
+        binding_service.refresh_lxns_if_expired(b2, exc),
+    )
+    assert results == [True, True]
+    assert calls == ["rt-old"]  # 落雪只被消耗一次
+    assert b1.lxns_token == "new-token"
+    assert b2.lxns_token == "new-token"  # 后到者经锁内重读采用新凭据
