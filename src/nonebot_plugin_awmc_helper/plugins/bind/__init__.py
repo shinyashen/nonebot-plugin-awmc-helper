@@ -193,7 +193,10 @@ async def _complete_lxns(platform: str, user_id: str, code: str) -> None:
         await UniMessage.text(f" 落雪授权失败：{e}").finish(at_sender=True)
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.bind_lxns(
-        binding, token=token.access_token, friend_code=token.friend_code
+        binding,
+        token=token.access_token,
+        friend_code=token.friend_code,
+        refresh_token=token.refresh_token,
     )
     pending_bindings.discard(platform, user_id)
     fc = f"，好友码 {token.friend_code}" if token.friend_code else ""

@@ -240,13 +240,23 @@ class BindingService:
         await store.save_binding(binding)
 
     async def bind_lxns(
-        self, binding: UserBinding, *, token: str | None, friend_code: int | None
+        self,
+        binding: UserBinding,
+        *,
+        token: str | None,
+        friend_code: int | None,
+        refresh_token: str | None = None,
     ) -> None:
         binding.service = SERVICE_LXNS
         if token is not None:
             binding.lxns_token = token
         if friend_code is not None:
             binding.lxns_friend_code = friend_code
+        if refresh_token is not None:
+            # OAuth 换发的 refresh_token 必须落库：access_token 仅 15 分钟
+            # 有效，自动续期（refresh_lxns_if_expired）全靠它（2026-09-26
+            # 修复：此前 OAuth 绑定路径从未落库，导致绑定 15 分钟后必失效）
+            binding.lxns_refresh_token = refresh_token
         await store.save_binding(binding)
 
 
