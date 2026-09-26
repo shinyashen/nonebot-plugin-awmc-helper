@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 
 SERVICE_DIVINGFISH = "divingfish"
 SERVICE_LXNS = "lxns"
+SERVICE_NET = "net"  # 日服 maimai でらっくす NET（官方站直连，凭据 = SEGA ID + 密码）
+
+# NET 数据源仅覆盖 b50；其余指令在 score/binding 层统一拦截
+NET_UNSUPPORTED_HINT = "日服数据源（NET）暂不支持该指令，敬请期待后续版本"
 
 # user_id 可作 QQ 号的平台：qq 为 Hoshino 迁移数据的历史键；OneBot v11 是
 # uninfo 单平台适配器（Session.platform 恒为 None，适配器标识即平台语义）
@@ -145,11 +149,13 @@ class BindingService:
         return await store.delete_binding(platform, user_id)
 
     async def set_service(self, binding: UserBinding, service: str) -> None:
-        """切换查分器：未配置落雪凭据时拒绝。"""
+        """切换查分器：目标数据源未配置凭据时拒绝。"""
         if service == SERVICE_LXNS and not (
             binding.lxns_token or binding.lxns_friend_code
         ):
             raise BindingError("尚未绑定落雪查分器，无法切换数据源")
+        if service == SERVICE_NET and not binding.net_sega_id:
+            raise BindingError("尚未绑定日服 NET，无法切换数据源")
         binding.service = service
         await store.save_binding(binding)
 
@@ -166,7 +172,13 @@ class BindingService:
         return None
 
     def identifier(self, binding: UserBinding) -> PlayerIdentifier:
-        """按绑定装配 maimai-py PlayerIdentifier（不可查时抛 BindingError）。"""
+        """按绑定装配 maimai-py PlayerIdentifier（不可查时抛 BindingError）。
+
+        NET 数据源不走 maimai-py（官方站直连），到此即说明上游未拦截，
+        给出能力边界提示而非「尚未绑定」的误导文案。
+        """
+        if binding.service == SERVICE_NET:
+            raise BindingError(NET_UNSUPPORTED_HINT)
         qq = self.qq_of(binding)
         if binding.service == SERVICE_DIVINGFISH:
             ident = PlayerIdentifier(
@@ -192,6 +204,16 @@ class BindingService:
             return self.identifier(binding)
         except BindingError:
             return None
+
+    def has_usable_credentials(self, binding: UserBinding) -> bool:
+        """当前数据源是否已有可用凭据（NET 凭 SEGA ID，CN 源凭 PlayerIdentifier）。
+
+        指令入口的「先绑定」检查用这个，不要用 identifier_or_none——
+        它对 NET 恒为 None（NET 不走 maimai-py identifier），会误判未绑定。
+        """
+        if binding.service == SERVICE_NET:
+            return bool(binding.net_sega_id)
+        return self.identifier_or_none(binding) is not None
 
     async def refresh_lxns_if_expired(
         self, binding: UserBinding, exc: Exception
@@ -281,6 +303,16 @@ class BindingService:
             # 有效，自动续期（refresh_lxns_if_expired）全靠它（2026-09-26
             # 修复：此前 OAuth 绑定路径从未落库，导致绑定 15 分钟后必失效）
             binding.lxns_refresh_token = refresh_token
+        await store.save_binding(binding)
+
+    async def bind_net(
+        self, binding: UserBinding, *, sega_id: str, password: str
+    ) -> None:
+        """绑定日服 NET：SEGA ID + 密码落库（敏感级别高于查分器 token，
+        bind 插件侧引导私聊操作）。"""
+        binding.service = SERVICE_NET
+        binding.net_sega_id = sega_id
+        binding.net_password = password
         await store.save_binding(binding)
 
 

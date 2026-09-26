@@ -7,9 +7,11 @@
 import asyncio
 
 import httpx
+from nonebot import logger
 from maimai_py import (
     Song,
     PlayerSong,
+    PlayerBests,
     MaimaiPlates,
     MaimaiScores,
     MaimaiPyError,
@@ -21,9 +23,18 @@ from maimai_py import (
     InvalidPlayerIdentifierError,
 )
 
+from .ext import ExtError
 from .songs import song_service
 from .client import client, divingfish_provider
-from .binding import UserBinding, BindingError, binding_service
+from ..config import plugin_config
+from .binding import (
+    SERVICE_NET,
+    NET_UNSUPPORTED_HINT,
+    UserBinding,
+    BindingError,
+    binding_service,
+)
+from .ext.net import NET_ERROR_MESSAGES, NetError
 
 
 class UserScoreError(Exception):
@@ -31,7 +42,11 @@ class UserScoreError(Exception):
 
 
 def _map_error(e: Exception) -> UserScoreError:
-    """maimai-py 异常 → 用户文案（统一映射表，含已知坑）。"""
+    """maimai-py / ext 异常 → 用户文案（统一映射表，含已知坑）。"""
+    if isinstance(e, NetError):
+        return UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e)))
+    if isinstance(e, ExtError):
+        return UserScoreError(str(e))
     if isinstance(e, InvalidPlayerIdentifierError):
         return UserScoreError(
             "没有找到这个玩家，请确认绑定信息（水鱼用户名/QQ、落雪好友码或个人 Token）"
@@ -58,6 +73,12 @@ def _map_error(e: Exception) -> UserScoreError:
 class ScoreService:
     """成绩查询封装：全部先 ensure_loaded（被动缓存由 maimai-py 保证）。"""
 
+    @staticmethod
+    def _guard_cn(binding: UserBinding) -> None:
+        """NET 数据源能力拦截：仅 b50 支持，其余指令统一在此拒绝。"""
+        if binding.service == SERVICE_NET:
+            raise UserScoreError(NET_UNSUPPORTED_HINT)
+
     async def _run(self, binding: UserBinding | None, make_coro):
         """统一执行 maimai-py 查询：异常映射 + 落雪 token 过期自动续期重试。
 
@@ -78,6 +99,7 @@ class ScoreService:
             raise _map_error(e) from e
 
     async def get_player(self, binding: UserBinding):
+        self._guard_cn(binding)
         await song_service.ensure_loaded()
         return await self._run(
             binding,
@@ -87,8 +109,38 @@ class ScoreService:
             ),
         )
 
-    async def get_b50(self, binding: UserBinding) -> MaimaiScores:
-        """B50（b35 + b15 与总 rating）。"""
+    async def _get_b50_net(self, binding: UserBinding) -> PlayerBests:
+        """日服 B50：NET 抓取 → JP 视图组装（冷却在 core.net_score 维护）。"""
+        from .net_score import net_score_service
+
+        platform, user_id = binding.platform, binding.user_id
+        remain = net_score_service.cooldown.try_acquire(platform, user_id)
+        if remain > 0:
+            minutes = plugin_config.awmc_net_cooldown_minutes
+            raise UserScoreError(
+                f"日服查询过于频繁，请约 {remain // 60 + 1} 分钟后再试"
+                f"（NET 数据源冷却 {minutes} 分钟，防止官方风控）"
+            )
+        try:
+            records = await net_score_service.fetch_records(binding)
+        except Exception:
+            # 抓取失败不占冷却（成功才留 15 分钟窗口）
+            net_score_service.cooldown.release(platform, user_id)
+            raise
+        bests = await net_score_service.build_b50(records)
+        if bests.rating <= 0:
+            logger.warning(
+                "net-score：NET 记录组装后 rating 为 0（登录态可能已失效或页面改版）"
+            )
+        return bests
+
+    async def get_b50(self, binding: UserBinding) -> "MaimaiScores | PlayerBests":
+        """B50（b35 + b15 与总 rating）；NET 数据源走日服组装链路。
+
+        两个返回类型对渲染层 duck-compatible（rating/b35/b15/scores 字段同构）。
+        """
+        if binding.service == SERVICE_NET:
+            return await self._get_b50_net(binding)
         await song_service.ensure_loaded()
         return await self._run(
             binding,
@@ -100,6 +152,7 @@ class ScoreService:
 
     async def get_scores_all(self, binding: UserBinding) -> MaimaiScores:
         """全量成绩（牌子 / ap50 / 表格的基础）。"""
+        self._guard_cn(binding)
         await song_service.ensure_loaded()
         return await self._run(
             binding,
@@ -133,6 +186,7 @@ class ScoreService:
         """
         ident: PlayerIdentifier | None = None
         if binding is not None:
+            self._guard_cn(binding)
             ident = binding_service.identifier_or_none(binding)
         await song_service.ensure_loaded()
         result = await self._run(
@@ -151,6 +205,7 @@ class ScoreService:
 
     async def get_plates(self, binding: UserBinding, plate: str) -> MaimaiPlates:
         """牌子进度（判牌语义在 maimai-py 内置）。"""
+        self._guard_cn(binding)
         await song_service.ensure_loaded()
         return await self._run(
             binding,

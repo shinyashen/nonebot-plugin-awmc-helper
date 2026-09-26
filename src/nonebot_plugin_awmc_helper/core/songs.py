@@ -358,6 +358,10 @@ class SongService:
         self._jp_fingerprint = fp
         return self._jp_view
 
+    async def jp_all(self) -> list[Song]:
+        """日服视图全量曲目（日服数据源 NET 记录映射用，随指纹缓存）。"""
+        return list((await self._jp_songs_map()).values())
+
     async def jp_by_title_fuzzy(self, title: str) -> list[Song]:
         """日服视图标题子串匹配（国服查歌 fallback）。"""
         return await self.by_title_fuzzy(title, "jp")

@@ -5,7 +5,8 @@
 - `绑定水鱼token <Import-Token>` / `水鱼授权码 <token>`：全量成绩档
 - `绑定落雪`：OAuth 授权（需部署配置）；`绑定落雪 <个人Token|好友码>` 直绑
 - `落雪授权码 <code>` / `lxcode <code>`：回填授权码
-- `解绑`、`数据源 <0/1>`、`主题 <0/1>`、`我的绑定`
+- `绑定日服 <SEGA ID> <密码>`：日服 NET 直连（b50；密码落库，建议私聊操作）
+- `解绑`、`数据源 <0/1/2>`、`主题 <0/1>`、`我的绑定`
 """
 
 from nonebot import on_command, on_message
@@ -19,6 +20,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core.ext import lxns as lxns_ext
 from ...core.utils import handle_errors
 from ...core.binding import (
+    SERVICE_NET,
     QQ_PLATFORMS,
     SERVICE_LXNS,
     SERVICE_DIVINGFISH,
@@ -32,8 +34,8 @@ __plugin_meta__ = PluginMetadata(
     description="舞萌DX 查分器绑定与个人设置",
     usage=(
         "绑定水鱼 <用户名>｜绑定水鱼token <Import-Token>｜绑定落雪｜"
-        "绑定落雪 <Token|好友码>｜落雪授权码 <code>｜解绑｜数据源 <0|1>｜"
-        "主题 <0|1>｜我的绑定"
+        "绑定落雪 <Token|好友码>｜落雪授权码 <code>｜绑定日服 <SEGA ID> <密码>｜"
+        "解绑｜数据源 <0|1|2>｜主题 <0|1>｜我的绑定"
     ),
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
@@ -44,6 +46,7 @@ df_bind = on_command("绑定水鱼", aliases={"绑定df", "dfbind"}, block=True)
 df_token = on_command("绑定水鱼token", aliases={"水鱼授权码", "dftoken"}, block=True)
 lx_bind = on_command("绑定落雪", aliases={"绑定lx", "lxbind"}, block=True)
 lx_code = on_command("落雪授权码", aliases={"lxcode"}, block=True)
+net_bind = on_command("绑定日服", aliases={"绑定net", "netbind"}, block=True)
 unbind = on_command("解绑", block=True)
 set_provider = on_command("数据源", block=True)
 set_theme = on_command("主题", block=True)
@@ -203,6 +206,50 @@ async def _complete_lxns(platform: str, user_id: str, code: str) -> None:
     await UniMessage.text(f" 落雪绑定成功{fc}").finish(at_sender=True)
 
 
+@net_bind.handle()
+@handle_errors("绑定失败，请稍后再试")
+async def _(session: Session = UniSession(), message: Message = CommandArg()):
+    """绑定日服 NET：`绑定日服 <SEGA ID> <密码>`（一次完成，绑定即验证登录）。
+
+    SEGA 账号密码敏感级别高于查分器 token：消息引导里始终提示私聊风险；
+    凭据本体不回显、不在完成消息中出现。
+    """
+    platform, user_id = session_keys(session)
+    arg = str(message).strip()
+    sega_id, sep, password = arg.partition(" ")
+    if not arg or not sep or not password.strip():
+        await UniMessage.text(
+            "用法：绑定日服 <SEGA ID> <密码>\n\n"
+            "⚠️ 该数据源需提供 SEGA 账号密码（仅存于本机数据库，用于登录"
+            "官方 maimai NET 抓取成绩，仅支持 b50）。密码级别敏感，"
+            "建议私聊机器人操作，且不要使用与其他服务相同的密码。"
+        ).finish(at_sender=True)
+    binding = await binding_service.ensure(platform, user_id)
+    password = password.strip()
+    # 绑定即验证：能区分密码错误与临时故障（维护/页面改版时仍保存凭据）
+    from ...core.ext.net import NetError, NetCredentials, MaimaiNetClient
+
+    client = MaimaiNetClient()
+    verify_note = ""
+    try:
+        await client.login(NetCredentials(sega_id=sega_id, password=password))
+    except NetError as e:
+        if e.code == "invalid_credentials":
+            await UniMessage.text(" SEGA ID 或密码错误，绑定未保存").finish(
+                at_sender=True
+            )
+        verify_note = f"\n（凭据已保存；NET 当前无法验证：{e.code}，稍后查询时生效）"
+    except Exception:
+        verify_note = "\n（凭据已保存；NET 暂时无法连接验证，稍后查询时生效）"
+    finally:
+        await client.aclose()
+    await binding_service.bind_net(binding, sega_id=sega_id, password=password)
+    await UniMessage.text(
+        f" 已绑定日服 NET（SEGA ID：{sega_id}），当前数据源已切换为日服。"
+        "支持指令：b50" + verify_note
+    ).finish(at_sender=True)
+
+
 @unbind.handle()
 @handle_errors("操作失败，请稍后再试")
 async def _(session: Session = UniSession()):
@@ -216,18 +263,20 @@ async def _(session: Session = UniSession()):
 @handle_errors("设置失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = str(message).strip()
-    service = {"0": SERVICE_DIVINGFISH, "1": SERVICE_LXNS}.get(arg)
+    service = {"0": SERVICE_DIVINGFISH, "1": SERVICE_LXNS, "2": SERVICE_NET}.get(arg)
     if service is None:
-        await UniMessage.text(" 用法：数据源 <0|1>（0 = 水鱼，1 = 落雪）").finish(
-            at_sender=True
-        )
+        await UniMessage.text(
+            " 用法：数据源 <0|1|2>（0 = 水鱼，1 = 落雪，2 = 日服 NET）"
+        ).finish(at_sender=True)
     platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
     try:
         await binding_service.set_service(binding, service)
     except Exception as e:
         await UniMessage.text(f" {e}").finish(at_sender=True)
-    name = "水鱼" if service == SERVICE_DIVINGFISH else "落雪"
+    name = {SERVICE_DIVINGFISH: "水鱼", SERVICE_LXNS: "落雪", SERVICE_NET: "日服 NET"}[
+        service
+    ]
     await UniMessage.text(f" 数据源已切换为{name}").finish(at_sender=True)
 
 
@@ -252,7 +301,12 @@ async def _(session: Session = UniSession()):
     binding = await binding_service.get(platform, user_id)
     if binding is None:
         await UniMessage.text(" 尚未绑定").finish(at_sender=True)
-    lines = [f" 数据源：{'水鱼' if binding.service == SERVICE_DIVINGFISH else '落雪'}"]
+    service_name = {
+        SERVICE_DIVINGFISH: "水鱼",
+        SERVICE_LXNS: "落雪",
+        SERVICE_NET: "日服 NET",
+    }.get(binding.service, binding.service)
+    lines = [f" 数据源：{service_name}"]
     if binding.divingfish_username:
         lines.append(f"水鱼用户名：{binding.divingfish_username}")
     if binding.divingfish_import_token:
@@ -261,5 +315,12 @@ async def _(session: Session = UniSession()):
         lines.append(f"落雪好友码：{binding.lxns_friend_code}")
     if binding.lxns_token:
         lines.append(f"落雪 Token：{binding.lxns_token[:4]}****")
+    if binding.net_sega_id:
+        shown = binding.net_sega_id
+        lines.append(
+            f"日服 NET SEGA ID：{shown[:2]}****"
+            if len(shown) > 4
+            else "日服 NET：已绑定"
+        )
     lines.append(f"主题：{'prism_plus' if binding.theme == 'prism_plus' else 'circle'}")
     await UniMessage.text("\n".join(lines)).finish(at_sender=True)

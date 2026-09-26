@@ -319,7 +319,11 @@ COMBO_FILE = {"fc": "FC", "fcp": "FCp", "ap": "AP", "app": "APp"}
 SYNC_FILE = {"sync": "Sync", "fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FSDp"}
 
 # 数据源 → 署名显示名（查分器站点品牌名，各卡面共用）
-SERVICE_DISPLAY = {"divingfish": "Diving-Fish", "lxns": "Lxns-Network"}
+SERVICE_DISPLAY = {
+    "divingfish": "Diving-Fish",
+    "lxns": "Lxns-Network",
+    "net": "maimai NET (JP)",
+}
 
 # RateType 枚举名 → UI_TTR_Rank_*.png 文件名后缀（由 RATE_TO_ZH 派生：
 # 素材名把显示名的 + 写作小写 p，如 "SS+" → "SSp"）

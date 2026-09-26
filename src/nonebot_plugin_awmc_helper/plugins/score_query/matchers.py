@@ -18,7 +18,11 @@ from ...core.render import info as info_render
 from ...core.render import stats as stats_render
 from ...core.render import best50 as b50_render
 from ...core.render import nb_chart
-from ...core.binding import session_keys, binding_service
+from ...core.binding import (
+    SERVICE_NET,
+    session_keys,
+    binding_service,
+)
 from ...core.render.tools import text_to_image, image_to_bytes
 
 AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
@@ -47,13 +51,16 @@ def _at_target(event: Event | None) -> str | None:
 
 
 async def _get_binding(session: Session, event: Event | None, *, required: bool = True):
-    """取（@目标 或 发送者的）绑定；required 时无可用凭据则提示。"""
+    """取（@目标 或 发送者的）绑定；required 时无可用凭据则提示。
+
+    凭据判断用 has_usable_credentials（NET 数据源无 PlayerIdentifier）。
+    """
     platform = session_keys(session)[0]
     user_id = _at_target(event) or str(session.user.id)
     binding = await binding_service.ensure(platform, user_id)
-    if required and binding_service.identifier_or_none(binding) is None:
+    if required and not binding_service.has_usable_credentials(binding):
         await UniMessage.text(
-            " 尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定"
+            " 尚未绑定查分器，请先使用「绑定水鱼」「绑定落雪」或「绑定日服」进行绑定"
         ).finish(at_sender=True)
     return binding
 
@@ -109,20 +116,37 @@ async def _(
         )
     else:
         binding = await _get_binding(session, event)
-        player = await score_service.get_player(binding)
-        bests = await score_service.get_b50(binding)
-        png = await b50_render.best50_bytes(
-            player_name=_display_name(player),
-            rating=bests.rating,
-            rating_b35=bests.rating_b35,
-            rating_b15=bests.rating_b15,
-            scores_b35=bests.scores_b35,
-            scores_b15=bests.scores_b15,
-            player=player,
-            qqid=binding_service.qq_of(binding),
-            service=binding.service,
-            theme=binding.theme or DEFAULT_THEME,
-        )
+        if binding.service == SERVICE_NET:
+            # 日服 NET：无 player 概念（NET 首页玩家名结构未考证，先显示
+            # SEGA ID），b50 由 score_service 内部分派抓取与 JP 组装
+            bests = await score_service.get_b50(binding)
+            png = await b50_render.best50_bytes(
+                player_name=binding.net_sega_id or "maimai NET",
+                rating=bests.rating,
+                rating_b35=bests.rating_b35,
+                rating_b15=bests.rating_b15,
+                scores_b35=bests.scores_b35,
+                scores_b15=bests.scores_b15,
+                player=None,
+                qqid=binding_service.qq_of(binding),
+                service=binding.service,
+                theme=binding.theme or DEFAULT_THEME,
+            )
+        else:
+            player = await score_service.get_player(binding)
+            bests = await score_service.get_b50(binding)
+            png = await b50_render.best50_bytes(
+                player_name=_display_name(player),
+                rating=bests.rating,
+                rating_b35=bests.rating_b35,
+                rating_b15=bests.rating_b15,
+                scores_b35=bests.scores_b35,
+                scores_b15=bests.scores_b15,
+                player=player,
+                qqid=binding_service.qq_of(binding),
+                service=binding.service,
+                theme=binding.theme or DEFAULT_THEME,
+            )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

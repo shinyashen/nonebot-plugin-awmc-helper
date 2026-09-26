@@ -40,13 +40,16 @@ class UserBinding(SQLModel, table=True):
 
     platform: str = Field(primary_key=True)
     user_id: str = Field(primary_key=True)
-    service: str = Field(default="divingfish")  # divingfish / lxns
+    service: str = Field(default="divingfish")  # divingfish / lxns / net
     divingfish_username: str | None = Field(default=None)
     divingfish_import_token: str | None = Field(default=None)
     lxns_friend_code: int | None = Field(default=None)
     lxns_token: str | None = Field(default=None)
     # 落雪 OAuth refresh_token（maimai-py 暂无刷新流程，先落库防迁移丢失）
     lxns_refresh_token: str | None = Field(default=None)
+    # 日服 NET 凭据（SEGA ID + 密码；NET 无第三方 API，仅能凭账号登录官方站）
+    net_sega_id: str | None = Field(default=None)
+    net_password: str | None = Field(default=None)
     theme: str = Field(default="prism_plus")  # prism_plus / circle
     bound_at: NaiveDatetime = Field(default_factory=datetime.now)
 
@@ -303,6 +306,9 @@ _MIGRATE_COLUMNS: dict[str, dict[str, str]] = {
         "lxns_refresh_token": (
             "ALTER TABLE user_binding ADD COLUMN lxns_refresh_token VARCHAR"
         ),
+        # 日服 NET 凭据（2026-09-26 起支持数据源 net）
+        "net_sega_id": "ALTER TABLE user_binding ADD COLUMN net_sega_id VARCHAR",
+        "net_password": "ALTER TABLE user_binding ADD COLUMN net_password VARCHAR",
     },
 }
 

@@ -65,6 +65,8 @@ class Config(BaseModel):
     awmc_gamerch_fill: bool = True
     # gamerch 页面磁盘缓存 TTL（小时）
     awmc_gamerch_max_age: int = 24
+    # 日服 NET 数据源 per-user 查询冷却（分钟，0=禁用；dxrating 同款 15 分钟）
+    awmc_net_cooldown_minutes: int = 15
 
 
 plugin_config: Config = get_plugin_config(Config)
