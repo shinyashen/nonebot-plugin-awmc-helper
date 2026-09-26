@@ -5,6 +5,25 @@ from nonebug import App
 
 BASE = "https://www.yuzuchan.moe/api/v2"
 
+_SELF_ID = "1234567890"  # 合并转发节点 uin 取 bot self_id，须先配好再断言
+
+
+def _forward_nodes(texts: list[str]) -> list[dict]:
+    """try_send_forward 的节点构造期望（name/uin 键裸 dict，见 core/forward.py）。"""
+    from nonebot_plugin_awmc_helper.core.forward import NODE_NICKNAME
+
+    return [
+        {
+            "type": "node",
+            "data": {
+                "name": NODE_NICKNAME,
+                "uin": _SELF_ID,
+                "content": [{"type": "text", "data": {"text": text}}],
+            },
+        }
+        for text in texts
+    ]
+
 
 @pytest.fixture
 async def songs(tmp_path):
@@ -143,7 +162,7 @@ async def test_alias_multi_match_forward(app: App, songs):
     """多曲命中别名：OB11 以合并转发逐曲展示（首条为命中数量）。"""
     import nonebot
     from fake import fake_group_message_event_v11
-    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Bot
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     from nonebot_plugin_awmc_helper.core import store
@@ -156,17 +175,11 @@ async def test_alias_multi_match_forward(app: App, songs):
     await song_service.reload_alias_index()
 
     event = fake_group_message_event_v11(message="企鹅有什么别名", user_id=12345678)
-    forward = Message(
+    forward = _forward_nodes(
         [
-            MessageSegment.node_custom(
-                1234567890, "Bot", Message("找到2个相同别名的曲目：")
-            ),
-            MessageSegment.node_custom(
-                1234567890, "Bot", Message("ID：231、10231\n企鹅舞\n企鹅")
-            ),
-            MessageSegment.node_custom(
-                1234567890, "Bot", Message("ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅")
-            ),
+            "找到2个相同别名的曲目：",
+            "ID：231、10231\n企鹅舞\n企鹅",
+            "ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅",
         ]
     )
     async with app.test_matcher(alias.alias_song) as ctx:
@@ -208,7 +221,12 @@ async def test_alias_multi_match_forward(app: App, songs):
 
 @pytest.mark.asyncio
 async def test_alias_multi_match_forward_fallback(app: App, songs):
-    """合并转发失败（默认 bot 非数字 self_id 无法构造节点）→ 降级普通消息。"""
+    """合并转发发送失败（协议端报错）→ 降级普通消息。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import alias
     from nonebot_plugin_awmc_helper.core.songs import song_service
@@ -217,12 +235,66 @@ async def test_alias_multi_match_forward_fallback(app: App, songs):
     await store.add_local_alias(500, "企鹅", "u")
     await song_service.reload_alias_index()
 
+    event = fake_group_message_event_v11(message="企鹅有什么别名", user_id=12345678)
+    forward = _forward_nodes(
+        [
+            "找到2个相同别名的曲目：",
+            "ID：231、10231\n企鹅舞\n企鹅",
+            "ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅",
+        ]
+    )
     msg = (
         "找到2个相同别名的曲目：\n"
         "ID：231、10231\n企鹅舞\n企鹅\n======\n"
         "ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅"
     )
-    await _assert_reply(app, alias.alias_song, "企鹅有什么别名", msg, with_session=True)
+    async with app.test_matcher(alias.alias_song) as ctx:
+        bot = ctx.create_bot(
+            base=Bot,
+            adapter=nonebot.get_adapter(OnebotV11Adapter),
+            self_id=_SELF_ID,
+        )
+        ctx.receive_event(bot, event)
+        # handler 注入 uninfo Session，会实时拉取群/成员信息
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "测试群",
+                "member_count": 10,
+                "max_member_count": 100,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "test",
+            },
+        )
+        # 协议端报错 → try_send_forward 返回 False → 降级普通消息
+        ctx.should_call_api(
+            "send_group_forward_msg",
+            {"group_id": 87654321, "message": forward, "messages": forward},
+            result=None,
+            exception=RuntimeError("protocol error"),
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(12345678),
+                    MessageSegment.text(f" {msg}"),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
 
 
 @pytest.mark.asyncio
