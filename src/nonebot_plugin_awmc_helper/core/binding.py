@@ -191,9 +191,12 @@ class BindingService:
         """落雪个人 token 过期时用 refresh_token 续期并落库（对齐原版
         maimaiDX 的 _on_unauthorized 自动刷新），成功返回 True。
 
-        仅当「落雪源 + 带 token + 有 refresh_token + OAuth 已配置」且异常为
+        仅当「带落雪 token + 有 refresh_token + OAuth 已配置」且异常为
         maimai-py 的 401 合流异常（InvalidPlayerIdentifierError，落雪 user API
         未授权与玩家不存在在其内部合流）时才尝试；调用方刷新成功后需重试原查询。
+        本方法供全部落雪链路共用（含第三方传分类插件），与默认查分器
+        ``service`` 无关——凭据齐备即可续期（2026-09-26 放宽，原要求
+        service == lxns）。
         """
         from maimai_py import InvalidPlayerIdentifierError
 
@@ -201,7 +204,8 @@ class BindingService:
 
         if not isinstance(exc, InvalidPlayerIdentifierError):
             return False
-        if binding.service != SERVICE_LXNS or not binding.lxns_token:
+        # service 仅是默认查分器偏好；落雪凭据有效性与其无关
+        if not binding.lxns_token:
             return False
         if not binding.lxns_refresh_token or not lxns_ext.oauth_configured():
             return False
