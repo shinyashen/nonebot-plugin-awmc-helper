@@ -373,6 +373,8 @@ async def test_lxns_refresh_concurrent_single_call(db, songs, monkeypatch):
 
     b1 = await binding_service.get("OneBot V11", "30007")
     b2 = await binding_service.get("OneBot V11", "30007")
+    assert b1 is not None
+    assert b2 is not None
     exc = InvalidPlayerIdentifierError("401")
     results = await asyncio.gather(
         binding_service.refresh_lxns_if_expired(b1, exc),
@@ -452,6 +454,7 @@ async def test_resolve_query_at_chain(db):
 
     # 无 at：发送者 ensure（落库，对齐 auto_create）
     b = await binding_service.resolve_query("OneBot V11", "10001", None)
+    assert b is not None
     assert b.user_id == "10001"
     assert await store.get_binding("OneBot V11", "10001") is not None
 

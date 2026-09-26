@@ -477,6 +477,7 @@ async def test_set_provider_net(app: App, db, net_service):
     await binding_service.bind_net(binding, sega_id="sid", password="pw")
     await _assert_reply(app, bind.set_provider, "数据源 2", "数据源已切换为日服 NET")
     fresh = await binding_service.get("OneBot V11", "12345678")
+    assert fresh is not None
     assert fresh.service == SERVICE_NET
 
 

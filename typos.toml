@@ -1,0 +1,11 @@
+# typos 拼写检查豁免（均为「按原样引用的外部标识符」，非拼写错误）
+[default]
+extend-ignore-re = [
+  # http.py 内嵌 maimaidx.jp 证书链的 base64 行
+  '(?m)^[A-Za-z0-9+/]{60,}={0,2}$',
+]
+
+[default.extend-words]
+calcuate = "calcuate"  # maimai_py 上游方法名 _calcuate_dx_star
+FOT = "FOT"            # 字体厂商前缀（FOT-NewRodin Pro）
+GAM = "GAM"            # 素材文件名前缀（UI_GAM_Gauge_DXScoreIcon）
