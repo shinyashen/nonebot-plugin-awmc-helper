@@ -443,7 +443,7 @@ def test_minfo_card_renders_given_prefer_type(db):
 
 @pytest.mark.asyncio
 async def test_get_minfo_unplayed_maps_to_none(songs, monkeypatch):
-    """core 契约：已绑定且全难度无成绩 → None（未游玩）；未绑定 → 空成绩 PlayerSong。"""
+    """core 契约：已绑定且无成绩 → None（未游玩）；未绑定 → 空成绩 PlayerSong。"""
     from maimai_py import PlayerSong
 
     from nonebot_plugin_awmc_helper.core import client as client_mod
@@ -468,12 +468,45 @@ async def test_get_minfo_unplayed_maps_to_none(songs, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_minfo_type_scoped_unplayed(songs, monkeypatch):
+    """core 契约：指定谱面类型时该类型无成绩即未游玩（另一类型有分不算）。
+
+    双谱曲「标准谱有分、DX 谱没分」查 DX → None（提示未游玩），而不是把这曲的
+    标准谱成绩当成 DX 成绩、画出全「未游玩」的空卡。
+    """
+    from maimai_py import SongType, LevelIndex, PlayerSong
+
+    from nonebot_plugin_awmc_helper.core import client as client_mod
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
+
+    async def fake_minfo(song, identifier, provider=None):
+        return PlayerSong(song, sd_scores)
+
+    monkeypatch.setattr(client_mod.client, "minfo", fake_minfo)
+    song = await song_service.by_id(231)
+    assert song is not None
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+
+    assert await score_service.get_minfo(song, binding, SongType.DX) is None
+    sd_hit = await score_service.get_minfo(song, binding, SongType.STANDARD)
+    assert sd_hit is not None
+    assert sd_hit.scores == sd_scores
+    # 不指定类型（名称命中多条目）时任一类型有成绩即算玩过
+    any_hit = await score_service.get_minfo(song, binding)
+    assert any_hit is not None
+
+
+@pytest.mark.asyncio
 async def test_minfo_unplayed_hint(app: App, db, songs, monkeypatch):
-    """已绑定但全难度无成绩 → 不渲染成绩卡，提示未游玩（对齐 Hoshino 原版）。"""
+    """已绑定但无成绩 → 不渲染成绩卡，提示未游玩（对齐 Hoshino 原版）。"""
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
 
-    async def fake_minfo(song, binding):
+    async def fake_minfo(song, binding, song_type=None):
         return None
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
@@ -483,16 +516,20 @@ async def test_minfo_unplayed_hint(app: App, db, songs, monkeypatch):
 @requires_assets
 @pytest.mark.asyncio
 async def test_minfo_alias_lists_entry_ids(app: App, db, songs, monkeypatch):
-    """别名查双谱曲（回归）：不猜卡片主类型，列出 SD/DX 条目 id 交用户指定。
+    """别名查双谱曲（玩过）→ 不猜卡片主类型，列出 SD/DX 条目 id 交用户指定。
 
-    「相信彩虹」场景——此前固定按 DX 出卡，标准谱的成绩被整卡滤成「未游玩」；
-    现与「是什么歌」同格式同语义（对齐 Hoshino 基准 info 的多 id 分支）。
+    「相信彩虹」场景（标准谱有分）：与「是什么歌」同格式同语义（对齐 Hoshino
+    基准 info 的多 id 分支）。
     """
+    from maimai_py import SongType, LevelIndex, PlayerSong
+
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
 
-    async def fake_minfo(song_key, binding_key):  # pragma: no cover - 不应触达
-        raise AssertionError("双条目应列 id 列表，不得查成绩出卡")
+    sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
+
+    async def fake_minfo(song_key, binding_key, song_type=None):
+        return PlayerSong(song_key, sd_scores)
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
     await _assert_reply(
@@ -508,8 +545,48 @@ async def test_minfo_alias_lists_entry_ids(app: App, db, songs, monkeypatch):
 
 @requires_assets
 @pytest.mark.asyncio
+async def test_minfo_unplayed_song_hints_not_id_list(app: App, db, songs, monkeypatch):
+    """别名查双谱曲但**整曲未游玩** → 文本提示，而非 id 列表或全灰卡。"""
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.score import score_service
+
+    async def fake_minfo(song_key, binding_key, song_type=None):
+        return None
+
+    monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
+    await _assert_reply(app, score_query.minfo, "minfo 企鹅舞", "尚未游玩过该曲目")
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_minfo_unplayed_chart_type_hints(app: App, db, songs, monkeypatch):
+    """查**没打过的谱面类型**（dx 前缀 / DX id）→ 文本提示，不画全「未游玩」空卡。
+
+    双谱曲标准谱有分而 DX 谱没分时，按类型收窄的「未游玩」判定在 core
+    （``get_minfo`` 的 ``song_type``）；此处同时断言 handler 传对了类型。
+    """
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.score import score_service
+
+    seen: list = []
+
+    async def fake_minfo(song_key, binding_key, song_type=None):
+        seen.append(song_type)
+        return None  # 该类型无成绩
+
+    monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
+    await _assert_reply(app, score_query.minfo, "minfo dx企鹅舞", "尚未游玩过该曲目")
+    await _assert_reply(app, score_query.minfo, "minfo 10231", "尚未游玩过该曲目")
+    # 单条目/数字 id 均按主类型收窄；双条目（名称无前缀）不指定类型
+    assert seen == [SongType.DX, SongType.DX]
+
+
+@requires_assets
+@pytest.mark.asyncio
 async def test_minfo_entry_prefix_pins_card_type(app: App, db, songs, monkeypatch):
-    """minfo 带谱面前缀（dx/标）时条目收敛到该类型 → 直接出对应类型成绩卡。"""
+    """minfo 带谱面前缀（dx/标）时条目收敛到该类型 → 直接出该类型成绩卡。"""
     import base64
 
     from maimai_py import SongType, LevelIndex, PlayerSong
@@ -525,16 +602,16 @@ async def test_minfo_entry_prefix_pins_card_type(app: App, db, songs, monkeypatc
     binding = await binding_service.ensure("OneBot V11", "12345678")
     song = await song_service.by_id(231)
     assert song is not None
-    # 标准谱有分、DX 谱没分：dx 前缀查询即用户明确要 DX 卡（全「未游玩」是对的）
-    sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
+    dx_scores = [_score_extend(231, SongType.DX, LevelIndex.MASTER)]
 
-    async def fake_minfo(song_key, binding_key):
-        return PlayerSong(song_key, sd_scores)
+    async def fake_minfo(song_key, binding_key, song_type=None):
+        assert song_type == SongType.DX  # dx 前缀须把类型收敛到 DX
+        return PlayerSong(song, dx_scores)
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
     expected_png = info_render.song_play_data(
         song,
-        sd_scores,
+        dx_scores,
         service=binding.service,
         theme=binding.theme or DEFAULT_THEME,
         prefer_type=SongType.DX,
@@ -549,10 +626,13 @@ async def test_minfo_entry_prefix_pins_card_type(app: App, db, songs, monkeypatc
 
 
 @requires_assets
-@pytest.mark.parametrize(("key", "prefer"), [("231", "STANDARD"), ("10231", "DX")])
+@pytest.mark.parametrize(
+    ("key", "type_name", "level_index"),
+    [("231", "STANDARD", "EXPERT"), ("10231", "DX", "MASTER")],
+)
 @pytest.mark.asyncio
 async def test_minfo_digit_id_pins_card_type(
-    app: App, db, songs, monkeypatch, key, prefer
+    app: App, db, songs, monkeypatch, key, type_name, level_index
 ):
     """数字 id 按其形状定卡片主类型：根 id → SD 卡，+10000 → DX 卡。"""
     import base64
@@ -570,18 +650,20 @@ async def test_minfo_digit_id_pins_card_type(
     binding = await binding_service.ensure("OneBot V11", "12345678")
     song = await song_service.by_id(231)
     assert song is not None
-    dx_score = _score_extend(231, SongType.DX, LevelIndex.MASTER)
+    expected_type = SongType[type_name]
+    scores = [_score_extend(231, expected_type, LevelIndex[level_index])]
 
-    async def fake_minfo(song_key, binding_key):
-        return PlayerSong(song, [dx_score])
+    async def fake_minfo(song_key, binding_key, queried_type=None):
+        assert queried_type is expected_type  # id 形状推断的类型须原样传入 core
+        return PlayerSong(song, scores)
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
     expected_png = info_render.song_play_data(
         song,
-        [dx_score],
+        scores,
         service=binding.service,
         theme=binding.theme or DEFAULT_THEME,
-        prefer_type=SongType[prefer],
+        prefer_type=expected_type,
     )
     expected = Message(
         [
@@ -804,7 +886,7 @@ async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypa
 
     captured: dict = {}
 
-    async def fake_minfo(song, binding):
+    async def fake_minfo(song, binding, song_type=None):
         captured["platform"] = binding.platform
         captured["user_id"] = binding.user_id
         return None  # 未游玩 → 提示文案

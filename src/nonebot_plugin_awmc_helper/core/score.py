@@ -5,10 +5,12 @@
 """
 
 import asyncio
+from typing import TYPE_CHECKING
 
 import httpx
 from maimai_py import (
     Song,
+    SongType,
     PlayerSong,
     PlayerBests,
     MaimaiPlates,
@@ -21,6 +23,9 @@ from maimai_py import (
     InvalidDeveloperTokenError,
     InvalidPlayerIdentifierError,
 )
+
+if TYPE_CHECKING:
+    from maimai_py import ScoreExtend
 
 from .ext import ExtError
 from .songs import song_service
@@ -38,6 +43,19 @@ from .net_score import NetScoreError, net_score_service
 
 class UserScoreError(Exception):
     """查分业务错误，message 为面向用户的文案。"""
+
+
+def _has_scores(
+    scores: "list[ScoreExtend] | None", song_type: SongType | None = None
+) -> bool:
+    """成绩是否覆盖目标谱面类型：``song_type=None`` 时任一类型有成绩即可。
+
+    双谱曲的成绩来自同一曲（SD/DX 同根 id），「未游玩」判定必须能按类型收窄
+    ——否则标准谱有分而 DX 谱没分的曲会画出全「未游玩」的空卡。
+    """
+    if not scores:
+        return False
+    return any(s.type == song_type for s in scores) if song_type else True
 
 
 def _map_error(e: Exception) -> UserScoreError:
@@ -132,17 +150,18 @@ class ScoreService:
         )
 
     async def get_minfo_net(
-        self, binding: UserBinding, song: Song
+        self, binding: UserBinding, song: Song, song_type: SongType | None = None
     ) -> PlayerSong | None:
         """日服单曲成绩：NET 窗口缓存过滤组装 PlayerSong（未游玩 None）。
 
-        仅 service=net 时由 minfo 调用；score/JP 视图口径，与 CN minfo 语义一致。
+        仅 service=net 时由 minfo 调用；score/JP 视图口径，与 CN minfo 语义一致
+        （``song_type`` 见 :meth:`get_minfo`）。
         """
         try:
             hit = await net_score_service.get_minfo_scores(binding, song)
         except NetScoreError as e:
             raise UserScoreError(str(e)) from e
-        if hit is None:
+        if hit is None or not _has_scores(hit, song_type):
             return None
         return PlayerSong(song=song, scores=hit)
 
@@ -172,18 +191,26 @@ class ScoreService:
         return player, bests  # type: ignore[return-value]
 
     async def get_minfo(
-        self, song: Song, binding: UserBinding | None
+        self,
+        song: Song,
+        binding: UserBinding | None,
+        song_type: SongType | None = None,
     ) -> PlayerSong | None:
         """单曲成绩（未绑定时仅谱面信息）。
 
-        已绑定且有凭据但任何难度都无成绩时返回 None（= 未游玩，对齐 Hoshino
-        原版 ``MusicNotPlayError`` →「您未游玩过曲目」语义）；未绑定时成绩为空
-        的 PlayerSong 原样返回，供纯谱面视图渲染。
+        已绑定且有凭据但无成绩时返回 None（= 未游玩，对齐 Hoshino 原版按条目
+        id 查询的 ``MusicNotPlayError`` →「您未游玩过曲目」语义）；未绑定时成绩
+        为空的 PlayerSong 原样返回，供纯谱面视图渲染。
+
+        ``song_type``：本次查询指向的谱面类型（数字 id 形状 / 唯一命中条目的
+        类型）。给出时**该类型**无成绩即算未游玩——双谱曲「标准谱有分、DX 谱
+        没分」时查 DX 谱应提示未游玩，而不是画一张全「未游玩」的空卡；为 None
+        时任一类型有成绩即算玩过（名称命中多条目、宴谱条目等场景）。
         """
         ident: PlayerIdentifier | None = None
         if binding is not None:
             if binding.service == SERVICE_NET:
-                return await self.get_minfo_net(binding, song)
+                return await self.get_minfo_net(binding, song, song_type)
             ident = binding_service.identifier_or_none(binding)
         await song_service.ensure_loaded()
         result = await self._run(
@@ -196,9 +223,9 @@ class ScoreService:
                 else binding_service.provider(binding),  # type: ignore[arg-type]
             ),
         )
-        if ident is not None and result is not None and not result.scores:
-            return None
-        return result
+        if ident is None or result is None:
+            return result
+        return result if _has_scores(result.scores, song_type) else None
 
     async def get_plates(self, binding: UserBinding, plate: str) -> MaimaiPlates:
         """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，Import-Token 优先。"""

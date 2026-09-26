@@ -10,12 +10,13 @@ from .render import _ginfo_image
 from ...constants import DEFAULT_THEME, COLOR_TO_LEVEL_INDEX
 from ...core.score import UserScoreError, score_service
 from ...core.songs import (
+    ChartEntry,
     cn_song_map,
     song_service,
     entries_list_text,
     prefer_type_from_raw_id,
 )
-from ...core.types import Song, FCType, SongType, LevelIndex
+from ...core.types import FCType, SongType, LevelIndex
 from ...core.utils import handle_errors
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
@@ -118,13 +119,13 @@ async def _resolve_song(key: str):
     return songs[0]
 
 
-async def _minfo_target(key: str, scope: Scope) -> tuple[Song, SongType | None]:
-    """minfo 曲目定位 → (曲, 卡片主类型偏好)；无法唯一确定时列出 id 并终止。
+async def _minfo_entries(key: str, scope: Scope) -> "list[ChartEntry]":
+    """minfo 曲目定位 → 谱面类型条目（数字 id 单条目 / 名称走 core 条目链）。
 
-    数字 id 按其形状定类型（≤4 位 SD、5 位 DX）；名称走 core 条目链——命中
-    SD/DX 双条目时不猜主类型，列出 id 列表交用户指定（与「是什么歌」同格式
-    同语义，对齐 Hoshino 基准 info 的多 id 分支）；带谱面前缀（dx/标准/标）
-    时条目收敛到该类型，直接出卡。
+    数字 id 按其形状定类型（≤4 位 SD、5 位 DX）；名称命中 SD/DX 双条目时不猜
+    主类型（交调用方列出 id 让用户指定，与「是什么歌」同格式同语义，对齐
+    Hoshino 基准 info 的多 id 分支）；带谱面前缀（dx/标准/标）时条目收敛到该
+    类型。未命中时直接以文案终止。
     """
     if key.isdigit():
         raw_id = int(key)
@@ -135,24 +136,23 @@ async def _minfo_target(key: str, scope: Scope) -> tuple[Song, SongType | None]:
         )
         if song is None:
             await UniMessage.text(f" 未找到ID为「{key}」的乐曲").finish(at_sender=True)
-        return song, prefer_type_from_raw_id(raw_id)
+        return [(raw_id, song, prefer_type_from_raw_id(raw_id))]
     entries = await song_service.entries_for_name(
         key, scope=scope, cn_title=scope == "cn"
     )
     if not entries:
         await UniMessage.text(f" 没有找到「{key}」对应的乐曲").finish(at_sender=True)
-    if len(entries) > 1:
-        cn_songs = await cn_song_map([s for _, s, _ in entries])
-        flags = [cn_songs[s.id] is None for _, s, _ in entries]
-        text = entries_list_text(
-            entries,
-            flags,
-            hint="※ 请使用「minfo <ID>」查询指定谱面",
-            limit=10,
-        )
-        await UniMessage.text(f" {text}").finish(at_sender=True)
-    _entry_id, song, prefer = entries[0]
-    return song, prefer
+    return entries
+
+
+async def _finish_entry_list(entries: "list[ChartEntry]") -> None:
+    """多条目歧义提示：列出谱面 id 并终止（附逐条日服限定标注）。"""
+    cn_songs = await cn_song_map([s for _, s, _ in entries])
+    flags = [cn_songs[s.id] is None for _, s, _ in entries]
+    text = entries_list_text(
+        entries, flags, hint="※ 请使用「minfo <ID>」查询指定谱面", limit=10
+    )
+    await UniMessage.text(f" {text}").finish(at_sender=True)
 
 
 async def _minfo_net(key: str, binding) -> None:
@@ -161,14 +161,21 @@ async def _minfo_net(key: str, binding) -> None:
     与 CN minfo 的差异：曲走 JP 视图（数字 id 折根/别名/标题）、成绩来自
     NET 抓取缓存（窗口内 b50/minfo 共享一份）、渲染前补拉日服曲绘。
     """
-    song, prefer = await _minfo_target(key, "jp")
+    entries = await _minfo_entries(key, "jp")
+    song_ids = {s.id for _, s, _ in entries}
+    if len(song_ids) > 1:  # 关键词命中多曲：列 id 供用户指定（不查成绩）
+        await _finish_entry_list(entries)
+    prefer = entries[0][2] if len(entries) == 1 else None
     if net_score_service.needs_fetch(binding):
         await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
             at_sender=True
         )
-    info = await score_service.get_minfo(song, binding)
-    if info is None:
+    info = await score_service.get_minfo(entries[0][1], binding, prefer)
+    if info is None:  # 该谱面类型无成绩（或整曲未游玩）→ 文本提示，不画空卡
         await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
+    if len(entries) > 1:  # 双谱曲且玩过：列 id 让用户指定看哪张
+        await _finish_entry_list(entries)
+    song = entries[0][1]
     await jp_cover.ensure(song.id)
     png = info_render.song_play_data(
         song,
@@ -314,13 +321,19 @@ async def _(
     binding = await _get_binding_or_none(session, event)
     if binding is not None and binding.service == SERVICE_NET:
         await _minfo_net(key, binding)
-    song, prefer = await _minfo_target(key, "cn")
-    info = await score_service.get_minfo(song, binding)
-    if info is None:
+    entries = await _minfo_entries(key, "cn")
+    if len({s.id for _, s, _ in entries}) > 1:  # 关键词命中多曲：列 id（不查成绩）
+        await _finish_entry_list(entries)
+    prefer = entries[0][2] if len(entries) == 1 else None
+    info = await score_service.get_minfo(entries[0][1], binding, prefer)
+    if info is None:  # 该谱面类型无成绩（或整曲未游玩）→ 文本提示，不画空卡
         await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
+    if len(entries) > 1:  # 双谱曲且玩过：列 id 让用户指定看哪张
+        await _finish_entry_list(entries)
+    song = entries[0][1]
 
-    # R1：按基准 info.py 版式渲染真实成绩卡（主类型由 _minfo_target 定：
-    # 数字 id 按形状、名称命中单条目按其类型，双条目已在上方列出 id 终止）
+    # R1：按基准 info.py 版式渲染真实成绩卡（主类型在定位时定好：数字 id 按形状、
+    # 唯一命中条目按其类型；双条目/多曲已在上方列出 id 终止）
     png = info_render.song_play_data(
         song,
         info.scores,
