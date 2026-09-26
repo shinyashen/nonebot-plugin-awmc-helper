@@ -144,6 +144,10 @@ wahlap_ext.fetch_locations() -> list[WahlapArcade]
 ```python
 paginate(data, page, per_page) -> tuple[list, int]
 handle_errors(fallback, except_with_message=())   # handler 异常兜底装饰器
+build_smart_transport() -> httpx transport | None # HTTP 智能代理层（未配代理返回 None）
+try_send_forward(bot, entries, *, group_id=None, user_id=None) -> bool
+                                                  # OB11 合并转发（LLBot/NapCat 兼容，
+                                                  # 失败/超时返回 False 由调用方降级）
 
 font(size, name)                                  # 素材包字体
 assets.cover(song_id) / assets.pic(name, theme)   # 素材访问（0.png 兜底）
