@@ -66,6 +66,24 @@ NAMEPLATE_PAGE = """
 </div></div></body></html>
 """
 
+# 收藏品姓名框页：装备「デフォルト」框的真实形态（2026-09-28 shinya 账号实测，
+# 预览图哈希为该账号原文）——block_info 是分组名、项名才是判定依据
+NAMEPLATE_DEFAULT_PAGE = """
+<html><body>
+<div class="town_block m_15 p_15 t_l">
+<div class="t_c f_15 f_b">― 設定中のネームプレート ―</div>
+<div class="see_through_block collection_setting_block p_r m_t_10 p_10 f_0">
+  <div class="block_info f_11 orange">デフォルト</div>
+  <div class="p_5 f_14 break">デフォルト</div>
+  <img class="w_396" src="/maimai-mobile/img/line_01.png">
+  <div class="p_l_5 f_12 gray break">はじめから所持</div>
+  <div class="p_r"><img class="w_396 m_r_10"
+   src="/maimai-mobile/img/NamePlate/b919c327669240b8.png"></div>
+</div>
+</div>
+</body></html>
+"""
+
 
 RECORD_PAGE = """
 <html><body><div class="wrapper">
@@ -232,16 +250,28 @@ async def test_achievement_out_of_range_dropped(net_ext):
 
 
 def test_parse_player_identity(net_ext):
-    """首页身份块解析：玩家名/官方 rating/头像 URL/称号与稀有度。"""
+    """首页身份块解析：玩家名/官方 rating/头像 URL/称号与稀有度。
+
+    fixture 头像用的是デフォルト头像哈希（真实页面原文），判定为 None；
+    自定义头像走 test_parse_player_custom_icon。
+    """
     player = net_ext._parse_player(HOME_PAGE)
     assert player is not None
     assert player.name == "\uff43\uff44\uff44"
     assert player.rating == 15828
-    assert player.icon_url == f"{MOBILE}/img/Icon/34f0363f4ce86d07.png"
+    assert player.icon_url is None  # デフォルト头像 → None（渲染层落 QQ 头像）
     assert player.trophy_name == "アウラ、フルコンしろ。"
     assert player.trophy_color == "Normal"
     assert player.course_url == f"{MOBILE}/img/course/course_rank_10hvsSHd90.png"
     assert player.class_url == f"{MOBILE}/img/class/class_rank_s_00.png"
+
+
+def test_parse_player_custom_icon(net_ext):
+    """自定义头像（非デフォルト哈希）→ URL 原样下发。"""
+    custom = HOME_PAGE.replace("Icon/34f0363f4ce86d07.png", "Icon/cafe12cafe12cafe.png")
+    player = net_ext._parse_player(custom)
+    assert player is not None
+    assert player.icon_url == f"{MOBILE}/img/Icon/cafe12cafe12cafe.png"
 
 
 def test_parse_player_absent(net_ext):
@@ -266,13 +296,25 @@ async def test_login_carries_player_identity(net_mock, net_ext):
 
 def test_parse_equipped_nameplate(net_ext):
     """收藏品页装备中项：w_396.m_r_10 预览图（第一张 w_396 是装饰线，勿取）。"""
-    url = net_ext._parse_equipped_nameplate(NAMEPLATE_PAGE)
-    assert url == f"{MOBILE}/img/NamePlate/a.png"
-    assert "line_01" not in (url or "")
-    # 无装备块/无图 → None
+    parsed = net_ext._parse_equipped_nameplate(NAMEPLATE_PAGE)
+    assert parsed.url == f"{MOBILE}/img/NamePlate/a.png"
+    assert parsed.is_default is False
+    assert "line_01" not in (parsed.url or "")
+    # 无装备块 → 未知态（url None 且 is_default False，区别于确认默认框）
     bare = NAMEPLATE_PAGE.replace(" collection_setting_block", "")
-    assert net_ext._parse_equipped_nameplate(bare) is None
-    assert net_ext._parse_equipped_nameplate("<html></html>") is None
+    assert net_ext._parse_equipped_nameplate(bare) == (None, False)
+    assert net_ext._parse_equipped_nameplate("<html></html>") == (None, False)
+
+
+def test_parse_equipped_nameplate_default(net_ext):
+    """装备「デフォルト」框 → is_default 态（卡面落水鱼缺省牌，不贴官方素色框）。
+
+    真实形态（2026-09-28 实测）：block_info 是分组名（デフォルト 分组下所有项
+    同名），判定默认框只能看项名 .p_5.f_14.break。
+    """
+    parsed = net_ext._parse_equipped_nameplate(NAMEPLATE_DEFAULT_PAGE)
+    assert parsed.url is None
+    assert parsed.is_default is True
 
 
 @pytest.mark.asyncio
@@ -285,6 +327,7 @@ async def test_login_fetches_equipped_nameplate(net_mock, net_ext):
         await client.login(net_ext.NetCredentials(sega_id="sid", password="pw"))
         assert client.player is not None
         assert client.player.nameplate_url == f"{MOBILE}/img/NamePlate/a.png"
+        assert client.player.nameplate_is_default is False
     finally:
         await client.aclose()
 
@@ -294,5 +337,18 @@ async def test_login_fetches_equipped_nameplate(net_mock, net_ext):
         await client.login(net_ext.NetCredentials(sega_id="sid", password="pw"))
         assert client.player is not None
         assert client.player.nameplate_url is None
+        assert client.player.nameplate_is_default is False
+    finally:
+        await client.aclose()
+
+    # 装备的是「デフォルト」框：确认态落到 player（is_default=True）
+    _mock_login_flow(net_mock, home_page=HOME_PAGE)
+    net_mock.get(f"{MOBILE}/collection/nameplate").respond(text=NAMEPLATE_DEFAULT_PAGE)
+    client = net_ext.MaimaiNetClient()
+    try:
+        await client.login(net_ext.NetCredentials(sega_id="sid", password="pw"))
+        assert client.player is not None
+        assert client.player.nameplate_url is None
+        assert client.player.nameplate_is_default is True
     finally:
         await client.aclose()

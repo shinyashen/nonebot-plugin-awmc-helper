@@ -394,6 +394,55 @@ async def test_nameplate_url_persisted_and_backfilled(
     assert row == "https://x/a.png"
 
 
+@pytest.mark.asyncio
+async def test_nameplate_default_clears_cached_custom(
+    net_service, jp_view, db, monkeypatch
+):
+    """确认装备「デフォルト」框 → 清兜底缓存，旧自定义名牌不复活。
+
+    收藏品页抓得到时默认框是**确认态**（区别于抓取失败的未知态）：反向写
+    空串而非回填；之后某次弹回（未知态）读到空串也不回填，卡面稳定落缺省牌。
+    """
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.net import NetPlayer
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+    key = "net_nameplate:OneBot V11:12345678"
+
+    player = NetPlayer(name="p", rating=1, nameplate_url="https://x/a.png")
+
+    async def fake_fetch(b):
+        return _records(), player
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
+    await net_service.get_scores(binding)
+    assert await store.kv_get(key) == "https://x/a.png"
+
+    # 换回「デフォルト」框：确认态 → 反向写空串，而非回填旧自定义名牌
+    default_player = NetPlayer(name="p", rating=1, nameplate_is_default=True)
+
+    async def fake_fetch_default(b):
+        return _records(), default_player
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch_default)
+    net_service._window_cache.clear()
+    await net_service.get_scores(binding)
+    assert await store.kv_get(key) == ""
+    assert net_service.player_of(binding).nameplate_url is None
+    assert net_service.player_of(binding).nameplate_is_default is True
+
+    # 之后某次收藏品区弹回（未知态）：空串不回填，nameplate_url 保持 None
+    async def fake_fetch_unknown(b):
+        return _records(), NetPlayer(name="p", rating=1)
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch_unknown)
+    net_service._window_cache.clear()
+    await net_service.get_scores(binding)
+    assert net_service.player_of(binding).nameplate_url is None
+
+
 # ---------------------------------------------------------------------------
 # 命令流：绑定日服（仅私聊）/ 数据源 2 / b50 / minfo（nonebug + respx）
 # ---------------------------------------------------------------------------

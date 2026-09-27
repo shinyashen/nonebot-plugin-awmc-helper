@@ -14,6 +14,7 @@ INTL（国际服 am-all.net 网关）暂不实现，端点差异见调研笔记 
 """
 
 import re
+from typing import NamedTuple
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
@@ -58,6 +59,11 @@ COMMON_HEADERS = {
 
 # B50 参与谱面的 diff 参数（0-4 = basic..remaster；10 = 宴谱页，不参与 rating 暂不抓）
 B50_DIFF_PARAMS: tuple[int, ...] = (0, 1, 2, 3, 4)
+
+# デフォルト头像文件名（img/Icon/ 哈希）：两实测账号（2026-09-27 联调账号、
+# 2026-09-28 作者账号 shinya，均从未更换头像）同哈希，据此判定为全服初始头像；
+# 版本更新若整体换哈希即失配——失配只是回到「贴官方默认图」的现状，无副作用
+_DEFAULT_ICON_FILE = "34f0363f4ce86d07.png"
 
 
 class NetError(ExtError):
@@ -107,20 +113,33 @@ class NetPlayer:
 
     供 B50 卡头部对齐落雪名片显示（头像/称号/段位认定/でらっクラス/名字）；
     course/class 徽章页面上是哈希文件名图片，无数字可解析——采集官方图 URL
-    由渲染层直接贴图。NET 不展示姓名框/边框等游戏内收藏品（落雪有是因为
-    用户上传游戏内数据），不设对应字段。
+    由渲染层直接贴图。姓名框经收藏品页顺带采集（可获取性差，net_score 层
+    kv_cache 兜底）；边框（frame）收藏品页有但落雪卡版式不渲染，不采集。
     """
 
     name: str  # 游戏内玩家名（全角字符原样）
     rating: int  # 官方 rating（NET 首页展示值）
-    icon_url: str | None = None  # 头像图 URL（img/Icon/ 哈希文件名）
+    icon_url: str | None = (
+        None  # 头像图 URL（img/Icon/ 哈希）；デフォルト头像为 None（渲染层落 QQ 头像）
+    )
     trophy_name: str | None = None  # 称号（名牌条）文本
     trophy_color: str | None = None  # 称号稀有度（trophy_{Color} class 尾段）
     course_url: str | None = None  # 段位认定徽章图 URL（img/course/）
     class_url: str | None = None  # でらっクラス徽章图 URL（img/class/）
-    nameplate_url: str | None = None  # 装备中姓名框图 URL（收藏品页，可获取性差）
+    nameplate_url: str | None = (
+        None  # 装备中自定义姓名框图 URL（收藏品页，可获取性差）；默认框/未知为 None
+    )
+    # 收藏品页确认装备的是「デフォルト」框（与抓取失败区分：前者清兜底缓存，后者回填）
+    nameplate_is_default: bool = False
     # star（icon_star ×N）NET 有展示但落雪卡版式无槽位，不采集；
     # 边框（frame）NET 收藏品页有，但落雪卡版式不渲染，不采集
+
+
+class EquippedNameplate(NamedTuple):
+    """收藏品页「設定中のネームプレート」块解析结果（三态）。"""
+
+    url: str | None  # 装备中自定义姓名框图 URL；默认框/未知态为 None
+    is_default: bool  # True = 页面确认装备的是「デフォルト」框（≠抓取失败的未知态）
 
 
 # FC/FS 徽章文件名 → 语义（dxrating MUSIC_RECORD_FLAG_MATCHERS）
@@ -211,15 +230,18 @@ class MaimaiNetClient:
         home = await self._request("GET", f"{BASE}/home/")
         self.player = _parse_player(home.text)
         if self.player is not None:
-            self.player.nameplate_url = await self._fetch_equipped_nameplate()
+            equipped = await self._fetch_equipped_nameplate()
+            if equipped is not None:
+                self.player.nameplate_url = equipped.url
+                self.player.nameplate_is_default = equipped.is_default
 
-    async def _fetch_equipped_nameplate(self) -> str | None:
-        """收藏品姓名框页 → 当前装备名牌图 URL（弹回/改版返回 None）。
+    async def _fetch_equipped_nameplate(self) -> EquippedNameplate | None:
+        """收藏品姓名框页 → 装备中项解析（弹回/改版返回 None＝未知态）。
 
         NET 收藏品区**可获取性差**（间歇性 302 回登录页，实测成功率低且与
         账号/路径无关），失败不重试不报错——上层 net_score 有 kv_cache 持久
-        缓存兜底，抓到一次即长期可用。装备中项 = ``.collection_setting_block``
-        （betterDXnet/maifetcher 同口径），缩略图 ``img.w_396``。
+        缓存兜底，抓到一次即长期可用；确认装备「デフォルト」框时返回
+        is_default 态，供上层清掉兜底缓存（旧自定义名牌不该在默认框时代复活）。
         """
         try:
             resp = await self._request("GET", f"{BASE}/collection/nameplate")
@@ -258,18 +280,29 @@ def _extract_login_token(html: str) -> str | None:
     return str(value) if value else None
 
 
-def _parse_equipped_nameplate(html: str) -> str | None:
-    """收藏品姓名框页 → 装备中名牌图 URL（无装备块/改版返回 None）。
+def _parse_equipped_nameplate(html: str) -> EquippedNameplate:
+    """收藏品姓名框页 → 装备中项解析（无装备块/改版 → 未知态）。
 
-    页面结构（2026-09-28 真实页面实测；betterDXnet/maifetcher 同口径）：每项一个
-    ``.see_through_block``，装备中项附加 ``collection_setting_block`` class。
-    装备块内第一张 ``img.w_396`` 是**装饰分隔线**（line_01.png，实测踩坑），
-    名牌预览图必须取 ``img.w_396.m_r_10``。
+    页面结构（2026-09-28 真实页面实测；betterDXnet/maifetcher 同口径）：页首
+    「設定中のネームプレート」块即装备块（``.see_through_block`` 附加
+    ``collection_setting_block`` class），块内依次为 分组名（``.block_info``）、
+    项名（``.p_5.f_14.break``）、装饰分隔线（``img.w_396``，line_01.png，实测
+    踩坑）、备注、名牌预览图（``img.w_396.m_r_10``）。注意分组名在デフォルト
+    分组下恒为「デフォルト」，判定默认框只能看**项名**。
+
+    装备的是游戏初始「デフォルト」框（项名「デフォルト」+ 备注「はじめから
+    所持」）→ is_default 态：卡面落水鱼缺省牌 550101，不贴官方素色默认框。
     """
     soup = BeautifulSoup(html, "html.parser")
-    img = soup.select_one(".collection_setting_block img.w_396.m_r_10")
+    block = soup.select_one(".collection_setting_block")
+    if block is None:
+        return EquippedNameplate(None, False)
+    name_el = block.select_one(".p_5.f_14.break")
+    if name_el is not None and name_el.get_text(strip=True) == "デフォルト":
+        return EquippedNameplate(None, True)
+    img = block.select_one("img.w_396.m_r_10")
     src = _attr_text(img, "src") if img is not None else ""
-    return urljoin(f"{BASE}/", src) if src else None
+    return EquippedNameplate(urljoin(f"{BASE}/", src) if src else None, False)
 
 
 def _parse_player(html: str) -> NetPlayer | None:
@@ -309,10 +342,17 @@ def _parse_player(html: str) -> NetPlayer | None:
     # 段位认定/でらっクラス徽章：按 src 路径定位（哈希文件名，数字不可解析）
     course = block.select_one('img[src*="/img/course/"]')
     class_ = block.select_one('img[src*="/img/class/"]')
+    # デフォルト头像 → icon_url 置 None：渲染层跳过官方素色头像直接落 QQ 头像
+    icon_url = urljoin(f"{BASE}/", icon_src) if icon_src else None
+    if (
+        icon_url is not None
+        and icon_src.rsplit("/", 1)[-1].split("?")[0] == _DEFAULT_ICON_FILE
+    ):
+        icon_url = None
     return NetPlayer(
         name=name,
         rating=int(rating_text),
-        icon_url=urljoin(f"{BASE}/", icon_src) if icon_src else None,
+        icon_url=icon_url,
         trophy_name=trophy_name,
         trophy_color=trophy_color,
         course_url=urljoin(f"{BASE}/", _attr_text(course, "src"))

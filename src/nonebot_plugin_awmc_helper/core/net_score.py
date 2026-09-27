@@ -133,11 +133,13 @@ class NetScoreService:
         return entry[2] if entry is not None else None
 
     async def _merge_nameplate(self, binding, player: NetPlayer | None) -> None:
-        """装备名牌 URL 持久缓存：抓到即更新，抓不到回填上次结果。
+        """装备名牌 URL 持久缓存：抓到自定义即更新，抓不到回填上次结果。
 
         NET 收藏品区间歇性 302（实测成功率低），不持久化的话名牌会在
         「真实/缺省」间抖动；kv_cache 键按绑定隔离，玩家换名牌后随下一次
-        抓取成功自动更新。尽力而为：缓存层异常不影响查询主链路。
+        抓取成功自动更新。确认装备「デフォルト」框（is_default 态）时反向
+        写空串，防止更早缓存的自定义名牌在默认框时代复活。尽力而为：
+        缓存层异常不影响查询主链路。
         """
         if player is None:
             return
@@ -146,9 +148,12 @@ class NetScoreService:
             if player.nameplate_url:
                 if await store.kv_get(key) != player.nameplate_url:
                     await store.kv_set(key, player.nameplate_url)
+            elif player.nameplate_is_default:
+                if await store.kv_get(key):
+                    await store.kv_set(key, "")
             else:
                 cached = await store.kv_get(key)
-                if isinstance(cached, str):
+                if isinstance(cached, str) and cached:
                     player.nameplate_url = cached
         except Exception as e:
             logger.debug(f"net-score：名牌缓存读写失败（忽略）：{e!r}")
