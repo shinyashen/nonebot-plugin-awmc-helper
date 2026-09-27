@@ -18,6 +18,7 @@ from nonebot_plugin_uninfo import Session, SceneType, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.ext import lxns as lxns_ext
+from ...core.ext import divingfish as df_ext
 from ...core.utils import handle_errors
 from ...core.binding import (
     SERVICE_NET,
@@ -42,10 +43,24 @@ __plugin_meta__ = PluginMetadata(
 )
 
 
+# 水鱼 OAuth 设备码绑定文案（对齐 Hoshino oauth_message.py 措辞）
+DIVINGFISH_NO_SESSION_MSG = "请先发送「绑定水鱼」获取授权链接，完成授权后再发送确认码。"
+DIVINGFISH_INVALID_CODE_MSG = (
+    "未识别到有效的水鱼确认码。\n"
+    "请发送授权完成页面显示的完整确认码，形如 BCDF-GHJK-LMNP。"
+)
+DIVINGFISH_MISMATCH_MSG = (
+    "水鱼绑定失败：这串确认码对应的授权不属于您的账号。\n"
+    "确认码只能由发起绑定的本人使用，请勿使用他人转发给您的确认码。\n"
+    "如需绑定自己的账号，请发送「绑定水鱼」重新走一遍授权。"
+)
+DIVINGFISH_BIND_SUCCESS_MSG = "水鱼查分器授权完成，现在可以直接使用查询指令了。"
+
 df_bind = on_command("绑定水鱼", aliases={"绑定df", "dfbind"}, block=True)
 df_token = on_command("绑定水鱼token", aliases={"水鱼授权码", "dftoken"}, block=True)
 lx_bind = on_command("绑定落雪", aliases={"绑定lx", "lxbind"}, block=True)
 lx_code = on_command("落雪授权码", aliases={"lxcode"}, block=True)
+df_code = on_command("水鱼授权码", aliases={"dfcode"}, block=True)
 net_bind = on_command("绑定日服", aliases={"绑定net", "netbind"}, block=True)
 unbind = on_command("解绑", block=True)
 set_provider = on_command("数据源", block=True)
@@ -78,7 +93,35 @@ async def _is_expired_lxns_code(bot: Bot, event: Event) -> bool:
     return lxns_ext.extract_authorization_code(event.get_plaintext()) is not None
 
 
+async def _is_pending_df_code(bot: Bot, event: Event) -> bool:
+    """这条消息是不是待回填水鱼确认码会话发出的有效确认码（会话决定归属：
+    两家授权码长相一样，靠 kind 区分，见 Hoshino pending_binding 同款设计）。"""
+    from nonebot_plugin_uninfo import get_session
+
+    session = await get_session(bot, event)
+    if session is None:
+        return False
+    if not pending_bindings.is_active(*session_keys(session), "divingfish"):
+        return False
+    return df_ext.extract_confirmation_code(event.get_plaintext()) is not None
+
+
+async def _is_expired_df_code(bot: Bot, event: Event) -> bool:
+    from nonebot_plugin_uninfo import get_session
+
+    session = await get_session(bot, event)
+    if session is None:
+        return False
+    if pending_bindings.is_active(*session_keys(session), "divingfish"):
+        return False
+    if not pending_bindings.expired_recently(*session_keys(session), "divingfish"):
+        return False
+    return df_ext.extract_confirmation_code(event.get_plaintext()) is not None
+
+
 bind_code = on_message(rule=Rule(_is_pending_lxns_code), priority=0, block=True)
+df_code_message = on_message(rule=Rule(_is_pending_df_code), priority=0, block=True)
+df_code_expired = on_message(rule=Rule(_is_expired_df_code), priority=0, block=True)
 bind_code_expired = on_message(rule=Rule(_is_expired_lxns_code), priority=0, block=True)
 
 
@@ -106,16 +149,94 @@ async def _(bot: Bot, event: Event):
     ).finish(at_sender=True)
 
 
+@df_code_message.handle()
+@handle_errors("绑定失败，请稍后再试")
+async def _(bot: Bot, event: Event):
+    from nonebot_plugin_uninfo import get_session
+
+    session = await get_session(bot, event)
+    assert session is not None
+    code = df_ext.extract_confirmation_code(event.get_plaintext())
+    assert code is not None
+    await _complete_df(*session_keys(session), code)
+
+
+@df_code_expired.handle()
+@handle_errors("绑定失败，请稍后再试")
+async def _(bot: Bot, event: Event):
+    from nonebot_plugin_uninfo import get_session
+
+    session = await get_session(bot, event)
+    assert session is not None
+    await UniMessage.text(
+        " 水鱼授权已超时，请重新发送「绑定水鱼」获取新的授权链接"
+    ).finish(at_sender=True)
+
+
+@df_code.handle()
+@handle_errors("绑定失败，请稍后再试")
+async def _(session: Session = UniSession(), message: Message = CommandArg()):
+    platform, user_id = session_keys(session)
+    code = df_ext.extract_confirmation_code(str(message))
+    if code is None:
+        await UniMessage.text(" " + DIVINGFISH_INVALID_CODE_MSG).finish(at_sender=True)
+    await _complete_df(platform, user_id, code)
+
+
 @df_bind.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
+    """「绑定水鱼」：无参 + OAuth 已配置 → 设备码授权（handoff=code 确认码
+    回填，对齐 Hoshino 上游与落雪同构 UX）；带确认码 → 回填收尾；带其他
+    参数 → 用户名公开档（既有行为）。"""
     platform, user_id = session_keys(session)
     arg = str(message).strip()
     if not arg and platform not in QQ_PLATFORMS:
         # 无参且无凭据可用：先回用法，不 ensure（否则查一次用法就落一行库）
         await UniMessage.text(" 用法：绑定水鱼 <水鱼用户名>").finish(at_sender=True)
+    if arg:
+        code = df_ext.extract_confirmation_code(arg)
+        if code is not None:
+            if pending_bindings.is_active(platform, user_id, "divingfish"):
+                await _complete_df(platform, user_id, code)
+            await UniMessage.text(" " + DIVINGFISH_NO_SESSION_MSG).finish(
+                at_sender=True
+            )
     binding = await binding_service.ensure(platform, user_id)
     if not arg:
+        if platform in QQ_PLATFORMS and df_ext.oauth_ready():
+            # 设备码授权（sunset 文档 §3.2 完整版）：handoff=code 确认码回填，
+            # scope 一次带齐 read+write（水鱼已要求所有写入走 OAuth）
+            ref = binding_service.divingfish_subject(binding)
+            if ref is None:  # pragma: no cover —— QQ 平台必可派生
+                await UniMessage.text(" 用法：绑定水鱼 <水鱼用户名>").finish(
+                    at_sender=True
+                )
+            label = df_ext.binding_label(user_id)
+            try:
+                device = await df_ext.device_authorize(ref[4:], label)
+            except Exception as e:
+                await UniMessage.text(f" 水鱼授权发起失败：{e}").finish(at_sender=True)
+            pending_bindings.start(platform, user_id, "divingfish", ttl=1200)
+            link = device.get("verification_uri_complete") or device.get(
+                "verification_uri", ""
+            )
+            minutes = max(int(device.get("expires_in", 1200)) // 60, 1)
+            await UniMessage.text(
+                "水鱼已要求所有成绩写入走 OAuth 授权，请完成一次绑定：\n\n"
+                "1. 打开以下链接并登录水鱼账号，授权本 BOT 访问您的水鱼查分器数据\n"
+                "=======================\n"
+                f"{link}\n"
+                "=======================\n"
+                f"2. 确认页面显示的绑定身份为「{label}」后点击「同意授权」\n"
+                "3. 复制页面给出的确认码，直接发送给我（无需任何前缀）\n\n"
+                f"本次绑定 {minutes} 分钟内有效，确认码只能使用一次；"
+                "超时或失效后请重新发送「绑定水鱼」。\n"
+                "=======================\n"
+                "请注意！！链接与确认码都仅供您本人使用，请勿转发他人。\n"
+                "确认码建议在与 BOT 的私聊中发送，避免被他人看到。\n"
+                f"如需取消授权，请前往 {df_ext.REVOKE_URL}"
+            ).finish(at_sender=True)
         if platform in QQ_PLATFORMS:
             await binding_service.set_service(binding, SERVICE_DIVINGFISH)
             await UniMessage.text(
@@ -129,6 +250,28 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         f" 已绑定水鱼账号「{arg}」（公开查询）。\n"
         "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」"
     ).finish(at_sender=True)
+
+
+async def _complete_df(platform: str, user_id: str, code: str) -> None:
+    """确认码回填收尾：兑换令牌（水鱼侧校验回填人 = 发起人）→ 落 OAuth 标志。"""
+    binding = await binding_service.get(platform, user_id)
+    if binding is None:
+        await UniMessage.text(" " + DIVINGFISH_NO_SESSION_MSG).finish(at_sender=True)
+    ref = binding_service.divingfish_subject(binding)
+    if ref is None:  # pragma: no cover —— 会话期间标识不会消失
+        await UniMessage.text(
+            " 当前绑定缺少水鱼授权所需的身份标识，请重新发送「绑定水鱼」"
+        ).finish(at_sender=True)
+    try:
+        result = await df_ext.redeem(ref[4:], code)
+    except Exception as e:
+        if str(e).startswith("mismatch"):
+            await UniMessage.text(" " + DIVINGFISH_MISMATCH_MSG).finish(at_sender=True)
+        await UniMessage.text(f" {e}").finish(at_sender=True)
+    sub = df_ext.token_subject(result.get("access_token", "")) or result.get("sub")
+    await binding_service.bind_divingfish_oauth(binding, sub=sub)
+    pending_bindings.discard(platform, user_id)
+    await UniMessage.text(" " + DIVINGFISH_BIND_SUCCESS_MSG).finish(at_sender=True)
 
 
 @df_token.handle()
@@ -315,6 +458,8 @@ async def _(session: Session = UniSession()):
         lines.append(f"水鱼用户名：{binding.divingfish_username}")
     if binding.divingfish_import_token:
         lines.append(f"水鱼 Import-Token：{binding.divingfish_import_token[:4]}****")
+    if binding.divingfish_oauth:
+        lines.append("水鱼 OAuth：已授权（写入走 OAuth 统一凭据）")
     if binding.lxns_friend_code:
         lines.append(f"落雪好友码：{binding.lxns_friend_code}")
     if binding.lxns_token:

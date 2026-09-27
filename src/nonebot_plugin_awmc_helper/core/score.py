@@ -311,8 +311,7 @@ class ScoreService:
             # 单曲只有 OAuth Bearer 形态，无回退路径：未覆盖用户给专项文案
             raise UserScoreError(
                 "该水鱼账号未授权本 bot 查询单曲成绩。\n"
-                "全量成绩（牌子/表格）请补录「绑定水鱼token <Import-Token>」恢复；\n"
-                "单曲查询需账号授权，绑定功能即将上线"
+                "请发送「绑定水鱼」完成一次授权（约 1 分钟）"
             ) from e
         if ident is None or result is None:
             return result

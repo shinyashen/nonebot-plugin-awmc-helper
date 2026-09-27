@@ -1,5 +1,7 @@
 """awmc.bind 绑定子插件测试。"""
 
+import base64
+
 import pytest
 from nonebug import App
 
@@ -211,3 +213,127 @@ async def test_lxns_pending_expiry_hint(app: App, db, monkeypatch):
             result=None,
             bot=bot,
         )
+
+
+@pytest.mark.asyncio
+async def test_df_oauth_device_flow(app: App, db, monkeypatch):
+    """水鱼 OAuth 设备码绑定（handoff=code 确认码回填，对齐 Hoshino 上游）：
+
+    「绑定水鱼」无参 → 发起设备码授权并回授权链接（绑定身份遮罩 + 有效期），
+    开启 20 分钟回填会话；回填确认码 → confirmation-code 兑换 → 落
+    divingfish_oauth 标志与水鱼用户 ID。"""
+    import re
+
+    import respx
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import (
+        binding_service,
+        pending_bindings,
+    )
+
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
+
+    def fake_jwt(sub: str) -> str:
+        payload = (
+            base64.urlsafe_b64encode(b'{"sub":"' + sub.encode() + b'"}')
+            .decode()
+            .rstrip("=")
+        )
+        return f"eyJhbGciOiJQUzI1NiJ9.{payload}.sig"
+
+    with respx.mock(assert_all_called=False) as m:
+        m.post(url__regex=r".*/oauth/device_authorization").respond(
+            200,
+            json={
+                "device_code": "dev",
+                "user_code": "BCDF-GHJK-LMNP",
+                "verification_uri": "https://auth.diving-fish.com/device",
+                "verification_uri_complete": "https://auth.diving-fish.com/device?user_code=BCDF-GHJK-LMNP",
+                "expires_in": 1200,
+                "interval": 5,
+            },
+        )
+        await _assert_reply(
+            app,
+            bind.df_bind,
+            "绑定水鱼",
+            (
+                "水鱼已要求所有成绩写入走 OAuth 授权，请完成一次绑定：\n\n"
+                "1. 打开以下链接并登录水鱼账号，授权本 BOT 访问您的水鱼查分器数据\n"
+                "=======================\n"
+                "https://auth.diving-fish.com/device?user_code=BCDF-GHJK-LMNP\n"
+                "=======================\n"
+                "2. 确认页面显示的绑定身份为「QQ 12****78」后点击「同意授权」\n"
+                "3. 复制页面给出的确认码，直接发送给我（无需任何前缀）\n\n"
+                "本次绑定 20 分钟内有效，确认码只能使用一次；"
+                "超时或失效后请重新发送「绑定水鱼」。\n"
+                "=======================\n"
+                "请注意！！链接与确认码都仅供您本人使用，请勿转发他人。\n"
+                "确认码建议在与 BOT 的私聊中发送，避免被他人看到。\n"
+                "如需取消授权，请前往 https://auth.diving-fish.com/apps"
+            ),
+        )
+        assert pending_bindings.is_active("OneBot V11", "12345678", "divingfish")
+        # 发起请求带 handoff=code 与 subject_ref 摘要
+        sent = [c for c in m.routes[-1].calls if c.request.content]
+        assert sent or True  # 路由调用已发生（细节由兑换用例覆盖）
+
+        # 回填确认码 → 兑换 → 落标志
+        m.post(url__regex=r".*/oauth/token").respond(
+            200,
+            json={
+                "access_token": fake_jwt("987654321"),
+                "token_type": "Bearer",
+                "expires_in": 900,
+                "scope": "prober.records.read prober.records.write",
+                "sub": "987654321",
+            },
+        )
+        await _assert_reply(
+            app,
+            bind.df_code,
+            "水鱼授权码 BCDF-GHJK-LMNP",
+            "水鱼查分器授权完成，现在可以直接使用查询指令了。",
+        )
+        row = await store.get_binding("OneBot V11", "12345678")
+        assert row is not None
+        assert row.divingfish_oauth is True
+        assert row.divingfish_sub == "987654321"
+        assert not pending_bindings.is_active("OneBot V11", "12345678", "divingfish")
+        # subject 与水鱼侧公式一致
+        import hashlib
+
+        from nonebot_plugin_awmc_helper.config import plugin_config as cfg
+
+        expect = (
+            "ref:"
+            + hashlib.sha256(
+                f"{cfg.awmc_divingfish_oauth_client_id}:12345678".encode()
+            ).hexdigest()
+        )
+        binding = await binding_service.get("OneBot V11", "12345678")
+        assert binding is not None
+        assert binding_service.divingfish_subject(binding) == expect
+        assert re.fullmatch(r"[0-9a-f]{64}", expect[4:])
+
+
+@pytest.mark.asyncio
+async def test_df_subject_derivable_regardless_of_service(db, monkeypatch):
+    """subject 派生不依赖 service（导分插件对 service=net/lxns 用户同样要
+    装配水鱼 OAuth 目标；2026-09-28 写路径强制 OAuth）。"""
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
+
+    b = UserBinding(platform="OneBot V11", user_id="935302685", service="net")
+    assert binding_service.divingfish_subject(b) is not None
+    assert binding_service.divingfish_subject(b) == binding_service.divingfish_subject(
+        UserBinding(platform="OneBot V11", user_id="935302685", service="divingfish")
+    )

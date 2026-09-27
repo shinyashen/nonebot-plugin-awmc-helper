@@ -181,11 +181,14 @@ class BindingService:
         且与「未授权」不可区分。本插件公开键口径为「用户名 > QQ 号」，此处同样
         用户名优先、否则取 QQ 号（仅 QQ 系平台）。OAuth 未配置或无可用标识时
         返回 None（调用方回退旧路径）。
+
+        ⚠️ 不检查 ``binding.service``：service 仅是查询偏好，水鱼凭据与它无关
+        （导分插件对 service=net/lxns 的用户同样要装配水鱼 OAuth 目标，
+        2026-09-28 写路径强制 OAuth 后成为主用途）；调用方需要 service 语义
+        时自行先行判断。
         """
         client_id = plugin_config.awmc_divingfish_oauth_client_id
         if not (client_id and plugin_config.awmc_divingfish_oauth_client_secret):
-            return None
-        if binding.service != SERVICE_DIVINGFISH:
             return None
         external_id = binding.divingfish_username or (
             str(qq) if (qq := self.qq_of(binding)) else None
@@ -410,6 +413,20 @@ class BindingService:
     async def bind_divingfish_token(self, binding: UserBinding, token: str) -> None:
         binding.service = SERVICE_DIVINGFISH
         binding.divingfish_import_token = token
+        await store.save_binding(binding)
+
+    async def bind_divingfish_oauth(
+        self, binding: UserBinding, sub: str | None = None
+    ) -> None:
+        """标记水鱼 OAuth consent 已建立（设备码绑定成功后调用）。
+
+        映射本体在授权服务器侧（ref 摘要换票），本地仅存标志与水鱼用户 ID
+        （sub，诊断/展示/将来 sub: 换票备胎）；不改 service——OAuth 写凭据
+        与默认查分器偏好无关。
+        """
+        binding.divingfish_oauth = True
+        if sub is not None:
+            binding.divingfish_sub = sub
         await store.save_binding(binding)
 
     async def bind_lxns(

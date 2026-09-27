@@ -43,6 +43,10 @@ class UserBinding(SQLModel, table=True):
     service: str = Field(default="divingfish")  # divingfish / lxns / net
     divingfish_username: str | None = Field(default=None)
     divingfish_import_token: str | None = Field(default=None)
+    # 水鱼 OAuth 设备码绑定：映射本体在授权服务器侧（ref 摘要换票），
+    # 本地只存「已完成 consent」标志与水鱼用户 ID（诊断/展示用）
+    divingfish_oauth: bool = Field(default=False)
+    divingfish_sub: str | None = Field(default=None)
     lxns_friend_code: int | None = Field(default=None)
     lxns_token: str | None = Field(default=None)
     # 落雪 OAuth refresh_token（maimai-py 暂无刷新流程，先落库防迁移丢失）
@@ -309,6 +313,9 @@ _MIGRATE_COLUMNS: dict[str, dict[str, str]] = {
         # 日服 NET 凭据（2026-09-26 起支持数据源 net）
         "net_sega_id": "ALTER TABLE user_binding ADD COLUMN net_sega_id VARCHAR",
         "net_password": "ALTER TABLE user_binding ADD COLUMN net_password VARCHAR",
+        # 水鱼 OAuth 设备码绑定（2026-09-28 起：写路径强制 OAuth）
+        "divingfish_oauth": "ALTER TABLE user_binding ADD COLUMN divingfish_oauth BOOL",
+        "divingfish_sub": "ALTER TABLE user_binding ADD COLUMN divingfish_sub VARCHAR",
     },
 }
 
