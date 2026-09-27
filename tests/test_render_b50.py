@@ -222,6 +222,7 @@ def test_fit_into_scales_and_centers():
     bbox2 = out2.getbbox()
     assert (bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]) == (10, 5)
 
+
 def test_fit_into_upscale_opt_in():
     """名牌图放大适配：默认不放大，allow_upscale=True 才放大填满槽位。"""
     from PIL import Image
