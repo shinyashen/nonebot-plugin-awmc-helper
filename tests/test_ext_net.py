@@ -34,6 +34,13 @@ HOME_PAGE = """
       </div>
       <div class="clearfix"></div>
     </div>
+    <img class="user_data_block_line" src="/maimai-mobile/img/line_01.png">
+    <img class="h_35 f_l" src="/maimai-mobile/img/course/course_rank_10hvsSHd90.png">
+    <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class/class_rank_s_00.png">
+    <div class="p_l_10 f_l f_14">
+      <img class="h_30 m_3 v_m" src="/maimai-mobile/img/icon_star.png">
+      ×3
+    </div>
   </div>
 </div></body></html>
 """
@@ -212,6 +219,8 @@ def test_parse_player_identity(net_ext):
     assert player.icon_url == f"{MOBILE}/img/Icon/34f0363f4ce86d07.png"
     assert player.trophy_name == "アウラ、フルコンしろ。"
     assert player.trophy_color == "Normal"
+    assert player.course_url == f"{MOBILE}/img/course/course_rank_10hvsSHd90.png"
+    assert player.class_url == f"{MOBILE}/img/class/class_rank_s_00.png"
 
 
 def test_parse_player_absent(net_ext):

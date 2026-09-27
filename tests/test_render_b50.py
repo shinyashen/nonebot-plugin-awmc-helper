@@ -200,3 +200,24 @@ def test_utage_bg_cached_and_alpha_preserved():
         assets.static_path() / "mai" / "pic" / "b50_score_basic.png"
     ).getchannel("A")
     assert bg.getchannel("A").tobytes() == src_alpha.tobytes()
+
+
+def test_fit_into_scales_and_centers():
+    """NET 官方徽章图等比适配槽位：只缩不放、居中、画布透明。"""
+    from PIL import Image
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import _fit_into
+
+    wide = Image.new("RGBA", (100, 50), (255, 0, 0, 255))  # 2:1 → 装进 80x32
+    out = _fit_into(wide, (80, 32))
+    assert out.size == (80, 32)
+    scaled = out.getbbox()  # 非透明内容区
+    assert scaled is not None
+    inner_w, inner_h = scaled[2] - scaled[0], scaled[3] - scaled[1]
+    assert (inner_w, inner_h) == (64, 32)  # min(0.8, 0.64) = 0.64
+    assert (scaled[0], scaled[1]) == ((80 - 64) // 2, 0)  # 垂直已满、水平居中
+
+    tiny = Image.new("RGBA", (10, 5), (0, 255, 0, 255))  # 小图不放大
+    out2 = _fit_into(tiny, (80, 32))
+    bbox2 = out2.getbbox()
+    assert (bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]) == (10, 5)

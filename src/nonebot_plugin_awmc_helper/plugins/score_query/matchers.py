@@ -1,5 +1,7 @@
 """查分指令入口：b50 / ap50 / minfo / ginfo。"""
 
+import asyncio
+
 from nonebot import on_regex, on_command
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.adapters import Event, Message
@@ -193,11 +195,14 @@ def _display_name(player) -> str:
     return getattr(player, "nickname", None) or player.name
 
 
-async def _net_icon_bytes(player) -> bytes | None:
-    """NET 首页头像 → bytes（落盘缓存；无身份/无头像 URL/下载失败均 None）。"""
-    if player is None or not player.icon_url:
+async def _net_image_bytes(url: str | None) -> bytes | None:
+    """NET 官方资料图 URL → bytes（落盘缓存；无 URL/下载失败均 None）。
+
+    头像（img/Icon）与段位认定/でらっクラス徽章（img/course、img/class）同构。
+    """
+    if not url:
         return None
-    path = await jp_cover.ensure_icon(player.icon_url.rsplit("/", 1)[-1])
+    path = await jp_cover.ensure_asset(url)
     return path.read_bytes() if path is not None else None
 
 
@@ -233,6 +238,12 @@ async def _(
                 )
             bests = await score_service.get_b50(binding)
             player = net_score_service.player_of(binding)
+            # 身份素材并发拉取（首查下载，之后落盘缓存秒回）
+            icon_b, course_b, class_b = await asyncio.gather(
+                _net_image_bytes(player.icon_url if player else None),
+                _net_image_bytes(player.course_url if player else None),
+                _net_image_bytes(player.class_url if player else None),
+            )
             png = await b50_render.best50_bytes(
                 player_name=(player.name if player else None)
                 or binding.net_sega_id
@@ -246,9 +257,11 @@ async def _(
                 qqid=binding_service.qq_of(binding),
                 service=binding.service,
                 theme=binding.theme or DEFAULT_THEME,
-                icon_image=await _net_icon_bytes(player),
+                icon_image=icon_b,
                 trophy_name=player.trophy_name if player else None,
                 trophy_color=player.trophy_color if player else None,
+                course_image=course_b,
+                class_image=class_b,
             )
         else:
             player = await score_service.get_player(binding)

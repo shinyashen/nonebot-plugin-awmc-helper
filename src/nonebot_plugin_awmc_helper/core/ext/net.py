@@ -105,8 +105,10 @@ class NetRecord:
 class NetPlayer:
     """NET 首页身份区（home/ 页 .basic_block 玩家名片）。
 
-    供 B50 卡头部显示真实玩家信息（此前只有 SEGA ID 可显示）；
-    course/class 徽章页面上是哈希文件名图片，无数字可解析，暂不采集。
+    供 B50 卡头部对齐落雪名片显示（头像/称号/段位认定/でらっクラス/名字）；
+    course/class 徽章页面上是哈希文件名图片，无数字可解析——采集官方图 URL
+    由渲染层直接贴图。NET 不展示姓名框/边框等游戏内收藏品（落雪有是因为
+    用户上传游戏内数据），不设对应字段。
     """
 
     name: str  # 游戏内玩家名（全角字符原样）
@@ -114,6 +116,9 @@ class NetPlayer:
     icon_url: str | None = None  # 头像图 URL（img/Icon/ 哈希文件名）
     trophy_name: str | None = None  # 称号（名牌条）文本
     trophy_color: str | None = None  # 称号稀有度（trophy_{Color} class 尾段）
+    course_url: str | None = None  # 段位认定徽章图 URL（img/course/）
+    class_url: str | None = None  # でらっクラス徽章图 URL（img/class/）
+    # star（icon_star ×N）NET 有展示但落雪卡版式无槽位，不采集
 
 
 # FC/FS 徽章文件名 → 语义（dxrating MUSIC_RECORD_FLAG_MATCHERS）
@@ -267,12 +272,21 @@ def _parse_player(html: str) -> NetPlayer | None:
             ),
             None,
         )
+    # 段位认定/でらっクラス徽章：按 src 路径定位（哈希文件名，数字不可解析）
+    course = block.select_one('img[src*="/img/course/"]')
+    class_ = block.select_one('img[src*="/img/class/"]')
     return NetPlayer(
         name=name,
         rating=int(rating_text),
         icon_url=urljoin(f"{BASE}/", icon_src) if icon_src else None,
         trophy_name=trophy_name,
         trophy_color=trophy_color,
+        course_url=urljoin(f"{BASE}/", _attr_text(course, "src"))
+        if course is not None
+        else None,
+        class_url=urljoin(f"{BASE}/", _attr_text(class_, "src"))
+        if class_ is not None
+        else None,
     )
 
 

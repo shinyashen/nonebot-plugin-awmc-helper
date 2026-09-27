@@ -284,6 +284,22 @@ def _sync_icon(fs: FSType | None) -> Image.Image | None:
     return assets.pic_optional(f"UI_MSS_MBase_Icon_{name}.png")
 
 
+def _fit_into(img: Image.Image, box: tuple[int, int]) -> Image.Image:
+    """等比缩放居中放进 box（只缩不放）——NET 官方徽章图适配既有槽位。
+
+    官方图为哈希文件名、无数字可解析，无法走本地按数字索引的素材；
+    等比贴图与本地素材本就是同一套游戏内徽章美术，视觉一致。
+    """
+    width, height = img.size
+    scale = min(box[0] / width, box[1] / height, 1.0)
+    size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    canvas = Image.new("RGBA", box, (0, 0, 0, 0))
+    canvas.alpha_composite(
+        img.resize(size), ((box[0] - size[0]) // 2, (box[1] - size[1]) // 2)
+    )
+    return canvas
+
+
 async def _draw_header(
     im: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -298,12 +314,16 @@ async def _draw_header(
     icon_image: bytes | None = None,
     trophy_name: str | None = None,
     trophy_color: str | None = None,
+    course_image: bytes | None = None,
+    class_image: bytes | None = None,
 ) -> None:
     """头部落雪名片，元素与层级顺序照搬 Hoshino PlayerBest50.draw。
 
-    NET 数据源无 Player 概念，经 icon_image（头像原始 bytes）与
-    trophy_name/trophy_color（NET 首页称号与稀有度）注入身份；
-    仅在 player 缺失时生效。
+    NET 数据源无 Player 概念，经 icon_image（头像原始 bytes）、
+    trophy_name/trophy_color（NET 首页称号与稀有度）、course_image/
+    class_image（NET 官方段位认定/でらっクラス徽章图）注入身份；
+    仅在 player 缺失/无对应字段时生效。NET 不提供姓名框/边框
+    （游戏内收藏品，NET 页面不展示），名牌保持缺省。
     """
     pic = assets.static_path() / "mai" / "pic"
     im.alpha_composite(
@@ -366,23 +386,34 @@ async def _draw_header(
 
     im.alpha_composite(Image.open(pic / "Name.png").convert("RGBA"), (435, 115))
 
-    # 段位认定牌（水鱼无该字段时回退 additional_rating，再回退 0）
+    # 段位认定牌：NET 官方徽章图优先（哈希名无数字，等比贴入槽位）；
+    # 其余源按数字取本地素材（水鱼无该字段时回退 additional_rating，再回退 0）
     course_rank = getattr(player, "course_rank", None)
     if course_rank is None:
         course_rank = getattr(player, "additional_rating", 0) or 0
-    im.alpha_composite(
-        Image.open(pic / f"UI_DNM_DaniPlate_{dani_plate_num(course_rank)}.png")
-        .convert("RGBA")
-        .resize((80, 32)),
-        (625, 120),
-    )
-    class_rank = getattr(player, "class_rank", 0) or 0
-    im.alpha_composite(
-        Image.open(pic / f"UI_FBR_Class_{class_rank:02d}.png")
-        .convert("RGBA")
-        .resize((90, 54)),
-        (620, 60),
-    )
+    if course_image:
+        course_badge = _fit_into(
+            Image.open(BytesIO(course_image)).convert("RGBA"), (80, 32)
+        )
+    else:
+        course_badge = (
+            Image.open(pic / f"UI_DNM_DaniPlate_{dani_plate_num(course_rank)}.png")
+            .convert("RGBA")
+            .resize((80, 32))
+        )
+    im.alpha_composite(course_badge, (625, 120))
+    if class_image:
+        class_badge = _fit_into(
+            Image.open(BytesIO(class_image)).convert("RGBA"), (90, 54)
+        )
+    else:
+        class_rank = getattr(player, "class_rank", 0) or 0
+        class_badge = (
+            Image.open(pic / f"UI_FBR_Class_{class_rank:02d}.png")
+            .convert("RGBA")
+            .resize((90, 54))
+        )
+    im.alpha_composite(class_badge, (620, 60))
 
     # 称号条：有称号用对应色底 + 称号名；NET 称号次之；无则彩虹底 + B35/B15 统计
     trophy = getattr(player, "trophy", None)
@@ -509,10 +540,13 @@ async def draw_b50_nb(
     icon_image: bytes | None = None,
     trophy_name: str | None = None,
     trophy_color: str | None = None,
+    course_image: bytes | None = None,
+    class_image: bytes | None = None,
 ) -> Image.Image:
     """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。
 
-    icon_image/trophy_name/trophy_color 为 NET 数据源身份注入（player 缺失时生效）。
+    icon_image/trophy_name/trophy_color/course_image/class_image 为 NET 数据源
+    身份注入（player 缺失或对应字段缺失时生效）。
     """
     pic = assets.static_path() / "mai" / "pic"
     im = Image.open(pic / theme / "b50.png").convert("RGBA")
@@ -531,6 +565,8 @@ async def draw_b50_nb(
         icon_image=icon_image,
         trophy_name=trophy_name,
         trophy_color=trophy_color,
+        course_image=course_image,
+        class_image=class_image,
     )
 
     # 成绩行：b35 从 y=235、b15 从 y=1085，均 5 列、行距 114（Hoshino 布局）
@@ -570,6 +606,8 @@ async def best50_bytes(
     icon_image: bytes | None = None,
     trophy_name: str | None = None,
     trophy_color: str | None = None,
+    course_image: bytes | None = None,
+    class_image: bytes | None = None,
 ) -> bytes:
     return image_to_bytes(
         await draw_b50_nb(
@@ -586,5 +624,7 @@ async def best50_bytes(
             icon_image=icon_image,
             trophy_name=trophy_name,
             trophy_color=trophy_color,
+            course_image=course_image,
+            class_image=class_image,
         )
     )
