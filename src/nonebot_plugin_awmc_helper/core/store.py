@@ -352,6 +352,18 @@ async def get_binding(platform: str, user_id: str) -> UserBinding | None:
         ).first()
 
 
+async def get_lxns_refreshable_bindings() -> list[UserBinding]:
+    """全部持有 refresh_token 的绑定（落雪令牌每日保活任务用）。"""
+    async with session() as db:
+        return list(
+            await db.exec(
+                select(UserBinding).where(
+                    col(UserBinding.lxns_refresh_token).is_not(None)
+                )
+            )
+        )
+
+
 async def save_binding(binding: UserBinding) -> None:
     async with session() as db:
         db.add(binding)

@@ -76,6 +76,9 @@ class Config(BaseModel):
     awmc_gamerch_max_age: int = 24
     # 日服 NET 数据源 per-user 查询冷却（分钟，0=禁用；dxrating 同款 15 分钟）
     awmc_net_cooldown_minutes: int = 15
+    # 落雪令牌每日保活（refresh_token 30 天不刷新即失效；每日 4:30 对全部
+    # 持有 refresh_token 的绑定续期一次，防止闲置绑定走进续期死局）
+    awmc_lxns_keepalive: bool = True
 
 
 plugin_config: Config = get_plugin_config(Config)
