@@ -1,4 +1,4 @@
-"""constants 派生表与 maimai_py 的同步性（fork 对齐回归）。
+"""constants 派生表与 maimai_py 的同步性（上游对齐回归）。
 
 导入须放函数内：nonebot 驱动在 session 级 fixture 中初始化，
 模块导入期（收集阶段）尚未就绪。

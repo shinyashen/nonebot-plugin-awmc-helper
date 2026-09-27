@@ -163,7 +163,7 @@ class AwmcAliasProvider(IAliasProvider):
 class DivingFishCurveProvider(ICurveProvider):
     """水鱼 chart_stats 曲线 provider（拟合定数/游玩分布，查歌「擬」行与统计卡）。
 
-    maimai_py 1.5.2 自带的 ``DivingFishProvider.get_curves`` 仍按旧版合并式
+    maimai_py 1.5.3 自带的 ``DivingFishProvider.get_curves`` 仍按旧版合并式
     ``dist``（[1..4] 槽为全连分布）反序列化，且 ``get_curves`` 内写死
     ``DivingFishProvider._deser_curve``（子类覆写反序列化不会被采用）；
     水鱼 API 现已把全连分布独立为 ``fc_dist`` 字段，故自行实现接口

@@ -1,6 +1,7 @@
 """水鱼 Developer-Token 日落迁移：OAuth 路由 / 回退 / 迁移文案测试。
 
-库侧（maimai_py fork feat/divingfish-oauth）提供 OAuth Bearer 路径；本文件验证
+库侧（maimai-py ≥1.5.3 的 ``DivingFishProvider`` OAuth Bearer 支持，PR #63 合入
+上游）提供 OAuth Bearer 路径；本文件验证
 插件层的 subject 装配、Import-Token 优先序、未覆盖用户的回退与专项文案。
 subject 口径：``sha256(f"{client_id}:{external_id}")``，external_id 与 dev 时代
 ``/dev/*`` 实际传参一致（用户名 > QQ 号），与水鱼迁移快照的等值映射对齐。

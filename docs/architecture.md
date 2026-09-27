@@ -97,7 +97,7 @@ maimaiDX（`local/repos/maimaiDX/core/image/`）为唯一权威**；NB 版
   完成表头部大面板是 `plate_progress.png`（`_plate_progress_bg`），
   `progress_bg.png` 是进度总览每槽的底部小条（`_plate_progress_bottom_bg`）；
   进度总览头部面板是 `plate_progress_2.png`；
-- **素材包的简繁命名与 fork `plate_aliases` 不同**：牌头仅 晓/樱/堇/辉/华 +
+- **素材包的简繁命名与 maimai_py `plate_aliases` 不同**：牌头仅 晓/樱/堇/辉/华 +
   「極」用繁体（`render/assets.py` 的 `_S2T_VERSION`/`_S2T_KIND`），牌种
   將/鏡 等在素材包中是简体，不能从 `plate_aliases` 反推；
 - **素材尺寸与 Hoshino 原版可能不同**（如 `progress_big.png` 为 43 高，

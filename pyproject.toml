@@ -10,7 +10,7 @@ dependencies = [
   "aiosqlite>=0.19.0",                        # 统一 SQLite 异步驱动
   "beautifulsoup4>=4.12.0",                   # gamerch wiki 页面解析
   "httpx>=0.27.0,<1.0.0",
-  "maimai-py>=1.5.2",                         # 数据层唯一基础，跟随 PyPI 最新版不锁上界
+  "maimai-py>=1.5.3",                         # 数据层唯一基础，跟随 PyPI 最新版不锁上界
   "nonebot-plugin-alconna>=0.60.0,<1.0.0",    # 跨平台命令解析拓展
   "nonebot-plugin-apscheduler>=0.5.0,<1.0.0", # 定时任务
   "nonebot-plugin-localstore>=0.7.4,<1.0.0",  # 存储文件
@@ -52,11 +52,6 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 nonebug = { git = "https://github.com/nonebot/nonebug" }
-# maimai-py 暂钉作者 fork 的水鱼 OAuth 分支（feat/divingfish-oauth，基于上游
-# develop，含 MAGiCAL 27000/国服「回」牌；水鱼 developer-token 2026-10-01 日落，
-# 该分支提供 OAuth Bearer 路径，见 local/reference/divingfish-oauth-sunset.md）。
-# PR 合入上游后切回 main（或 PyPI 收录后删本行跟随最新版）。
-maimai-py = { git = "https://github.com/shinyashen/maimai.py", branch = "feat/divingfish-oauth" }
 
 [tool.bumpversion]
 current_version = "0.1.0"
