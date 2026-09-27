@@ -51,9 +51,11 @@ HOME_PAGE = """
 NAMEPLATE_PAGE = """
 <html><body><div class="see_through_area">
 <div class="town_block" name="genre_1">
-<div class="see_through_block collection_setting_block">
+<div class="see_through_block collection_setting_block p_r m_t_10 p_10 f_0">
+  <img class="w_396" src="/maimai-mobile/img/line_01.png">
   <div class="p_r"><img class="w_396 m_r_10" src="/maimai-mobile/img/NamePlate/a.png">
   </div>
+  <img class="collection_setting_img" src="/maimai-mobile/img/collection_setting.png">
   <div class="block_info">装备中名牌</div>
 </div>
 <div class="see_through_block">
@@ -263,9 +265,10 @@ async def test_login_carries_player_identity(net_mock, net_ext):
 
 
 def test_parse_equipped_nameplate(net_ext):
-    """收藏品页装备中项：collection_setting_block 内的 w_396 预览图。"""
+    """收藏品页装备中项：w_396.m_r_10 预览图（第一张 w_396 是装饰线，勿取）。"""
     url = net_ext._parse_equipped_nameplate(NAMEPLATE_PAGE)
     assert url == f"{MOBILE}/img/NamePlate/a.png"
+    assert "line_01" not in (url or "")
     # 无装备块/无图 → None
     bare = NAMEPLATE_PAGE.replace(" collection_setting_block", "")
     assert net_ext._parse_equipped_nameplate(bare) is None

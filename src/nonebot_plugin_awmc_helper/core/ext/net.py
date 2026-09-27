@@ -261,12 +261,13 @@ def _extract_login_token(html: str) -> str | None:
 def _parse_equipped_nameplate(html: str) -> str | None:
     """收藏品姓名框页 → 装备中名牌图 URL（无装备块/改版返回 None）。
 
-    页面结构（betterDXnet src/api/collections/nameplate.ts 同口径）：每项一个
-    ``.see_through_block``，装备中项附加 ``collection_setting_block`` class，
-    预览图为 ``img.w_396``。
+    页面结构（2026-09-28 真实页面实测；betterDXnet/maifetcher 同口径）：每项一个
+    ``.see_through_block``，装备中项附加 ``collection_setting_block`` class。
+    装备块内第一张 ``img.w_396`` 是**装饰分隔线**（line_01.png，实测踩坑），
+    名牌预览图必须取 ``img.w_396.m_r_10``。
     """
     soup = BeautifulSoup(html, "html.parser")
-    img = soup.select_one(".collection_setting_block img.w_396")
+    img = soup.select_one(".collection_setting_block img.w_396.m_r_10")
     src = _attr_text(img, "src") if img is not None else ""
     return urljoin(f"{BASE}/", src) if src else None
 
