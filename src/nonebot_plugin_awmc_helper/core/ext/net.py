@@ -118,7 +118,9 @@ class NetPlayer:
     trophy_color: str | None = None  # 称号稀有度（trophy_{Color} class 尾段）
     course_url: str | None = None  # 段位认定徽章图 URL（img/course/）
     class_url: str | None = None  # でらっクラス徽章图 URL（img/class/）
-    # star（icon_star ×N）NET 有展示但落雪卡版式无槽位，不采集
+    nameplate_url: str | None = None  # 装备中姓名框图 URL（收藏品页，可获取性差）
+    # star（icon_star ×N）NET 有展示但落雪卡版式无槽位，不采集；
+    # 边框（frame）NET 收藏品页有，但落雪卡版式不渲染，不采集
 
 
 # FC/FS 徽章文件名 → 语义（dxrating MUSIC_RECORD_FLAG_MATCHERS）
@@ -208,6 +210,24 @@ class MaimaiNetClient:
         await self._request("GET", f"{BASE}/aimeList/submit/", params={"idx": "0"})
         home = await self._request("GET", f"{BASE}/home/")
         self.player = _parse_player(home.text)
+        if self.player is not None:
+            self.player.nameplate_url = await self._fetch_equipped_nameplate()
+
+    async def _fetch_equipped_nameplate(self) -> str | None:
+        """收藏品姓名框页 → 当前装备名牌图 URL（弹回/改版返回 None）。
+
+        NET 收藏品区**可获取性差**（间歇性 302 回登录页，实测成功率低且与
+        账号/路径无关），失败不重试不报错——上层 net_score 有 kv_cache 持久
+        缓存兜底，抓到一次即长期可用。装备中项 = ``.collection_setting_block``
+        （betterDXnet/maifetcher 同口径），缩略图 ``img.w_396``。
+        """
+        try:
+            resp = await self._request("GET", f"{BASE}/collection/nameplate")
+        except (NetError, ExtNetworkError):
+            return None
+        if resp.status_code != 200:
+            return None
+        return _parse_equipped_nameplate(resp.text)
 
     async def fetch_music_records(self) -> list[NetRecord]:
         """逐难度抓全曲记录页并解析（B50 参与：standard/dx 全难度）。
@@ -236,6 +256,19 @@ def _extract_login_token(html: str) -> str | None:
     node = soup.find("input", attrs={"name": "token"})
     value = node.get("value") if isinstance(node, Tag) else None
     return str(value) if value else None
+
+
+def _parse_equipped_nameplate(html: str) -> str | None:
+    """收藏品姓名框页 → 装备中名牌图 URL（无装备块/改版返回 None）。
+
+    页面结构（betterDXnet src/api/collections/nameplate.ts 同口径）：每项一个
+    ``.see_through_block``，装备中项附加 ``collection_setting_block`` class，
+    预览图为 ``img.w_396``。
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    img = soup.select_one(".collection_setting_block img.w_396")
+    src = _attr_text(img, "src") if img is not None else ""
+    return urljoin(f"{BASE}/", src) if src else None
 
 
 def _parse_player(html: str) -> NetPlayer | None:

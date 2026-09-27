@@ -357,6 +357,43 @@ async def test_player_identity_cached_with_window(net_service, jp_view, monkeypa
     assert net_service.player_of(binding) is player2
 
 
+@pytest.mark.asyncio
+async def test_nameplate_url_persisted_and_backfilled(
+    net_service, jp_view, db, monkeypatch
+):
+    """装备名牌 kv_cache 持久化：抓到即存，后续弹回时回填上次结果。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.net import NetPlayer
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+    key = "net_nameplate:OneBot V11:12345678"
+
+    player = NetPlayer(name="p", rating=1, nameplate_url="https://x/a.png")
+
+    async def fake_fetch(b):
+        return _records(), player
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
+    await net_service.get_scores(binding)
+    assert await store.kv_get(key) == "https://x/a.png"
+
+    # 下一次抓取弹回（url 为 None）→ 从 kv 回填，卡面不抖回缺省
+    player2 = NetPlayer(name="p", rating=1, nameplate_url=None)
+
+    async def fake_fetch2(b):
+        return _records(), player2
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch2)
+    net_service._window_cache.clear()
+    await net_service.get_scores(binding)
+    assert net_service.player_of(binding).nameplate_url == "https://x/a.png"
+    # 未更新时不重复写库
+    row = await store.kv_get(key)
+    assert row == "https://x/a.png"
+
+
 # ---------------------------------------------------------------------------
 # 命令流：绑定日服（仅私聊）/ 数据源 2 / b50 / minfo（nonebug + respx）
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ from maimai_py import (
 )
 from maimai_py.utils import ScoreCoefficient
 
+from . import store
 from .songs import song_service
 from .ext.net import NetPlayer, NetRecord, NetCredentials, MaimaiNetClient
 from ..constants import normalize_text
@@ -131,6 +132,27 @@ class NetScoreService:
         entry = self._window_cache.get(self._key(binding))
         return entry[2] if entry is not None else None
 
+    async def _merge_nameplate(self, binding, player: NetPlayer | None) -> None:
+        """装备名牌 URL 持久缓存：抓到即更新，抓不到回填上次结果。
+
+        NET 收藏品区间歇性 302（实测成功率低），不持久化的话名牌会在
+        「真实/缺省」间抖动；kv_cache 键按绑定隔离，玩家换名牌后随下一次
+        抓取成功自动更新。尽力而为：缓存层异常不影响查询主链路。
+        """
+        if player is None:
+            return
+        try:
+            key = f"net_nameplate:{binding.platform}:{binding.user_id}"
+            if player.nameplate_url:
+                if await store.kv_get(key) != player.nameplate_url:
+                    await store.kv_set(key, player.nameplate_url)
+            else:
+                cached = await store.kv_get(key)
+                if isinstance(cached, str):
+                    player.nameplate_url = cached
+        except Exception as e:
+            logger.debug(f"net-score：名牌缓存读写失败（忽略）：{e!r}")
+
     async def get_scores(self, binding) -> tuple[list[ScoreExtend], bool]:
         """窗口内全量成绩（缓存优先）；返回 (scores, from_cache)。
 
@@ -151,6 +173,7 @@ class NetScoreService:
         except Exception:
             self._fail_until[key] = time.monotonic() + FETCH_FAIL_BACKOFF_SECONDS
             raise
+        await self._merge_nameplate(binding, player)
         scores = await self.assemble(records)
         if window > 0:
             self._window_cache[key] = (time.monotonic(), scores, player)

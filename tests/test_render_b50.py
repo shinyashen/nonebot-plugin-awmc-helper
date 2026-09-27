@@ -221,3 +221,18 @@ def test_fit_into_scales_and_centers():
     out2 = _fit_into(tiny, (80, 32))
     bbox2 = out2.getbbox()
     assert (bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]) == (10, 5)
+
+def test_fit_into_upscale_opt_in():
+    """名牌图放大适配：默认不放大，allow_upscale=True 才放大填满槽位。"""
+    from PIL import Image
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import _fit_into
+
+    plate = Image.new("RGBA", (396, 66), (255, 0, 0, 255))
+    out = _fit_into(plate, (800, 130))  # 默认只缩不放
+    bbox = out.getbbox()
+    assert (bbox[2] - bbox[0], bbox[3] - bbox[1]) == (396, 66)
+    out2 = _fit_into(plate, (800, 130), allow_upscale=True)
+    bbox2 = out2.getbbox()
+    w, h = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
+    assert (w, h) == (780, 130)  # min(800/396, 130/66) ≈ 1.9697 → 780×130

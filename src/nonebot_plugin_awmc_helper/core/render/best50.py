@@ -284,14 +284,18 @@ def _sync_icon(fs: FSType | None) -> Image.Image | None:
     return assets.pic_optional(f"UI_MSS_MBase_Icon_{name}.png")
 
 
-def _fit_into(img: Image.Image, box: tuple[int, int]) -> Image.Image:
-    """等比缩放居中放进 box（只缩不放）——NET 官方徽章图适配既有槽位。
+def _fit_into(
+    img: Image.Image, box: tuple[int, int], *, allow_upscale: bool = False
+) -> Image.Image:
+    """等比缩放居中放进 box（默认只缩不放）——NET 官方徽章图适配既有槽位。
 
     官方图为哈希文件名、无数字可解析，无法走本地按数字索引的素材；
     等比贴图与本地素材本就是同一套游戏内徽章美术，视觉一致。
+    名牌官方图（396 宽）相对槽位（800 宽）过小，需 allow_upscale 放大。
     """
     width, height = img.size
-    scale = min(box[0] / width, box[1] / height, 1.0)
+    limit = min(box[0] / width, box[1] / height)
+    scale = limit if allow_upscale else min(limit, 1.0)
     size = (max(1, round(width * scale)), max(1, round(height * scale)))
     canvas = Image.new("RGBA", box, (0, 0, 0, 0))
     canvas.alpha_composite(
@@ -316,14 +320,15 @@ async def _draw_header(
     trophy_color: str | None = None,
     course_image: bytes | None = None,
     class_image: bytes | None = None,
+    nameplate_image: bytes | None = None,
 ) -> None:
     """头部落雪名片，元素与层级顺序照搬 Hoshino PlayerBest50.draw。
 
     NET 数据源无 Player 概念，经 icon_image（头像原始 bytes）、
     trophy_name/trophy_color（NET 首页称号与稀有度）、course_image/
-    class_image（NET 官方段位认定/でらっクラス徽章图）注入身份；
-    仅在 player 缺失/无对应字段时生效。NET 不提供姓名框/边框
-    （游戏内收藏品，NET 页面不展示），名牌保持缺省。
+    class_image（NET 官方段位认定/でらっクラス徽章图）、nameplate_image
+    （NET 收藏品页装备中姓名框图）注入身份；仅在 player 缺失/无对应字段时
+    生效。边框 NET 收藏品页有但本卡版式不渲染，不采集。
     """
     pic = assets.static_path() / "mai" / "pic"
     im.alpha_composite(
@@ -331,7 +336,8 @@ async def _draw_header(
         (14, 60),
     )
 
-    # 名牌：水鱼版本牌字符串 → plate_version；落雪收藏牌 → 在线素材；缺省 550101
+    # 名牌：水鱼版本牌字符串 → plate_version；落雪收藏牌 → 在线素材；
+    # NET 装备中姓名框 → 官方原图放大适配；缺省 550101
     plate_item = getattr(player, "name_plate", None)
     plate_img: Image.Image | None = None
     if isinstance(plate_item, str):
@@ -340,6 +346,12 @@ async def _draw_header(
             plate_img = Image.open(candidate).convert("RGBA")
     elif plate_item is not None:
         plate_img = await fetch_item_image("plate", plate_item.id)
+    if plate_img is None and nameplate_image:
+        plate_img = _fit_into(
+            Image.open(BytesIO(nameplate_image)).convert("RGBA"),
+            (800, 130),
+            allow_upscale=True,
+        )
     if plate_img is None:
         plate_img = Image.open(pic / "UI_Plate_550101.png").convert("RGBA")
     im.alpha_composite(plate_img.resize((800, 130)), (300, 60))
@@ -542,11 +554,12 @@ async def draw_b50_nb(
     trophy_color: str | None = None,
     course_image: bytes | None = None,
     class_image: bytes | None = None,
+    nameplate_image: bytes | None = None,
 ) -> Image.Image:
     """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。
 
-    icon_image/trophy_name/trophy_color/course_image/class_image 为 NET 数据源
-    身份注入（player 缺失或对应字段缺失时生效）。
+    icon_image/trophy_name/trophy_color/course_image/class_image/nameplate_image
+    为 NET 数据源身份注入（player 缺失或对应字段缺失时生效）。
     """
     pic = assets.static_path() / "mai" / "pic"
     im = Image.open(pic / theme / "b50.png").convert("RGBA")
@@ -567,6 +580,7 @@ async def draw_b50_nb(
         trophy_color=trophy_color,
         course_image=course_image,
         class_image=class_image,
+        nameplate_image=nameplate_image,
     )
 
     # 成绩行：b35 从 y=235、b15 从 y=1085，均 5 列、行距 114（Hoshino 布局）
@@ -608,6 +622,7 @@ async def best50_bytes(
     trophy_color: str | None = None,
     course_image: bytes | None = None,
     class_image: bytes | None = None,
+    nameplate_image: bytes | None = None,
 ) -> bytes:
     return image_to_bytes(
         await draw_b50_nb(
@@ -626,5 +641,6 @@ async def best50_bytes(
             trophy_color=trophy_color,
             course_image=course_image,
             class_image=class_image,
+            nameplate_image=nameplate_image,
         )
     )

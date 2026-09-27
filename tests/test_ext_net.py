@@ -47,6 +47,24 @@ HOME_PAGE = """
 
 
 # 记录页最小样本：DX 块（达成率/DX分/AP+徽章）+ SD 块（toggle 覆盖/FSD+ 徽章）+ 坏块
+# 收藏品姓名框页最小样本（betterDXnet 同口径）：装备中项带 collection_setting_block
+NAMEPLATE_PAGE = """
+<html><body><div class="see_through_area">
+<div class="town_block" name="genre_1">
+<div class="see_through_block collection_setting_block">
+  <div class="p_r"><img class="w_396 m_r_10" src="/maimai-mobile/img/NamePlate/a.png">
+  </div>
+  <div class="block_info">装备中名牌</div>
+</div>
+<div class="see_through_block">
+  <div class="p_r"><img class="w_396 m_r_10 gray_img"
+   src="/maimai-mobile/img/NamePlate/b.png"></div>
+  <div class="block_info">未装备</div>
+</div>
+</div></div></body></html>
+"""
+
+
 RECORD_PAGE = """
 <html><body><div class="wrapper">
 <form id="f1"><div class="w_450 m_15 p_r f_0">
@@ -94,6 +112,7 @@ def _mock_login_flow(m, *, login_page=LOGIN_PAGE, login_redirect=None, home_page
     m.get(f"{MOBILE}/aimeList/").respond(text="ok")
     m.get(f"{MOBILE}/aimeList/submit/", params={"idx": "0"}).respond(text="ok")
     m.get(f"{MOBILE}/home/").respond(text=home_page)
+    m.get(f"{MOBILE}/collection/nameplate").respond(302)
 
 
 def _mock_record_pages(m, *, page=RECORD_PAGE):
@@ -239,5 +258,38 @@ async def test_login_carries_player_identity(net_mock, net_ext):
         await client.login(net_ext.NetCredentials(sega_id="sid", password="pw"))
         assert client.player is not None
         assert client.player.name == "\uff43\uff44\uff44"
+    finally:
+        await client.aclose()
+
+
+def test_parse_equipped_nameplate(net_ext):
+    """收藏品页装备中项：collection_setting_block 内的 w_396 预览图。"""
+    url = net_ext._parse_equipped_nameplate(NAMEPLATE_PAGE)
+    assert url == f"{MOBILE}/img/NamePlate/a.png"
+    # 无装备块/无图 → None
+    bare = NAMEPLATE_PAGE.replace(" collection_setting_block", "")
+    assert net_ext._parse_equipped_nameplate(bare) is None
+    assert net_ext._parse_equipped_nameplate("<html></html>") is None
+
+
+@pytest.mark.asyncio
+async def test_login_fetches_equipped_nameplate(net_mock, net_ext):
+    """登录流顺带抓装备名牌：200 → URL；302（收藏品区弹回）→ None。"""
+    _mock_login_flow(net_mock, home_page=HOME_PAGE)
+    net_mock.get(f"{MOBILE}/collection/nameplate").respond(text=NAMEPLATE_PAGE)
+    client = net_ext.MaimaiNetClient()
+    try:
+        await client.login(net_ext.NetCredentials(sega_id="sid", password="pw"))
+        assert client.player is not None
+        assert client.player.nameplate_url == f"{MOBILE}/img/NamePlate/a.png"
+    finally:
+        await client.aclose()
+
+    _mock_login_flow(net_mock, home_page=HOME_PAGE)  # nameplate 默认 302
+    client = net_ext.MaimaiNetClient()
+    try:
+        await client.login(net_ext.NetCredentials(sega_id="sid", password="pw"))
+        assert client.player is not None
+        assert client.player.nameplate_url is None
     finally:
         await client.aclose()

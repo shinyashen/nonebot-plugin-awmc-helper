@@ -239,10 +239,11 @@ async def _(
             bests = await score_service.get_b50(binding)
             player = net_score_service.player_of(binding)
             # 身份素材并发拉取（首查下载，之后落盘缓存秒回）
-            icon_b, course_b, class_b = await asyncio.gather(
+            icon_b, course_b, class_b, plate_b = await asyncio.gather(
                 _net_image_bytes(player.icon_url if player else None),
                 _net_image_bytes(player.course_url if player else None),
                 _net_image_bytes(player.class_url if player else None),
+                _net_image_bytes(player.nameplate_url if player else None),
             )
             png = await b50_render.best50_bytes(
                 player_name=(player.name if player else None)
@@ -262,6 +263,7 @@ async def _(
                 trophy_color=player.trophy_color if player else None,
                 course_image=course_b,
                 class_image=class_b,
+                nameplate_image=plate_b,
             )
         else:
             player = await score_service.get_player(binding)
