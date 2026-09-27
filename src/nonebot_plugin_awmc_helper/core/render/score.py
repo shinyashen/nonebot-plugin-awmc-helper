@@ -5,8 +5,10 @@
 底图尺寸由调用方按数据量计算后传入（NB handler 同款约定）。
 """
 
+from collections.abc import Callable
+
 from PIL import ImageDraw
-from maimai_py import RateType, SongType
+from maimai_py import RateType, SongType, ScoreExtend
 from maimai_py.models import SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
@@ -25,6 +27,21 @@ from ...constants import RATE_FILE, DX_ID_OFFSET, LEVEL_INDEX_EN, chart_display_
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 同源，tools 单源）
 _DEFAULT_TEXT_COLOR = TEXT_BLUE
+
+
+def score_list_height(total: int, page: int, end_page: int) -> int:
+    """分数列表行卡区高度（NB 版式算式，tables 分数列表与第三方扩展共用）。
+
+    非末页整 80 条 4 段；末页按实际条数算行数与段数。调用方在结果上加
+    固定头部高度得画布总高（DrawScore 构造参数）。
+    """
+    to_page = 80 if page < end_page else (total % 80 or 80)
+    line = (to_page + 4) // 5
+    if page < end_page:
+        return line * 109 + 130 * 4
+    multiplier = (to_page + 19) // 20
+    actual_line = 4 if to_page <= 20 else line
+    return actual_line * 109 + 130 * multiplier
 
 
 def _rate_file_of(achievement: float) -> str:
@@ -211,10 +228,17 @@ class DrawScore:
 
     # -- 等级进度卡（R4，NB whiledraw / _while_pic / draw_plan / draw_category）
 
-    def whiledraw(self, scores: list, list_y: int = 0) -> None:
+    def whiledraw(
+        self,
+        scores: list,
+        list_y: int = 0,
+        sub_of: Callable[[ScoreExtend], str | None] | None = None,
+    ) -> None:
         """绘制成绩行卡（5 列 × N 行，b50_score_* 难度底，宴谱换 #EB77ED 染色底）。
 
         ``scores``：ScoreExtend 列表；DX 星直接取 ``score.dx_star``（库已算）。
+        ``sub_of``：副行文字提取器，透传 :func:`draw_score_row`（None=默认
+        「定数 -> 单曲Ra」）。
         """
         dr = ImageDraw.Draw(self._im)
         gap, col_step, start_x = 114, 276, 16
@@ -222,7 +246,7 @@ class DrawScore:
             row, col = divmod(num, 5)
             x = start_x + col * col_step
             y = list_y + row * gap
-            draw_score_row(self._im, dr, x, y, score, self._theme)
+            draw_score_row(self._im, dr, x, y, score, self._theme, sub_of=sub_of)
 
     def _while_pic(
         self, items: list[tuple[int, int, float]], start_y: int = 200
@@ -392,8 +416,13 @@ class DrawScore:
         play_result: list,
         page: int,
         end_page: int,
+        sub_of: Callable[[ScoreExtend], str | None] | None = None,
     ) -> bytes:
-        """绘制分数列表（80/页，每 20 条一段，NB draw_score_list 同布局）。"""
+        """绘制分数列表（80/页，每 20 条一段，NB draw_score_list 同布局）。
+
+        ``sub_of``：副行文字提取器，透传 :func:`draw_score_row`
+        （None=默认「定数 -> 单曲Ra」；导分插件传「pc: N」提取器复用本版式）。
+        """
         dr = ImageDraw.Draw(self._im)
         start_offset = (page - 1) * 80
         current_page_result = play_result[start_offset : page * 80]
@@ -414,7 +443,7 @@ class DrawScore:
                 fill=_DEFAULT_TEXT_COLOR,
                 anchor="mm",
             )
-            self.whiledraw(result, base_y + 140)
+            self.whiledraw(result, base_y + 140, sub_of=sub_of)
 
         height = self._im.size[1]
         self._im.alpha_composite(

@@ -19,7 +19,7 @@ from ...core.songs import song_service
 from ...core.utils import parse_page, slow_notice, handle_errors
 from ...core.plates import is_valid_plate, plate_kinds_hint
 from ...core.binding import session_keys, binding_service, service_display
-from ...core.render.score import DrawScore
+from ...core.render.score import DrawScore, score_list_height
 from ...core.render.tools import text_to_image, image_to_bytes
 
 # 牌种正则（牌子字符与牌种均取自 constants——PLATE_CHARS/PLATE_KINDS 与 core
@@ -232,15 +232,8 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         await UniMessage.text("  没有找到符合条件的成绩").finish(at_sender=True)
     end_page = max(1, -(-len(matched) // 80))
     real = min(max(page, 1), end_page)
-    # NB 高度公式：非末页整 80 条 4 段；末页按实际条数算行数与段数
-    to_page = 80 if real < end_page else (len(matched) % 80 or 80)
-    line = (to_page + 4) // 5
-    if real < end_page:
-        plc = line * 109 + 130 * 4
-    else:
-        multiplier = (to_page + 19) // 20
-        actual_line = 4 if to_page <= 20 else line
-        plc = actual_line * 109 + 130 * multiplier
+    # NB 高度公式已下沉 core（pc 列表等第三方扩展共用）
+    plc = score_list_height(len(matched), real, end_page)
     service = service_display(binding)
     card = DrawScore(280 + plc, service=service)
     png = card.draw_score_list(title, matched, real, end_page)

@@ -19,6 +19,7 @@ from bisect import bisect_right
 from typing import cast
 from functools import lru_cache
 from collections import Counter
+from collections.abc import Callable
 
 import httpx
 from PIL import Image, ImageDraw
@@ -471,11 +472,16 @@ def draw_score_row(
     y: int,
     score: ScoreExtend,
     theme: str,
+    *,
+    sub_of: Callable[[ScoreExtend], str | None] | None = None,
 ) -> None:
     """单张 B50 风格成绩行卡（b50_score_* 底图，B50 大图与等级完成表共用）。
 
     宴谱成绩（``score.type == UTAGE``，库把其 level_index 记为 BASIC）
     换用程序染色的 #EB77ED 宴谱底图，ID 文字同色，其余版式不变。
+
+    ``sub_of``：副行文字提取器，返回 None 回退默认「定数 -> 单曲Ra」；
+    供第三方扩展把该行替换为自有数据展示（如导分插件的游玩次数）。
     """
     diff = score.level_index.value  # LevelIndex.value 恰为 DIFF_*_COLORS 下标 0-4
     if score.type == SongType.UTAGE:
@@ -528,9 +534,12 @@ def draw_score_row(
         fill=DIFF_TEXT_COLORS[diff],
         anchor="mm",
     )
+    sub_text = sub_of(score) if sub_of else None
     draw.text(
         (x + 93, y + 65),
-        f"{score.level_value} -> {int(score.dx_rating or 0)}",
+        sub_text
+        if sub_text is not None
+        else f"{score.level_value} -> {int(score.dx_rating or 0)}",
         font=font(15, FONT_NUM),
         fill=DIFF_TEXT_COLORS[diff],
         anchor="lm",

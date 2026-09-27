@@ -237,3 +237,40 @@ def test_fit_into_upscale_opt_in():
     bbox2 = out2.getbbox()
     w, h = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
     assert (w, h) == (780, 130)  # min(800/396, 130/66) ≈ 1.9697 → 780×130
+
+
+def test_score_list_height_formula():
+    """分数列表高度公式（NB 版式算式下沉 core）：非末页整 80 四段，末页按实条数。"""
+    from nonebot_plugin_awmc_helper.core.render.score import score_list_height
+
+    assert score_list_height(200, 1, 3) == 16 * 109 + 130 * 4  # 非末页整 80
+    assert score_list_height(161, 3, 3) == 4 * 109 + 130 * 1  # 末页 1 条：4 行 1 段
+    assert score_list_height(181, 3, 3) == 5 * 109 + 130 * 2  # 末页 21 条：5 行 2 段
+    assert score_list_height(160, 2, 2) == 16 * 109 + 130 * 4  # 末页恰整 80
+
+
+@requires_assets
+def test_score_row_sub_hook_swaps_subline():
+    """副行提取器替换「定数 -> 单曲Ra」行；返回 None 回退默认（导分 pc 列表复用）。"""
+    from PIL import Image, ImageDraw
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import draw_score_row
+
+    def render(sub_of):
+        im = Image.new("RGBA", (260, 114), (255, 255, 255, 255))
+        draw_score_row(
+            im,
+            ImageDraw.Draw(im),
+            0,
+            0,
+            _score(231, SongType.DX),
+            "prism_plus",
+            sub_of=sub_of,
+        )
+        return im.tobytes()
+
+    default = render(None)
+    assert render(lambda s: None) == default  # 提取器返回 None → 默认定数行
+    assert render(lambda s: f"pc: {s.id}") != default  # 自定义文字生效
+    assert render(lambda s: f"pc: {s.id}") == render(lambda s: f"pc: {s.id}")
