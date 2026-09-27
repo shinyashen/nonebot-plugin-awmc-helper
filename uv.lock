@@ -1021,7 +1021,7 @@ wheels = [
 [[package]]
 name = "maimai-py"
 version = "1.5.2"
-source = { git = "https://github.com/shinyashen/maimai.py?branch=main#0c950dad498c656faca58b231f1e509d991a3dfc" }
+source = { git = "https://github.com/shinyashen/maimai.py?branch=feat%2Fdivingfish-oauth#33e40f28f517f7e085f6328245db6dd44398b92a" }
 dependencies = [
     { name = "aiocache" },
     { name = "cryptography" },
@@ -1364,7 +1364,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
-    { name = "maimai-py", git = "https://github.com/shinyashen/maimai.py?branch=main" },
+    { name = "maimai-py", git = "https://github.com/shinyashen/maimai.py?branch=feat%2Fdivingfish-oauth" },
     { name = "nonebot-plugin-alconna", specifier = ">=0.60.0,<1.0.0" },
     { name = "nonebot-plugin-apscheduler", specifier = ">=0.5.0,<1.0.0" },
     { name = "nonebot-plugin-localstore", specifier = ">=0.7.4,<1.0.0" },

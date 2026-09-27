@@ -7,6 +7,7 @@
 
 import time
 import asyncio
+import hashlib
 from typing import TYPE_CHECKING, ClassVar
 from dataclasses import dataclass
 
@@ -171,14 +172,43 @@ class BindingService:
             return int(binding.user_id)
         return None
 
-    def identifier(self, binding: UserBinding) -> PlayerIdentifier:
+    def divingfish_subject(self, binding: UserBinding) -> str | None:
+        """水鱼 OAuth subject（ref 摘要）：``sha256(f"{client_id}:{external_id}")``。
+
+        external_id 必须与 Developer-Token 时代 ``/dev/*`` 调用**实际传入**的参数
+        原值完全一致——水鱼迁移快照按原值等值建映射，差一字节即 ``consent_required``
+        且与「未授权」不可区分。本插件公开键口径为「用户名 > QQ 号」，此处同样
+        用户名优先、否则取 QQ 号（仅 QQ 系平台）。OAuth 未配置或无可用标识时
+        返回 None（调用方回退旧路径）。
+        """
+        client_id = plugin_config.awmc_divingfish_oauth_client_id
+        if not (client_id and plugin_config.awmc_divingfish_oauth_client_secret):
+            return None
+        if binding.service != SERVICE_DIVINGFISH:
+            return None
+        external_id = binding.divingfish_username or (
+            str(qq) if (qq := self.qq_of(binding)) else None
+        )
+        if external_id is None:
+            return None
+        return (
+            "ref:" + hashlib.sha256(f"{client_id}:{external_id}".encode()).hexdigest()
+        )
+
+    def identifier(
+        self, binding: UserBinding, *, with_oauth: bool = True
+    ) -> PlayerIdentifier:
         """装配 maimai-py PlayerIdentifier（**公开查询键**语义：bests/players/minfo）。
 
         水鱼公开键优先级：绑定用户名 > QQ 号——maimai_py 的
         ``PlayerIdentifier._as_diving_fish`` 中 qq 优先于 username，同时携带
         会在「聊天 QQ ≠ 水鱼账号 QQ」时静默查错账号，故有用户名时不带 qq。
-        Import-Token 不是公开查询键（水鱼 b50/单曲接口无 token 形态），
-        全量成绩请用 :meth:`full_identifier`。
+        OAuth 已配置时把 subject 放进 credentials（``with_oauth=False`` 可取
+        纯公开键，供 scores/plates 的未授权回退使用）：minfo 单曲只有 Bearer
+        形态（无公开/Import-Token 形态），靠它走 OAuth；b50/players 走公开
+        路径、忽略 credentials。注意「用户名 + credentials」组合**不能**进入
+        maimai_py 的全量查询（会被视为密码登录），全量请用 :meth:`full_identifier`。
+        Import-Token 不是公开查询键，全量成绩请用 :meth:`full_identifier`。
 
         NET 数据源不走 maimai-py（官方站直连），到此即说明上游未拦截，
         给出能力边界提示而非「尚未绑定」的误导文案。
@@ -187,8 +217,14 @@ class BindingService:
             raise BindingError(NET_UNSUPPORTED_HINT)
         qq = self.qq_of(binding)
         if binding.service == SERVICE_DIVINGFISH:
+            subject = self.divingfish_subject(binding) if with_oauth else None
             if binding.divingfish_username:
-                ident = PlayerIdentifier(username=binding.divingfish_username)
+                ident = PlayerIdentifier(
+                    username=binding.divingfish_username,
+                    credentials=subject,
+                )
+            elif subject:
+                ident = PlayerIdentifier(qq=qq, credentials=subject)
             else:
                 ident = PlayerIdentifier(qq=qq)
         else:
@@ -215,20 +251,31 @@ class BindingService:
     def full_identifier(self, binding: UserBinding) -> PlayerIdentifier:
         """装配**全量成绩**查询键（scores/plates 等 records 类查询）。
 
-        与公开键的差异在水鱼：Import-Token 优先——maimai_py 把
-        ``username + credentials`` 组合视为「用户名 + 密码」登录水鱼，
-        Import-Token 并存必触发错误登录（score-updater 的 credentials-only
-        用法同理），故有 token 时不得携带 username；b50/单曲公开查询
-        不经本方法。落雪与公开键相同（token 优先的语义已含在 identifier）。
+        与公开键的差异在水鱼，迁移期（developer-token 2026-10-01 日落）顺序：
+
+        1. Import-Token 最优先——maimai_py 把 ``username + credentials`` 视为
+           「用户名 + 密码」登录，token 必须独占 credentials（score-updater 的
+           credentials-only 写路径同理）；读/写/传分三条路径均实证可用；
+        2. 无 token 时尝试 OAuth subject——补齐名单内的用户免迁移直通，
+           未覆盖用户由 score 层捕获 PlayerNotAuthorizedError 回退公开键，
+           给出可行动的迁移文案而非裸「未授权」；
+        3. 公开键兜底（developer 端点已日落，将得到 410 → 迁移文案）。
+
+        b50/单曲公开查询不经本方法。落雪与公开键相同
+        （token 优先的语义已含在 identifier）。
         """
         if binding.service == SERVICE_NET:
             raise BindingError(NET_UNSUPPORTED_HINT)
-        if binding.service == SERVICE_DIVINGFISH and binding.divingfish_import_token:
-            ident = PlayerIdentifier(
-                qq=self.qq_of(binding),
-                credentials=binding.divingfish_import_token,
-            )
-            return ident
+        if binding.service == SERVICE_DIVINGFISH:
+            if binding.divingfish_import_token:
+                ident = PlayerIdentifier(
+                    qq=self.qq_of(binding),
+                    credentials=binding.divingfish_import_token,
+                )
+                return ident
+            subject = self.divingfish_subject(binding)
+            if subject:
+                return PlayerIdentifier(qq=self.qq_of(binding), credentials=subject)
         return self.identifier(binding)
 
     def identifier_or_none(self, binding: UserBinding) -> PlayerIdentifier | None:

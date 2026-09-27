@@ -16,10 +16,12 @@ from maimai_py import (
     MaimaiPlates,
     MaimaiScores,
     MaimaiPyError,
+    RateLimitError,
     DivingFishPlayer,
     PlayerIdentifier,
     InvalidPlateError,
     PrivacyLimitationError,
+    PlayerNotAuthorizedError,
     InvalidDeveloperTokenError,
     InvalidPlayerIdentifierError,
 )
@@ -64,6 +66,16 @@ def _map_error(e: Exception) -> UserScoreError:
         return UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e)))
     if isinstance(e, ExtError):
         return UserScoreError(str(e))
+    if isinstance(e, PlayerNotAuthorizedError):
+        # 水鱼 OAuth 未授权（consent_required 与「用户不存在」服务端有意不可区分，
+        # 文案只引导绑定）；大多在 scores/plates 层被回退逻辑消化，此处兜底
+        return UserScoreError(
+            "该水鱼账号未授权本 bot 查询成绩：\n"
+            "全量成绩请补录「绑定水鱼token <Import-Token>」恢复（b50 不受影响）；\n"
+            "账号授权绑定即将上线，届时按指引绑定后全功能可用"
+        )
+    if isinstance(e, RateLimitError):
+        return UserScoreError("水鱼今日查询配额已用完（按 UTC 日重置），请明天再试")
     if isinstance(e, InvalidPlayerIdentifierError):
         return UserScoreError(
             "没有找到这个玩家，请确认绑定信息（水鱼用户名/QQ、落雪好友码或个人 Token）"
@@ -75,6 +87,13 @@ def _map_error(e: Exception) -> UserScoreError:
             "落雪请在 落雪查分器 → 隐私设置 中允许通过好友码查询"
         )
     if isinstance(e, InvalidDeveloperTokenError):
+        if "sunset" in str(e):
+            # maimai_py 对 developer 端点 410 的映射（2026-10-01 日落）
+            return UserScoreError(
+                "水鱼开发者接口已于 2026-10-01 停止服务：\n"
+                "全量成绩（牌子/表格/ap50）请补录「绑定水鱼token <Import-Token>」恢复\n"
+                "（获取：水鱼个人页 → 设置 → Import-Token）；b50 不受影响"
+            )
         return UserScoreError("机器人开发者令牌无效或缺失，请联系管理员检查部署配置")
     if isinstance(e, InvalidPlateError):
         return UserScoreError(
@@ -105,6 +124,10 @@ class ScoreService:
             return await make_coro()
         except BindingError as e:
             raise UserScoreError(str(e)) from e
+        except PlayerNotAuthorizedError:
+            # 水鱼 OAuth 未授权：不在 _run 内吃掉——它常意味着换一条凭据路径
+            # 仍有戏（scores/plates 回退公开键），由调用方决定回退或映射文案
+            raise
         except (MaimaiPyError, httpx.RequestError) as e:
             if binding is not None and await binding_service.refresh_lxns_if_expired(
                 binding, e
@@ -166,16 +189,30 @@ class ScoreService:
         return PlayerSong(song=song, scores=hit)
 
     async def get_scores_all(self, binding: UserBinding) -> MaimaiScores:
-        """全量成绩（牌子 / ap50 / 表格的基础）：Import-Token 优先。"""
+        """全量成绩（牌子 / ap50 / 表格的基础）：Import-Token 优先。
+
+        无 Import-Token 时尝试 OAuth subject（未覆盖用户回退公开键 → 迁移文案）。
+        """
         self._guard_cn(binding)
         await song_service.ensure_loaded()
-        return await self._run(
-            binding,
-            lambda: client.scores(
-                binding_service.full_identifier(binding),
-                provider=binding_service.provider(binding),
-            ),
-        )
+        try:
+            return await self._run(
+                binding,
+                lambda: client.scores(
+                    binding_service.full_identifier(binding),
+                    provider=binding_service.provider(binding),
+                ),
+            )
+        except PlayerNotAuthorizedError:
+            # 未覆盖补齐名单：回退公开键（developer 端点日落 → 迁移文案），
+            # 指引补录 Import-Token，比裸「未授权」更有行动价值
+            return await self._run(
+                binding,
+                lambda: client.scores(
+                    binding_service.identifier(binding, with_oauth=False),
+                    provider=binding_service.provider(binding),
+                ),
+            )
 
     async def get_b50_by_username(
         self, username: str
@@ -213,32 +250,53 @@ class ScoreService:
                 return await self.get_minfo_net(binding, song, song_type)
             ident = binding_service.identifier_or_none(binding)
         await song_service.ensure_loaded()
-        result = await self._run(
-            binding,
-            lambda: client.minfo(
-                song,
-                ident,
-                provider=divingfish_provider
-                if ident is None
-                else binding_service.provider(binding),  # type: ignore[arg-type]
-            ),
-        )
+        try:
+            result = await self._run(
+                binding,
+                lambda: client.minfo(
+                    song,
+                    ident,
+                    provider=divingfish_provider
+                    if ident is None
+                    else binding_service.provider(binding),  # type: ignore[arg-type]
+                ),
+            )
+        except PlayerNotAuthorizedError as e:
+            # 单曲只有 OAuth Bearer 形态，无回退路径：未覆盖用户给专项文案
+            raise UserScoreError(
+                "该水鱼账号未授权本 bot 查询单曲成绩。\n"
+                "全量成绩（牌子/表格）请补录「绑定水鱼token <Import-Token>」恢复；\n"
+                "单曲查询需账号授权，绑定功能即将上线"
+            ) from e
         if ident is None or result is None:
             return result
         return result if _has_scores(result.scores, song_type) else None
 
     async def get_plates(self, binding: UserBinding, plate: str) -> MaimaiPlates:
-        """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，Import-Token 优先。"""
+        """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，Import-Token 优先。
+
+        无 Import-Token 时尝试 OAuth subject（未覆盖用户回退公开键 → 迁移文案）。
+        """
         self._guard_cn(binding)
         await song_service.ensure_loaded()
-        return await self._run(
-            binding,
-            lambda: client.plates(
-                binding_service.full_identifier(binding),
-                plate,
-                provider=binding_service.provider(binding),
-            ),
-        )
+        try:
+            return await self._run(
+                binding,
+                lambda: client.plates(
+                    binding_service.full_identifier(binding),
+                    plate,
+                    provider=binding_service.provider(binding),
+                ),
+            )
+        except PlayerNotAuthorizedError:
+            return await self._run(
+                binding,
+                lambda: client.plates(
+                    binding_service.identifier(binding, with_oauth=False),
+                    plate,
+                    provider=binding_service.provider(binding),
+                ),
+            )
 
 
 score_service = ScoreService()

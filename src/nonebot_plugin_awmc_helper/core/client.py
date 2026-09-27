@@ -37,9 +37,12 @@ client = MaimaiClient(
 """唯一的 MaimaiClient 实例（进程单例），全插件共享；transport 挂智能代理层。"""
 
 divingfish_provider = DivingFishProvider(
-    developer_token=plugin_config.awmc_divingfish_developer_token
+    developer_token=plugin_config.awmc_divingfish_developer_token,
+    client_id=plugin_config.awmc_divingfish_oauth_client_id,
+    client_secret=plugin_config.awmc_divingfish_oauth_client_secret,
 )
-"""水鱼 provider：开发者 token 用于查公开数据与拟合曲线。"""
+"""水鱼 provider：developer token 已随 2026-10-01 日落失去作用；OAuth 凭据启用
+Bearer 路径（全量/单曲），未配置时水鱼仅公开查询/Import-Token 路径可用。"""
 
 lxns_provider = LXNSProvider(developer_token=plugin_config.awmc_lxns_developer_token)
 """落雪 provider：开发者 token 用于 friend_code/QQ 查询。"""

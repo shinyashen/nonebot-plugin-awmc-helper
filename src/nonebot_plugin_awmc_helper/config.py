@@ -18,8 +18,14 @@ class Config(BaseModel):
     awmc_disabled_plugins: set[str] = set()
     # 默认查分器
     awmc_default_provider: Literal["divingfish", "lxns"] = "divingfish"
-    # 水鱼开发者 token（查公开数据/拟合曲线）
+    # 水鱼开发者 token（2026-10-01 起水鱼 developer 端点全部 410，
+    # 此配置不再有实际作用，仅保留读兼容）
     awmc_divingfish_developer_token: str | None = None
+    # 水鱼 OAuth 应用（developer-token 日落迁移，见
+    # local/reference/divingfish-oauth-sunset.md；机密客户端 + 设备码绑定，
+    # 未配置时水鱼仅公开查询/Import-Token 路径可用）
+    awmc_divingfish_oauth_client_id: str | None = None
+    awmc_divingfish_oauth_client_secret: str | None = None
     # 落雪开发者 token
     awmc_lxns_developer_token: str | None = None
     # 落雪 OAuth 应用（绑定落雪 lxbind 必需）
