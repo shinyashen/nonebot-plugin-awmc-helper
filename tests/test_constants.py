@@ -164,24 +164,62 @@ def test_level_index_tables_share_axis():
     assert DIFF_DISPLAY_NAMES == ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 
-def test_wu_plate_kinds_and_validity():
-    """舞/霸真实牌表：舞代仅 将/极/神/舞舞，霸仅 者（唯一「者」尾牌）。"""
+def test_plate_kinds_roster_and_validity():
+    """牌单例外表（素材包 mai/plate_version 全量实证，26 组牌头）：
+
+    舞代仅 将/极/神/舞舞，霸仅 者（唯一「者」尾牌），**真无将**（仅 极/神/舞舞，
+    原版 Hoshino 亦硬编码拒绝「真将」），**初整代无牌**（牌单自真起）；其余
+    版本四牌齐全，超出者判否。
+    """
     from nonebot_plugin_awmc_helper.core.plates import (
+        plate_kinds,
         is_valid_plate,
         plate_kinds_of,
+        plate_kinds_hint,
     )
 
     assert plate_kinds_of("舞") == ("将", "极", "神", "舞舞")
     assert plate_kinds_of("霸") == ("者",)
     assert plate_kinds_of("樱") == ("将",)
+    # 真无将：真实牌单只有 极/神/舞舞，且不参与「将」的预渲染
+    assert plate_kinds("真") == ("极", "神", "舞舞")
+    assert plate_kinds_of("真") == ()
+    assert not is_valid_plate("真", "将")
+    assert is_valid_plate("真", "极")
+    assert plate_kinds("初") == ()
+    for kind in ("将", "极", "神", "舞舞", "者"):
+        assert not is_valid_plate("初", kind)
     assert is_valid_plate("舞", "将")
     assert is_valid_plate("霸", "者")
     for kind in ("者",):
         assert not is_valid_plate("舞", kind)
     for kind in ("将", "极", "神", "舞舞"):
         assert not is_valid_plate("霸", kind)
-    # 非舞/霸版本不设限
-    assert is_valid_plate("樱", "极")
+    # 四牌版本：四牌之内均有效，超出（者）判否
+    for kind in ("将", "极", "神", "舞舞"):
+        assert is_valid_plate("樱", kind)
+    assert not is_valid_plate("樱", "者")
+    # 提示文案由牌单派生
+    assert plate_kinds_hint("真") == "真代牌为 真极/真神/真舞舞"
+    assert plate_kinds_hint("舞") == "舞代牌为 舞将/舞极/舞神/舞舞舞"
+    assert plate_kinds_hint("初") == "国服没有「初」代牌子"
+
+
+def test_plate_version_range_zhen_includes_first_gen():
+    """真牌范围含初代：初代曲国服无自己的牌，只落在真牌范围内（下界前移）。
+
+    对齐库 ``MaimaiPlates._configure``（真 = [初, 真]）与原版 Hoshino
+    （``VERSION_MAP["真"] = ([真, 初], ...)``、柚子牌表「真」键含初代曲）；
+    其余牌字下界即本代，上界为下一牌字版本码 -1。
+    """
+    from nonebot_plugin_awmc_helper.core.plates import plate_version_range
+
+    assert plate_version_range("真") == (10000, 11999)
+    assert plate_version_range("超") == (12000, 12999)
+    assert plate_version_range("彩") == (25500, 25999)
+    assert plate_version_range("丸") == (26000, 26499)
+    # 末段（当前最后一张牌字，上界为占位 FUTURE 前一位）
+    assert plate_version_range("回") == (26500, 29999)
 
 
 def test_chart_display_id_rules():

@@ -9,33 +9,60 @@ from maimai_py import Song, Version, SongType, SongDifficulty, plate_to_version
 _LEGACY_PLATES = ("舞", "霸")
 """旧作全集牌：横跨全部旧框版本，主类型为 SD。"""
 
-_WU_PLATE_KINDS: dict[str, tuple[str, ...]] = {
+_PLATE_KINDS_ROSTER: dict[str, tuple[str, ...]] = {
     "舞": ("将", "极", "神", "舞舞"),
     "霸": ("者",),
+    "真": ("极", "神", "舞舞"),
+    "初": (),
 }
-"""舞/霸实际存在的牌种（游戏内与素材包一致）：舞代仅 舞将/舞极/舞神/舞舞舞，
-霸前缀仅 霸者 一张（也是全游戏唯一「者」尾牌）——不存在 舞者/霸将 等组合。"""
+"""牌单例外表（2026-09-27 素材包 ``mai/plate_version/`` 全量实证，26 组牌头）：
+
+除下列四项外各版本均为 将/极/神/舞舞 四牌齐全——舞代四牌；霸仅 者（全游戏唯一
+「者」尾牌）；**真无将**（仅 极/神/舞舞）；**初整代无牌**（国服牌单自真起）。
+用户口径与素材一致（2026-09-27：没有初、真没有将牌）。"""
+
+_DEFAULT_PLATE_KINDS = ("将", "极", "神", "舞舞")
+
+_SD_FIRST_PLATES = {"真": "初"}
+"""下界前移的版本：**真牌含初代曲**——库侧 ``MaimaiPlates._configure`` 把
+初+真 并作真牌范围，原版 Hoshino 的 ``VERSION_MAP["真"]`` 亦为 [真, 初]；
+国服无初牌（牌单自真起），初代曲只能落在真牌范围内，否则「牌子」进度
+（库算）与「完成表」底图（本地算）会差出一整代曲目。"""
+
+
+def plate_kinds(version: str) -> tuple[str, ...]:
+    """该版本**真实存在**的牌种（牌单例外表；未知版本按四牌齐全兜底）。"""
+    return _PLATE_KINDS_ROSTER.get(version, _DEFAULT_PLATE_KINDS)
 
 
 def plate_kinds_of(version: str) -> tuple[str, ...]:
-    """版本实际存在的牌种（完成表预渲染枚举口径）：舞代四牌、霸仅者。
+    """完成表**预渲染**枚举口径：舞/霸全牌、真无将故跳过，其余版本只出「将」。
 
-    其余版本沿用「将」的单牌预渲染口径（查询兜底生成不限于将）。
+    与 :func:`plate_kinds`（真实牌单）区分——真实牌单各版本都是四牌，只预渲染
+    「将」是既有的省时口径（其余牌种查询时兜底生成，见
+    ``table_template.draw_plate_table_with_fallback``）。
     """
-    if version in _WU_PLATE_KINDS:
-        return _WU_PLATE_KINDS[version]
-    return ("将",)
+    kinds = plate_kinds(version)
+    if version in _LEGACY_PLATES:
+        return kinds
+    return ("将",) if "将" in kinds else ()
+
+
+def plate_kinds_hint(version: str) -> str:
+    """牌名不存在时的牌单提示（读例外表；初代整代无牌另有文案）。"""
+    kinds = plate_kinds(version)
+    if not kinds:
+        return f"国服没有「{version}」代牌子"
+    return f"{version}代牌为 " + "/".join(f"{version}{kind}" for kind in kinds)
 
 
 def is_valid_plate(version: str, kind: str) -> bool:
-    """（版本字, 牌种）是否为真实存在的牌子。
+    """（版本字, 牌种）是否为真实存在的牌子（牌单例外表为准）。
 
-    舞/霸按真实牌表收紧（舞者/霸将/霸极/霸神/霸舞舞 均不存在）；其余版本
-    不设限，交由数据源判定。
+    舞/霸/真 按真实牌表收紧（舞者/霸将/真将/樱者 等组合均不存在）；其余版本
+    四牌齐全，超出四牌的牌种（如 樱者）同样判否。
     """
-    if version in _WU_PLATE_KINDS:
-        return kind in _WU_PLATE_KINDS[version]
-    return True
+    return kind in plate_kinds(version)
 
 
 def major_type_of_plate(version: str) -> SongType:
@@ -60,8 +87,13 @@ def plate_version_range(version: str) -> tuple[int, int] | None:
     pv = plate_to_version.get(version)
     if pv is None:
         return None
+    # 上界 = 下一牌字版本码 -1（未/FUTURE 为占位枚举，作上界即 29999，与库
+    # ``MaimaiPlates._configure`` 的 [本代, 下一代) 半开区间口径一致）；
+    # 下界默认为本代，真牌前移到初（_SD_FIRST_PLATES）——只动下界，上界仍按真。
+    lo = pv.value
+    if first := _SD_FIRST_PLATES.get(version):
+        lo = plate_to_version[first].value
     nxt = [v.value for v in plate_to_version.values() if v.value > pv.value]
-    # 末段上界 = 当前最新版本码（FUTURE 为占位枚举、无对应真实版本，不计）
     hi = (
         (min(nxt) - 1)
         if nxt
@@ -71,7 +103,7 @@ def plate_version_range(version: str) -> tuple[int, int] | None:
             if v.value < Version.MAIMAI_DX_FUTURE.value
         )
     )
-    return (pv.value, hi)
+    return (lo, hi)
 
 
 def in_plate_scope(
