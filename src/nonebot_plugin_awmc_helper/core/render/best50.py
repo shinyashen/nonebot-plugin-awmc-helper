@@ -295,8 +295,16 @@ async def _draw_header(
     rating_b35: int,
     rating_b15: int,
     theme: str,
+    icon_image: bytes | None = None,
+    trophy_name: str | None = None,
+    trophy_color: str | None = None,
 ) -> None:
-    """头部落雪名片，元素与层级顺序照搬 Hoshino PlayerBest50.draw。"""
+    """头部落雪名片，元素与层级顺序照搬 Hoshino PlayerBest50.draw。
+
+    NET 数据源无 Player 概念，经 icon_image（头像原始 bytes）与
+    trophy_name/trophy_color（NET 首页称号与稀有度）注入身份；
+    仅在 player 缺失时生效。
+    """
     pic = assets.static_path() / "mai" / "pic"
     im.alpha_composite(
         Image.open(pic / theme / "logo.png").convert("RGBA").resize((249, 120)),
@@ -316,11 +324,13 @@ async def _draw_header(
         plate_img = Image.open(pic / "UI_Plate_550101.png").convert("RGBA")
     im.alpha_composite(plate_img.resize((800, 130)), (300, 60))
 
-    # 头像：落雪 icon → QQ 头像 → 缺省 509506
+    # 头像：落雪 icon → NET 头像 bytes → QQ 头像 → 缺省 509506
     icon_img = None
     icon_item = getattr(player, "icon", None)
     if icon_item is not None:
         icon_img = await fetch_item_image("icon", icon_item.id)
+    if icon_img is None and icon_image:
+        icon_img = Image.open(BytesIO(icon_image)).convert("RGBA")
     if icon_img is None and qqid is not None:
         icon_img = await _qq_avatar(qqid)
     if icon_img is None:
@@ -374,7 +384,7 @@ async def _draw_header(
         (620, 60),
     )
 
-    # 称号条：有称号用对应色底 + 称号名；无则彩虹底 + B35/B15 统计
+    # 称号条：有称号用对应色底 + 称号名；NET 称号次之；无则彩虹底 + B35/B15 统计
     trophy = getattr(player, "trophy", None)
     shougou_dir = assets.static_path() / "mai" / "shougou"
     if trophy is not None:
@@ -385,6 +395,14 @@ async def _draw_header(
             (270, 27)
         )
         trophy_text, trophy_font = trophy.name, font(14, FONT_HAN)
+    elif trophy_name:
+        color = trophy_color or "Normal"
+        if not (shougou_dir / f"UI_CMN_Shougou_{color}.png").exists():
+            color = "Normal"
+        shougou = Image.open(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
+            (270, 27)
+        )
+        trophy_text, trophy_font = trophy_name, font(14, FONT_HAN)
     else:
         shougou = Image.open(shougou_dir / "UI_CMN_Shougou_Rainbow.png").resize(
             (270, 27)
@@ -488,8 +506,14 @@ async def draw_b50_nb(
     qqid: int | None = None,
     service: str | None = None,
     theme: str = DEFAULT_THEME,
+    icon_image: bytes | None = None,
+    trophy_name: str | None = None,
+    trophy_color: str | None = None,
 ) -> Image.Image:
-    """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。"""
+    """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。
+
+    icon_image/trophy_name/trophy_color 为 NET 数据源身份注入（player 缺失时生效）。
+    """
     pic = assets.static_path() / "mai" / "pic"
     im = Image.open(pic / theme / "b50.png").convert("RGBA")
     draw = ImageDraw.Draw(im)
@@ -504,6 +528,9 @@ async def draw_b50_nb(
         rating_b35=rating_b35,
         rating_b15=rating_b15,
         theme=theme,
+        icon_image=icon_image,
+        trophy_name=trophy_name,
+        trophy_color=trophy_color,
     )
 
     # 成绩行：b35 从 y=235、b15 从 y=1085，均 5 列、行距 114（Hoshino 布局）
@@ -540,6 +567,9 @@ async def best50_bytes(
     qqid: int | None = None,
     service: str | None = None,
     theme: str = DEFAULT_THEME,
+    icon_image: bytes | None = None,
+    trophy_name: str | None = None,
+    trophy_color: str | None = None,
 ) -> bytes:
     return image_to_bytes(
         await draw_b50_nb(
@@ -553,5 +583,8 @@ async def best50_bytes(
             qqid=qqid,
             service=service,
             theme=theme,
+            icon_image=icon_image,
+            trophy_name=trophy_name,
+            trophy_color=trophy_color,
         )
     )

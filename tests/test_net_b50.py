@@ -265,7 +265,7 @@ async def test_window_cache_and_backoff(net_service, jp_view, monkeypatch):
 
     async def fake_fetch(b):
         calls.append(1)
-        return _records()
+        return _records(), None
 
     monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
 
@@ -280,10 +280,13 @@ async def test_window_cache_and_backoff(net_service, jp_view, monkeypatch):
     assert len(calls) == 1
 
     # 过期 → 重新抓取
-    fetched_at, cached = net_service._window_cache[(binding.platform, binding.user_id)]
+    fetched_at, cached, _ = net_service._window_cache[
+        (binding.platform, binding.user_id)
+    ]
     net_service._window_cache[(binding.platform, binding.user_id)] = (
         fetched_at - 16 * 60,
         cached,
+        None,
     )
     assert net_service.needs_fetch(binding)
     _, from_cache = await net_service.get_scores(binding)
@@ -315,6 +318,43 @@ async def test_window_cache_and_backoff(net_service, jp_view, monkeypatch):
 
     monkeypatch.setattr(plugin_config, "awmc_net_cooldown_minutes", 0)
     assert net_service.needs_fetch(binding)
+
+
+@pytest.mark.asyncio
+async def test_player_identity_cached_with_window(net_service, jp_view, monkeypatch):
+    """首页身份随窗口缓存：抓取时写入、窗口内 player_of 复用、过期后随成绩重抓。"""
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.net import NetPlayer
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+
+    player = NetPlayer(name="プレイヤー", rating=10516)
+
+    async def fake_fetch(b):
+        return _records(), player
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
+    await net_service.get_scores(binding)
+    assert net_service.player_of(binding) is player
+
+    # 人为过期 → 重抓 → 身份随之更新
+    fetched_at, cached, _ = net_service._window_cache[
+        (binding.platform, binding.user_id)
+    ]
+    net_service._window_cache[(binding.platform, binding.user_id)] = (
+        fetched_at - 16 * 60,
+        cached,
+        None,
+    )
+    player2 = NetPlayer(name="改名後", rating=11000)
+
+    async def fake_fetch2(b):
+        return _records(), player2
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch2)
+    await net_service.get_scores(binding)
+    assert net_service.player_of(binding) is player2
 
 
 # ---------------------------------------------------------------------------
@@ -513,14 +553,25 @@ async def test_b50_net_command(app: App, db, net_service, jp_view, monkeypatch):
     binding = await binding_service.ensure("OneBot V11", "12345678")
     await binding_service.bind_net(binding, sega_id="sid", password="pw")
 
+    from nonebot_plugin_awmc_helper.core.ext.net import NetPlayer
+
+    # 首页身份（icon_url 置 None：头像下载走 ensure_icon 网络路径，此测不触发）
+    net_player = NetPlayer(
+        name="Ｔｅｆｇ",  # 全角字符（真实玩家名形态）
+        rating=10516,
+        icon_url=None,
+        trophy_name="テスト称号",
+        trophy_color="Normal",
+    )
+
     async def fake_fetch(b):
-        return _records()
+        return _records(), net_player
 
     monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
 
     bests = await net_service.build_b50(_records())
     expected_png = await best50_bytes(
-        "sid",  # 卡片显示名 = SEGA ID（NET 首页玩家名结构未考证）
+        net_player.name,  # 卡片显示名 = NET 首页玩家名（缺失才回退 SEGA ID）
         bests.rating,
         bests.rating_b35,
         bests.rating_b15,
@@ -530,6 +581,8 @@ async def test_b50_net_command(app: App, db, net_service, jp_view, monkeypatch):
         qqid=12345678,
         service="net",
         theme="prism_plus",
+        trophy_name=net_player.trophy_name,
+        trophy_color=net_player.trophy_color,
     )
     event = fake_private_message_event_v11(message="b50", user_id=12345678)
     async with app.test_matcher(score_query.b50) as ctx:
@@ -580,7 +633,7 @@ async def test_minfo_net_command(app: App, db, net_service, jp_view, monkeypatch
     await binding_service.bind_net(binding, sega_id="sid", password="pw")
 
     async def fake_fetch(b):
-        return _records()
+        return _records(), None
 
     monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
 
@@ -647,7 +700,7 @@ async def test_b50_at_net_target(app: App, db, net_service, jp_view, monkeypatch
 
     async def fake_fetch(b):
         assert (b.platform, b.user_id) == ("OneBot V11", "99999999")
-        return _records()
+        return _records(), None
 
     monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
 

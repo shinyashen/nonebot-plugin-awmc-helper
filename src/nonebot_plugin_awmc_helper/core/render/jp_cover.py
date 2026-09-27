@@ -1,4 +1,4 @@
-"""日服封面在线获取：maimaidx.jp 官方曲绘 + localstore 缓存（不动 static 素材目录）。
+"""日服官方图片在线获取：曲绘/玩家头像 + localstore 缓存（不动 static 素材目录）。
 
 - 触发时机：日服谱面卡渲染前调用 :func:`ensure`；static 素材与缓存都没有时才拉取；
 - URL 契约（01 文档）：``https://maimaidx.jp/maimai-mobile/img/Music/{image_url}``，
@@ -72,6 +72,31 @@ async def ensure_image(
         key,
         lambda: download_to_file(
             url, path, subject=f"jp_cover：{key} 曲绘", verify=maimaidx_ssl_context()
+        ),
+    )
+    return path if ok else None
+
+
+async def ensure_icon(file_name: str, cache_dir: Path | None = None) -> Path | None:
+    """日服玩家头像落盘缓存（NET 首页身份区，img/Icon/{官方哈希文件名}）。
+
+    B50 卡 NET 头像用：按官方文件名缓存（同名即同图，天然去重），
+    与曲绘同 host 同缓存目录；失败返回 None（渲染走 QQ 头像/缺省回退）。
+    ``file_name`` 只取末段（官方页哈希名；防 URL 带路径成分落到缓存目录外）。
+    """
+    file_name = Path(file_name).name
+    cache = cache_dir or jp_cache_dir()
+    path = cache / file_name
+    if path.exists():
+        return path
+    url = f"https://maimaidx.jp/maimai-mobile/img/Icon/{file_name}"
+    ok = await _COVER_GATE.run(
+        f"icon:{file_name}",
+        lambda: download_to_file(
+            url,
+            path,
+            subject=f"jp_cover：NET 头像 {file_name}",
+            verify=maimaidx_ssl_context(),
         ),
     )
     return path if ok else None

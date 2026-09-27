@@ -16,6 +16,29 @@ LOGIN_PAGE = (
     "</form></body></html>"
 )
 
+# 首页身份块最小样本（2026-09-27 服务器实测 .basic_block 结构：头像/称号/玩家名/rating）
+HOME_PAGE = """
+<html><body><div class="basic_block p_10 f_0">
+  <img class="w_112 f_l" src="/maimai-mobile/img/Icon/34f0363f4ce86d07.png">
+  <div class="p_l_10 f_l">
+    <div class="trophy_block trophy_Normal p_3 t_c f_0">
+      <div class="trophy_inner_block f_13"><span>アウラ、フルコンしろ。</span></div>
+    </div>
+    <div class="m_b_5">
+      <div class="name_block f_l f_16">ｃｄｄ</div>
+      <div class="f_r t_r f_0">
+        <div class="p_r p_3">
+          <img class="h_30 f_r" src="/maimai-mobile/img/rating_base_purple.png">
+          <div class="rating_block">15828</div>
+        </div>
+      </div>
+      <div class="clearfix"></div>
+    </div>
+  </div>
+</div></body></html>
+"""
+
+
 # 记录页最小样本：DX 块（达成率/DX分/AP+徽章）+ SD 块（toggle 覆盖/FSD+ 徽章）+ 坏块
 RECORD_PAGE = """
 <html><body><div class="wrapper">
@@ -56,14 +79,14 @@ def net_ext():
     return mod
 
 
-def _mock_login_flow(m, *, login_page=LOGIN_PAGE, login_redirect=None):
+def _mock_login_flow(m, *, login_page=LOGIN_PAGE, login_redirect=None, home_page="ok"):
     m.get(f"{MOBILE}/").respond(text=login_page)
     m.post(f"{MOBILE}/submit/").respond(
         302, headers={"location": login_redirect or f"{MOBILE}/home"}
     )
     m.get(f"{MOBILE}/aimeList/").respond(text="ok")
     m.get(f"{MOBILE}/aimeList/submit/", params={"idx": "0"}).respond(text="ok")
-    m.get(f"{MOBILE}/home/").respond(text="ok")
+    m.get(f"{MOBILE}/home/").respond(text=home_page)
 
 
 def _mock_record_pages(m, *, page=RECORD_PAGE):
@@ -178,3 +201,34 @@ async def test_achievement_out_of_range_dropped(net_ext):
     page = RECORD_PAGE.replace("100.5000%", "200.0000%")
     records = net_ext._parse_music_records(page)
     assert [r.title for r in records] == ["標準曲"]
+
+
+def test_parse_player_identity(net_ext):
+    """首页身份块解析：玩家名/官方 rating/头像 URL/称号与稀有度。"""
+    player = net_ext._parse_player(HOME_PAGE)
+    assert player is not None
+    assert player.name == "\uff43\uff44\uff44"
+    assert player.rating == 15828
+    assert player.icon_url == f"{MOBILE}/img/Icon/34f0363f4ce86d07.png"
+    assert player.trophy_name == "アウラ、フルコンしろ。"
+    assert player.trophy_color == "Normal"
+
+
+def test_parse_player_absent(net_ext):
+    """无身份块/关键字段缺失 → None（不阻塞成绩组装）。"""
+    assert net_ext._parse_player("<html><body></body></html>") is None
+    no_rating = HOME_PAGE.replace('<div class="rating_block">15828</div>', "")
+    assert net_ext._parse_player(no_rating) is None
+
+
+@pytest.mark.asyncio
+async def test_login_carries_player_identity(net_mock, net_ext):
+    """登录流最后一跳 home/ 顺带解析身份（client.player）。"""
+    _mock_login_flow(net_mock, login_page=LOGIN_PAGE, home_page=HOME_PAGE)
+    client = net_ext.MaimaiNetClient()
+    try:
+        await client.login(net_ext.NetCredentials(sega_id="sid", password="pw"))
+        assert client.player is not None
+        assert client.player.name == "\uff43\uff44\uff44"
+    finally:
+        await client.aclose()

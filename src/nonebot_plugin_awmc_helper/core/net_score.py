@@ -31,7 +31,7 @@ from maimai_py import (
 from maimai_py.utils import ScoreCoefficient
 
 from .songs import song_service
-from .ext.net import NetRecord, NetCredentials, MaimaiNetClient
+from .ext.net import NetPlayer, NetRecord, NetCredentials, MaimaiNetClient
 from ..constants import normalize_text
 
 DX_ID_OFFSET = 10000  # Score.id 的 DX 谱面偏移（maimai_py 约定，与水鱼/落雪返回一致）
@@ -82,8 +82,10 @@ class NetScoreService:
     """
 
     def __init__(self) -> None:
-        self._window_cache: dict[tuple[str, str], tuple[float, list[ScoreExtend]]] = {}
-        # (platform, user_id) → (fetched_at, 组装后的全量成绩)
+        self._window_cache: dict[
+            tuple[str, str], tuple[float, list[ScoreExtend], NetPlayer | None]
+        ] = {}
+        # (platform, user_id) → (fetched_at, 组装后的全量成绩, 登录时抓到的首页身份)
         self._fail_until: dict[tuple[str, str], float] = {}
         # 抓取失败短退避，窗口内重试防轰炸
         self._title_index: tuple[str | None, dict[str, list[Song]]] = (None, {})
@@ -108,17 +110,26 @@ class NetScoreService:
 
     # -- 抓取与组装 -----------------------------------------------------------
 
-    async def fetch_records(self, binding) -> list[NetRecord]:
-        """按绑定凭据登录 NET 并抓全曲记录（错误透传 ext 层语义）。"""
+    async def fetch_records(self, binding) -> tuple[list[NetRecord], NetPlayer | None]:
+        """按绑定凭据登录 NET 并抓全曲记录 + 首页身份（错误透传 ext 层语义）。
+
+        身份来自登录流的最后一跳 home/ 页（client.player），与成绩同一会话
+        零额外请求；页面改版导致身份块缺失时为 None，不阻塞成绩组装。
+        """
         creds = NetCredentials(
             sega_id=binding.net_sega_id or "", password=binding.net_password or ""
         )
         client = MaimaiNetClient()
         try:
             await client.login(creds)
-            return await client.fetch_music_records()
+            return await client.fetch_music_records(), client.player
         finally:
             await client.aclose()
+
+    def player_of(self, binding) -> NetPlayer | None:
+        """窗口内登录时抓到的首页身份（未抓取过/窗口清空返回 None）。"""
+        entry = self._window_cache.get(self._key(binding))
+        return entry[2] if entry is not None else None
 
     async def get_scores(self, binding) -> tuple[list[ScoreExtend], bool]:
         """窗口内全量成绩（缓存优先）；返回 (scores, from_cache)。
@@ -136,13 +147,13 @@ class NetScoreService:
             remain = int(until - time.monotonic()) + 1
             raise NetScoreError(f"日服 NET 刚刚查询失败，请约 {remain} 秒后再重试")
         try:
-            records = await self.fetch_records(binding)
+            records, player = await self.fetch_records(binding)
         except Exception:
             self._fail_until[key] = time.monotonic() + FETCH_FAIL_BACKOFF_SECONDS
             raise
         scores = await self.assemble(records)
         if window > 0:
-            self._window_cache[key] = (time.monotonic(), scores)
+            self._window_cache[key] = (time.monotonic(), scores, player)
         else:
             self._window_cache.pop(key, None)
         return scores, False

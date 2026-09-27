@@ -193,6 +193,14 @@ def _display_name(player) -> str:
     return getattr(player, "nickname", None) or player.name
 
 
+async def _net_icon_bytes(player) -> bytes | None:
+    """NET 首页头像 → bytes（落盘缓存；无身份/无头像 URL/下载失败均 None）。"""
+    if player is None or not player.icon_url:
+        return None
+    path = await jp_cover.ensure_icon(player.icon_url.rsplit("/", 1)[-1])
+    return path.read_bytes() if path is not None else None
+
+
 @b50.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
@@ -218,14 +226,17 @@ async def _(
         binding = await _get_binding(session, event)
         if binding.service == SERVICE_NET:
             # 日服 NET：窗口缓存优先（首次/过期时真实抓取，约 5-15 秒）；
-            # 无 player 概念（NET 首页玩家名结构未考证，先显示 SEGA ID）
+            # 身份来自登录流顺带解析的首页（玩家名/称号/头像），缺失回退 SEGA ID
             if net_score_service.needs_fetch(binding):
                 await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
                     at_sender=True
                 )
             bests = await score_service.get_b50(binding)
+            player = net_score_service.player_of(binding)
             png = await b50_render.best50_bytes(
-                player_name=binding.net_sega_id or "maimai NET",
+                player_name=(player.name if player else None)
+                or binding.net_sega_id
+                or "maimai NET",
                 rating=bests.rating,
                 rating_b35=bests.rating_b35,
                 rating_b15=bests.rating_b15,
@@ -235,6 +246,9 @@ async def _(
                 qqid=binding_service.qq_of(binding),
                 service=binding.service,
                 theme=binding.theme or DEFAULT_THEME,
+                icon_image=await _net_icon_bytes(player),
+                trophy_name=player.trophy_name if player else None,
+                trophy_color=player.trophy_color if player else None,
             )
         else:
             player = await score_service.get_player(binding)

@@ -15,6 +15,7 @@ INTL（国际服 am-all.net 网关）暂不实现，端点差异见调研笔记 
 
 import re
 from dataclasses import dataclass
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import Tag, BeautifulSoup
@@ -100,6 +101,21 @@ class NetRecord:
     fs: str | None = None  # sync / fs / fsp / fsd / fsdp
 
 
+@dataclass
+class NetPlayer:
+    """NET 首页身份区（home/ 页 .basic_block 玩家名片）。
+
+    供 B50 卡头部显示真实玩家信息（此前只有 SEGA ID 可显示）；
+    course/class 徽章页面上是哈希文件名图片，无数字可解析，暂不采集。
+    """
+
+    name: str  # 游戏内玩家名（全角字符原样）
+    rating: int  # 官方 rating（NET 首页展示值）
+    icon_url: str | None = None  # 头像图 URL（img/Icon/ 哈希文件名）
+    trophy_name: str | None = None  # 称号（名牌条）文本
+    trophy_color: str | None = None  # 称号稀有度（trophy_{Color} class 尾段）
+
+
 # FC/FS 徽章文件名 → 语义（dxrating MUSIC_RECORD_FLAG_MATCHERS）
 _FLAG_MATCHERS: tuple[tuple[str, str], ...] = (
     ("applus.png", "app"),
@@ -131,6 +147,8 @@ class MaimaiNetClient:
         else:
             kwargs["verify"] = maimaidx_ssl_context()
         self._http = httpx.AsyncClient(**kwargs)
+        self.player: NetPlayer | None = None
+        """登录时从首页身份区解析的玩家信息（登录失败/页面无身份块为 None）。"""
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -180,10 +198,11 @@ class MaimaiNetClient:
             },
             error_code="invalid_credentials",
         )
-        # 选 Aime 卡（idx=0 = 第一张）→ 进 home 领全会话 cookie
+        # 选 Aime 卡（idx=0 = 第一张）→ 进 home 领全会话 cookie；顺带解析身份区
         await self._request("GET", f"{BASE}/aimeList/")
         await self._request("GET", f"{BASE}/aimeList/submit/", params={"idx": "0"})
-        await self._request("GET", f"{BASE}/home/")
+        home = await self._request("GET", f"{BASE}/home/")
+        self.player = _parse_player(home.text)
 
     async def fetch_music_records(self) -> list[NetRecord]:
         """逐难度抓全曲记录页并解析（B50 参与：standard/dx 全难度）。
@@ -212,6 +231,49 @@ def _extract_login_token(html: str) -> str | None:
     node = soup.find("input", attrs={"name": "token"})
     value = node.get("value") if isinstance(node, Tag) else None
     return str(value) if value else None
+
+
+def _parse_player(html: str) -> NetPlayer | None:
+    """首页身份块 → :class:`NetPlayer`（无身份块/关键字段缺失返回 None）。
+
+    DOM 结构（2026-09-27 服务器实测，dxrating 未解析此页）：home/ 页
+    ``.basic_block`` 内依次为 头像（``img.w_112``，img/Icon/ 哈希文件名）、
+    称号条（``.trophy_block``，稀有度是 ``trophy_{Color}`` 附加 class）、
+    玩家名（``.name_block``，全角字符）、官方 rating（``.rating_block``）。
+    aimeList 页也有同构身份块，本函数只用于 home/ 页。
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    block = soup.select_one(".basic_block")
+    if block is None:
+        return None
+    name_el = block.select_one(".name_block")
+    rating_el = block.select_one(".rating_block")
+    name = name_el.get_text(strip=True) if name_el else ""
+    rating_text = rating_el.get_text(strip=True) if rating_el else ""
+    if not name or not rating_text.isdigit():
+        return None
+    icon = block.select_one("img.w_112")
+    icon_src = _attr_text(icon, "src") if icon is not None else ""
+    trophy_el = block.select_one(".trophy_block")
+    trophy_name = trophy_color = None
+    if trophy_el is not None:
+        trophy_name = trophy_el.get_text(strip=True) or None
+        # 稀有度 = trophy_{Color} 附加 class；trophy_block 是块标识本身，排除
+        trophy_color = next(
+            (
+                c.removeprefix("trophy_")
+                for c in trophy_el.get("class") or []
+                if c.startswith("trophy_") and c != "trophy_block"
+            ),
+            None,
+        )
+    return NetPlayer(
+        name=name,
+        rating=int(rating_text),
+        icon_url=urljoin(f"{BASE}/", icon_src) if icon_src else None,
+        trophy_name=trophy_name,
+        trophy_color=trophy_color,
+    )
 
 
 def _parse_music_records(html: str) -> list[NetRecord]:
