@@ -23,7 +23,7 @@ from ...core.calc import score_line, min_ds_of_ra, rise_recommend
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import SongType
-from ...core.utils import paginate, parse_page, handle_errors
+from ...core.utils import paginate, parse_page, slow_notice, handle_errors
 from ...core.binding import session_keys, binding_service, service_display
 from ...core.render.tools import text_to_image, image_to_bytes
 
@@ -111,7 +111,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     level, target_raw = groups
     target = int(target_raw) if target_raw else 1
     binding = await binding_service.ensure(*session_keys(session))
-    bests = await score_service.get_b50(binding)
+    bests = await score_service.get_b50(binding, notify_slow=slow_notice())
 
     # 候选：指定等级时按等级过滤，否则按 B50 末位 RA 推算定数区间
     lowest_ra = min(
@@ -197,7 +197,7 @@ async def _(session: Session = UniSession()):
     if ident is None or (ident.username is None and ident.qq is None):
         await UniMessage.text(" 请先绑定水鱼查分器后再查询排名").finish(at_sender=True)
     # query/player 响应含 username（DivingFishPlayer.name），qq 查询同样可用
-    player = await score_service.get_player(binding)
+    player = await score_service.get_player(binding, notify_slow=slow_notice())
     username = player.name
     users = await df_ext.rating_ranking()
     for i, u in enumerate(users):

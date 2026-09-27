@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar
 from dataclasses import dataclass
 
 from maimai_py import PlayerIdentifier
+from nonebot.log import logger
 
 from . import store
 from .store import UserBinding
@@ -320,33 +321,32 @@ class BindingService:
             )
         return binding
 
-    async def refresh_lxns_if_expired(
-        self, binding: UserBinding, exc: Exception
-    ) -> bool:
-        """落雪个人 token 过期时用 refresh_token 续期并落库（对齐原版
-        maimaiDX 的 _on_unauthorized 自动刷新），成功返回 True。
+    async def refresh_lxns(self, binding: UserBinding) -> str:
+        """落雪令牌续期核心（全部落雪链路共用：主插件查询、第三方传分、每日保活）。
 
-        仅当「带落雪 token + 有 refresh_token + OAuth 已配置」且异常为
-        maimai-py 的 401 合流异常（InvalidPlayerIdentifierError，落雪 user API
-        未授权与玩家不存在在其内部合流）时才尝试；调用方刷新成功后需重试原查询。
-        本方法供全部落雪链路共用（含第三方传分类插件），与默认查分器
-        ``service`` 无关——凭据齐备即可续期（2026-09-26 放宽，原要求
-        service == lxns）。
+        返回三态：
+        - ``"refreshed"``：已续期并落库，调用方须重试原操作（重新装配凭据）；
+        - ``"dead"``：refresh_token 已被落雪判定失效（invalid_grant），只能
+          重新「绑定落雪」；
+        - ``"skip"``：无凭据 / OAuth 未配置 / 网络等暂时性失败，调用方按原
+          错误处理。
+
+        并发安全：按 (platform, user_id) 加锁 + 锁内重读库中凭据——rt 一次性
+        轮换，并发续期的后到者重放旧 rt 会 invalid_grant（落雪甚至可能据此
+        撤销授权），库中 token 与进入时不同即说明别处刚刷新过，直接采用新
+        凭据返回、不重放旧 rt。落库必须在锁内完成（save 的 commit 与后到者
+        的锁内重读走不同连接，先释放锁会让重读赶在 commit 生效前看到旧
+        token，误判「没人刷新过」而重放已轮换作废的旧 rt → invalid_grant）。
+        与默认查分器 ``service`` 无关——凭据齐备即可续期（2026-09-26 放宽，
+        原要求 service == lxns）。
         """
-        from maimai_py import InvalidPlayerIdentifierError
-
         from .ext import lxns as lxns_ext
 
-        if not isinstance(exc, InvalidPlayerIdentifierError):
-            return False
         # service 仅是默认查分器偏好；落雪凭据有效性与其无关
         if not binding.lxns_token:
-            return False
+            return "skip"
         if not binding.lxns_refresh_token or not lxns_ext.oauth_configured():
-            return False
-        # 锁内重读库中凭据：并发场景另一协程可能刚完成续期（rt 一次性轮换），
-        # 库中 token 与进入时不同即说明已刷新——直接采用新凭据返回，
-        # 不重放旧 rt
+            return "skip"
         entry_token = binding.lxns_token
         async with self._lxns_refresh_lock(binding.platform, binding.user_id):
             fresh = await self.get(binding.platform, binding.user_id)
@@ -359,21 +359,40 @@ class BindingService:
                 binding.lxns_refresh_token = fresh.lxns_refresh_token
                 if fresh.lxns_friend_code:
                     binding.lxns_friend_code = fresh.lxns_friend_code
-                return True
+                return "refreshed"
             try:
                 token = await lxns_ext.refresh_token(binding.lxns_refresh_token)
+            except lxns_ext.LxnsGrantError as e:
+                logger.warning(
+                    f"落雪 refresh_token 已失效，需重新绑定"
+                    f"（{binding.platform}:{binding.user_id}）：{e}"
+                )
+                return "dead"
             except Exception:
-                return False
+                return "skip"
             binding.lxns_token = token.access_token
             if token.refresh_token:
                 binding.lxns_refresh_token = token.refresh_token
             if token.friend_code:
                 binding.lxns_friend_code = token.friend_code
-            # 落库必须在锁内完成（save 的 commit 与后到者的锁内重读走不同
-            # 连接，先释放锁会让重读赶在 commit 生效前看到旧 token，误判
-            # 「没人刷新过」而重放已轮换作废的旧 rt → invalid_grant）
             await store.save_binding(binding)
-        return True
+            return "refreshed"
+
+    async def refresh_lxns_if_expired(
+        self, binding: UserBinding, exc: Exception
+    ) -> bool:
+        """（按需续期兼容包装）落雪个人 token 过期时用 refresh_token 续期并
+        落库（对齐原版 maimaiDX 的 _on_unauthorized 自动刷新），成功返回 True。
+
+        仅当异常为 maimai-py 的 401 合流异常（InvalidPlayerIdentifierError，
+        落雪 user API 未授权与玩家不存在在其内部合流）时才尝试；状态细分与
+        并发语义见 :meth:`refresh_lxns`，新代码建议直接用后者。
+        """
+        from maimai_py import InvalidPlayerIdentifierError
+
+        if not isinstance(exc, InvalidPlayerIdentifierError):
+            return False
+        return await self.refresh_lxns(binding) == "refreshed"
 
     def provider(self, binding: UserBinding):
         """按绑定取数据源 provider（与 core.client 的单例同源）。"""

@@ -16,7 +16,7 @@ from .sheet import (
 from ...constants import PLATE_CHARS, PLATE_KINDS, DEFAULT_THEME, chart_display_id
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
-from ...core.utils import parse_page, handle_errors
+from ...core.utils import parse_page, slow_notice, handle_errors
 from ...core.plates import is_valid_plate, plate_kinds_hint
 from ...core.binding import session_keys, binding_service, service_display
 from ...core.render.score import DrawScore
@@ -82,7 +82,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
         )
-    scores = await score_service.get_scores_all(binding)
+    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
 
     theme = binding.theme or DEFAULT_THEME
     png = await table_template.draw_rating_table_with_fallback(
@@ -106,7 +106,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     page = int(page_raw) if page_raw else 1
     checker, _plan_name = _plan_checker(plan)
     binding = await binding_service.ensure(*session_keys(session))
-    scores = await score_service.get_scores_all(binding)
+    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
 
     completed: list = []
@@ -191,7 +191,9 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         ).finish(at_sender=True)
     binding = await binding_service.ensure(*session_keys(session))
     page = parse_page(page_raw)
-    plates = await score_service.get_plates(binding, f"{version}{kind}")
+    plates = await score_service.get_plates(
+        binding, f"{version}{kind}", notify_slow=slow_notice()
+    )
     if mode == "完成表":
         await _plate_completion_sheet(binding, version, kind, page)
         return
@@ -217,7 +219,7 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     ds_raw, page_raw = groups
     page = parse_page(page_raw)
     binding = await binding_service.ensure(*session_keys(session))
-    scores = await score_service.get_scores_all(binding)
+    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
     if "." in ds_raw:  # 定数
         ds = float(ds_raw)
         matched = [s for s in scores.scores if abs(s.level_value - ds) < 0.05]

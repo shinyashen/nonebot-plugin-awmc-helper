@@ -114,6 +114,24 @@ def handle_errors(
     return decorator
 
 
+def slow_notice(text: str = " 比预期时间要长，再稍等一下…"):
+    """慢查询中途一次性提示的回调工厂（须在 handler 栈内触发；发送失败静默）。
+
+    供 ``score_service`` 的 ``notify_slow`` 参数使用：落雪令牌续期后等待
+    生效超过预期（进入 10s 档）时给用户一句非技术提示。
+    """
+
+    async def notify() -> None:
+        from nonebot_plugin_alconna.uniseg import UniMessage
+
+        try:
+            await UniMessage.text(text).send(at_sender=True)
+        except Exception:
+            pass  # 提示属锦上添花，任何发送问题都不影响查询本身
+
+    return notify
+
+
 GROUP_ADMIN = None
 """群管理权限（SUPERUSER ∨ 群管/群主；延迟装配见 :func:`group_admin`）。"""
 

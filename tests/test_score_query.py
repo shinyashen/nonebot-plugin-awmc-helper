@@ -451,7 +451,7 @@ async def test_get_minfo_unplayed_maps_to_none(songs, monkeypatch):
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
-    async def fake_minfo(song, identifier, provider=None):
+    async def fake_minfo(song, identifier, provider=None, **kwargs):
         return PlayerSong(song, [])
 
     monkeypatch.setattr(client_mod.client, "minfo", fake_minfo)
@@ -483,7 +483,7 @@ async def test_get_minfo_type_scoped_unplayed(songs, monkeypatch):
 
     sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
 
-    async def fake_minfo(song, identifier, provider=None):
+    async def fake_minfo(song, identifier, provider=None, **kwargs):
         return PlayerSong(song, sd_scores)
 
     monkeypatch.setattr(client_mod.client, "minfo", fake_minfo)
@@ -506,7 +506,7 @@ async def test_minfo_unplayed_hint(app: App, db, songs, monkeypatch):
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
 
-    async def fake_minfo(song, binding, song_type=None):
+    async def fake_minfo(song, binding, song_type=None, notify_slow=None):
         return None
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
@@ -528,7 +528,7 @@ async def test_minfo_alias_lists_entry_ids(app: App, db, songs, monkeypatch):
 
     sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
 
-    async def fake_minfo(song_key, binding_key, song_type=None):
+    async def fake_minfo(song_key, binding_key, song_type=None, notify_slow=None):
         return PlayerSong(song_key, sd_scores)
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
@@ -550,7 +550,7 @@ async def test_minfo_unplayed_song_hints_not_id_list(app: App, db, songs, monkey
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
 
-    async def fake_minfo(song_key, binding_key, song_type=None):
+    async def fake_minfo(song_key, binding_key, song_type=None, notify_slow=None):
         return None
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
@@ -572,7 +572,7 @@ async def test_minfo_unplayed_chart_type_hints(app: App, db, songs, monkeypatch)
 
     seen: list = []
 
-    async def fake_minfo(song_key, binding_key, song_type=None):
+    async def fake_minfo(song_key, binding_key, song_type=None, notify_slow=None):
         seen.append(song_type)
         return None  # 该类型无成绩
 
@@ -604,7 +604,7 @@ async def test_minfo_entry_prefix_pins_card_type(app: App, db, songs, monkeypatc
     assert song is not None
     dx_scores = [_score_extend(231, SongType.DX, LevelIndex.MASTER)]
 
-    async def fake_minfo(song_key, binding_key, song_type=None):
+    async def fake_minfo(song_key, binding_key, song_type=None, notify_slow=None):
         assert song_type == SongType.DX  # dx 前缀须把类型收敛到 DX
         return PlayerSong(song, dx_scores)
 
@@ -653,7 +653,7 @@ async def test_minfo_digit_id_pins_card_type(
     expected_type = SongType[type_name]
     scores = [_score_extend(231, expected_type, LevelIndex[level_index])]
 
-    async def fake_minfo(song_key, binding_key, queried_type=None):
+    async def fake_minfo(song_key, binding_key, queried_type=None, notify_slow=None):
         assert queried_type is expected_type  # id 形状推断的类型须原样传入 core
         return PlayerSong(song, scores)
 
@@ -886,7 +886,7 @@ async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypa
 
     captured: dict = {}
 
-    async def fake_minfo(song, binding, song_type=None):
+    async def fake_minfo(song, binding, song_type=None, notify_slow=None):
         captured["platform"] = binding.platform
         captured["user_id"] = binding.user_id
         return None  # 未游玩 → 提示文案

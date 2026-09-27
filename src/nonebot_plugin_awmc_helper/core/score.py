@@ -25,6 +25,7 @@ from maimai_py import (
     InvalidDeveloperTokenError,
     InvalidPlayerIdentifierError,
 )
+from nonebot.log import logger
 
 if TYPE_CHECKING:
     from maimai_py import ScoreExtend
@@ -115,10 +116,13 @@ class ScoreService:
         if binding.service == SERVICE_NET:
             raise UserScoreError(NET_UNSUPPORTED_HINT)
 
-    async def _run(self, binding: UserBinding | None, make_coro):
+    async def _run(self, binding: UserBinding | None, make_coro, notify_slow=None):
         """统一执行 maimai-py 查询：异常映射 + 落雪 token 过期自动续期重试。
 
         ``make_coro`` 是无参协程工厂，重试时重新装配 identifier（token 已刷新）。
+        续期成功后走 :meth:`_retry_after_refresh` 阶梯（落雪对新令牌的生效有
+        短延迟，见 local/QUESTIONS.md Q43）；``notify_slow`` 在等待超过预期时
+        被调用一次（handler 传发送回调，供用户侧提示）。
         """
         try:
             return await make_coro()
@@ -129,16 +133,48 @@ class ScoreService:
             # 仍有戏（scores/plates 回退公开键），由调用方决定回退或映射文案
             raise
         except (MaimaiPyError, httpx.RequestError) as e:
-            if binding is not None and await binding_service.refresh_lxns_if_expired(
-                binding, e
-            ):
-                try:
-                    return await make_coro()
-                except (MaimaiPyError, httpx.RequestError) as e2:
-                    raise _map_error(e2) from e2
+            if binding is None:
+                raise _map_error(e) from e
+            if not isinstance(e, InvalidPlayerIdentifierError):
+                raise _map_error(e) from e
+            status = await binding_service.refresh_lxns(binding)
+            if status == "refreshed":
+                return await self._retry_after_refresh(make_coro, e, notify_slow)
+            if status == "dead":
+                raise UserScoreError("落雪授权已过期，请重新「绑定落雪」") from e
             raise _map_error(e) from e
 
-    async def get_player(self, binding: UserBinding):
+    @staticmethod
+    async def _retry_after_refresh(make_coro, first: Exception, notify_slow=None):
+        """续期成功后的阶梯重试：落雪侧新令牌生效有短延迟（实测通常 ≤10s、
+        偶发长至数分钟，Q43），立即 → 5s → 10s 三级覆盖绝大多数窗口。
+
+        仅对 401 合流异常（InvalidPlayerIdentifierError）继续阶梯——续期成功
+        后玩家身份不会变，再次 401 即生效延迟；其余异常立即映射。等待进入
+        10s 一档时经 ``notify_slow`` 提示一次（超过预期）；最终仍失败给非
+        技术兜底文案（不向用户暴露令牌/续期细节，技术细节进日志）。
+        """
+        last = first
+        notified = False
+        for delay in (0, 5, 10):
+            if delay >= 10 and notify_slow is not None and not notified:
+                notified = True
+                try:
+                    await notify_slow()
+                except Exception:
+                    logger.debug("慢查询提示发送失败（不影响查询）")
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                return await make_coro()
+            except InvalidPlayerIdentifierError as e:
+                last = e
+            except (MaimaiPyError, httpx.RequestError) as e2:
+                raise _map_error(e2) from e2
+        logger.warning(f"落雪续期后阶梯重试（0/5/10s）仍 401：{last!r}")
+        raise UserScoreError("落雪查分器暂时无法访问，请一分钟后再试") from last
+
+    async def get_player(self, binding: UserBinding, notify_slow=None):
         self._guard_cn(binding)
         await song_service.ensure_loaded()
         return await self._run(
@@ -147,6 +183,7 @@ class ScoreService:
                 binding_service.identifier(binding),
                 provider=binding_service.provider(binding),
             ),
+            notify_slow=notify_slow,
         )
 
     async def _get_b50_net(self, binding: UserBinding) -> PlayerBests:
@@ -156,7 +193,9 @@ class ScoreService:
         except NetScoreError as e:
             raise UserScoreError(str(e)) from e
 
-    async def get_b50(self, binding: UserBinding) -> "MaimaiScores | PlayerBests":
+    async def get_b50(
+        self, binding: UserBinding, notify_slow=None
+    ) -> "MaimaiScores | PlayerBests":
         """B50（b35 + b15 与总 rating）；NET 数据源走日服组装链路。
 
         两个返回类型对渲染层 duck-compatible（rating/b35/b15/scores 字段同构）。
@@ -170,6 +209,7 @@ class ScoreService:
                 binding_service.identifier(binding),
                 provider=binding_service.provider(binding),
             ),
+            notify_slow=notify_slow,
         )
 
     async def get_minfo_net(
@@ -188,7 +228,9 @@ class ScoreService:
             return None
         return PlayerSong(song=song, scores=hit)
 
-    async def get_scores_all(self, binding: UserBinding) -> MaimaiScores:
+    async def get_scores_all(
+        self, binding: UserBinding, notify_slow=None
+    ) -> MaimaiScores:
         """全量成绩（牌子 / ap50 / 表格的基础）：Import-Token 优先。
 
         无 Import-Token 时尝试 OAuth subject（未覆盖用户回退公开键 → 迁移文案）。
@@ -202,6 +244,7 @@ class ScoreService:
                     binding_service.full_identifier(binding),
                     provider=binding_service.provider(binding),
                 ),
+                notify_slow=notify_slow,
             )
         except PlayerNotAuthorizedError:
             # 未覆盖补齐名单：回退公开键（developer 端点日落 → 迁移文案），
@@ -212,6 +255,7 @@ class ScoreService:
                     binding_service.identifier(binding, with_oauth=False),
                     provider=binding_service.provider(binding),
                 ),
+                notify_slow=notify_slow,
             )
 
     async def get_b50_by_username(
@@ -232,6 +276,7 @@ class ScoreService:
         song: Song,
         binding: UserBinding | None,
         song_type: SongType | None = None,
+        notify_slow=None,
     ) -> PlayerSong | None:
         """单曲成绩（未绑定时仅谱面信息）。
 
@@ -260,6 +305,7 @@ class ScoreService:
                     if ident is None
                     else binding_service.provider(binding),  # type: ignore[arg-type]
                 ),
+                notify_slow=notify_slow,
             )
         except PlayerNotAuthorizedError as e:
             # 单曲只有 OAuth Bearer 形态，无回退路径：未覆盖用户给专项文案
@@ -272,7 +318,9 @@ class ScoreService:
             return result
         return result if _has_scores(result.scores, song_type) else None
 
-    async def get_plates(self, binding: UserBinding, plate: str) -> MaimaiPlates:
+    async def get_plates(
+        self, binding: UserBinding, plate: str, notify_slow=None
+    ) -> MaimaiPlates:
         """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，Import-Token 优先。
 
         无 Import-Token 时尝试 OAuth subject（未覆盖用户回退公开键 → 迁移文案）。
@@ -287,6 +335,7 @@ class ScoreService:
                     plate,
                     provider=binding_service.provider(binding),
                 ),
+                notify_slow=notify_slow,
             )
         except PlayerNotAuthorizedError:
             return await self._run(
@@ -296,6 +345,7 @@ class ScoreService:
                     plate,
                     provider=binding_service.provider(binding),
                 ),
+                notify_slow=notify_slow,
             )
 
 

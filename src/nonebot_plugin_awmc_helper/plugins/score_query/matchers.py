@@ -19,7 +19,7 @@ from ...core.songs import (
     prefer_type_from_raw_id,
 )
 from ...core.types import FCType, SongType, LevelIndex
-from ...core.utils import handle_errors
+from ...core.utils import slow_notice, handle_errors
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
 from ...core.render import best50 as b50_render
@@ -266,8 +266,9 @@ async def _(
                 nameplate_image=plate_b,
             )
         else:
-            player = await score_service.get_player(binding)
-            bests = await score_service.get_b50(binding)
+            notify_slow = slow_notice()
+            player = await score_service.get_player(binding, notify_slow=notify_slow)
+            bests = await score_service.get_b50(binding, notify_slow=notify_slow)
             png = await b50_render.best50_bytes(
                 player_name=_display_name(player),
                 rating=bests.rating,
@@ -297,7 +298,8 @@ async def _(
     from ...core.types import current_version
 
     binding = await _get_binding(session, event)
-    scores = await score_service.get_scores_all(binding)
+    notify_slow = slow_notice()
+    scores = await score_service.get_scores_all(binding, notify_slow=notify_slow)
     ap_scores = [
         s
         for s in scores.scores
@@ -320,7 +322,7 @@ async def _(
         key=lambda s: s.dx_rating or 0,
         reverse=True,
     )[:15]
-    player = await score_service.get_player(binding)
+    player = await score_service.get_player(binding, notify_slow=notify_slow)
     png = await b50_render.best50_bytes(
         _display_name(player),
         sum(int(s.dx_rating or 0) for s in ap_b35 + ap_b15),
@@ -354,7 +356,9 @@ async def _(
     if len({s.id for _, s, _ in entries}) > 1:  # 关键词命中多曲：列 id（不查成绩）
         await _finish_entry_list(entries)
     prefer = entries[0][2] if len(entries) == 1 else None
-    info = await score_service.get_minfo(entries[0][1], binding, prefer)
+    info = await score_service.get_minfo(
+        entries[0][1], binding, prefer, notify_slow=slow_notice()
+    )
     if info is None:  # 该谱面类型无成绩（或整曲未游玩）→ 文本提示，不画空卡
         await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
     if len(entries) > 1:  # 双谱曲且玩过：列 id 让用户指定看哪张

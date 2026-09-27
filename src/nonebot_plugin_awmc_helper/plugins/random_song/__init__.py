@@ -21,7 +21,7 @@ from ...core.calc import SSSP_ACHIEVEMENT, min_ds_of_ra
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.types import Genre, SongType, ScoreExtend
-from ...core.utils import handle_errors
+from ...core.utils import slow_notice, handle_errors
 from ...core.binding import session_keys, binding_service
 from ...core.chart_card import chart_card_bytes
 
@@ -114,7 +114,7 @@ async def _(session: Session = UniSession()):
     binding = await binding_service.ensure(*session_keys(session))
     song = None
     try:
-        bests = await score_service.get_b50(binding)
+        bests = await score_service.get_b50(binding, notify_slow=slow_notice())
         song = await _pick_rise_song(bests.scores)
     except UserScoreError:
         song = None

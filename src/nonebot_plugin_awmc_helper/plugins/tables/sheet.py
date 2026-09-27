@@ -9,6 +9,7 @@ from ...constants import LEVEL_LIST, chart_display_id
 from ...core.score import score_service
 from ...core.songs import song_service
 from ...core.types import FCType, FSType, SongType
+from ...core.utils import slow_notice
 from ...core.plates import in_plate_scope, major_type_of_plate, plate_version_range
 from ...core.binding import service_display
 from ...core.render.plate_progress import plate_progress_bytes
@@ -89,7 +90,7 @@ async def _plate_completion_sheet(binding, version: str, kind: str, page: int) -
                     entries.append((song, d))
     if not entries:
         await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
-    scores = await score_service.get_scores_all(binding)
+    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
     png = await table_template.draw_plate_table_with_fallback(
         version,
         kind,

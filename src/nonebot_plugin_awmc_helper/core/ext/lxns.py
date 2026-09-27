@@ -54,6 +54,21 @@ class LxnsToken:
         self.friend_code = data.get("friend_code")
 
 
+class LxnsGrantError(ExtError):
+    """OAuth token 端点的错误响应体。
+
+    落雪失败响应为 OAuth 风格 ``{"error", "error_description"}``（无 message
+    字段）；``invalid_grant`` = 授权码/refresh_token 无效或已过期（区别于
+    网络等暂时性失败）。见 https://maimai.lxns.net/docs/oauth-guide。
+    """
+
+    def __init__(self, error: str, description: str) -> None:
+        self.error = error
+        self.description = description
+        friendly = {"invalid_grant": "落雪授权已失效或过期"}.get(error)
+        super().__init__(friendly or f"落雪授权失败（{error}）")
+
+
 def oauth_configured() -> bool:
     return all(
         (
@@ -87,6 +102,8 @@ async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
         if resp.headers.get("content-type", "").startswith("application/json")
         else {}
     )
+    if "error" in data:  # OAuth 风格错误体（无 message 字段）
+        raise LxnsGrantError(str(data["error"]), str(data.get("error_description", "")))
     if resp.status_code != 200 or not data.get("success", True):
         raise ExtError(str(data.get("message", error_default)))
     return LxnsToken(data.get("data", data))

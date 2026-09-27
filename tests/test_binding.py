@@ -474,3 +474,149 @@ async def test_resolve_query_at_chain(db):
 
     # at 无行（非 QQ 平台）：None → 由调用方给出「无法代查」降级
     assert await binding_service.resolve_query("telegram", "u1", "u2") is None
+
+
+@pytest.mark.asyncio
+async def test_lxns_refresh_dead_oauth_error_body(db, songs, monkeypatch):
+    """落雪 OAuth 风格错误体（invalid_grant，无 message 字段）→ 三态 "dead"。
+
+    查询路径对 dead 给「重新绑定落雪」文案而非「没有找到玩家」——rt 30 天
+    过期死局的准确定位（Q43 ②；2026-09-28 服务器实测回归）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_client_secret", "sec")
+    monkeypatch.setattr(plugin_config, "awmc_lxns_redirect_uri", "http://localhost/cb")
+
+    binding = await binding_service.ensure("OneBot V11", "30008")
+    await binding_service.bind_lxns(binding, token="expired-token", friend_code=123)
+    binding.lxns_refresh_token = "rt-dead"
+    await store.save_binding(binding)
+
+    scores_url = "https://maimai.lxns.net/api/v0/user/maimai/player/scores"
+    with respx.mock(assert_all_called=False) as m:
+        m.get(scores_url).respond(
+            401, json={"code": 401, "success": False, "message": "unauthorized"}
+        )
+        m.post("https://maimai.lxns.net/api/v0/oauth/token").respond(
+            400,
+            json={
+                "error": "invalid_grant",
+                "error_description": "refresh token expired",
+            },
+        )
+        assert await binding_service.refresh_lxns(binding) == "dead"
+        binding2 = await binding_service.get("OneBot V11", "30008")
+        assert binding2 is not None
+        with pytest.raises(UserScoreError, match="重新「绑定落雪」"):
+            await score_service.get_scores_all(binding2)
+
+
+@pytest.mark.asyncio
+async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
+    """续期成功后的阶梯重试（Q43）：立即 → 5s → 20s 三级；仅 401 合流异常
+    继续阶梯，其余异常立即映射；skip 按原错误处理；全败给非技术兜底文案。"""
+    from nonebot_plugin_awmc_helper.core import score as score_module
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    binding = await binding_service.ensure("OneBot V11", "30009")
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(score_module.asyncio, "sleep", fake_sleep)
+
+    async def make(status: str, n_fail: int):
+        sleeps.clear()
+        calls = {"n": 0}
+
+        async def fake_refresh(b):
+            return status
+
+        async def factory():
+            calls["n"] += 1
+            if calls["n"] <= n_fail:
+                raise InvalidPlayerIdentifierError("unauthorized")
+            return "ok"
+
+        monkeypatch.setattr(binding_service, "refresh_lxns", fake_refresh)
+        return factory, calls
+
+    async def make_other_error(n_fail: int):
+        sleeps.clear()
+        calls = {"n": 0}
+
+        async def fake_refresh(b):
+            return "refreshed"
+
+        async def factory():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise InvalidPlayerIdentifierError("unauthorized")
+            if calls["n"] <= 1 + n_fail:
+                from maimai_py import PrivacyLimitationError
+
+                raise PrivacyLimitationError("private")
+            return "ok"
+
+        monkeypatch.setattr(binding_service, "refresh_lxns", fake_refresh)
+        return factory, calls
+
+    # 立即重试成功（窗口 ≈ 0 的常态）
+    factory, calls = await make("refreshed", 1)
+    assert await score_service._run(binding, factory) == "ok"
+    assert calls["n"] == 2
+    assert sleeps == []
+
+    # 5s 后成功
+    factory, calls = await make("refreshed", 2)
+    assert await score_service._run(binding, factory) == "ok"
+    assert calls["n"] == 3
+    assert sleeps == [5]
+
+    # 10s 后成功；进入 10s 档时慢查询提示触发一次
+    notices = []
+
+    async def notify_slow():
+        notices.append(1)
+
+    factory, calls = await make("refreshed", 3)
+    assert await score_service._run(binding, factory, notify_slow) == "ok"
+    assert calls["n"] == 4
+    assert sleeps == [5, 10]
+    assert len(notices) == 1
+
+    # 全败：非技术兜底文案（不暴露令牌/续期细节）
+    factory, calls = await make("refreshed", 99)
+    with pytest.raises(UserScoreError, match="暂时无法访问"):
+        await score_service._run(binding, factory, notify_slow)
+    assert calls["n"] == 4
+    assert sleeps == [5, 10]
+    assert len(notices) == 2
+
+    # dead：重绑文案
+    factory, calls = await make("dead", 99)
+    with pytest.raises(UserScoreError, match="重新「绑定落雪」"):
+        await score_service._run(binding, factory)
+    assert calls["n"] == 1
+    assert sleeps == []
+
+    # skip（无凭据/网络）：按原错误映射
+    factory, calls = await make("skip", 99)
+    with pytest.raises(UserScoreError, match="没有找到这个玩家"):
+        await score_service._run(binding, factory)
+    assert calls["n"] == 1
+    assert sleeps == []
+
+    # 续期后遇到非 401 异常：立即映射，不进阶梯
+    factory, calls = await make_other_error(1)
+    with pytest.raises(UserScoreError, match="未授权第三方查询"):
+        await score_service._run(binding, factory)
+    assert calls["n"] == 2
+    assert sleeps == []
