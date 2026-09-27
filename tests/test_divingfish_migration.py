@@ -199,6 +199,7 @@ async def test_minfo_oauth_covered(db, songs, oauth):
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     song = await song_service.by_id(231)
+    assert song is not None
     binding = await binding_service.ensure("qq", "10001")
     with respx.mock(assert_all_called=False) as m:
         m.post(AUTH_TOKEN).respond(json=_token_ok())
@@ -220,6 +221,7 @@ async def test_minfo_uncovered_copy(db, songs, oauth):
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     song = await song_service.by_id(231)
+    assert song is not None
     binding = await binding_service.ensure("qq", "10001")
     with respx.mock(assert_all_called=False) as m:
         m.post(AUTH_TOKEN).respond(
