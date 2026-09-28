@@ -27,6 +27,28 @@ def _is_float(value: str) -> bool:
         return False
 
 
+def parse_range_args(a_list: list[str], label: str) -> "tuple[float, float, int]":
+    """数值范围查歌参数解析（定数/bpm 两分支同构，报错文案按 label 定制）。
+
+    形态：「值」（单值=上下限相同）或「最小 最大」+ 可选页数；不合法抛
+    ``ValueError``（文案面向用户，handler 转 finish）。
+    """
+    page = 1
+    if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
+        v1, v2 = float(a_list[0]), float(a_list[1])
+        if len(a_list) >= 3 and a_list[2].isdigit():
+            page = int(a_list[2])
+    elif len(a_list) == 1 and _is_float(a_list[0]):
+        v1 = v2 = float(a_list[0])
+    else:
+        raise ValueError(
+            f"{label}查歌参数错误，请输入正确格式，页数为可选：\n"
+            f"{label}查歌「{label}」「页数」\n"
+            f"{label}查歌「最小{label}」「最大{label}」「页数」"
+        )
+    return v1, v2, page
+
+
 async def _utage_jp_only(song_id: int, diff_id: int) -> bool:
     """该张宴谱是否日服限定：国服视图无宿主曲，或宿主曲无此 diff_id。
 

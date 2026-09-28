@@ -22,10 +22,10 @@ from .render import (
     _render_pending_result,
 )
 from .resolve import (
-    _is_float,
     _vote_hint,
     _split_page,
     _resolve_raw_id,
+    parse_range_args,
 )
 from ...constants import UTAGE_ID_BASE, display_song_id
 from ...core.songs import cn_song_map, song_service, entries_list_text
@@ -53,19 +53,10 @@ async def _(
     a_list = rest.split()
 
     if cmd == "定数":
-        page = 1
-        if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
-            ds1, ds2 = float(a_list[0]), float(a_list[1])
-            if len(a_list) >= 3 and a_list[2].isdigit():
-                page = int(a_list[2])
-        elif len(a_list) == 1 and _is_float(a_list[0]):
-            ds1 = ds2 = float(a_list[0])
-        else:
-            await _reply(
-                "定数查歌参数错误，请输入正确格式，页数为可选：\n"
-                "定数查歌「定数」「页数」\n"
-                "定数查歌「最小定数」「最大定数」「页数」"
-            ).finish(at_sender=True)
+        try:
+            ds1, ds2, page = parse_range_args(a_list, "定数")
+        except ValueError as e:
+            await _reply(str(e)).finish(at_sender=True)
         songs = await song_service.by_level_value(min(ds1, ds2), max(ds1, ds2))
         await _render_query_result(
             songs,
@@ -75,19 +66,10 @@ async def _(
             lambda: song_service.pending_by_level_value(min(ds1, ds2), max(ds1, ds2)),
         )
     elif cmd == "bpm":
-        page = 1
-        if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
-            b1, b2 = float(a_list[0]), float(a_list[1])
-            if len(a_list) >= 3 and a_list[2].isdigit():
-                page = int(a_list[2])
-        elif len(a_list) == 1 and _is_float(a_list[0]):
-            b1 = b2 = float(a_list[0])
-        else:
-            await _reply(
-                "bpm查歌参数错误，请输入正确格式，页数为可选：\n"
-                "bpm查歌「bpm」「页数」\n"
-                "bpm查歌「最小bpm」「最大bpm」「页数」"
-            ).finish(at_sender=True)
+        try:
+            b1, b2, page = parse_range_args(a_list, "bpm")
+        except ValueError as e:
+            await _reply(str(e)).finish(at_sender=True)
         songs = await song_service.by_bpm(min(b1, b2), max(b1, b2))
         await _render_query_result(
             songs,
