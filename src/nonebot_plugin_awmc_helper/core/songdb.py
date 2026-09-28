@@ -1025,9 +1025,11 @@ def apply_missing(
                 del state.charts[key]
             for key in [k for k in state.levels if k[0] == song_id]:
                 del state.levels[key]
-            state._charts_by_song = None
-            state._groups_by_song = None
             removed += 1
+    # 懒索引按 song_id 键控：删除只影响被删曲自己的条目，循环内查其他曲仍准确
+    # （循环里 groups_of_song 会命中 stale 索引而非触发全表重建）；整轮结束统一置空
+    state._charts_by_song = None
+    state._groups_by_song = None
     return removed
 
 
@@ -1044,10 +1046,11 @@ async def rebuild(
     jp: dict[int, Entry] = {}
     if payloads.get("maimaiinfo") is not None and payloads.get("dschange") is not None:
         jp = parse_maimaiinfo(payloads["maimaiinfo"], payloads["dschange"])
-        apply_jp(state, jp, None)
     otoge: OtogeData | None = None
     if payloads.get("otoge_db") is not None and jp:
         otoge = parse_otoge(payloads["otoge_db"], payloads.get("otoge_deleted") or [])
+        # otoge 在场只跑这一遍：apply_jp(jp, otoge) 完全包含 apply_jp(jp, None)
+        # 的工作（otoge 匹配均有守卫），先跑无 otoge 版是纯重复
         apply_jp(state, jp, otoge)
         # otoge 独有的无 id 条目（宴轮换快照为主）→ 暂存待归并（§7.5-A）；
         # 已知标题须含谱面自身标题（宴条目标题 ≠ 基曲标题）
@@ -1077,6 +1080,8 @@ async def rebuild(
                 await upsert_pending("otoge-db", f"title:{title}", "missing_id", item)
             else:
                 _fill_row_from_otoge(state, song_id, item)
+    elif jp:
+        apply_jp(state, jp, None)
     cn_known: set[tuple[int, str]] | None = None
     if payloads.get("lxns") is not None:
         cn = parse_lxns(payloads["lxns"])
