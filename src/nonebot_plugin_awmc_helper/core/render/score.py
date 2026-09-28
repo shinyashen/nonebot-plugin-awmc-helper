@@ -24,6 +24,12 @@ from .tools import (
 from .assets import assets
 from .best50 import draw_score_row
 from ...constants import RATE_FILE, DX_ID_OFFSET, LEVEL_INDEX_EN, chart_display_id
+from .table_layout import (
+    SCORE_ROW_GAP,
+    SCORE_ROW_COLS,
+    SCORE_ROW_START_X,
+    SCORE_ROW_COL_STEP,
+)
 
 # 难度文字色 / 谱面 id 色（NB AssetsImage 同源，tools 单源）
 _DEFAULT_TEXT_COLOR = TEXT_BLUE
@@ -241,11 +247,10 @@ class DrawScore:
         「定数 -> 单曲Ra」）。
         """
         dr = ImageDraw.Draw(self._im)
-        gap, col_step, start_x = 114, 276, 16
         for num, score in enumerate(scores):
-            row, col = divmod(num, 5)
-            x = start_x + col * col_step
-            y = list_y + row * gap
+            row, col = divmod(num, SCORE_ROW_COLS)
+            x = SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP
+            y = list_y + row * SCORE_ROW_GAP
             draw_score_row(self._im, dr, x, y, score, self._theme, sub_of=sub_of)
 
     def _while_pic(
@@ -427,7 +432,7 @@ class DrawScore:
         start_offset = (page - 1) * 80
         current_page_result = play_result[start_offset : page * 80]
 
-        section_height = 140 + 4 * 114
+        section_height = 140 + 4 * SCORE_ROW_GAP
         for num in range(0, len(current_page_result), 20):
             idx = num // 20
             result = current_page_result[num : num + 20]

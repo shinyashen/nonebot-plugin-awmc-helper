@@ -85,3 +85,10 @@ def slot_level_of(
         )
         return slot_rep(diff, re_m, use_remaster=True).level
     return diff.level
+
+
+# B50 式成绩行卡网格（best50 大图与 score 列表共用，Hoshino 布局）
+SCORE_ROW_START_X = 16
+SCORE_ROW_COL_STEP = 276
+SCORE_ROW_GAP = 114
+SCORE_ROW_COLS = 5

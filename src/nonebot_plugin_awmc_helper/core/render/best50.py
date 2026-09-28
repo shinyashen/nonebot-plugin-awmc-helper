@@ -55,6 +55,12 @@ from ...constants import (
     DEFAULT_THEME,
     SERVICE_DISPLAY,
 )
+from .table_layout import (
+    SCORE_ROW_GAP,
+    SCORE_ROW_COLS,
+    SCORE_ROW_START_X,
+    SCORE_ROW_COL_STEP,
+)
 
 RA_THRESHOLD = [
     (1000, "01"),
@@ -590,12 +596,12 @@ async def draw_b50_nb(
         nameplate_image=nameplate_image,
     )
 
-    # 成绩行：b35 从 y=235、b15 从 y=1085，均 5 列、行距 114（Hoshino 布局）
+    # 成绩行：b35 从 y=235、b15 从 y=1085（Hoshino 布局，几何见 table_layout）
     for data, initial_y in ((scores_b35, 235), (scores_b15, 1085)):
         for num, score in enumerate(data):
-            row, col = divmod(num, 5)
-            x = 16 + col * 276
-            y = initial_y + row * 114
+            row, col = divmod(num, SCORE_ROW_COLS)
+            x = SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP
+            y = initial_y + row * SCORE_ROW_GAP
             draw_score_row(im, draw, x, y, score, theme)
 
     service_name = SERVICE_DISPLAY.get(service or "", "")
