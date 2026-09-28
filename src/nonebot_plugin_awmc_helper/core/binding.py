@@ -240,9 +240,13 @@ class BindingService:
         返回 None（调用方回退旧路径）。
 
         ⚠️ 不检查 ``binding.service``：service 仅是查询偏好，水鱼凭据与它无关
-        （导分插件对 service=net/lxns 的用户同样要装配水鱼 OAuth 目标，
-        2026-09-28 写路径强制 OAuth 后成为主用途）；调用方需要 service 语义
-        时自行先行判断。
+        （score-updater 对 service=net/lxns 且已完成 OAuth 授权的用户同样凭
+        本摘要装配水鱼导分目标——2026-09-28 写路径强制 OAuth 后的主要用途）；
+        调用方需要 service 语义时自行先行判断。
+        ⚠️ 本摘要可从公开标识（QQ/用户名）派生，**不构成已授权证据**：存量
+        「仅 QQ」行的 consent 至多只读（补齐快照不含 write）、普遍缺失，
+        拿去写入必败——导分等写路径须以 ``divingfish_oauth`` 标志为准判定
+        可写（2026-09-28 二次修订，修复仅 QQ 行被误当凭据装配导致整链失败）。
         """
         client_id = plugin_config.awmc_divingfish_oauth_client_id
         if not (client_id and plugin_config.awmc_divingfish_oauth_client_secret):
