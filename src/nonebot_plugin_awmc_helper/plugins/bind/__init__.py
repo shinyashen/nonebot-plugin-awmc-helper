@@ -70,109 +70,74 @@ set_theme = on_command("主题", block=True)
 my_bind = on_command("我的绑定", block=True)
 
 
-async def _is_pending_lxns_code(bot: Bot, event: Event) -> bool:
+_CODE_SERVICES = ("lxns", "divingfish")
+"""回填会话覆盖的数据源（两家授权码长相一样，靠会话 kind 区分归属）。"""
+
+
+async def _code_fill_state(
+    bot: Bot, event: Event
+) -> "tuple[tuple[str, str], str, str] | None":
+    """回填消息全量判定：返回 ((platform, user_id), service, "pending"|"expired")，
+    非回填消息 None。
+
+    pending 优先：会话活跃且文本为对应授权码 → 回填；会话刚超时仍发码 →
+    给重发指引而非静默。四条近似 rule 收进一个 matcher（原 2×2 组合）。
+    """
+    keys = await _keys_of(bot, event)
+    if keys is None:
+        return None
+    event_text = event.get_plaintext()
+    for service, extract in (
+        ("lxns", lxns_ext.extract_authorization_code),
+        ("divingfish", df_ext.extract_confirmation_code),
+    ):
+        if extract(event_text) is None:
+            continue
+        if pending_bindings.is_active(*keys, service):
+            return keys, service, "pending"
+        if pending_bindings.expired_recently(*keys, service):
+            return keys, service, "expired"
+    return None
+
+
+async def _is_code_fill(bot: Bot, event: Event) -> bool:
+    """回填 matcher 的 rule（checker 须返回 bool；具体状态 handler 再判定）。"""
+    return await _code_fill_state(bot, event) is not None
+
+
+async def _keys_of(bot: Bot, event: Event) -> tuple[str, str] | None:
     from nonebot_plugin_uninfo import get_session
 
     session = await get_session(bot, event)
     if session is None:
-        return False
-    if not pending_bindings.is_active(*session_keys(session), "lxns"):
-        return False
-    return lxns_ext.extract_authorization_code(event.get_plaintext()) is not None
+        return None
+    return session_keys(session)
 
 
-async def _is_expired_lxns_code(bot: Bot, event: Event) -> bool:
-    """回填会话刚超时仍发码：给出重发指引而非静默。"""
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    if session is None:
-        return False
-    if pending_bindings.is_active(*session_keys(session), "lxns"):
-        return False
-    if not pending_bindings.expired_recently(*session_keys(session), "lxns"):
-        return False
-    return lxns_ext.extract_authorization_code(event.get_plaintext()) is not None
+bind_code_fill = on_message(rule=Rule(_is_code_fill), priority=0, block=True)
 
 
-async def _is_pending_df_code(bot: Bot, event: Event) -> bool:
-    """这条消息是不是待回填水鱼确认码会话发出的有效确认码（会话决定归属：
-    两家授权码长相一样，靠 kind 区分，见 Hoshino pending_binding 同款设计）。"""
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    if session is None:
-        return False
-    if not pending_bindings.is_active(*session_keys(session), "divingfish"):
-        return False
-    return df_ext.extract_confirmation_code(event.get_plaintext()) is not None
-
-
-async def _is_expired_df_code(bot: Bot, event: Event) -> bool:
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    if session is None:
-        return False
-    if pending_bindings.is_active(*session_keys(session), "divingfish"):
-        return False
-    if not pending_bindings.expired_recently(*session_keys(session), "divingfish"):
-        return False
-    return df_ext.extract_confirmation_code(event.get_plaintext()) is not None
-
-
-bind_code = on_message(rule=Rule(_is_pending_lxns_code), priority=0, block=True)
-df_code_message = on_message(rule=Rule(_is_pending_df_code), priority=0, block=True)
-df_code_expired = on_message(rule=Rule(_is_expired_df_code), priority=0, block=True)
-bind_code_expired = on_message(rule=Rule(_is_expired_lxns_code), priority=0, block=True)
-
-
-@bind_code.handle()
+@bind_code_fill.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(bot: Bot, event: Event):
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    assert session is not None
-    code = lxns_ext.extract_authorization_code(event.get_plaintext())
-    assert code is not None
-    await _complete_lxns(*session_keys(session), code)
-
-
-@bind_code_expired.handle()
-@handle_errors("绑定失败，请稍后再试")
-async def _(bot: Bot, event: Event):
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    assert session is not None
-    await UniMessage.text(
-        " 落雪授权已超时，请重新发送「绑定落雪」获取新的授权链接"
-    ).finish(at_sender=True)
-
-
-@df_code_message.handle()
-@handle_errors("绑定失败，请稍后再试")
-async def _(bot: Bot, event: Event):
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    assert session is not None
-    code = df_ext.extract_confirmation_code(event.get_plaintext())
-    assert code is not None
-    await _complete_df(*session_keys(session), code)
-
-
-@df_code_expired.handle()
-@handle_errors("绑定失败，请稍后再试")
-async def _(bot: Bot, event: Event):
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    assert session is not None
-    await UniMessage.text(
-        " 水鱼授权已超时，请重新发送「绑定水鱼」获取新的授权链接"
-    ).finish(at_sender=True)
+    state = await _code_fill_state(bot, event)
+    assert state is not None
+    keys, service, phase = state
+    if phase == "expired":
+        zh = "落雪" if service == "lxns" else "水鱼"
+        cmd = "「绑定落雪」" if service == "lxns" else "「绑定水鱼」"
+        await UniMessage.text(
+            f" {zh}授权已超时，请重新发送{cmd}获取新的授权链接"
+        ).finish(at_sender=True)
+    text = event.get_plaintext()
+    if service == "lxns":
+        code = lxns_ext.extract_authorization_code(text)
+        assert code is not None
+        await _complete_lxns(*keys, code)
+    else:
+        code = df_ext.extract_confirmation_code(text)
+        assert code is not None
+        await _complete_df(*keys, code)
 
 
 @df_code.handle()

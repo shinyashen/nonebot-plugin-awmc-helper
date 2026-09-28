@@ -197,7 +197,7 @@ async def test_lxns_pending_expiry_hint(app: App, db, monkeypatch):
     sess.expires = _time.monotonic() - 1  # 置为已过期
 
     event = fake_group_message_event_v11(message="X7TF-J3TU-AXSH")
-    async with app.test_matcher(bind.bind_code_expired) as ctx:
+    async with app.test_matcher(bind.bind_code_fill) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
         ctx.should_call_send(
