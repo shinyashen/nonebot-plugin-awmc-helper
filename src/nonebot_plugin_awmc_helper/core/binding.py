@@ -434,22 +434,6 @@ class BindingService:
             await store.save_binding(binding)
             return "refreshed"
 
-    async def refresh_lxns_if_expired(
-        self, binding: UserBinding, exc: Exception
-    ) -> bool:
-        """（按需续期兼容包装）落雪个人 token 过期时用 refresh_token 续期并
-        落库（对齐原版 maimaiDX 的 _on_unauthorized 自动刷新），成功返回 True。
-
-        仅当异常为 maimai-py 的 401 合流异常（InvalidPlayerIdentifierError，
-        落雪 user API 未授权与玩家不存在在其内部合流）时才尝试；状态细分与
-        并发语义见 :meth:`refresh_lxns`，新代码建议直接用后者。
-        """
-        from maimai_py import InvalidPlayerIdentifierError
-
-        if not isinstance(exc, InvalidPlayerIdentifierError):
-            return False
-        return await self.refresh_lxns(binding) == "refreshed"
-
     def provider(self, binding: UserBinding):
         """按绑定取数据源 provider（与 core.client 的单例同源）。"""
         from .client import lxns_provider, divingfish_provider
@@ -497,7 +481,7 @@ class BindingService:
             binding.lxns_friend_code = friend_code
         if refresh_token is not None:
             # OAuth 换发的 refresh_token 必须落库：access_token 仅 15 分钟
-            # 有效，自动续期（refresh_lxns_if_expired）全靠它（2026-09-26
+            # 有效，自动续期（refresh_lxns）全靠它（2026-09-26
             # 修复：此前 OAuth 绑定路径从未落库，导致绑定 15 分钟后必失效）
             binding.lxns_refresh_token = refresh_token
         await store.save_binding(binding)

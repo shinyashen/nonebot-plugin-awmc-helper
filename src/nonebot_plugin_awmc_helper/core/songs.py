@@ -772,15 +772,6 @@ _load_task: asyncio.Task | None = None
 # ---------------------------------------------------------------------------
 
 
-async def jp_songs() -> list[Song]:
-    """JP 视图曲目列表（§5.2）。
-
-    经 SongService 的指纹缓存取（与国服查歌的日服 fallback 同一份物化），
-    规范表为空返回 []。
-    """
-    return list((await song_service._jp_songs_map()).values())
-
-
 async def prerender_templates() -> str:
     """预渲染全部底图（core 实现，自动触发与 SUPERUSER 指令共用），返回结果描述。"""
     from .render import table_template

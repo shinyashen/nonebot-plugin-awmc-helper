@@ -375,12 +375,11 @@ async def test_lxns_refresh_concurrent_single_call(db, songs, monkeypatch):
     b2 = await binding_service.get("OneBot V11", "30007")
     assert b1 is not None
     assert b2 is not None
-    exc = InvalidPlayerIdentifierError("401")
     results = await asyncio.gather(
-        binding_service.refresh_lxns_if_expired(b1, exc),
-        binding_service.refresh_lxns_if_expired(b2, exc),
+        binding_service.refresh_lxns(b1),
+        binding_service.refresh_lxns(b2),
     )
-    assert results == [True, True]
+    assert results == ["refreshed", "refreshed"]
     assert calls == ["rt-old"]  # 落雪只被消耗一次
     assert b1.lxns_token == "new-token"
     assert b2.lxns_token == "new-token"  # 后到者经锁内重读采用新凭据
