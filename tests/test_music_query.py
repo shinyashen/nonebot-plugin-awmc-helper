@@ -4,8 +4,8 @@ import base64
 
 import pytest
 from mocks import requires_assets
-from songdb_fixtures import make_pending_item
 from nonebug import App
+from songdb_fixtures import make_pending_item
 
 
 @pytest.fixture

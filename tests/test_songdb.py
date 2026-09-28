@@ -1,4 +1,5 @@
-"""awmc.songdb 指令测试：`刷新歌曲库`/`重载补充数据`（finish 截断回归、MuNET 走查启动）。"""
+"""awmc.songdb 指令测试：`刷新歌曲库`/`重载补充数据`
+（finish 截断回归、MuNET 走查启动）。"""
 
 import pytest
 from nonebug import App

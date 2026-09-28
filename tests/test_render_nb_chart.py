@@ -6,10 +6,11 @@
 """
 
 import pytest
-from mocks import make_song, make_utage, requires_assets, make_buddy_notes
-from songdb_fixtures import make_pending_item
-from maimai_py import Genre
 from PIL import Image, ImageDraw
+from mocks import make_song, make_utage, requires_assets, make_buddy_notes
+from maimai_py import Genre
+from songdb_fixtures import make_pending_item
+
 
 def _buddy_host(buddy_notes):
     """buddy 宴曲宿主：谱面行顶层五项为 0（规范表实际形态），物量在 buddy_notes。"""
@@ -348,7 +349,6 @@ def test_notes_cell_text_touch_convention():
     # 其余列 0 → -（SD 旧框移植谱 hold=0 等按未收录口径）
     assert notes_cell_text(0, 1, is_dx=True, row_has_notes=True) == "-"
     assert notes_cell_text(0, 0, is_dx=False, row_has_notes=False) == "-"
-
 
 
 @requires_assets

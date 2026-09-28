@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+
 @pytest.fixture
 async def db(tmp_path: Path):
     from nonebot_plugin_awmc_helper.core import store
@@ -24,6 +25,7 @@ async def songs(db):
     await seed_service(song_service)
     yield
     song_service._ready.clear()
+
 
 @pytest.mark.asyncio
 async def test_binding_ensure_and_identifier(db):

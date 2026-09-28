@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from mocks import requires_assets
-
 from maimai_py import SongType, LevelIndex
 
 

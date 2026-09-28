@@ -9,8 +9,8 @@ from songdb_fixtures import (
     make_dschange,
     make_divingfish,
     make_otoge_live,
-    make_otoge_deleted,
     make_pending_item,
+    make_otoge_deleted,
 )
 
 

@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from mocks import requires_assets
 from nonebug import App
-
 from maimai_py import SongType
 
 
@@ -126,6 +125,7 @@ async def test_update_rating_continues_after_progress(app: App, monkeypatch):
             bot=bot,
         )
         ctx.should_finished()
+
 
 @pytest.mark.asyncio
 @requires_assets

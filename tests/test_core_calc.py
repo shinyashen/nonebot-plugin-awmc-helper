@@ -141,7 +141,6 @@ def test_bests_empty_input():
 
 
 def test_score_line_formula():
-
     """分数线公式对拍原版：紫799（DX Master）100% 线。"""
     from mocks import make_diff
 

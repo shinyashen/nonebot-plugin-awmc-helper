@@ -6,8 +6,8 @@ from songdb_fixtures import (
     make_all_data,
     make_dschange,
     make_otoge_live,
-    make_otoge_deleted,
     make_pending_item,
+    make_otoge_deleted,
 )
 
 

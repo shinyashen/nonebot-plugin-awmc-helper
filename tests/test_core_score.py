@@ -8,6 +8,7 @@ from maimai_py.exceptions import InvalidPlayerIdentifierError
 
 BASE_DF = "https://www.diving-fish.com/api/maimaidxprober"
 
+
 @pytest.fixture
 async def db(tmp_path: Path):
     from nonebot_plugin_awmc_helper.core import store
@@ -27,6 +28,7 @@ async def songs(db):
     await seed_service(song_service)
     yield
     song_service._ready.clear()
+
 
 @pytest.mark.asyncio
 async def test_get_b50_divingfish(db, songs):
