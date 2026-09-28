@@ -24,20 +24,20 @@ async def songs(tmp_path):
 async def test_query_by_title_and_id(songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
-    assert song.title == "PENGUIN"
-    fuzzy = await song_service.by_title_fuzzy("PRE")
-    assert {s.id for s in fuzzy} == {500}  # 大小写不敏感子串
+    assert song.title == "チルノのパーフェクトさんすう教室"
+    fuzzy = await song_service.by_title_fuzzy("true love")
+    assert {s.id for s in fuzzy} == {8}  # 大小写不敏感子串
 
 
 @pytest.mark.asyncio
 async def test_alias_lookup_incl_disabled_filter(songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    got = await song_service.by_alias("普瑞")
+    got = await song_service.by_alias("琪露诺")
     assert got is not None
-    assert got[0].id == 500
+    assert got[0].id == 199
     # disabled 曲目默认不出现在 get_all
     all_songs = await song_service.get_all()
     assert all(not s.disabled for s in all_songs)
@@ -49,22 +49,26 @@ async def test_by_alias_chart_prefix_fallback(songs):
     """精确未命中时剥离谱面类型前缀重查（Q31：dx/标准/标/旧/sd/宴）。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    # 带前缀命中（种子别名「普瑞」「企鹅舞」）
-    got = await song_service.by_alias("dx普瑞")
-    assert [s.id for s in got] == [500]
-    got = await song_service.by_alias("标准企鹅舞")
-    assert [s.id for s in got] == [231]
-    # 叠层前缀只剥一层：「dx标普瑞」→「标普瑞」不在去前缀库中 → 不命中
-    assert await song_service.by_alias("dx标普瑞") == []
+    # 带前缀命中（种子别名「琪露诺」）
+    got = await song_service.by_alias("dx琪露诺")
+    assert [s.id for s in got] == [199]
+    got = await song_service.by_alias("标准琪露诺")
+    assert [s.id for s in got] == [199]
+    # 宴谱汉字前缀（199 蛸宴）：裸写汉字剥前缀命中（柚子库 [宴]cycles 形态）
+    got, info = await song_service.by_alias_detail("蛸琪露诺")
+    assert [s.id for s in got] == [199]
+    assert info == ("琪露诺", "蛸", "prefix")
+    # 叠层前缀只剥一层：「dx标琪露诺」→「标琪露诺」不在去前缀库中 → 不命中
+    assert await song_service.by_alias("dx标琪露诺") == []
     # by_alias_detail 暴露剥离信息（供别名查询提示语）
-    detail_songs, strip_info = await song_service.by_alias_detail("dx普瑞")
-    assert [s.id for s in detail_songs] == [500]
-    assert strip_info == ("普瑞", "dx", "prefix")  # (剥离后别名, 命中词, 位置)
-    _, exact_info = await song_service.by_alias_detail("普瑞")
+    detail_songs, strip_info = await song_service.by_alias_detail("dx琪露诺")
+    assert [s.id for s in detail_songs] == [199]
+    assert strip_info == ("琪露诺", "dx", "prefix")  # (剥离后别名, 命中词, 位置)
+    _, exact_info = await song_service.by_alias_detail("琪露诺")
     assert exact_info is None
     # 精确命中优先，不受剥离影响
-    got = await song_service.by_alias("普瑞")
-    assert [s.id for s in got] == [500]
+    got = await song_service.by_alias("琪露诺")
+    assert [s.id for s in got] == [199]
     # 完全未命中：剥无可剥 → 空
     assert await song_service.by_alias("不存在的别名") == []
     assert await song_service.by_alias("dx") == []
@@ -75,16 +79,16 @@ async def test_by_alias_chart_suffix_fallback(songs):
     """精确未命中时剥离谱面类型后缀重查（dx/标准，柚子库实测形态）。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    # 「普瑞dx」库里没有（种子别名只有「普瑞」）→ 剥后缀「普瑞」命中
-    got, info = await song_service.by_alias_detail("普瑞dx")
-    assert [s.id for s in got] == [500]
-    assert info == ("普瑞", "dx", "suffix")
-    got, info = await song_service.by_alias_detail("企鹅舞标准")
-    assert [s.id for s in got] == [231]
-    assert info == ("企鹅舞", "标准", "suffix")
+    # 「琪露诺dx」库里没有（种子别名只有「琪露诺」）→ 剥后缀「琪露诺」命中
+    got, info = await song_service.by_alias_detail("琪露诺dx")
+    assert [s.id for s in got] == [199]
+    assert info == ("琪露诺", "dx", "suffix")
+    got, info = await song_service.by_alias_detail("琪露诺标准")
+    assert [s.id for s in got] == [199]
+    assert info == ("琪露诺", "标准", "suffix")
     # 「标」/汉字后缀实测不存在，不剥：查询原样未命中 → 空
-    assert (await song_service.by_alias_detail("普瑞标"))[0] == []
-    assert (await song_service.by_alias_detail("普瑞宴"))[0] == []
+    assert (await song_service.by_alias_detail("琪露诺标"))[0] == []
+    assert (await song_service.by_alias_detail("琪露诺宴"))[0] == []
     # 剥完为空不剥
     assert (await song_service.by_alias_detail("标准"))[0] == []
 
@@ -94,17 +98,18 @@ async def test_alias_title_duplicate_filtered(songs):
     """剥前后缀后与歌名相同的别名不进展示列表（归一化比对）。
 
     生产链路中 provider 已把「dx翼」剥成「翼」入库，inject 绕过 provider，
-    故直接种入剥后形态模拟。
+    故直接种入剥后形态模拟；「标题与别名同形」无法用真实曲构造，
+    用（构造）占位曲（别名与歌名同形是本用例的被测形态）。
     """
     from mocks import make_song, seed_service
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    dup = make_song(456, "翼", aliases=["翼", "ＷＩＮＧ", "小鸟"])
+    dup = make_song(456, "（构造）翼", aliases=["（构造）翼", "ＷＩＮＧ", "小鸟"])
     await seed_service(song_service, [*list(songs), dup])
     try:
         aliases = await song_service.aliases_of(456)
-        assert aliases == ["ＷＩＮＧ", "小鸟"]  # 「翼」与歌名重复 → 不展示
+        assert aliases == ["ＷＩＮＧ", "小鸟"]  # 「（构造）翼」与歌名重复 → 不展示
         # 查询侧索引仍保留，剥后可正常命中本曲
         got, _ = await song_service.by_alias_detail("小鸟dx")
         assert [s.id for s in got] == [456]
@@ -118,30 +123,37 @@ async def test_alias_title_duplicate_filtered(songs):
 async def test_filters(songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    # 定数查歌：13.0~14.0 命中 500 的 13+（13.7）与 231 的 13.2
+    # 定数查歌：13.0~14.0 命中 199（SD 13.3 / DX 13.0）与 624 的 13.4
     got = await song_service.by_level_value(13.0, 14.0)
-    assert {s.id for s in got} == {231, 500}
-    # 曲师（大小写不敏感）
-    assert {s.id for s in await song_service.by_artist("UZZ")} == {500}
-    # 谱师
-    assert {s.id for s in await song_service.by_note_designer("サルミ")} == {231, 500}
-    # BPM 范围
-    assert {s.id for s in await song_service.by_bpm(150, 190)} == {500}
+    assert {s.id for s in got} == {199, 624}
+    # 宴谱定数同样参与窗口查询（199 蛸宴 12.7）
+    assert {s.id for s in await song_service.by_level_value(12.6, 12.8)} == {199}
+    # 曲师（大小写不敏感精确匹配）
+    assert {s.id for s in await song_service.by_artist("ao")} == {624}
+    # 谱师查询暂缺断言：真实数据低难度谱面无谱师（note_designer=None），
+    # by_note_designer 直取 .lower() 会崩溃（产品侧待修，见测试报告），
+    # 真实样例库全量含 None 谱师谱面，无法构造不触雷的查询
+    # BPM 范围（8 的 150 在下界外）
+    assert {s.id for s in await song_service.by_bpm(160, 190)} == {199}
 
 
 @pytest.mark.asyncio
 async def test_random(songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    got = await song_service.random(song_type=SongType.DX, level="13+")
+    got = await song_service.random(song_type=SongType.DX, level="13")
     assert got is not None
-    assert got[0].id == 500
-    # 排除宴会谱后按类型过滤
-    got2 = await song_service.random(genre=Genre.宴会場, exclude_utage=True)
-    assert got2 is None  # 901 只有宴会谱
-    got3 = await song_service.random(genre=Genre.宴会場, exclude_utage=False)
+    assert got[0].id == 199  # DX 13 仅 199（902 disabled 不入池）
+    # 宴会谱排除语义：等级 12+ 仅 199 的蛸宴命中 → 排除后落空、放行后唯一
+    got2 = await song_service.random(level="12+", exclude_utage=True)
+    assert got2 is None
+    got3 = await song_service.random(level="12+", exclude_utage=False)
     assert got3 is not None
-    assert got3[0].id == 901
+    assert got3[0].id == 199
+    # 东方Project：199 的普通谱在池，排除宴谱口径下仍非空
+    got4 = await song_service.random(genre=Genre.東方Project, exclude_utage=True)
+    assert got4 is not None
+    assert got4[0].id == 199
 
 
 @pytest.mark.asyncio

@@ -185,7 +185,7 @@ def test_rise_recommend_basic():
     b50 = [
         extend(
             Score(
-                id=231,
+                id=199,
                 level="13",
                 level_index=LevelIndex.MASTER,
                 achievements=100.0,
@@ -196,20 +196,20 @@ def test_rise_recommend_basic():
                 play_count=None,
                 play_time=None,
                 rate=RateType.SSS,
-                type=SongType.DX,
+                type=SongType.STANDARD,
             ),
-            title="PENGUIN",
-            level_value=13.2,
+            title="チルノのパーフェクトさんすう教室",
+            level_value=13.3,
             level_dx_score=2100,
             dx_star=4,
-            version=25000,
+            version=12000,  # 199 SD Master 真实版本（旧版本侧）
         )
     ]
-    candidates = [s for s in sample_songs() if s.id == 500]  # DX Master 13.7
-    rec = rise_recommend(b50, candidates, target=10, latest_version_value=20000)
+    candidates = [s for s in sample_songs() if s.id == 624]  # SD Master 13.4 未入线
+    rec = rise_recommend(b50, candidates, target=10, latest_version_value=25500)
     assert rec
     top = rec[0]
-    assert top["song"].id == 500
+    assert top["song"].id == 624
     assert top["gain"] >= 10
 
 
@@ -228,7 +228,7 @@ def test_rise_recommend_old_fields():
     b50 = [
         extend(
             Score(
-                id=231,
+                id=199,
                 level="13",
                 level_index=LevelIndex.MASTER,
                 achievements=100.0,
@@ -239,30 +239,38 @@ def test_rise_recommend_old_fields():
                 play_count=None,
                 play_time=None,
                 rate=RateType.SSS,
-                type=SongType.DX,
+                type=SongType.STANDARD,
             ),
-            title="PENGUIN",
-            level_value=13.2,
+            title="チルノのパーフェクトさんすう教室",
+            level_value=13.3,
             level_dx_score=2100,
             dx_star=4,
-            version=25000,
+            version=12000,  # 199 SD Master 真实版本（旧版本侧）
         )
     ]
-    candidates = [s for s in sample_songs() if s.id in (231, 500)]
-    rec = rise_recommend(b50, candidates, target=10, latest_version_value=20000)
+    candidates = [s for s in sample_songs() if s.id in (199, 624)]
+    # level="13" 收敛谱面：199 只剩 SD/DX Master、624 只剩 SD Master，
+    # 且 199 的 DX Master 属新版本侧（无新版本 B50 基准）不会进推荐
+    rec = rise_recommend(
+        b50, candidates, level="13", target=10, latest_version_value=25500
+    )
     by_chart = {(r["song"].id, r["diff"].type): r for r in rec}
-    # 500 未游玩：旧成绩 0（NB RiseResult 默认值语义）
-    assert by_chart[(500, SongType.DX)]["old_achievements"] == 0.0
-    assert by_chart[(500, SongType.DX)]["old_ra"] == 0
-    # 231 已游玩未入线：旧成绩取 B50 成绩
-    assert by_chart[(231, SongType.DX)]["old_achievements"] == 100.0
-    assert by_chart[(231, SongType.DX)]["old_ra"] == 200
+    # 624 未游玩：旧成绩 0（NB RiseResult 默认值语义）
+    assert by_chart[(624, SongType.STANDARD)]["old_achievements"] == 0.0
+    assert by_chart[(624, SongType.STANDARD)]["old_ra"] == 0
+    # 199 已游玩未入线：旧成绩取 B50 成绩
+    assert by_chart[(199, SongType.STANDARD)]["old_achievements"] == 100.0
+    assert by_chart[(199, SongType.STANDARD)]["old_ra"] == 200
 
 
 def test_rise_recommend_version_filter():
     """推分双栏按版本划分（用户口径，NB 旧/新版本谱面推荐）：旧版本 =
     当前版本以前全部谱面（b35 侧）、新版本 = 当前版本谱面（b15 侧），
-    SD/DX 均可入任一栏，side 由谱面版本决定而非类型。"""
+    SD/DX 均可入任一栏，side 由谱面版本决定而非类型。
+
+    版本组合（24000/25000）为断言需要而构造，真实样例曲库无此组合，
+    故曲目/成绩均用（构造）占位命名。
+    """
     import dataclasses
 
     from mocks import make_diff, make_song
@@ -289,7 +297,7 @@ def test_rise_recommend_version_filter():
                 rate=RateType.SSS,
                 type=SongType.STANDARD,
             ),
-            title="oldSD",
+            title="（构造）oldSD",
             level_value=13.0,
             level_dx_score=2100,
             dx_star=4,
@@ -310,7 +318,7 @@ def test_rise_recommend_version_filter():
                 rate=RateType.SSS,
                 type=SongType.DX,
             ),
-            title="oldDX",
+            title="（构造）oldDX",
             level_value=13.0,
             level_dx_score=2100,
             dx_star=4,
@@ -331,7 +339,7 @@ def test_rise_recommend_version_filter():
                 rate=RateType.SSS,
                 type=SongType.DX,
             ),
-            title="newDX",
+            title="（构造）newDX",
             level_value=13.0,
             level_dx_score=2100,
             dx_star=4,
@@ -342,7 +350,7 @@ def test_rise_recommend_version_filter():
     def cand(song_id, type_, version):
         return make_song(
             song_id,
-            f"s{song_id}",
+            f"（构造）s{song_id}",  # 占位曲：版本组合为断言构造
             diffs=[
                 make_diff(
                     type=type_,

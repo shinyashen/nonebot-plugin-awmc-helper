@@ -9,7 +9,7 @@ import pytest
 from PIL import Image, ImageDraw
 from mocks import make_song, make_utage, requires_assets, make_buddy_notes
 from maimai_py import Genre
-from songdb_fixtures import make_pending_item
+from songdb_fixtures import make_pending_item, make_pending_revealed
 
 
 def _buddy_host(buddy_notes):
@@ -361,7 +361,9 @@ async def test_pending_card_renders():
     )
     from nonebot_plugin_awmc_helper.core.render.nb_chart import song_chart_info
 
-    bare = parse_pending_item(make_pending_item())
+    # 定数未揭（真实现役形态）gate 拒之门外；用揭晓形态（MuNET 实测值）出卡
+    assert parse_pending_item(make_pending_item()) is None
+    bare = parse_pending_item(make_pending_revealed())
     assert bare is not None
     png = song_chart_info(
         pending_to_song(bare),
@@ -375,16 +377,7 @@ async def test_pending_card_renders():
     assert png.startswith(b"\x89PNG")
     assert len(png) > 1000
 
-    full = parse_pending_item(
-        make_pending_item(
-            image_url="x.png",
-            dx_lev_bas_notes_tap="192",
-            dx_lev_bas_notes_hold="12",
-            dx_lev_bas_notes_slide="4",
-            dx_lev_bas_notes_touch="4",
-            dx_lev_bas_notes_break="4",
-        )
-    )
+    full = parse_pending_item(make_pending_revealed(image_url="x.png"))
     assert full is not None
     png = song_chart_info(
         pending_to_song(full),

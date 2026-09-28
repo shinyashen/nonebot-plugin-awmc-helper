@@ -17,9 +17,9 @@ AUTH_TOKEN = "https://auth.diving-fish.com/oauth/token"
 BASE_DF = "https://www.diving-fish.com/api/maimaidxprober"
 CID, SECRET = "test-client-id", "test-client-secret"
 
-# 231 的 DX 谱（songs fixture 已种子），成绩结构对齐 maimai_py _deser_score
+# 199 的 DX 谱（songs fixture 已种子），成绩结构对齐 maimai_py _deser_score
 SCORE_JSON = {
-    "song_id": 10231,
+    "song_id": 10199,
     "level": "13",
     "level_index": 3,
     "achievements": 100.5,
@@ -166,7 +166,7 @@ async def test_scores_all_oauth_covered(db, songs, oauth):
     assert token_route.called
     assert records_route.called
     assert len(scores.scores) == 1
-    assert scores.scores[0].id == 231  # maimai_py 归一化：10231 % 10000
+    assert scores.scores[0].id == 199  # maimai_py 归一化：10199 % 10000
 
 
 @pytest.mark.asyncio
@@ -256,13 +256,13 @@ async def test_minfo_oauth_covered(db, songs, oauth):
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
     binding = await binding_service.ensure("qq", "10001")
     with respx.mock(assert_all_called=False) as m:
         m.post(AUTH_TOKEN).respond(json=_token_ok())
         record_route = m.post(f"{BASE_DF}/player/record").respond(
-            json={"10231": [SCORE_JSON]}
+            json={"10199": [SCORE_JSON]}
         )
         result = await score_service.get_minfo(song, binding)
 
@@ -278,7 +278,7 @@ async def test_minfo_uncovered_copy(db, songs, oauth):
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
     binding = await binding_service.ensure("qq", "10001")
     with respx.mock(assert_all_called=False) as m:

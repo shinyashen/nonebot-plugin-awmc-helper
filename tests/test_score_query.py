@@ -99,15 +99,15 @@ def _curve_song():
         fc_sample_size={FCType.FC: 80, FCType.AP: 20},
     )
     return make_song(
-        231,
-        "PENGUIN",
-        aliases=["企鹅舞"],
+        199,
+        "チルノのパーフェクトさんすう教室",
+        aliases=["琪露诺"],
         diffs=[
             make_diff(
                 type=SongType.STANDARD,
                 level_index=LevelIndex.EXPERT,
                 level="10",
-                level_value=10.5,
+                level_value=10.4,
             ),
             make_diff(
                 type=SongType.DX,
@@ -191,7 +191,7 @@ async def test_ginfo_rich_chart_card(app: App, db, songs):
         ]
     )
     await _send_image_reply(
-        app, score_query.ginfo, "ginfo 231", expected, with_session=False
+        app, score_query.ginfo, "ginfo 199", expected, with_session=False
     )
 
 
@@ -212,7 +212,7 @@ async def test_ginfo_sd_chart_without_curve(app: App, db, songs):
         ]
     )
     await _send_image_reply(
-        app, score_query.ginfo, "ginfo 红231", expected, with_session=False
+        app, score_query.ginfo, "ginfo 红199", expected, with_session=False
     )
 
 
@@ -243,7 +243,7 @@ async def test_b50_username_lookup(app: App, db, songs):
             "sd": [],
             "dx": [
                 {
-                    "song_id": 10231,  # 231 的 DX 谱
+                    "song_id": 10199,  # 199 的 DX 谱
                     "level": "13",
                     "level_index": 3,
                     "achievements": 100.5,
@@ -344,7 +344,7 @@ def _score_extend(
     )
     return ScoreExtend(
         **dataclasses.asdict(base),
-        title="PENGUIN",
+        title="チルノのパーフェクトさんすう教室",
         level_value=level_value,
         level_dx_score=3000,
         dx_star=None,
@@ -431,7 +431,7 @@ def test_minfo_card_renders_given_prefer_type(db):
     from nonebot_plugin_awmc_helper.core.render import info as info_render
 
     song = _curve_song()  # SD EXPERT + DX MASTER
-    sd_score = _score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)
+    sd_score = _score_extend(199, SongType.STANDARD, LevelIndex.EXPERT)
     # 主类型由指令侧定好后传入（数字 id 形状 / 条目类型），未指定偏好时 DX 优先
     assert info_render.song_play_data(song, [sd_score]) == info_render.song_play_data(
         song, [sd_score], prefer_type=SongType.DX
@@ -455,7 +455,7 @@ async def test_get_minfo_unplayed_maps_to_none(songs, monkeypatch):
         return PlayerSong(song, [])
 
     monkeypatch.setattr(client_mod.client, "minfo", fake_minfo)
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
 
     binding = await binding_service.ensure("OneBot V11", "12345678")
@@ -481,13 +481,13 @@ async def test_get_minfo_type_scoped_unplayed(songs, monkeypatch):
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
-    sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
+    sd_scores = [_score_extend(199, SongType.STANDARD, LevelIndex.EXPERT)]
 
     async def fake_minfo(song, identifier, provider=None, **kwargs):
         return PlayerSong(song, sd_scores)
 
     monkeypatch.setattr(client_mod.client, "minfo", fake_minfo)
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
     binding = await binding_service.ensure("OneBot V11", "12345678")
 
@@ -510,7 +510,7 @@ async def test_minfo_unplayed_hint(app: App, db, songs, monkeypatch):
         return None
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
-    await _assert_reply(app, score_query.minfo, "minfo 231", "尚未游玩过该曲目")
+    await _assert_reply(app, score_query.minfo, "minfo 199", "尚未游玩过该曲目")
 
 
 @requires_assets
@@ -526,7 +526,7 @@ async def test_minfo_alias_lists_entry_ids(app: App, db, songs, monkeypatch):
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
 
-    sd_scores = [_score_extend(231, SongType.STANDARD, LevelIndex.EXPERT)]
+    sd_scores = [_score_extend(199, SongType.STANDARD, LevelIndex.EXPERT)]
 
     async def fake_minfo(song_key, binding_key, song_type=None, notify_slow=None):
         return PlayerSong(song_key, sd_scores)
@@ -535,10 +535,11 @@ async def test_minfo_alias_lists_entry_ids(app: App, db, songs, monkeypatch):
     await _assert_reply(
         app,
         score_query.minfo,
-        "minfo 企鹅舞",
-        "找到2个谱面："
-        "\n231：PENGUIN"
-        "\n10231：PENGUIN"
+        "minfo 琪露诺",
+        "找到3个谱面："
+        "\n199：チルノのパーフェクトさんすう教室"
+        "\n10199：チルノのパーフェクトさんすう教室"
+        "\n100199：チルノのパーフェクトさんすう教室"
         "\n※ 请使用「ginfo <ID>」查询指定谱面",
     )
 
@@ -554,7 +555,7 @@ async def test_minfo_unplayed_song_hints_not_id_list(app: App, db, songs, monkey
         return None
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
-    await _assert_reply(app, score_query.minfo, "minfo 企鹅舞", "尚未游玩过该曲目")
+    await _assert_reply(app, score_query.minfo, "minfo 琪露诺", "尚未游玩过该曲目")
 
 
 @requires_assets
@@ -577,8 +578,8 @@ async def test_minfo_unplayed_chart_type_hints(app: App, db, songs, monkeypatch)
         return None  # 该类型无成绩
 
     monkeypatch.setattr(score_service, "get_minfo", fake_minfo)
-    await _assert_reply(app, score_query.minfo, "minfo dx企鹅舞", "尚未游玩过该曲目")
-    await _assert_reply(app, score_query.minfo, "minfo 10231", "尚未游玩过该曲目")
+    await _assert_reply(app, score_query.minfo, "minfo dx琪露诺", "尚未游玩过该曲目")
+    await _assert_reply(app, score_query.minfo, "minfo 10199", "尚未游玩过该曲目")
     # 单条目/数字 id 均按主类型收窄；双条目（名称无前缀）不指定类型
     assert seen == [SongType.DX, SongType.DX]
 
@@ -600,9 +601,9 @@ async def test_minfo_entry_prefix_pins_card_type(app: App, db, songs, monkeypatc
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     binding = await binding_service.ensure("OneBot V11", "12345678")
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
-    dx_scores = [_score_extend(231, SongType.DX, LevelIndex.MASTER)]
+    dx_scores = [_score_extend(199, SongType.DX, LevelIndex.MASTER)]
 
     async def fake_minfo(song_key, binding_key, song_type=None, notify_slow=None):
         assert song_type == SongType.DX  # dx 前缀须把类型收敛到 DX
@@ -622,13 +623,13 @@ async def test_minfo_entry_prefix_pins_card_type(app: App, db, songs, monkeypatc
             MessageSegment.image(f"base64://{base64.b64encode(expected_png).decode()}"),
         ]
     )
-    await _send_image_reply(app, score_query.minfo, "minfo dx企鹅舞", expected)
+    await _send_image_reply(app, score_query.minfo, "minfo dx琪露诺", expected)
 
 
 @requires_assets
 @pytest.mark.parametrize(
     ("key", "type_name", "level_index"),
-    [("231", "STANDARD", "EXPERT"), ("10231", "DX", "MASTER")],
+    [("199", "STANDARD", "EXPERT"), ("10199", "DX", "MASTER")],
 )
 @pytest.mark.asyncio
 async def test_minfo_digit_id_pins_card_type(
@@ -648,10 +649,10 @@ async def test_minfo_digit_id_pins_card_type(
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     binding = await binding_service.ensure("OneBot V11", "12345678")
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
     expected_type = SongType[type_name]
-    scores = [_score_extend(231, expected_type, LevelIndex[level_index])]
+    scores = [_score_extend(199, expected_type, LevelIndex[level_index])]
 
     async def fake_minfo(song_key, binding_key, queried_type=None, notify_slow=None):
         assert queried_type is expected_type  # id 形状推断的类型须原样传入 core
@@ -684,7 +685,7 @@ _B50_PAYLOAD = {
         "sd": [],
         "dx": [
             {
-                "song_id": 10231,
+                "song_id": 10199,
                 "level": "13",
                 "level_index": 3,
                 "achievements": 100.5,
@@ -877,7 +878,7 @@ async def test_b50_at_bound_username_target(app: App, db, songs):
 
 @pytest.mark.asyncio
 async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypatch):
-    """minfo 231 @某人：曲目键不混入 at 段（CQ 码污染回归），成绩按目标绑定查询。"""
+    """minfo 199 @某人：曲目键不混入 at 段（CQ 码污染回归），成绩按目标绑定查询。"""
     from fake import fake_group_message_event_v11
     from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
@@ -895,7 +896,7 @@ async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypa
 
     event = fake_group_message_event_v11(
         message=Message(
-            [MessageSegment.text("minfo 231 "), MessageSegment.at(99999999)]
+            [MessageSegment.text("minfo 199 "), MessageSegment.at(99999999)]
         ),
         user_id=12345678,
     )

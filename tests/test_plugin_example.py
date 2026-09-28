@@ -27,15 +27,19 @@ async def songs(tmp_path):
     store.set_db_file(None)
 
 
-def _penguin_song():
+def _chiruno_song():
     from mocks import sample_songs
 
-    return next(s for s in sample_songs() if s.id == 231)
+    return next(s for s in sample_songs() if s.id == 199)
 
 
 @pytest.mark.asyncio
 async def test_ext_song_query_replies_image(app: App, songs):
-    """ext点歌 penguin：标题模糊命中 PENGUIN(231)，回复渲染图。"""
+    """ext点歌 琪露诺：别名精确命中 チルノのパーフェクトさんすう教室(199)，回复渲染图。
+
+    不用同曲别名「⑨」：str.isdigit 对「⑨」为 True 而 int() 解析失败，
+    走编号分支会崩（产品层已知边界）。
+    """
     import nonebot
     import nonebot_plugin_awmc_example as example
     from fake import fake_group_message_event_v11
@@ -47,9 +51,9 @@ async def test_ext_song_query_replies_image(app: App, songs):
         image_to_bytes,
     )
 
-    event = fake_group_message_event_v11(message="ext点歌 penguin")
+    event = fake_group_message_event_v11(message="ext点歌 琪露诺")
     png = image_to_bytes(
-        text_to_image(example.format_result("penguin", [_penguin_song()], 5))
+        text_to_image(example.format_result("琪露诺", [_chiruno_song()], 5))
     )
     expected = Message(
         [

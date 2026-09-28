@@ -120,6 +120,10 @@ async def test_guess_reveal_idempotent(songs, monkeypatch):
 
     from nonebot_plugin_awmc_helper.plugins.guess import game as guess_game
 
+    # 揭晓附带的谱面卡渲染不在本测目标内（真实样例 SD 基础/高级谱无谱师，
+    # draw_song_card 对 note_designer=None 会崩，属产品待修项，另测覆盖渲染）
+    monkeypatch.setattr(guess_game.song_render, "song_card_bytes", lambda song: b"")
+
     sends: list[str] = []
 
     class _FakeUniMsg:

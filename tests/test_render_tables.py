@@ -47,16 +47,16 @@ async def test_table_template_overlay(songs, tmp_path, monkeypatch):
     entries = []
     for song in await song_service.get_all():
         for d in song.get_difficulties():
-            if d.type != SongType.UTAGE and d.level == "13+":
+            if d.type != SongType.UTAGE and d.level == "13":
                 entries.append((song, d))
     assert entries
 
-    total = await table_template.generate_rating_template("13+", song_service)
+    total = await table_template.generate_rating_template("13", song_service)
     assert total > 0
-    assert (table_template.rating_table_dir() / "13+.png").exists()
+    assert (table_template.rating_table_dir() / "13.png").exists()
 
     # 无成绩 → 空盖章但统计头正常；出非空 PNG
-    png = draw_rating_table("13+", None, [], entries)
+    png = draw_rating_table("13", None, [], entries)
     assert png is not None
     assert png.startswith(b"\x89PNG\r\n")
 
@@ -66,8 +66,8 @@ async def test_table_template_overlay(songs, tmp_path, monkeypatch):
 async def test_rating_grid_per_type_id(songs, monkeypatch):
     """定数表/等级完成表底图网格 id 必须为谱面级展示 id（DX=根 id+10000）。
 
-    素材与毛玻璃卡打桩后用 text 间谍捕获绘制串：DX 曲 500 应画 10500，
-    根 id「500」不得出现；lv7-14 网格与 lv15 大图两条路径都查。
+    素材与毛玻璃卡打桩后用 text 间谍捕获绘制串：199 的 DX 谱应画 10199，
+    根 id「199」不得出现；lv7-14 网格与 lv15 大图两条路径都查。
     """
     from PIL import Image as PILImage
     from PIL import ImageDraw
@@ -98,15 +98,15 @@ async def test_rating_grid_per_type_id(songs, monkeypatch):
 
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy)
 
-    song = await song_service.by_id(500)
+    song = await song_service.by_id(199)
     assert song is not None
     dx = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
     assert dx is not None
-    assert chart_display_id(song, dx) == 10500
+    assert chart_display_id(song, dx) == 10199
 
     table_template._rating_grid([(song, dx)])
-    assert "10500" in drawn
-    assert "500" not in drawn
+    assert "10199" in drawn
+    assert "199" not in drawn
 
     drawn.clear()
     lv15 = make_diff(
@@ -116,5 +116,5 @@ async def test_rating_grid_per_type_id(songs, monkeypatch):
         level_value=15.0,
     )
     table_template._rating_grid_15([(song, lv15)])
-    assert "10500" in drawn
-    assert "500" not in drawn
+    assert "10199" in drawn
+    assert "199" not in drawn

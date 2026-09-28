@@ -38,7 +38,7 @@ async def test_get_b50_divingfish(db, songs):
 
     binding = await binding_service.ensure("qq", "10001")
     score = {
-        "song_id": 10231,  # 231 的 DX 谱
+        "song_id": 10199,  # 199 的 DX 谱
         "level": "13",
         "level_index": 3,
         "achievements": 100.5,
@@ -63,7 +63,7 @@ async def test_get_b50_divingfish(db, songs):
 
     assert player.name == "tester"
     assert bests.rating == 300
-    assert len(bests.scores_b35) == 1  # 版本 25000 < 当前版本 → b35
+    assert len(bests.scores_b15) == 1  # 199 DX 谱版本 26000 ≥ 当前版本 25500 → b15
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_lxns_token_auto_refresh(db, songs, monkeypatch):
     await store.save_binding(binding)
 
     score_payload = {
-        "id": 10231,
+        "id": 10199,
         "level": "13",
         "level_index": 3,
         "achievements": 100.5,

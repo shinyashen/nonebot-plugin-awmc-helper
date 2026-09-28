@@ -1,5 +1,5 @@
 """awmc.tables 指令测试：`更新定数表` 刷新必须执行（finish 截断回归）、
-牌子牌单校验（不存在的牌名拒答）、13+定数表、牌子条件帮助。"""
+牌子牌单校验（不存在的牌名拒答）、13定数表、牌子条件帮助。"""
 
 from pathlib import Path
 
@@ -139,20 +139,20 @@ async def test_ds_table_command(app: App, songs):
     # 与 handler 相同的调用路径 → 相同数据 → 相同渲染（NB 版式网格）；
     # 先清掉真实目录可能残留的预渲染底图，固定走实时生成分支（xdist 下
     # 期望图与 handler 渲染必须基于同一磁盘状态）
-    (table_template.rating_table_dir() / "13+.png").unlink(missing_ok=True)
+    (table_template.rating_table_dir() / "13.png").unlink(missing_ok=True)
     entries = []
     for song in await song_service.get_all():
         for d in song.get_difficulties():
-            if d.type != SongType.UTAGE and d.level == "13+":
+            if d.type != SongType.UTAGE and d.level == "13":
                 entries.append((song, d))
-    png = table_template.rating_table_text_bytes("13+", entries)
+    png = table_template.rating_table_text_bytes("13", entries)
 
     import nonebot
     from fake import fake_group_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
-    event = fake_group_message_event_v11(message="13+定数表")
+    event = fake_group_message_event_v11(message="13定数表")
     expected = Message(
         [
             MessageSegment.at(12345678),

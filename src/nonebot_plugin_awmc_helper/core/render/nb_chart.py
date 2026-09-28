@@ -292,7 +292,8 @@ def song_chart_info(
             fill=color,
             anchor="mm",
         )
-        designer = truncate_hoshino(diff.note_designer, 19)
+        # 谱师缺省（真实数据 SD BASIC/ADVANCED 常无谱师）按「0 即 -」约定画 -
+        designer = truncate_hoshino(diff.note_designer or "-", 19)
         mr.text(
             (310, 590 + spacing),
             designer,

@@ -73,24 +73,26 @@ async def _assert_reply(
 async def test_score_line_command(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import score_tools
 
-    # 样例 231 的 DX Master：tap500 hold50 slide50 touch50 brk10
-    total = 500 * 500 + 50 * 1000 + 50 * 1500 + 50 * 500 + 10 * 2500
+    # 样例 199（チルノのパーフェクトさんすう教室）的 DX Master：
+    # tap457 hold43 slide107 touch49 brk37（真实物量）
+    total = 457 * 500 + 43 * 1000 + 107 * 1500 + 49 * 500 + 37 * 2500
     tap_great = total * 1 / 10000
     per_tap = 10000 / total
-    b50_tap = total * (0.01 / 10) / 4 / 100
-    b50_pct = total * (0.01 / 10) / 4 / total * 100
+    b50_reduce = total * (0.01 / 37) / 4
+    b50_tap = b50_reduce / 100
+    b50_pct = b50_reduce / total * 100
     expected = (
-        "PENGUIN「大师」\n"
+        "チルノのパーフェクトさんすう教室「大师」\n"
         "分数线「100.0%」\n允许的最多「TAP」「GREAT」数量为\n"
         f"「{tap_great:.2f}」(每个-{per_tap:.4f}%),\n"
-        "「BREAK」50落(一共「10」个)\n"
+        "「BREAK」50落(一共「37」个)\n"
         f"等价于「{b50_tap:.3f}」个「TAP」"
         f"「GREAT」(-{b50_pct:.4f}%)"
     )
     await _assert_reply(
         app,
         score_tools.score_line_cmd,
-        "分数线 紫231 100",
+        "分数线 紫199 100",
         expected,
         with_session=False,
     )
