@@ -128,21 +128,21 @@ def _make_song(standard_ver: int | None, dx_ver: int | None, song_version: int):
 
 def test_chart_version_follows_main_type_for_old_song_new_dx():
     """老曲补 DX：卡片版本取主类型谱面组的登场版本，而非曲级最小值。"""
-    from nonebot_plugin_awmc_helper.core.render.nb_chart import _chart_version
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import chart_version_of
 
     # 835 实库形态：SD 19999（FiNALE）、DX 25504（PRiSM PLUS）、曲级 = min
     song = _make_song(19999, 25504, 19999)
-    assert _chart_version(song, prefer_sd=False) == 25504  # 默认卡（有 DX 用 DX）
-    assert _chart_version(song, prefer_sd=True) == 19999  # 「标准」前缀卡
+    assert chart_version_of(song, prefer_sd=False) == 25504  # 默认卡（有 DX 用 DX）
+    assert chart_version_of(song, prefer_sd=True) == 19999  # 「标准」前缀卡
 
 
 def test_chart_version_falls_back_to_song_version():
     """无谱面或谱面版本缺失（0）时回落曲级 version。"""
-    from nonebot_plugin_awmc_helper.core.render.nb_chart import _chart_version
+    from nonebot_plugin_awmc_helper.core.render.nb_chart import chart_version_of
 
-    assert _chart_version(_make_song(19999, 25504, 19999), prefer_sd=False) == 25504
-    assert _chart_version(_make_song(0, 0, 19999), prefer_sd=False) == 19999
-    assert _chart_version(_make_song(None, None, 20000), prefer_sd=False) == 20000
+    assert chart_version_of(_make_song(19999, 25504, 19999), prefer_sd=False) == 25504
+    assert chart_version_of(_make_song(0, 0, 19999), prefer_sd=False) == 19999
+    assert chart_version_of(_make_song(None, None, 20000), prefer_sd=False) == 20000
 
 
 def test_card_display_id_follows_main_type():
