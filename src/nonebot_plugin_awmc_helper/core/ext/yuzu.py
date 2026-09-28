@@ -168,7 +168,6 @@ class YuzuClient:
                     ServerAlias(
                         song_id=int(x["song_id"]),
                         name=x.get("name", ""),
-                        is_votable=bool(x.get("is_votable", False)),
                         alias=list(x.get("alias", [])),
                     )
                 )

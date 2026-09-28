@@ -629,7 +629,7 @@ async def update_arcade_count(
     ``updated_by``/``touch``：默认记录操作人与时间；传 None/False 可只改数值
     （如管理侧改机台数不产生「最近上报人」语义）。
     """
-    column = {"person": Arcade.person, "machines": Arcade.machines}[field]
+    column = col({"person": Arcade.person, "machines": Arcade.machines}[field])
     if mode == "inc":
         expr = column + amount
     elif mode == "dec":
@@ -650,7 +650,7 @@ async def update_arcade_count(
         row = (
             await db.exec(
                 update(Arcade)
-                .where(Arcade.id == arcade_id)
+                .where(col(Arcade.id) == arcade_id)
                 .values(**values)
                 .returning(column)
             )
