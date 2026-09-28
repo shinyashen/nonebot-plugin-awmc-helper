@@ -20,6 +20,7 @@ from ..config import plugin_config
 from ..constants import THEMES, SERVICE_DISPLAY
 
 if TYPE_CHECKING:
+    from nonebot.adapters import Event
     from nonebot_plugin_uninfo import Session
 
 SERVICE_DIVINGFISH = "divingfish"
@@ -48,6 +49,36 @@ def session_keys(session: "Session") -> tuple[str, str]:
         adapter = getattr(session, "adapter", None)
         platform = getattr(adapter, "value", adapter)
     return str(platform or "unknown").strip(), str(session.user.id)
+
+
+def extract_at_target(event: "Event | None") -> str | None:
+    """消息中被 @ 的目标用户（代查），仅取第一个非全体 at。
+
+    段形状按 OneBot v11（``seg.type == "at"``）判定；其他适配器的 at 段
+    类型名不同时会静默退化为查自己，属已知限制。
+    """
+    message = getattr(event, "message", None)
+    if message is None:
+        return None
+    for seg in message:
+        if seg.type == "at" and str(seg.data.get("qq")) != "all":
+            return str(seg.data["qq"])
+    return None
+
+
+async def resolve_session_query(
+    session: "Session", event: "Event | None"
+) -> tuple[UserBinding | None, str | None]:
+    """会话级代查目标解析（score_query b50/minfo 等按人查分入口共用）。
+
+    解析查询目标（@目标 或 发送者）→ (绑定或 None, at 目标)；代查链见
+    :meth:`BindingService.resolve_query`。发送者路径 ensure 自动建行。
+    """
+    at_target = extract_at_target(event)
+    binding = await binding_service.resolve_query(
+        session_keys(session)[0], str(session.user.id), at_target
+    )
+    return binding, at_target
 
 
 def SessionBinding():

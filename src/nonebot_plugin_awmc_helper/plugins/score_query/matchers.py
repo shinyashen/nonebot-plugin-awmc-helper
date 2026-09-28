@@ -28,8 +28,8 @@ from ...core.songdb import Scope
 from ...core.binding import (
     SERVICE_NET,
     UserBinding,
-    session_keys,
     binding_service,
+    resolve_session_query,
 )
 from ...core.net_score import net_score_service
 
@@ -43,41 +43,9 @@ minfo = on_command(
 ginfo = on_regex(r"^[gG]info\s?(?:([绿黄红紫白])(?=\s|\d))?(.+)$", block=True)
 
 
-def _at_target(event: Event | None) -> str | None:
-    """消息中被 @ 的目标用户（代查），仅取第一个非全体 at。
-
-    段形状按 OneBot v11（``seg.type == "at"``）判定；其他适配器的 at 段
-    类型名不同时会静默退化为查自己，属已知限制。
-    """
-    message = getattr(event, "message", None)
-    if message is None:
-        return None
-    for seg in message:
-        if seg.type == "at" and str(seg.data.get("qq")) != "all":
-            return str(seg.data["qq"])
-    return None
-
-
-async def _resolve_target(
-    session: Session, event: Event | None
-) -> tuple["UserBinding | None", str | None]:
-    """解析查询目标（@目标 或 发送者）→ (绑定或 None, at 目标)。
-
-    代查链（binding_service.resolve_query）：目标绑定行只读 → QQ 平台
-    水鱼按 at 的 QQ 公开查询（无需对方绑定）→ 其余降级。发送者路径保持
-    ensure 自动建行。
-    """
-    platform = session_keys(session)[0]
-    at_target = _at_target(event)
-    binding = await binding_service.resolve_query(
-        platform, str(session.user.id), at_target
-    )
-    return binding, at_target
-
-
 async def _get_binding(session: Session, event: Event | None) -> UserBinding:
     """b50/ap50 入口：无可用凭据则按「代查 / 自身」分别提示并终止。"""
-    binding, at_target = await _resolve_target(session, event)
+    binding, at_target = await resolve_session_query(session, event)
     if binding is None or not binding_service.has_usable_credentials(binding):
         if at_target is not None and binding is None:
             await UniMessage.text(
@@ -94,7 +62,7 @@ async def _get_binding_or_none(
     session: Session, event: Event | None
 ) -> UserBinding | None:
     """minfo 入口：不强制已绑定（未绑定降级纯谱面卡）。"""
-    binding, _ = await _resolve_target(session, event)
+    binding, _ = await resolve_session_query(session, event)
     return binding
 
 
