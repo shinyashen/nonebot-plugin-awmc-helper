@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from maimai_py import ScoreExtend
 
 from .ext import ExtError
+from .calc import build_bests
 from .songs import song_service
 from .client import client, divingfish_provider
 from .binding import (
@@ -42,6 +43,9 @@ from .binding import (
 )
 from .ext.net import NET_ERROR_MESSAGES, NetError
 from .net_score import NetScoreError, net_score_service
+
+__all__ = ["UserScoreError", "build_bests", "score_service"]
+"""模块公开面：第三方 b50 变体（pc50 等）从 core.score 一站式导入。"""
 
 
 class UserScoreError(Exception):

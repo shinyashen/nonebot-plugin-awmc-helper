@@ -1,10 +1,20 @@
-"""自实现计算：RA/评级、分数线容错、推分推荐。
+"""自实现计算：RA/评级、分数线容错、推分推荐、best50 变体组装。
 
 RA 计算直接使用 maimai-py 的 ``ScoreCoefficient``（单一事实来源），
 分数线与推分算法对齐原版 maimaiDX（core/utils/calc.py + handler.get_rise_score_list）。
 """
 
-from maimai_py import Song, RateType, SongType, ScoreExtend, SongDifficulty
+from typing import Any
+from collections.abc import Callable
+
+from maimai_py import (
+    Song,
+    RateType,
+    SongType,
+    PlayerBests,
+    ScoreExtend,
+    SongDifficulty,
+)
 from maimai_py.utils import ScoreCoefficient
 
 from ..constants import RATE_TO_ZH, UTAGE_ID_BASE
@@ -173,4 +183,45 @@ def rise_recommend(
     )[:per_side]
     return sorted(
         old_side + new_side, key=lambda r: r["diff"].level_value, reverse=True
+    )
+
+
+def build_bests(
+    scores: list[ScoreExtend],
+    *,
+    key: Callable[[ScoreExtend], Any],
+    latest_version_value: int | None = None,
+) -> PlayerBests:
+    """公共 best50 组装：按版本拆旧 35 / 新 15，两侧各按 ``key`` 降序取满。
+
+    maimai_py 的 ``MaimaiScores.configure`` 固定按 RA 排序且不可注入排序键，
+    b50 变体（ap50、日服 NET、第三方 pc50）经本函数得到同构 PlayerBests。
+
+    - ``key``：单侧排序键（降序；标量或元组皆可，平手次序由键的后续位决定）；
+    - ``latest_version_value``：「新版本侧」下界版本码，缺省取 maimai_py
+      ``current_version``（日服 NET 链路传 ``current_version_jp``）；
+    - rating 三字段为**所列成绩的 RA 之和**（b50 变体的模板占位口径，
+      与 ap50 现状一致），不是玩家 rating。
+
+    调用方自行完成过滤/去重/曲级聚合——本函数只做拆分、排序、截断、求和。
+    """
+    if latest_version_value is None:
+        from maimai_py import current_version
+
+        latest_version_value = current_version.value
+    old: list[ScoreExtend] = []
+    new: list[ScoreExtend] = []
+    for score in scores:
+        (new if (score.version or 0) >= latest_version_value else old).append(score)
+    old.sort(key=key, reverse=True)
+    new.sort(key=key, reverse=True)
+    old, new = old[:35], new[:15]
+    ra_old = int(sum(s.dx_rating or 0 for s in old))
+    ra_new = int(sum(s.dx_rating or 0 for s in new))
+    return PlayerBests(
+        rating=ra_old + ra_new,
+        rating_b35=ra_old,
+        rating_b15=ra_new,
+        scores_b35=old,
+        scores_b15=new,
     )

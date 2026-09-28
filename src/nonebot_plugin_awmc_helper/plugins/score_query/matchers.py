@@ -10,7 +10,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .render import _ginfo_image
 from ...constants import DEFAULT_THEME, COLOR_TO_LEVEL_INDEX
-from ...core.score import UserScoreError, score_service
+from ...core.score import UserScoreError, build_bests, score_service
 from ...core.songs import (
     ChartEntry,
     cn_song_map,
@@ -260,11 +260,9 @@ async def _(
 ):
     """AP50（用户口径）：b50 的升级版——只统计 AP/APP 的 best50，渲染 B50 大图。
 
-    maimai_py 无 AP50 端点：全量成绩本地过滤后按版本拆 b35/b15 两侧灌入
-    B50 模板（Hoshino 落雪 ap50 端点 → Best50 → draw_best50 同构）。
+    maimai_py 无 AP50 端点：全量成绩本地过滤 fc∈{AP,APP} 后经公共
+    build_bests 组装（Hoshino 落雪 ap50 端点 → Best50 → draw_best50 同构）。
     """
-    from ...core.types import current_version
-
     binding = await _get_binding(session, event)
     notify_slow = slow_notice()
     scores = await score_service.get_scores_all(binding, notify_slow=notify_slow)
@@ -277,27 +275,15 @@ async def _(
     ]
     if not ap_scores:
         await UniMessage.text(" 没有查到 AP/APP 成绩").finish(at_sender=True)
-    # 两侧各自取满（旧 35 / 新 15）：先全局截 50 再切分会把一侧掏空、
-    # 总 RA 与模板 35/15 行数布局对不上
-    latest = current_version.value
-    ap_b35 = sorted(
-        (s for s in ap_scores if (s.version or 0) < latest),
-        key=lambda s: s.dx_rating or 0,
-        reverse=True,
-    )[:35]
-    ap_b15 = sorted(
-        (s for s in ap_scores if (s.version or 0) >= latest),
-        key=lambda s: s.dx_rating or 0,
-        reverse=True,
-    )[:15]
+    bests = build_bests(ap_scores, key=lambda s: s.dx_rating or 0)
     player = await score_service.get_player(binding, notify_slow=notify_slow)
     png = await b50_render.best50_bytes(
         _display_name(player),
-        sum(int(s.dx_rating or 0) for s in ap_b35 + ap_b15),
-        sum(int(s.dx_rating or 0) for s in ap_b35),
-        sum(int(s.dx_rating or 0) for s in ap_b15),
-        ap_b35,
-        ap_b15,
+        bests.rating,
+        bests.rating_b35,
+        bests.rating_b15,
+        bests.scores_b35,
+        bests.scores_b15,
         player=player,
         qqid=binding_service.qq_of(binding),
         service=binding.service,

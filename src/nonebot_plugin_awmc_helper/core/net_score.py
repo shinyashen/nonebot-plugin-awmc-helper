@@ -32,6 +32,7 @@ from maimai_py.utils import ScoreCoefficient
 from maimai_py.maimai import MaimaiScores
 
 from . import store
+from .calc import build_bests
 from .songs import song_service
 from .ext.net import NetPlayer, NetRecord, NetCredentials, MaimaiNetClient
 from ..constants import normalize_text
@@ -326,29 +327,15 @@ class NetScoreService:
 
     @staticmethod
     def _bests_of(scores: list[ScoreExtend]) -> PlayerBests:
-        """按 maimai_py MaimaiScores.configure 同口径组装 b35/b15 与总 rating。"""
-        b35: list[ScoreExtend] = []
-        b15: list[ScoreExtend] = []
-        current = current_version_jp.value
-        for score in scores:
-            if score.type not in (SongType.STANDARD, SongType.DX):
-                continue  # 宴谱不参与 rating（本模块抓取不含宴谱页，保险再滤一次）
-            (b15 if score.version >= current else b35).append(score)
+        """按 maimai_py MaimaiScores.configure 同口径组装 b35/b15 与总 rating。
 
-        def _key(s: ScoreExtend):
-            return (s.dx_rating or 0, s.dx_score or 0, s.achievements or 0)
-
-        b35.sort(key=_key, reverse=True)
-        b15.sort(key=_key, reverse=True)
-        b35, b15 = b35[:35], b15[:15]
-        rating_b35 = int(sum(s.dx_rating or 0 for s in b35))
-        rating_b15 = int(sum(s.dx_rating or 0 for s in b15))
-        return PlayerBests(
-            rating=rating_b35 + rating_b15,
-            rating_b35=rating_b35,
-            rating_b15=rating_b15,
-            scores_b35=b35,
-            scores_b15=b15,
+        宴谱先滤（本模块抓取不含宴谱页，保险再滤一次），排序/拆分/求和
+        收敛 core.calc.build_bests（版本侧用日服现行版本）。
+        """
+        return build_bests(
+            [s for s in scores if s.type in (SongType.STANDARD, SongType.DX)],
+            key=lambda s: (s.dx_rating or 0, s.dx_score or 0, s.achievements or 0),
+            latest_version_value=current_version_jp.value,
         )
 
 
