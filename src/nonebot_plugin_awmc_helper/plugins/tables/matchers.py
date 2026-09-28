@@ -16,9 +16,13 @@ from .sheet import (
 from ...constants import PLATE_CHARS, DEFAULT_THEME, chart_display_id
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
+from ...core.store import UserBinding
 from ...core.utils import parse_page, slow_notice, handle_errors
 from ...core.plates import PLATE_KINDS, is_valid_plate, plate_kinds_hint
-from ...core.binding import session_keys, binding_service, service_display
+from ...core.binding import (
+    SessionBinding,
+    service_display,
+)
 from ...core.render.score import DrawScore, score_list_height
 from ...core.render.tools import text_image_bytes
 
@@ -66,7 +70,11 @@ async def _(
 
 @score_table_cmd.handle()
 @handle_errors("生成完成表失败", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    groups: tuple = RegexGroup(),
+):
     """等级完成表（NB DrawRatingTable 移植）：模板 + 统计头 + 逐谱面盖章。
 
     计划映射：fc/fcp/ap → 连击章模式（NB plan=True）；fs 族 → Sync 章
@@ -76,7 +84,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     from ...core.render import table_template
 
     level, plan = groups
-    binding = await binding_service.ensure(*session_keys(session))
     entries = await _level_entries(level)
     if not entries:
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
@@ -95,7 +102,11 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
 @progress_cmd.handle()
 @handle_errors("生成进度失败", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    groups: tuple = RegexGroup(),
+):
     """等级进度（R4，NB DrawScore.draw_plan/draw_category 版式）。
 
     - `13fc进度`：三段总览（已完成 30/未完成 30/未游玩 100 网格）；
@@ -105,7 +116,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
     level, plan, category, page_raw = groups
     page = int(page_raw) if page_raw else 1
     checker, _plan_name = _plan_checker(plan)
-    binding = await binding_service.ensure(*session_keys(session))
     scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
 
@@ -181,7 +191,11 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
 @plate_cmd.handle()
 @handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    groups: tuple = RegexGroup(),
+):
     version, kind, mode, page_raw = groups
     # 牌单按真实牌表收紧（素材包 mai/plate_version 全量实证）：舞代四牌、
     # 霸仅者、真无将、初整代无牌
@@ -189,7 +203,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         await UniMessage.text(
             f" 没有找到「{version}{kind}」牌子。{plate_kinds_hint(version)}"
         ).finish(at_sender=True)
-    binding = await binding_service.ensure(*session_keys(session))
     page = parse_page(page_raw)
     plates = await score_service.get_plates(
         binding, f"{version}{kind}", notify_slow=slow_notice()
@@ -214,11 +227,14 @@ async def _():
 
 @score_list_cmd.handle()
 @handle_errors("查询失败", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    groups: tuple = RegexGroup(),
+):
     """分数列表（R5，NB DrawScore.draw_score_list 行卡版式，80/页）。"""
     ds_raw, page_raw = groups
     page = parse_page(page_raw)
-    binding = await binding_service.ensure(*session_keys(session))
     scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
     if "." in ds_raw:  # 定数
         ds = float(ds_raw)

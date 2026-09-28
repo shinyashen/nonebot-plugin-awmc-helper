@@ -8,6 +8,11 @@ from nonebot.params import RegexMatched
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from nonebot_plugin_awmc_helper.core.store import UserBinding
+from nonebot_plugin_awmc_helper.core.binding import (
+    SessionBinding,
+)
+
 from .render import (
     NOT_FOUND,
     JP_ONLY_NOTE,
@@ -27,7 +32,6 @@ from ...core.songs import cn_song_map, song_service, entries_list_text
 from ...core.types import SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
-from ...core.binding import session_keys, binding_service
 from ...core.chart_card import chart_card_bytes
 
 search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
@@ -35,14 +39,13 @@ search_alias_song = on_regex(r"(.+)是(?:什么|啥)歌[？?]?([0-9]+)?$", block
 query_chart = on_regex(r"(?i)^id\s?([0-9]+)$", block=True)
 
 
-async def _binding_of(session):
-    return await binding_service.ensure(*session_keys(session))
-
-
 @search.handle()
 @handle_errors()
-async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
-    binding = await _binding_of(session)
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    match: Match[str] = RegexMatched(),
+):
     cmd = match.group(1)
     rest = (match.group(2) or "").strip()
     if not cmd and not rest:
@@ -130,8 +133,11 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 
 @search_alias_song.handle()
 @handle_errors()
-async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
-    binding = await _binding_of(session)
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    match: Match[str] = RegexMatched(),
+):
     name = match.group(1).strip()
     page = int(match.group(2) or 1)
 
@@ -244,7 +250,11 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
 
 @query_chart.handle()
 @handle_errors()
-async def _(session: Session = UniSession(), match: Match[str] = RegexMatched()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    match: Match[str] = RegexMatched(),
+):
     _id = match.group(1)
     # 数字 id 解析单源 _resolve_raw_id（6 位宴 diff_id 定位 / DX 展示 id 回查 /
     # 形状推类型，与「是什么歌」别名入口同口径）
@@ -252,7 +262,6 @@ async def _(session: Session = UniSession(), match: Match[str] = RegexMatched())
     if hit is None:
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     song, card_prefer, jp, utage_diff = hit
-    binding = await _binding_of(session)
     png = (
         await _banquet_card(song, utage_diff, jp)
         if utage_diff is not None

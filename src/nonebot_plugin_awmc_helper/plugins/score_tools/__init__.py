@@ -22,9 +22,10 @@ from ...constants import LEVEL_INDEX_ZH, COLOR_TO_LEVEL_INDEX
 from ...core.calc import score_line, min_ds_of_ra, rise_recommend
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
+from ...core.store import UserBinding
 from ...core.types import SongType
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
-from ...core.binding import session_keys, binding_service, service_display
+from ...core.binding import SessionBinding, binding_service, service_display
 from ...core.render.tools import text_image_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -105,12 +106,15 @@ async def _(message: Message = CommandArg()):
 
 @rise_score.handle()
 @handle_errors("推分推荐失败，请稍后再试", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    groups: tuple = RegexGroup(),
+):
     from ...core.render.score import DrawScore
 
     level, target_raw = groups
     target = int(target_raw) if target_raw else 1
-    binding = await binding_service.ensure(*session_keys(session))
     bests = await score_service.get_b50(binding, notify_slow=slow_notice())
 
     # 候选：指定等级时按等级过滤，否则按 B50 末位 RA 推算定数区间
@@ -185,10 +189,9 @@ async def _(message: Message = CommandArg()):
 
 @my_rating_ranking.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession()):
+async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
     from ...core.binding import SERVICE_DIVINGFISH
 
-    binding = await binding_service.ensure(*session_keys(session))
     if binding.service != SERVICE_DIVINGFISH:
         await UniMessage.text(" 水鱼排行榜仅支持水鱼数据源（数据源 0）查询").finish(
             at_sender=True

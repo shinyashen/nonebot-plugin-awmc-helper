@@ -86,9 +86,7 @@ def plate_progress_bytes(
     current_y = 395
     for slot in slots:
         count = len(slot["items"])
-        rows = (
-            1 if count <= 0 else min((count - 1) // _GRID_COLS + 1, _MAX_ROWS)
-        )
+        rows = 1 if count <= 0 else min((count - 1) // _GRID_COLS + 1, _MAX_ROWS)
         current_y += rows * _GAP + 100
     height = current_y + 180
 

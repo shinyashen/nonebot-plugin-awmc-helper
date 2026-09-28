@@ -50,6 +50,24 @@ def session_keys(session: "Session") -> tuple[str, str]:
     return str(platform or "unknown").strip(), str(session.user.id)
 
 
+def SessionBinding():
+    """handler DI 依赖工厂：会话绑定，无则按部署默认查分器自动创建。
+
+    用法 ``binding: UserBinding = SessionBinding()``（nonebot.params.Depends
+    惯用大驼峰工厂名）；= ``binding_service.ensure(*session_keys(session))``
+    的 Depends 形态，session 由 DI 注入，各子插件查询类 handler 共用。
+    """
+
+    from nonebot_plugin_uninfo import UniSession
+
+    async def _get(session=UniSession()):
+        return await binding_service.ensure(*session_keys(session))
+
+    from nonebot.params import Depends
+
+    return Depends(_get)
+
+
 LXNS_PENDING_TTL = 90  # 落雪授权码回填会话无操作超时（秒）
 
 

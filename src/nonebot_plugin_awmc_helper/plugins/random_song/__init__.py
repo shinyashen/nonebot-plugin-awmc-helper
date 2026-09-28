@@ -20,9 +20,10 @@ from ...constants import ZH_TO_GENRE, COLOR_TO_LEVEL_INDEX
 from ...core.calc import SSSP_ACHIEVEMENT, min_ds_of_ra
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
+from ...core.store import UserBinding
 from ...core.types import Genre, SongType, ScoreExtend
 from ...core.utils import slow_notice, handle_errors
-from ...core.binding import session_keys, binding_service
+from ...core.binding import SessionBinding
 from ...core.chart_card import chart_card_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -49,7 +50,11 @@ mai_what_rise = on_command(
 
 @random_chart.handle()
 @handle_errors("随机失败，请稍后再试")
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    groups: tuple = RegexGroup(),
+):
     type_raw, color, level = groups
     song_type = None
     if type_raw:
@@ -66,7 +71,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
         )
     song, _diff = got
     # Hoshino/NB 同设计：随机结果渲染通常的谱面卡（draw_chart_info 语义）
-    binding = await binding_service.ensure(*session_keys(session))
     await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
         at_sender=True
     )
@@ -74,7 +78,11 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
 @genre_random.handle()
 @handle_errors("随机失败，请稍后再试")
-async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
+async def _(
+    session: Session = UniSession(),
+    binding: UserBinding = SessionBinding(),
+    groups: tuple = RegexGroup(),
+):
     """按分类随机谱面（随个流行等）。宴会場分类允许宴谱入池——
     宴谱是該分类的全部内容，按其余分类的排除口径会必然落空。"""
     genre = ZH_TO_GENRE[groups[0]]
@@ -84,7 +92,6 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
             at_sender=True
         )
     song, _diff = got
-    binding = await binding_service.ensure(*session_keys(session))
     await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
         at_sender=True
     )
@@ -92,13 +99,12 @@ async def _(session: Session = UniSession(), groups: tuple = RegexGroup()):
 
 @mai_what.handle()
 @handle_errors("随机失败，请稍后再试")
-async def _(session: Session = UniSession()):
+async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
     got = await song_service.random(exclude_utage=True)
     if got is None:
         await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
     song, _diff = got
     # Hoshino/NB 同设计：mai什么 同样渲染通常的谱面卡
-    binding = await binding_service.ensure(*session_keys(session))
     await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
         at_sender=True
     )
@@ -106,12 +112,11 @@ async def _(session: Session = UniSession()):
 
 @mai_what_rise.handle()
 @handle_errors("推荐失败，请稍后再试", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession()):
+async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
     """mai什么加分：NB 版 get_mai_what 语义——基于 B50 末位 RA 反推定数区间随机推荐单曲。
 
     未绑定 / B50 拉取失败 / 无候选时退化为普通随机曲目（与原版行为一致）。
     """
-    binding = await binding_service.ensure(*session_keys(session))
     song = None
     try:
         bests = await score_service.get_b50(binding, notify_slow=slow_notice())
@@ -123,7 +128,6 @@ async def _(session: Session = UniSession()):
         if got is None:
             await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
         song, _diff = got
-    binding = await binding_service.ensure(*session_keys(session))
     await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
         at_sender=True
     )

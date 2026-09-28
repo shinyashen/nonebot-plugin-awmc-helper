@@ -106,7 +106,9 @@ async def test_get_curves_failure_degrades():
     from nonebot_plugin_awmc_helper.core.provider import DivingFishCurveProvider
 
     with respx.mock(assert_all_called=True) as m:
-        m.get("https://www.diving-fish.com/api/maimaidxprober/chart_stats").side_effect = (  # noqa: E501
+        m.get(
+            "https://www.diving-fish.com/api/maimaidxprober/chart_stats"
+        ).side_effect = (  # noqa: E501
             RuntimeError("network down")
         )
         provider = DivingFishCurveProvider()

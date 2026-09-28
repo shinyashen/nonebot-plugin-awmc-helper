@@ -660,9 +660,7 @@ async def upsert_arcades(arcades: list["Arcade"]) -> None:
         ids = [arcade.id for arcade in arcades]
         existing: dict[int, Arcade] = {}
         if ids:
-            rows = (
-                await db.exec(select(Arcade).where(col(Arcade.id).in_(ids)))
-            ).all()
+            rows = (await db.exec(select(Arcade).where(col(Arcade.id).in_(ids)))).all()
             existing = {row.id: row for row in rows}
         for arcade in arcades:
             row = existing.get(arcade.id)
