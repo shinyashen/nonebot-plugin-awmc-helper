@@ -120,10 +120,14 @@ class ScoreService:
         """统一执行 maimai-py 查询：异常映射 + 落雪 token 过期自动续期重试。
 
         ``make_coro`` 是无参协程工厂，重试时重新装配 identifier（token 已刷新）。
-        续期成功后走 :meth:`_retry_after_refresh` 阶梯（落雪对新令牌的生效有
-        短延迟，见 local/QUESTIONS.md Q43）；``notify_slow`` 在等待超过预期时
-        被调用一次（handler 传发送回调，供用户侧提示）。
+        入口先做落雪 token 预检（JWT exp 已过/临近则先续期，省掉必败首跳；
+        best-effort 不上抛）。续期成功后走 :meth:`_retry_after_refresh` 阶梯
+        （落雪对新令牌的生效有短延迟，见 local/QUESTIONS.md Q43）；
+        ``notify_slow`` 在等待超过预期时被调用一次（handler 传发送回调，供
+        用户侧提示）。
         """
+        if binding is not None:
+            await binding_service.preflight_lxns(binding)
         try:
             return await make_coro()
         except BindingError as e:
@@ -179,7 +183,10 @@ class ScoreService:
     ):
         """凭据形态回退收口（get_scores_all/get_plates 逐行同构）。
 
-        先用完整标识（OAuth subject / Import-Token）执行 ``make(ident)``；
+        ``make(get_ident)`` 收到的是标识**装配函数**而非实例：工厂每次调用
+        重新装配 identifier，401 续期后的阶梯重试才能用上新 token（预检救活
+        首跳，生效延迟窗口内的重试靠这里保证不拿旧凭据硬撞）。
+        先用完整标识（OAuth subject / Import-Token）执行 ``make``；
         PlayerNotAuthorizedError（未覆盖补齐名单）回退公开键重试——developer
         端点日落后的迁移语义，指引补录 Import-Token，比裸「未授权」更有行动
         价值。单曲查询无公开键形态，不走此处（get_minfo 专项文案）。
@@ -187,13 +194,13 @@ class ScoreService:
         try:
             return await self._run(
                 binding,
-                make(binding_service.full_identifier(binding)),
+                make(lambda: binding_service.full_identifier(binding)),
                 notify_slow=notify_slow,
             )
         except PlayerNotAuthorizedError:
             return await self._run(
                 binding,
-                make(binding_service.identifier(binding, with_oauth=False)),
+                make(lambda: binding_service.identifier(binding, with_oauth=False)),
                 notify_slow=notify_slow,
             )
 
@@ -261,10 +268,13 @@ class ScoreService:
         self._guard_cn(binding)
         await song_service.ensure_loaded()
 
-        def make(ident):
-            return lambda: client.scores(
-                ident, provider=binding_service.provider(binding)
-            )
+        def make(get_ident):
+            def factory():
+                return client.scores(
+                    get_ident(), provider=binding_service.provider(binding)
+                )
+
+            return factory
 
         return await self._run_with_public_fallback(binding, make, notify_slow)
 
@@ -299,31 +309,41 @@ class ScoreService:
         没分」时查 DX 谱应提示未游玩，而不是画一张全「未游玩」的空卡；为 None
         时任一类型有成绩即算玩过（名称命中多条目、宴谱条目等场景）。
         """
-        ident: PlayerIdentifier | None = None
-        if binding is not None:
-            if binding.service == SERVICE_NET:
-                return await self.get_minfo_net(binding, song, song_type)
-            ident = binding_service.identifier_or_none(binding)
+        if binding is not None and binding.service == SERVICE_NET:
+            return await self.get_minfo_net(binding, song, song_type)
         await song_service.ensure_loaded()
-        try:
-            result = await self._run(
-                binding,
-                lambda: client.minfo(
-                    song,
-                    ident,
-                    provider=divingfish_provider
-                    if ident is None
-                    else binding_service.provider(binding),  # type: ignore[arg-type]
-                ),
-                notify_slow=notify_slow,
+
+        # 有无公开键只用于结果过滤（装配期判定，凭据刷新不改变有无）；
+        # 工厂内每次尝试重新装配 ident，401 续期后阶梯重试才用得上新 token
+        has_ident = (
+            binding_service.identifier_or_none(binding) is not None
+            if binding is not None
+            else False
+        )
+
+        def factory():
+            ident = (
+                binding_service.identifier_or_none(binding)
+                if binding is not None
+                else None
             )
+            return client.minfo(
+                song,
+                ident,
+                provider=divingfish_provider
+                if ident is None
+                else binding_service.provider(binding),  # type: ignore[arg-type]
+            )
+
+        try:
+            result = await self._run(binding, factory, notify_slow=notify_slow)
         except PlayerNotAuthorizedError as e:
             # 单曲只有 OAuth Bearer 形态，无回退路径：未覆盖用户给专项文案
             raise UserScoreError(
                 "该水鱼账号未授权本 bot 查询单曲成绩。\n"
                 "请发送「绑定水鱼」完成一次授权（约 1 分钟）"
             ) from e
-        if ident is None or result is None:
+        if not has_ident or result is None:
             return result
         return result if _has_scores(result.scores, song_type) else None
 

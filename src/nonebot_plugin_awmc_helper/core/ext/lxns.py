@@ -3,6 +3,8 @@
 端点与字段对齐原版 maimaiDX 的 LXNS OAuth2 实现。
 """
 
+import json
+import base64
 from dataclasses import dataclass
 
 import httpx
@@ -121,6 +123,32 @@ async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
     if resp.status_code != 200 or not data.get("success", True):
         raise ExtError(str(data.get("message", error_default)))
     return LxnsToken.from_payload(data.get("data", data))
+
+
+def token_expiry(access_token: str) -> float | None:
+    """读出 access token 的过期时刻（JWT ``exp``，缺则 ``iat + 900``）。
+
+    只解不验：令牌是落雪签发、仅库存自用，本地预检判过期无需验签，验签由
+    落雪资源服务器做（同水鱼 ``token_subject`` 先例）。有效期 900 秒取自
+    oauth-guide（``expires_in=900``）。非 JWT / payload 非对象 / 两字段皆缺
+    时返回 None，调用方回退 401 驱动的既有续期链路（落雪 OAuth 仍在 beta，
+    不对令牌内部结构做硬依赖）。
+    """
+    try:
+        payload = access_token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload))
+    except (IndexError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    exp = data.get("exp")
+    if isinstance(exp, (int, float)):
+        return float(exp)
+    iat = data.get("iat")
+    if isinstance(iat, (int, float)):
+        return float(iat) + 900
+    return None
 
 
 async def fetch_token(code: str) -> LxnsToken:

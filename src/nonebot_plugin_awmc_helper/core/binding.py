@@ -185,6 +185,17 @@ class BindingService:
     # 落雪续期按用户互斥：refresh_token 一次性轮换，并发续期的后到者
     # 重放旧 rt 会 invalid_grant（落雪甚至可能据此撤销授权）
     _lxns_refresh_locks: ClassVar[dict[tuple[str, str], asyncio.Lock]] = {}
+    # 各用户最近一次续期成功时刻（monotonic）：短窗内的续期请求不再重放
+    # grant——预检刚刷过的令牌随即 401（落雪侧生效延迟，Q43）会再触发
+    # 401 驱动续期，重放 grant 只会白转一次 rt、把生效窗口往后推（Q45
+    # 观察到的「白白轮换加剧踩踏」）。按用户键增长，进程内有界。
+    _lxns_refresh_at: ClassVar[dict[tuple[str, str], float]] = {}
+
+    # 预检余量：exp 到秒即 401 无宽限（Q43 受控实验），margin 只吸收本地
+    # 时钟偏差与「检查到实际发起调用」的耗时；生效延迟由 401 阶梯兜底
+    LXNS_PREFLIGHT_MARGIN = 60
+    # 视为「刚续期过」的短窗：覆盖 401 阶梯全程（0/5/10s）+ 一次请求余量
+    LXNS_RECENT_REFRESH_WINDOW = 60.0
 
     def _lxns_refresh_lock(self, platform: str, user_id: str) -> asyncio.Lock:
         return self._lxns_refresh_locks.setdefault((platform, user_id), asyncio.Lock())
@@ -401,6 +412,9 @@ class BindingService:
         凭据返回、不重放旧 rt。落库必须在锁内完成（save 的 commit 与后到者
         的锁内重读走不同连接，先释放锁会让重读赶在 commit 生效前看到旧
         token，误判「没人刷新过」而重放已轮换作废的旧 rt → invalid_grant）。
+        短窗防重放：刚续期成功后 ``LXNS_RECENT_REFRESH_WINDOW`` 内的再续期
+        请求直接按 ``"refreshed"`` 返回、不重放 grant（预检与 401 驱动双入口
+        汇聚时的防白转守卫，见 :attr:`_lxns_refresh_at` 注）。
         与默认查分器 ``service`` 无关——凭据齐备即可续期（2026-09-26 放宽，
         原要求 service == lxns）。
         """
@@ -424,6 +438,14 @@ class BindingService:
                 if fresh.lxns_friend_code:
                     binding.lxns_friend_code = fresh.lxns_friend_code
                 return "refreshed"
+            recent = self._lxns_refresh_at.get((binding.platform, binding.user_id))
+            if (
+                recent is not None
+                and time.monotonic() - recent < self.LXNS_RECENT_REFRESH_WINDOW
+            ):
+                # 刚续期过：库里 token 就是刚签发的（15 分钟内有效），按已
+                # 续期处理让调用方走重试阶梯等落雪侧生效即可
+                return "refreshed"
             try:
                 token = await lxns_ext.refresh_token(binding.lxns_refresh_token)
             except lxns_ext.LxnsGrantError as e:
@@ -440,7 +462,31 @@ class BindingService:
             if token.friend_code:
                 binding.lxns_friend_code = token.friend_code
             await store.save_binding(binding)
+            self._lxns_refresh_at[(binding.platform, binding.user_id)] = (
+                time.monotonic()
+            )
             return "refreshed"
+
+    async def preflight_lxns(self, binding: UserBinding) -> None:
+        """落雪 token 主动续期预检（查询/导分入口在装配凭据前调用）。
+
+        JWT ``exp`` 已过或临近（:data:`LXNS_PREFLIGHT_MARGIN`）就先续期，
+        省掉闲置超期后首查的必败 401（exp 到秒即失效，Q43 受控实验）；
+        新令牌的落雪侧生效延迟不由本方法解决，仍由调用方的 401 重试阶梯
+        兜底。best-effort：无凭据、解码失败（非 JWT，回退 401 驱动链路）、
+        续期失败（旧 token 可能仍在有效期内）一律静默返回，不得使查询失败。
+        """
+        from .ext import lxns as lxns_ext
+
+        if not binding.lxns_token:
+            return
+        exp = lxns_ext.token_expiry(binding.lxns_token)
+        if exp is None or time.time() < exp - self.LXNS_PREFLIGHT_MARGIN:
+            return
+        try:
+            await self.refresh_lxns(binding)
+        except Exception:
+            logger.debug("落雪 token 预检续期失败（忽略，走原链路）", exc_info=True)
 
     def provider(self, binding: UserBinding):
         """按绑定取数据源 provider（与 core.client 的单例同源）。"""
