@@ -18,6 +18,7 @@ from . import store
 from .store import UserBinding
 from ..config import plugin_config
 from ..constants import THEMES, SERVICE_DISPLAY
+from .session_store import TtlSession, TtlSessionStore
 
 if TYPE_CHECKING:
     from nonebot.adapters import Event
@@ -107,9 +108,8 @@ class BindingError(Exception):
 
 
 @dataclass
-class PendingSession:
+class PendingSession(TtlSession):
     kind: str
-    expires: float
 
 
 class PendingBindingStore:
@@ -119,33 +119,37 @@ class PendingBindingStore:
     超时会话短暂留在 ``_expired``（``EXPIRED_HINT_WINDOW`` 秒内可查），
     供拦截器对超时后仍发码的用户给出重发指引，避免静默无响应。
 
-    ⚠️ 每键单槽（``start`` 互踢）：落雪授权码与水鱼确认码形态同构，两条
-    on_message 拦截规则靠 kind 区分路由——正确性依赖「同一用户同时至多
-    一个待回填会话」这一不变量；若将来放宽为多会话，拦截规则需重审。
+    ⚠️ 每键单槽（``start`` 互踢）：落雪授权码与水鱼确认码形态同构，拦截
+    规则靠 kind 区分路由——正确性依赖「同一用户同时至多一个待回填会话」
+    这一不变量；若将来放宽为多会话，拦截规则需重审。
     """
 
     EXPIRED_HINT_WINDOW = 300
 
     def __init__(self) -> None:
-        self._sessions: dict[tuple[str, str], PendingSession] = {}
+        self._sessions: TtlSessionStore[tuple[str, str], PendingSession] = (
+            TtlSessionStore()
+        )
         self._expired: dict[tuple[str, str], tuple[str, float]] = {}
 
     def start(
         self, platform: str, user_id: str, kind: str, ttl: int = LXNS_PENDING_TTL
     ) -> None:
-        self._sessions[(platform, user_id)] = PendingSession(
-            kind=kind, expires=time.monotonic() + ttl
+        self._sessions.start(
+            (platform, user_id),
+            PendingSession(kind=kind, expire_at=time.monotonic() + ttl),
         )
         self._expired.pop((platform, user_id), None)
 
     def is_active(self, platform: str, user_id: str, kind: str | None = None) -> bool:
-        sess = self._sessions.get((platform, user_id))
+        sess, expired = self._sessions.take((platform, user_id))
         if sess is None:
             return False
-        if sess.expires < time.monotonic():
-            del self._sessions[(platform, user_id)]
+        if expired:
+            # 过期转提示窗副表（超时后仍发码给重发指引）
             self._expired[(platform, user_id)] = (sess.kind, time.monotonic())
             return False
+        self._sessions.start((platform, user_id), sess)
         return kind is None or sess.kind == kind
 
     def expired_recently(
@@ -162,7 +166,7 @@ class PendingBindingStore:
         return kind is None or expired_kind == kind
 
     def discard(self, platform: str, user_id: str) -> None:
-        self._sessions.pop((platform, user_id), None)
+        self._sessions.discard((platform, user_id))
         self._expired.pop((platform, user_id), None)
 
 

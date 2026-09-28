@@ -193,8 +193,8 @@ async def test_lxns_pending_expiry_hint(app: App, db, monkeypatch):
     monkeypatch.setattr(nonebot_plugin_uninfo, "get_session", fake_get_session)
 
     pending_bindings.start("OneBot V11", "12345678", "lxns")
-    sess = pending_bindings._sessions[("OneBot V11", "12345678")]
-    sess.expires = _time.monotonic() - 1  # 置为已过期
+    sess = pending_bindings._sessions._sessions[("OneBot V11", "12345678")]
+    sess.expire_at = _time.monotonic() - 1  # 置为已过期
 
     event = fake_group_message_event_v11(message="X7TF-J3TU-AXSH")
     async with app.test_matcher(bind.bind_code_fill) as ctx:
