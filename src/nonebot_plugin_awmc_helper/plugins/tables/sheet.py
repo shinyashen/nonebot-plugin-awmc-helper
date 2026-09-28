@@ -8,7 +8,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...constants import LEVEL_LIST, chart_display_id
 from ...core.score import score_service
 from ...core.songs import song_service
-from ...core.types import FCType, FSType, SongType
+from ...core.types import FCType, FSType
 from ...core.utils import slow_notice
 from ...core.plates import in_plate_scope, major_type_of_plate, plate_version_range
 from ...core.binding import service_display
@@ -67,12 +67,9 @@ def _plan_checker(plan: str):
 
 async def _level_entries(level: str) -> list[tuple]:
     """全库指定标级的谱面条目（定数表/完成表/推分计划三处查询共用）。"""
-    return [
-        (song, d)
-        for song in await song_service.get_all()
-        for d in song.get_difficulties()
-        if d.type != SongType.UTAGE and d.level == level
-    ]
+    from ...core.render.table_template import filter_level
+
+    return filter_level(await song_service.get_all(), level)
 
 
 async def _plate_completion_sheet(binding, version: str, kind: str, page: int) -> None:

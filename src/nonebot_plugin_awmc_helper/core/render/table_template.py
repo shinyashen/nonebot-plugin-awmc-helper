@@ -297,9 +297,10 @@ def _plate_grid(
 # ---------------------------------------------------------------------------
 
 
-def _filter_level(
+def filter_level(
     songs: Sequence[Song], level: str
 ) -> list[tuple[Song, SongDifficulty]]:
+    """全库指定标级的谱面条目（排除宴谱；底图生成与插件层查询共用）。"""
     entries = []
     for song in songs:
         for diff in song.get_difficulties():
@@ -310,7 +311,7 @@ def _filter_level(
 
 async def generate_rating_template(level: str, song_service) -> int:
     """NB 布局生成某等级定数表底图；lv15 走三列大图。返回谱面数。"""
-    entries = _filter_level(await song_service.get_all(), level)
+    entries = filter_level(await song_service.get_all(), level)
     if not entries:
         return 0
     img = _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
