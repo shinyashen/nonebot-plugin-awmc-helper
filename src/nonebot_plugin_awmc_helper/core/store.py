@@ -652,10 +652,20 @@ async def update_arcade_count(
 
 
 async def upsert_arcades(arcades: list["Arcade"]) -> None:
-    """按主键批量覆盖（华立官方同步用；单事务，保留本地字段）。"""
+    """按主键批量覆盖（华立官方同步用；单事务，保留本地字段）。
+
+    存量行一次 ``in_()`` 取回建 dict——华立全量同步上千机厅，逐行 SELECT 是 N+1。
+    """
     async with session() as db:
+        ids = [arcade.id for arcade in arcades]
+        existing: dict[int, Arcade] = {}
+        if ids:
+            rows = (
+                await db.exec(select(Arcade).where(col(Arcade.id).in_(ids)))
+            ).all()
+            existing = {row.id: row for row in rows}
         for arcade in arcades:
-            row = (await db.exec(select(Arcade).where(Arcade.id == arcade.id))).first()
+            row = existing.get(arcade.id)
             if row:
                 arcade.is_custom = row.is_custom
                 arcade.person = row.person
