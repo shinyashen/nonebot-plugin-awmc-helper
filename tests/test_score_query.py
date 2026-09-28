@@ -539,7 +539,7 @@ async def test_minfo_alias_lists_entry_ids(app: App, db, songs, monkeypatch):
         "找到2个谱面："
         "\n231：PENGUIN"
         "\n10231：PENGUIN"
-        "\n※ 请使用「minfo <ID>」查询指定谱面",
+        "\n※ 请使用「ginfo <ID>」查询指定谱面",
     )
 
 

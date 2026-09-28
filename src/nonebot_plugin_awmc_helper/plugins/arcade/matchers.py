@@ -158,6 +158,7 @@ def _arcade_msg(a: store.Arcade) -> str:
 
 
 @arcade_help.handle()
+@handle_errors()
 async def _():
     await UniMessage.image(raw=text_image_bytes(ARCADE_HELP)).finish(at_sender=True)
 

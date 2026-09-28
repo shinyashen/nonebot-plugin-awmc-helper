@@ -84,7 +84,7 @@ async def _resolve_song(key: str):
     if len(songs) > 1:
         msg = f"找到{len(songs)}首相关乐曲：\n"
         msg += "".join(f"{s.id}：{s.title}\n" for s in songs[:10])
-        msg += "※ 请使用「minfo <ID>」指定曲目"
+        msg += "※ 请使用「ginfo <ID>」指定曲目"
         await UniMessage.text(msg.rstrip(" \n")).finish(at_sender=True)
     return songs[0]
 
@@ -120,7 +120,7 @@ async def _finish_entry_list(entries: "list[ChartEntry]") -> None:
     cn_songs = await cn_song_map([s for _, s, _ in entries])
     flags = [cn_songs[s.id] is None for _, s, _ in entries]
     text = entries_list_text(
-        entries, flags, hint="※ 请使用「minfo <ID>」查询指定谱面", limit=10
+        entries, flags, hint="※ 请使用「ginfo <ID>」查询指定谱面", limit=10
     )
     await UniMessage.text(f" {text}").finish(at_sender=True)
 
@@ -256,7 +256,7 @@ async def _(
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
     session: Session = UniSession(),
-    event: Event = None,  # type: ignore[assignment]
+    event: Event | None = None,
 ):
     """AP50（用户口径）：b50 的升级版——只统计 AP/APP 的 best50，渲染 B50 大图。
 
@@ -310,7 +310,7 @@ async def _(
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
     session: Session = UniSession(),
-    event: Event = None,  # type: ignore[assignment]
+    event: Event | None = None,
     message: Message = CommandArg(),  # type: ignore[assignment]
 ):
     # extract_plain_text 丢弃 at 段：minfo 231 @某人 → 代查某人该曲成绩
