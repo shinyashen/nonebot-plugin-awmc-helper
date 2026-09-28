@@ -280,6 +280,18 @@ def test_score_row_sub_hook_swaps_subline():
     assert render(lambda s: f"pc: {s.id}") == render(lambda s: f"pc: {s.id}")
 
 
+def test_cover_song_id_utage_keeps_full_id():
+    """宴谱 id 100000+ 不得取模（修复前 100001 % 10000 = 1 命中别的歌的封面）。"""
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import cover_song_id
+
+    assert cover_song_id(_score(100001, SongType.UTAGE)) == 100001
+    # 常规谱维持取模归一化（落雪缺位 id 与水鱼全 id 落到同一封面文件）
+    assert cover_song_id(_score(10231, SongType.DX)) == 231
+    assert cover_song_id(_score(231, SongType.STANDARD)) == 231
+
+
 @requires_assets
 @pytest.mark.asyncio
 async def test_b50_footer_color_follows_theme(monkeypatch):

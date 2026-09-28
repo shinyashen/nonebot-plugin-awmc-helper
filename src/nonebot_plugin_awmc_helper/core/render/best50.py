@@ -193,6 +193,14 @@ def game_song_id(score: ScoreExtend) -> int:
     return score.id
 
 
+def cover_song_id(score: ScoreExtend) -> int:
+    """曲绘文件 ID：素材包封面按去偏移序号命名，取模统一落雪缺位/水鱼全 id；
+    宴谱 id 100000+ 与常规序列不同源，取模会命中别的歌的封面，须用全 id 直查。"""
+    if score.type == SongType.UTAGE:
+        return score.id
+    return score.id % 10000
+
+
 def truncate_title(s: str, limit: int = 18) -> str:
     """标题超宽截断（Hoshino 双参数规则：>limit 才截、截后 ≤limit-1 列）。"""
     return truncate_hoshino(s, limit)
@@ -488,9 +496,9 @@ def draw_score_row(
         im.alpha_composite(_utage_score_bg(), (x, y))
     else:
         im.alpha_composite(_score_row_bg(score.level_index), (x, y))
-    cover = assets.cover(score.id % 10000).resize((75, 75))
+    cover = assets.cover(cover_song_id(score)).resize((75, 75))
     im.alpha_composite(cover, (x + 12, y + 12))
-    type_abbr = "DX" if score.type.name == "DX" else "SD"
+    type_abbr = "DX" if score.type == SongType.DX else "SD"
     if badge := assets.type_badge(type_abbr, (37, 14)):
         im.alpha_composite(badge, (x + 51, y + 91))
     rate = _rate_badge(theme, score.rate)
