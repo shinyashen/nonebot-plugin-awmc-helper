@@ -78,7 +78,7 @@ class Config(BaseModel):
     # fill 语义 + 创建缺失曲；每日管线内 title-diff 候选，默认关需显式开启）
     awmc_munet_batch: bool = False
     # MuNET 别名全量走查刷新间隔（天，0=禁用默认关；走查有断点续走与单次
-    # 40 分钟时间预算，首轮约 2 晚走完）
+    # 60 分钟时间预算，实测约 30 分钟单晚走完）
     awmc_munet_alias_days: int = 0
     # 日服 NET 数据源 per-user 查询冷却（分钟，0=禁用；dxrating 同款 15 分钟）
     awmc_net_cooldown_minutes: int = 15

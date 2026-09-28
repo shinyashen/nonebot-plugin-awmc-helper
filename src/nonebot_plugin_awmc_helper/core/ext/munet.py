@@ -35,8 +35,9 @@ _last_request_at = 0.0
 
 _WALK_KV = "munet_alias_walk"
 _BATCH_KV = "munet_batch"
-_WALK_BUDGET_SECONDS = 2400.0
-"""单次走查时间预算（40 分钟 ≈ 2400 请求），超时记游标跨日续走。"""
+_WALK_BUDGET_SECONDS = 3600.0
+"""单次走查时间预算（60 分钟；规范表实测 1763 请求 ≈ 30 分钟，预算留足余量
+保证单晚走完），超时记游标跨日续走。"""
 
 # genre 数字 → 规范表流派名（落雪/国服值域）。2026-09-28 与规范表全量分组对账
 # 推导（抽样 46 曲六档全一致），非官方映射表；107=宴会場 为推断（未实测到条目）。
@@ -261,8 +262,8 @@ async def refresh_aliases_full(*, budget_seconds: float = _WALK_BUDGET_SECONDS) 
     - 完成后整源替换 ``song_alias``（source=munet，原始形态，归一化在 provider
       合并层）；中断记 kv 游标，下次任务从断点继续（单条失败游标照常前进，
       下个刷新周期自然重试）；
-    - ``awmc_munet_alias_days`` 控制整轮间隔（0=禁用）；时间预算默认 40 分钟
-      （1s 间隔 ≈ 2400 请求/轮）。
+    - ``awmc_munet_alias_days`` 控制整轮间隔（0=禁用）；时间预算默认 60 分钟，
+      单晚走完（实测 1763 请求 ≈ 30 分钟）。
     """
     from ...config import plugin_config
 
