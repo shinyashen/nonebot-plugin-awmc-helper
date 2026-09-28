@@ -11,7 +11,6 @@
 - `解绑`、`数据源 <0/1/2>`、`主题 <0/1>`、`我的绑定`
 """
 
-
 from nonebot.plugin import PluginMetadata
 
 from .matchers import (

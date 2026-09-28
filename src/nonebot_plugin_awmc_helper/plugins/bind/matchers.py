@@ -3,6 +3,7 @@
 NET 绑定验证域的业务逻辑在 :mod:`.net`（无注册副作用）；本模块只做
 参数解析、门禁与文案组装。
 """
+
 from nonebot import on_command, on_message
 from nonebot.rule import Rule
 from nonebot.params import CommandArg
