@@ -108,9 +108,7 @@ async def test_get_curves_failure_degrades():
     with respx.mock(assert_all_called=True) as m:
         m.get(
             "https://www.diving-fish.com/api/maimaidxprober/chart_stats"
-        ).side_effect = (
-            RuntimeError("network down")
-        )
+        ).side_effect = RuntimeError("network down")
         provider = DivingFishCurveProvider()
         assert await provider.get_curves(None) == {}  # type: ignore[arg-type]
     assert provider._hash() != DivingFishCurveProvider._OK_HASH
