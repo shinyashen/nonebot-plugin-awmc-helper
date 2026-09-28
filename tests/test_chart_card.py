@@ -40,7 +40,8 @@ async def test_theme_survives_b50_failure(monkeypatch):
     out = await chart_card.chart_card_bytes(_plain_song(), binding)
     assert out == b"img"
     assert seen["theme"] == "circle"
-    assert seen["calc"] is False and seen["best_list"] == []
+    assert seen["calc"] is False
+    assert seen["best_list"] == []
 
 
 @pytest.mark.asyncio
