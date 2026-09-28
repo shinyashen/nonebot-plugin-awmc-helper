@@ -931,6 +931,7 @@ async def full_refresh() -> dict:
             batch = await munet.run_batch_supplement()
             if batch.get("status") == "batch":
                 extra["changed"] = True
+                result["munet_batch"] = batch
         except Exception:
             logger.exception("MuNET 版本批次补充失败（不影响规范表管线）")
     if extra.get("changed"):

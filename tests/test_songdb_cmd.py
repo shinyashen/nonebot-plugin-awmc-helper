@@ -53,7 +53,14 @@ async def test_reload_extra_continues_after_progress(app: App, monkeypatch):
         )
         ctx.should_call_send(
             event,
-            Message([MessageSegment.text("补充数据已重载并重建底图（源 1 个）。")]),
+            Message(
+                [
+                    MessageSegment.text(
+                        "补充数据已重载并重建底图（源 1 个）"
+                        "；MuNET 别名走查未启用（awmc_munet_alias_days=0）。"
+                    )
+                ]
+            ),
             result=None,
             bot=bot,
         )
@@ -164,3 +171,73 @@ async def test_refresh_songs_failure(app: App, monkeypatch):
             bot=bot,
         )
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_reload_starts_munet_walk_when_enabled(app: App, monkeypatch):
+    import asyncio
+
+    import nonebot
+    from fake import fake_private_message_event_v11
+    from nonebot.adapters.onebot.v11 import (
+        Bot,
+        Message,
+        MessageSegment,
+    )
+    from nonebot.adapters.onebot.v11 import (
+        Adapter as OnebotV11Adapter,
+    )
+
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.plugins import songdb as plugin
+    from nonebot_plugin_awmc_helper.core.ext import munet, gamerch
+
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+    monkeypatch.setattr(plugin_config, "awmc_munet_alias_days", 7)
+
+    async def fake_apply(*, force: bool = False) -> dict:
+        return {"sources": 1, "applied": 0, "changed": False}
+
+    async def fake_gamerch_fill() -> tuple[int, bool]:
+        return 0, False
+
+    calls: list[dict] = []
+
+    async def fake_walk(**kwargs):
+        calls.append(kwargs)
+        return {"status": "done", "aliases": 10}
+
+    monkeypatch.setattr(songdb, "apply_external_sources", fake_apply)
+    monkeypatch.setattr(gamerch, "apply_fill", fake_gamerch_fill)
+    monkeypatch.setattr(munet, "refresh_aliases_full", fake_walk)
+
+    event = fake_private_message_event_v11(message="重载补充数据", user_id=12345678)
+    async with app.test_matcher(plugin.reload_extra) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.text("正在重载外部补充数据……")]),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.text(
+                        "补充数据无变化（源 1 个，本次应用 0 处，wiki 无缺口）"
+                        "；MuNET 别名走查已后台启动（约 30 分钟，结果见日志）。"
+                    )
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    # 等后台走查任务执行完毕并校验 force 透传
+    while plugin._munet_bg_tasks:
+        await asyncio.gather(*list(plugin._munet_bg_tasks))
+    assert calls
+    assert calls[0]["force"] is True

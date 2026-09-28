@@ -32,6 +32,8 @@ _MIN_INTERVAL = 1.0
 
 _throttle_lock = asyncio.Lock()
 _last_request_at = 0.0
+_walk_lock = asyncio.Lock()
+"""别名走查互斥锁：每日任务与手动触发（重载补充数据）不会并发走查。"""
 
 _WALK_KV = "munet_alias_walk"
 _BATCH_KV = "munet_batch"
@@ -256,29 +258,42 @@ def harvest_aliases(entries: list[dict]) -> dict[int, list[str]]:
     return out
 
 
-async def refresh_aliases_full(*, budget_seconds: float = _WALK_BUDGET_SECONDS) -> dict:
+async def refresh_aliases_full(
+    *, budget_seconds: float = _WALK_BUDGET_SECONDS, force: bool = False
+) -> dict:
     """别名全量走查（断点续走）：规范表派生组级 id 集 → 逐条 GetById 收割。
 
     - 完成后整源替换 ``song_alias``（source=munet，原始形态，归一化在 provider
       合并层）；中断记 kv 游标，下次任务从断点继续（单条失败游标照常前进，
       下个刷新周期自然重试）；
     - ``awmc_munet_alias_days`` 控制整轮间隔（0=禁用）；时间预算默认 60 分钟，
-      单晚走完（实测 1763 请求 ≈ 30 分钟）。
+      单晚走完（实测 1763 请求 ≈ 30 分钟）；
+    - ``force=True``（手动触发，重载补充数据）：跳过间隔/禁用检查，仍受互斥锁
+      保护（进行中直接返回 running）。
     """
     from ...config import plugin_config
 
+    if _walk_lock.locked():
+        return {"status": "running"}
     interval_days = plugin_config.awmc_munet_alias_days
-    if interval_days <= 0:
-        return {"status": "disabled"}
+    if not force:
+        if interval_days <= 0:
+            return {"status": "disabled"}
+        walk_state = await store.kv_get(_WALK_KV) or {}
+        finished_at = walk_state.get("finished_at")
+        if (
+            walk_state.get("cursor") is None
+            and finished_at
+            and time.time() - finished_at < interval_days * 86400
+        ):
+            return {"status": "fresh", "finished_at": finished_at}
+    async with _walk_lock:
+        return await _walk_targets(budget_seconds)
+
+
+async def _walk_targets(budget_seconds: float) -> dict:
     state = await store.kv_get(_WALK_KV) or {}
     cursor = state.get("cursor")
-    finished_at = state.get("finished_at")
-    if (
-        cursor is None
-        and finished_at
-        and time.time() - finished_at < interval_days * 86400
-    ):
-        return {"status": "fresh", "finished_at": finished_at}
     targets = await store.list_alias_walk_targets()
     index = int(cursor or 0)
     logger.info(
