@@ -520,6 +520,55 @@ async def load_song_aliases(sources: list[str]) -> dict[int, list[str]]:
     return merged
 
 
+async def upsert_song_aliases(source: str, items: dict[int, list[str]]) -> int:
+    """增量写入远端别名快照（不整源替换，已存在的 (song_id, alias) 跳过）。
+
+    版本批次补充等小批量写入用；全量走查用 :func:`save_song_aliases` 整源替换。
+    返回新写入行数。
+    """
+    added = 0
+    async with session() as db:
+        existing = {
+            (row.song_id, row.alias)
+            for row in (
+                await db.exec(select(SongAlias).where(col(SongAlias.source) == source))
+            ).all()
+        }
+        for song_id, aliases in items.items():
+            for alias in aliases:
+                if (song_id, alias) in existing:
+                    continue
+                existing.add((song_id, alias))
+                db.add(SongAlias(source=source, song_id=song_id, alias=alias))
+                added += 1
+        await db.commit()
+    return added
+
+
+async def list_alias_walk_targets() -> list[int]:
+    """MuNET 别名全量走查的组级 id 集（升序）。
+
+    MuNET 条目 id 沿官方机台内部 id 编码（§2.2）：SD 组=曲 id、SD+DX 双组曲的
+    DX 组=曲 id+10000、**仅 DX 组的曲（无 sd 组）MuNET 直接用曲 id**（如
+    パズルリボン DX-only = 1449）。宴谱挂在基曲条目上，无需单独 id。
+    """
+    async with session() as db:
+        songs = (await db.exec(select(SongRow))).all()
+        groups = (await db.exec(select(SongSheetGroup))).all()
+    kinds: dict[int, set[str]] = {}
+    for g in groups:
+        kinds.setdefault(g.song_id, set()).add(g.kind)
+    targets: set[int] = set()
+    for row in songs:
+        song_kinds = kinds.get(row.id, set())
+        if not song_kinds:
+            continue  # 无组歌曲不在 MuNET 上
+        targets.add(row.id)  # SD 组 / 仅 DX 组 / 仅宴组都用曲 id
+        if "sd" in song_kinds and "dx" in song_kinds:
+            targets.add(row.id + 10000)  # 双组曲的 DX 组
+    return sorted(targets)
+
+
 async def kv_get(key: str) -> Any | None:
     async with session() as db:
         row = (await db.exec(select(KvCache).where(KvCache.key == key))).first()

@@ -67,12 +67,14 @@ class AwmcSongProvider(ISongProvider):
 
 
 class AwmcAliasProvider(IAliasProvider):
-    """柚子 + 落雪 + 本地 三源别名合并 provider（song-db-design §5.6，Q31）。
+    """柚子 + 落雪 + MuNET + 本地 四源别名合并 provider（song-db-design §5.6）。
 
-    - 对齐原版 maimaiDX 的别名合并口径（core/merge/alias.py：柚子+落雪）；
+    - 对齐原版 maimaidx 的别名合并口径（core/merge/alias.py：柚子+落雪）；
     - 柚子的 SongID 是谱面级（sd 541 / dx 793 / 宴 66 条），官方 provider 内部
       已 ``%10000`` 折叠到根 id——同根 id 的标准/DX/宴谱别名在此天然合并；
-    - 叠加落雪别名库（``api/v0/maimai/alias/list``）与 ``local_alias`` 本地别名；
+    - 叠加落雪别名库（``api/v0/maimai/alias/list``）、MuNET 全量走查快照
+      （走查由每日任务离线完成，此处只读库内快照，零额外请求）与
+      ``local_alias`` 本地别名；
     - ``_hash`` 基于上次拉取的别名内容：柚子/落雪官方 provider 均为常量哈希，
       远端别名更新从不触发缓存重建，此处修复为内容驱动。
     """
@@ -128,7 +130,11 @@ class AwmcAliasProvider(IAliasProvider):
                 )
                 return None
 
-        sources = (("yuzu", self._fetch_yuzu), ("lxns", self._fetch_lxns))
+        sources = (
+            ("yuzu", self._fetch_yuzu),
+            ("lxns", self._fetch_lxns),
+            ("munet", self._fetch_munet),
+        )
         pulled = await asyncio.gather(*(_pull(name, fetch) for name, fetch in sources))
         for (name, _fetch), pairs in zip(sources, pulled):
             if pairs is not None:
@@ -155,6 +161,11 @@ class AwmcAliasProvider(IAliasProvider):
     async def _fetch_lxns(self, client) -> list[tuple[int, list[str]]]:
         raw = await self._lxns.get_aliases(client)
         return [(int(sid) % DX_ID_OFFSET, aliases) for sid, aliases in raw.items()]
+
+    async def _fetch_munet(self, client) -> list[tuple[int, list[str]]]:
+        """MuNET 别名快照（库内读，永不失败）：全量走查离线写入，见
+        :func:`core.ext.munet.refresh_aliases_full`。"""
+        return list((await store.load_song_aliases(["munet"])).items())
 
     def _hash(self) -> str:
         return self._fingerprint or "empty"

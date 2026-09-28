@@ -6,6 +6,8 @@
 - :mod:`.wahlap`：华立机厅 location；
 - :mod:`.maimaiinfo`：日服曲库骨架/定数历史（GitHub raw）；
 - :mod:`.otoge_db`：otoge-db 日服谱面/版本/宴谱数据（GitHub raw）；
+- :mod:`.otoge_pr`：otoge-db 自动化 PR 分支预读（day-0 新曲标题/封面，分层修复）；
+- :mod:`.munet`：MuNET 门户公开 API（current_jp 版本批次补充 + 别名全量走查）；
 - :mod:`.gamerch`：gamerch wiki 运行时补充源（宴谱物量等）；
 - :mod:`.net`：日服 maimai でらっくす NET 官方直连。
 
