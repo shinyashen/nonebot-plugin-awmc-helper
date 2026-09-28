@@ -109,13 +109,13 @@ def parse_music_ex(text: str) -> tuple[list[dict], str] | None:
     return None
 
 
-def extract_new_entries(entries: list[dict], main_titles: set[str]) -> list[dict]:
-    """取 main 没有的条目（day-0 新曲）；身份键 title。"""
+def extract_new_entries(entries: list[dict], known_titles: set[str]) -> list[dict]:
+    """按已知标题集过滤出条目（day-0 新曲）；身份键 title。"""
     seen: set[str] = set()
     out: list[dict] = []
     for entry in entries:
         title = entry.get("title")
-        if not title or title in main_titles or title in seen:
+        if not title or title in known_titles or title in seen:
             continue
         seen.add(title)
         out.append(entry)
@@ -150,17 +150,17 @@ async def fetch_branch_music_ex(branch: str) -> str:
     return resp.text
 
 
-async def load_open_pr_new_entries() -> list[dict]:
-    """全部 open 批次 PR 中 main 没有的条目（day-0 新曲，按 PR 顺序去重）。
+async def load_open_pr_entries() -> list[dict]:
+    """全部 open 批次 PR 的解析条目（含已在 main 的；调用方按规范表过滤）。
 
-    单 PR 损坏/分支消失记日志跳过；返回条目为 otoge 原始 dict（含
-    ``title``/``image_url``/``version`` 等）。无 open PR → 空列表。
+    单 PR 损坏/分支消失记日志跳过；条目为 otoge 原始 dict（含 ``title``/
+    ``image_url``/``version`` 等），跨 PR 按标题去重。无 open PR → 空列表。
     """
     prs = await list_open_song_prs()
     if not prs:
         return []
     main = await ext_otoge.fetch_music_ex()
-    main_titles = {e.get("title") for e in main if e.get("title")}
+    main_count = len(main)
     out: list[dict] = []
     seen: set[str] = set()
     for number, branch, _title in prs:
@@ -175,20 +175,16 @@ async def load_open_pr_new_entries() -> list[dict]:
             continue
         entries, layer = parsed
         # 合理性门：分支由 main 生长而来，条数不应少于 main（否则视为损坏）
-        if len(entries) < len(main):
+        if len(entries) < main_count:
             logger.warning(
                 f"otoge PR #{number}（{branch}）条数 {len(entries)} < main "
-                f"{len(main)}，疑似损坏，跳过"
+                f"{main_count}，疑似损坏，跳过"
             )
             continue
-        new_entries = extract_new_entries(entries, main_titles)
-        logger.info(
-            f"otoge PR #{number}（{branch}）：{layer} 层解析 {len(entries)} 条，"
-            f"main 外新条目 {len(new_entries)} 个"
-        )
-        for entry in new_entries:
-            title = entry["title"]
-            if title not in seen:
+        logger.info(f"otoge PR #{number}（{branch}）：{layer} 层解析 {len(entries)} 条")
+        for entry in entries:
+            title = entry.get("title")
+            if title and title not in seen:
                 seen.add(title)
                 out.append(entry)
     return out

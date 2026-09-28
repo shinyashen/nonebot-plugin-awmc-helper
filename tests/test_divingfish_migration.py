@@ -192,6 +192,31 @@ async def test_scores_all_quota_copy(db, songs, oauth):
 
 
 @pytest.mark.asyncio
+async def test_plates_oauth_covered(db, songs, oauth):
+    """补齐名单内用户：牌子进度走 OAuth Bearer 全量（get_plates 装配回归）。
+
+    55f52a4 曾把 ``_run_with_public_fallback`` 传入的标识工厂未调用直接传给
+    ``client.plates`` → maimai_py 读 ``identifier.credentials`` AttributeError；
+    本用例走真实 maimai_py 链路（respx 只 mock 上游 HTTP），装配错即炸。
+    """
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    binding = await binding_service.ensure("qq", "10001")
+    with respx.mock(assert_all_called=False) as m:
+        token_route = m.post(AUTH_TOKEN).respond(json=_token_ok())
+        records_route = m.get(f"{BASE_DF}/player/records").respond(
+            json={"records": [SCORE_JSON]}
+        )
+        plates = await score_service.get_plates(binding, "真将")
+
+    assert token_route.called
+    assert records_route.called
+    assert plates._version == "真"
+    assert plates._kind == "将"
+
+
+@pytest.mark.asyncio
 async def test_minfo_oauth_covered(db, songs, oauth):
     """补齐名单内用户：单曲成绩走 OAuth Bearer（music_id-only 请求体）。"""
     from nonebot_plugin_awmc_helper.core.score import score_service

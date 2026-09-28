@@ -928,7 +928,7 @@ async def full_refresh() -> dict:
         try:
             from .ext import munet
 
-            batch = await munet.run_version_batch()
+            batch = await munet.run_batch_supplement()
             if batch.get("status") == "batch":
                 extra["changed"] = True
         except Exception:

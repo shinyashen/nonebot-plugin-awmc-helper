@@ -80,7 +80,7 @@ def test_extract_new_entries_dedup(otoge_pr):
 
 
 @respx.mock
-async def test_load_open_pr_new_entries(otoge_pr):
+async def test_load_open_pr_entries(otoge_pr):
     respx.get("https://api.github.com/repos/zvuc/otoge-db/pulls").mock(
         return_value=httpx.Response(
             200,
@@ -105,9 +105,11 @@ async def test_load_open_pr_new_entries(otoge_pr):
         "https://raw.githubusercontent.com/zvuc/otoge-db/"
         "maimai/update-20260925/maimai/data/music-ex.json"
     ).mock(return_value=httpx.Response(200, text=_branch_text_with_field_conflict()))
-    new = await otoge_pr.load_open_pr_new_entries()
-    assert [e["title"] for e in new] == [NEW_ENTRY["title"]]
-    assert new[0]["image_url"] == NEW_ENTRY["image_url"]
+    new = await otoge_pr.load_open_pr_entries()
+    # 不再在模块内做 main 过滤（由调用方按规范表过滤），返回分支全部条目
+    assert [e["title"] for e in new] == [e["title"] for e in [*MAIN, NEW_ENTRY]]
+    happycore = next(e for e in new if e["title"] == NEW_ENTRY["title"])
+    assert happycore["image_url"] == NEW_ENTRY["image_url"]
 
 
 @respx.mock
@@ -129,4 +131,4 @@ async def test_load_open_pr_guards_entry_count(otoge_pr):
             200, text=json.dumps([NEW_ENTRY], ensure_ascii=False)
         )
     )
-    assert await otoge_pr.load_open_pr_new_entries() == []
+    assert await otoge_pr.load_open_pr_entries() == []

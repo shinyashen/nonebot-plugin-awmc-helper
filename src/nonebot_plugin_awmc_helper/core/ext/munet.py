@@ -16,11 +16,11 @@ from typing import Any
 
 import httpx
 from nonebot import logger
-from sqlmodel import col, select
+from sqlmodel import select
 
 from . import ExtError, ExtNetworkError, get_client
 from .. import store
-from ...constants import DX_ID_OFFSET
+from ...constants import DX_ID_OFFSET, normalize_text
 
 _PORTAL_ORIGIN = "https://portal.mumur.net"
 _HOSTS = (
@@ -314,88 +314,62 @@ async def refresh_aliases_full(*, budget_seconds: float = _WALK_BUDGET_SECONDS) 
     return {"status": "done", "hits": hits, "misses": misses, "aliases": total}
 
 
-async def _batch_candidate_titles(code: int | None) -> list[str]:
-    """当批候选标题：规范表当批版本组（含老曲补 DX）+ song_pending 暂存条目。"""
+async def _pending_titles() -> list[str]:
+    """song_pending 暂存条目的标题（无 id 曲目，同样走 MuNET 解析 id）。"""
     titles: list[str] = []
     async with store.session() as db:
-        if code is not None:
-            group_rows = (
-                await db.exec(
-                    select(store.SongSheetGroup).where(
-                        col(store.SongSheetGroup.version) == code
-                    )
-                )
-            ).all()
-            song_ids = {g.song_id for g in group_rows}
-            if song_ids:
-                song_rows = (
-                    await db.exec(
-                        select(store.SongRow).where(col(store.SongRow.id).in_(song_ids))
-                    )
-                ).all()
-                titles.extend(row.title for row in song_rows if row.title)
         pending_rows = (await db.exec(select(store.SongPending))).all()
-        for row in pending_rows:
-            try:
-                payload = json.loads(row.payload)
-            except ValueError:
-                continue
-            if isinstance(payload, dict) and payload.get("title"):
-                titles.append(payload["title"])
-    return [t for t in titles if t]
+    for row in pending_rows:
+        try:
+            payload = json.loads(row.payload)
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("title"):
+            titles.append(payload["title"])
+    return titles
 
 
-async def run_version_batch() -> dict:
-    """current_jp 版本批次补充：BrowseFilters 版本值出新档 → 候选 → 拉取合并。
+async def run_batch_supplement() -> dict:
+    """current_jp 批次内新增歌曲补充：otoge 视角 title-diff → 拉取合并。
 
-    - 候选标题 = otoge-db 自动化 PR 分支预读（day-0 标题+封面哈希，§六）∪
-      规范表当批组标题 ∪ song_pending 暂存标题；
-    - 每个候选标题 ``Search`` 解析 id（按 addVersion 过滤）→ ``GetById`` 全量 →
-      01 标准 JSON（fill 模式 + 创建缺失曲，经 :func:`songdb.apply_external_sources`）；
+    - 候选 = otoge-db 视角下规范表没有的标题：自动化 PR 分支（day-0 标题+
+      封面哈希，§六）∪ merged main 现役表 ∪ ``song_pending`` 暂存标题——
+      **版本内期中新增**（如 MAGiCAL 期的 27001 追加曲）与新版本批次同样覆盖；
+    - 每个候选标题 ``Search`` 解析 id → ``GetById`` 全量 → 01 标准 JSON
+      （fill 模式 + 创建缺失曲，经 :func:`songdb.apply_external_sources`）；
+      搜索按标题/别名模糊命中，仅对名称与候选一致的条目拉取全量；
     - 别名随拉取收割进 ``song_alias``（增量 upsert）；
-    - 首次运行只建立版本基线不回溯（历史批次由既有外部源覆盖）；
-    - 稳态每日 1 个 BrowseFilters 请求，信号命中才发生批次拉取（1s 间隔）。
+    - 每日管线触发，稳态无新增时零歌曲请求；BrowseFilters 仅作版本状态日志。
     """
+    from . import otoge_db as ext_otoge
     from . import otoge_pr
     from .. import songdb
     from ...config import plugin_config
 
     if not plugin_config.awmc_munet_batch:
         return {"status": "disabled"}
-    filters = await fetch_browse_filters()
-    versions = [v for v in filters.get("versions") or [] if isinstance(v, int)]
-    if not versions:
-        raise ExtError("MuNET BrowseFilters versions 为空")
-    newest = max(versions)
-    state = await store.kv_get(_BATCH_KV) or {}
-    last = state.get("addv")
-    if last is None:
-        await store.kv_set(_BATCH_KV, {"addv": newest})
-        logger.info(f"MuNET 版本基线：addVersion {newest}")
-        return {"status": "baseline", "addv": newest}
-    if newest <= last:
-        return {"status": "fresh", "addv": newest}
-    pending_versions = set(range(last + 1, newest + 1))
-    titles: list[str] = []
+    canonical_titles = await store.list_song_titles()
     images: dict[str, str] = {}
     try:
-        pr_entries = await otoge_pr.load_open_pr_new_entries()
+        pr_entries = await otoge_pr.load_open_pr_entries()
     except Exception as e:
         logger.warning(f"MuNET 批次：otoge PR 预读失败（不影响流程）：{e}")
         pr_entries = []
     for entry in pr_entries:
-        titles.append(entry["title"])
         if entry.get("image_url"):
             images[entry["title"]] = entry["image_url"]
-    for addv in sorted(pending_versions):
-        titles.extend(await _batch_candidate_titles(add_version_to_code(addv)))
-    titles = list(dict.fromkeys(titles))
+    titles = [e["title"] for e in pr_entries if e["title"] not in canonical_titles]
+    titles.extend(
+        e["title"]
+        for e in await ext_otoge.fetch_music_ex()
+        if e.get("title") and e["title"] not in canonical_titles
+    )
+    titles.extend(await _pending_titles())
+    titles = [t for t in dict.fromkeys(titles) if t not in canonical_titles]
     if len(titles) > 300:  # 安全阀：异常批量候选截断（正常批次 ≤ 数十）
         logger.warning(f"MuNET 批次：候选标题 {len(titles)} 超常，截断至 300")
         titles = titles[:300]
-    logger.info(
-        f"MuNET 版本批次：addVersion {last}→{newest}，候选标题 {len(titles)} 个"
-    )
+    logger.info(f"MuNET 批次补充：规范表外候选标题 {len(titles)} 个")
     docs_by_base: dict[int, dict] = {}
     alias_items: dict[int, list[str]] = {}
     processed = 0
@@ -405,8 +379,10 @@ async def run_version_batch() -> dict:
         except (ExtError, ExtNetworkError) as e:
             logger.warning(f"MuNET 批次：搜索「{title}」失败（{e}）")
             continue
+        want = normalize_text(title)
         for entry in hits:
-            if entry.get("addVersion") not in pending_versions:
+            # 搜索按标题/别名模糊命中：只拉名称与候选一致的条目，防泛化拉取
+            if normalize_text(entry.get("name") or "") != want:
                 continue
             try:
                 payload = await fetch_music_by_id(int(entry["id"]))
@@ -431,8 +407,7 @@ async def run_version_batch() -> dict:
             merged["sheets"].update(song_doc["sheets"])
     result: dict[str, Any] = {
         "status": "batch",
-        "from": last,
-        "to": newest,
+        "candidates": len(titles),
         "entries": processed,
     }
     if docs_by_base:
@@ -445,6 +420,11 @@ async def run_version_batch() -> dict:
         }
     if alias_items:
         result["aliases"] = await store.upsert_song_aliases("munet", alias_items)
-    await store.kv_set(_BATCH_KV, {"addv": newest})
-    logger.info(f"MuNET 版本批次完成：{result}")
+    try:
+        filters = await fetch_browse_filters()
+        logger.info(f"MuNET 版本状态：addVersion {filters.get('versions')}")
+    except (ExtError, ExtNetworkError) as e:
+        logger.debug(f"MuNET BrowseFilters 状态获取失败（信息性）：{e}")
+    await store.kv_set(_BATCH_KV, {"ran_at": time.time(), **result})
+    logger.info(f"MuNET 批次补充完成：{result}")
     return result

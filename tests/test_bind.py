@@ -89,6 +89,26 @@ async def test_bind_divingfish_token(app: App, db):
 
 
 @pytest.mark.asyncio
+async def test_bind_divingfish_rejects_token_lookalike(app: App, db):
+    """「绑定水鱼 <Import-Token>」：形似 token 的参数软引导且不落库。
+
+    生产事故（2026-09-28）：token 被当用户名落库后 b50 按用户名查必败。
+    """
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    await _assert_reply(
+        app,
+        bind.df_bind,
+        f"绑定水鱼 {'c9ab' * 32}",
+        "这串内容像是水鱼 Import-Token 而不是用户名，为避免误绑未做保存：\n"
+        "保存 Token 请发送「绑定水鱼token <Import-Token>」；\n"
+        "绑定公开查询请发送「绑定水鱼 <水鱼用户名>」（水鱼个人页显示的用户名）。",
+    )
+    assert await binding_service.get("OneBot V11", "12345678") is None
+
+
+@pytest.mark.asyncio
 async def test_bind_lxns_direct_and_switch(app: App, db):
     from nonebot_plugin_awmc_helper.plugins import bind
     from nonebot_plugin_awmc_helper.core.binding import binding_service

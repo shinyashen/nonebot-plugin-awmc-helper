@@ -38,6 +38,11 @@ DIVINGFISH_MISMATCH_MSG = (
     "如需绑定自己的账号，请发送「绑定水鱼」重新走一遍授权。"
 )
 DIVINGFISH_BIND_SUCCESS_MSG = "水鱼查分器授权完成，现在可以直接使用查询指令了。"
+DIVINGFISH_TOKEN_LOOKALIKE_MSG = (
+    "这串内容像是水鱼 Import-Token 而不是用户名，为避免误绑未做保存：\n"
+    "保存 Token 请发送「绑定水鱼token <Import-Token>」；\n"
+    "绑定公开查询请发送「绑定水鱼 <水鱼用户名>」（水鱼个人页显示的用户名）。"
+)
 
 df_bind = on_command("绑定水鱼", aliases={"绑定df", "dfbind"}, block=True)
 df_token = on_command("绑定水鱼token", aliases={"dftoken"}, block=True)
@@ -148,6 +153,12 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
             if pending_bindings.is_active(platform, user_id, "divingfish"):
                 await _complete_df(platform, user_id, code)
             await UniMessage.text(" " + DIVINGFISH_NO_SESSION_MSG).finish(
+                at_sender=True
+            )
+        if df_ext.looks_like_import_token(arg):
+            # 误投 token 会把凭据存成用户名、b50 按用户名查必败（Q51）；
+            # 软引导到 token 指令，且不 ensure（拒绝输入不落行）
+            await UniMessage.text(" " + DIVINGFISH_TOKEN_LOOKALIKE_MSG).finish(
                 at_sender=True
             )
     binding = await binding_service.ensure(platform, user_id)

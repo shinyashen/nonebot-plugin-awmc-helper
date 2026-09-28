@@ -520,6 +520,13 @@ async def load_song_aliases(sources: list[str]) -> dict[int, list[str]]:
     return merged
 
 
+async def list_song_titles() -> set[str]:
+    """规范表全部曲名（批次补充的 title-diff 候选过滤用）。"""
+    async with session() as db:
+        rows = (await db.exec(select(SongRow))).all()
+    return {row.title for row in rows if row.title}
+
+
 async def upsert_song_aliases(source: str, items: dict[int, list[str]]) -> int:
     """增量写入远端别名快照（不整源替换，已存在的 (song_id, alias) 跳过）。
 

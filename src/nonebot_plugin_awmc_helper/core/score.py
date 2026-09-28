@@ -361,9 +361,9 @@ class ScoreService:
         self._guard_cn(binding)
         await song_service.ensure_loaded()
 
-        def make(ident):
+        def make(get_ident):
             return lambda: client.plates(
-                ident, plate, provider=binding_service.provider(binding)
+                get_ident(), plate, provider=binding_service.provider(binding)
             )
 
         return await self._run_with_public_fallback(binding, make, notify_slow)

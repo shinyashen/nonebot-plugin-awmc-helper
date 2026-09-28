@@ -54,6 +54,9 @@ async def test_list_alias_walk_targets(db):
 
 
 async def test_walk_full_and_root_folding(db, monkeypatch):
+    from nonebot_plugin_awmc_helper.config import plugin_config
+
+    monkeypatch.setattr(plugin_config, "awmc_munet_alias_days", 7)
     await _seed(db)
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.core.ext import munet
@@ -82,6 +85,9 @@ async def test_walk_full_and_root_folding(db, monkeypatch):
 
 
 async def test_walk_resume_from_cursor(db, monkeypatch):
+    from nonebot_plugin_awmc_helper.config import plugin_config
+
+    monkeypatch.setattr(plugin_config, "awmc_munet_alias_days", 7)
     await _seed(db)
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.core.ext import munet
@@ -116,6 +122,9 @@ async def test_walk_disabled(db, monkeypatch):
 
 
 async def test_walk_fresh_within_interval(db, monkeypatch):
+    from nonebot_plugin_awmc_helper.config import plugin_config
+
+    monkeypatch.setattr(plugin_config, "awmc_munet_alias_days", 7)
     await _seed(db)
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.core.ext import munet

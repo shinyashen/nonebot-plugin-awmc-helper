@@ -71,6 +71,20 @@ def extract_confirmation_code(text: str) -> str | None:
     return None
 
 
+_IMPORT_TOKEN_PATTERN = re.compile(r"^[0-9a-fA-F]{64,}$")
+
+
+def looks_like_import_token(text: str) -> bool:
+    """参数是否形似 Import-Token（64+ 位连续十六进制）。
+
+    「绑定水鱼 <参数>」会把参数当用户名落库，误投 token 时 b50 按用户名
+    公开查询必败（生产实测 2026-09-28，用户名 = token → 水鱼 400 user not
+    exists）；bind 层据此软引导到「绑定水鱼token」，不落库。真实水鱼用户名
+    为 64+ 位纯十六进制串的情形可忽略不计。
+    """
+    return bool(_IMPORT_TOKEN_PATTERN.fullmatch((text or "").strip()))
+
+
 def binding_label(qq: str) -> str:
     """授权页展示的绑定身份遮罩串，用户凭它确认不是在给别人授权。"""
     if len(qq) <= 4:

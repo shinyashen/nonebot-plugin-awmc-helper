@@ -75,11 +75,11 @@ class Config(BaseModel):
     # gamerch 页面磁盘缓存 TTL（小时）
     awmc_gamerch_max_age: int = 24
     # MuNET current_jp 版本批次补充（当批曲目谱面/当前定数/别名/发布日期，
-    # fill 语义 + 创建缺失曲；BrowseFilters 信号触发，稳态每日 1 请求）
-    awmc_munet_batch: bool = True
-    # MuNET 别名全量走查刷新间隔（天，0=禁用）：走查有断点续走与单次 40 分钟
-    # 时间预算，首轮约 2 晚走完
-    awmc_munet_alias_days: int = 7
+    # fill 语义 + 创建缺失曲；每日管线内 title-diff 候选，默认关需显式开启）
+    awmc_munet_batch: bool = False
+    # MuNET 别名全量走查刷新间隔（天，0=禁用默认关；走查有断点续走与单次
+    # 40 分钟时间预算，首轮约 2 晚走完）
+    awmc_munet_alias_days: int = 0
     # 日服 NET 数据源 per-user 查询冷却（分钟，0=禁用；dxrating 同款 15 分钟）
     awmc_net_cooldown_minutes: int = 15
     # 落雪令牌每日保活（refresh_token 30 天不刷新即失效；每日 4:30 对全部

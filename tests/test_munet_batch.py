@@ -1,4 +1,4 @@
-"""MuNET current_jp 版本批次流程：信号 → 候选 → 拉取 → fill 合并 + 别名收割。"""
+"""MuNET current_jp 批次内新增歌曲补充：title-diff 候选 → 拉取 → fill 合并。"""
 
 import json
 
@@ -51,9 +51,11 @@ async def db(tmp_path):
 
 @pytest.fixture
 def monkeypatched_munet(monkeypatch):
-    """批次外部依赖全部替换：BrowseFilters/Search/GetById/PR 预读。"""
-    from nonebot_plugin_awmc_helper.core.ext import munet, otoge_pr
+    """批次外部依赖全部替换：开关 + BrowseFilters/Search/GetById/otoge 源/PR 预读。"""
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.ext import munet, otoge_db, otoge_pr
 
+    monkeypatch.setattr(plugin_config, "awmc_munet_batch", True)
     monkeypatch.setattr(munet, "_MIN_INTERVAL", 0)
 
     async def fake_filters():
@@ -76,10 +78,14 @@ def monkeypatched_munet(monkeypatch):
     async def fake_pr():
         return [{"title": "Test Batch Song", "image_url": "batch-cover.png"}]
 
+    async def fake_main():
+        return make_otoge_live()
+
     monkeypatch.setattr(munet, "fetch_browse_filters", fake_filters)
     monkeypatch.setattr(munet, "search_music", fake_search)
     monkeypatch.setattr(munet, "fetch_music_by_id", fake_by_id)
-    monkeypatch.setattr(otoge_pr, "load_open_pr_new_entries", fake_pr)
+    monkeypatch.setattr(otoge_pr, "load_open_pr_entries", fake_pr)
+    monkeypatch.setattr(otoge_db, "fetch_music_ex", fake_main)
 
 
 def full_payloads():
@@ -93,24 +99,11 @@ def full_payloads():
     }
 
 
-async def test_first_run_sets_baseline(db, monkeypatched_munet):
+async def test_batch_supplement_creates_songs_and_aliases(db, monkeypatched_munet):
     from nonebot_plugin_awmc_helper.core import store, songdb
     from nonebot_plugin_awmc_helper.core.ext import munet
 
     await songdb.rebuild(full_payloads())
-    result = await munet.run_version_batch()
-    assert result["status"] == "baseline"
-    assert result["addv"] == 27
-    assert await store.kv_get("munet_batch") == {"addv": 27}
-
-
-async def test_version_batch_creates_song_and_aliases(db, monkeypatched_munet):
-    from nonebot_plugin_awmc_helper.core import store, songdb
-    from nonebot_plugin_awmc_helper.core.ext import munet
-
-    await songdb.rebuild(full_payloads())
-    await store.kv_set("munet_batch", {"addv": 26})
-    # song_pending 暂存标题也进候选
     async with store.session() as s:
         s.add(
             store.SongPending(
@@ -121,10 +114,9 @@ async def test_version_batch_creates_song_and_aliases(db, monkeypatched_munet):
         )
         await s.commit()
 
-    result = await munet.run_version_batch()
+    result = await munet.run_batch_supplement()
     assert result["status"] == "batch"
-    assert result["entries"] == 2
-    assert await store.kv_get("munet_batch") == {"addv": 27}
+    assert result["entries"] == 2  # PR 预读 + song_pending 各解析出一首
 
     state = await songdb.State.load()
     row = state.songs.get(BATCH_ENTRY_ID)
@@ -138,8 +130,8 @@ async def test_version_batch_creates_song_and_aliases(db, monkeypatched_munet):
     assert chart.designer == "譜面-人"
     assert (chart.notes_tap, chart.notes_slide) == (158, 22)
     history = state.history_of(BATCH_ENTRY_ID, "dx", 3)
-    assert history  # 当前定数快照语义
-    assert history[-1][1] == 13.4
+    assert history
+    assert history[-1][1] == 13.4  # 当前定数快照语义
     # 封面来自 otoge PR 预读（MuNET 无封面字段）
     assert row.image_url == "batch-cover.png"
     assert 2060 in state.songs
@@ -148,18 +140,31 @@ async def test_version_batch_creates_song_and_aliases(db, monkeypatched_munet):
     assert aliases[BATCH_ENTRY_ID] == ["批次测试曲"]
 
 
-async def test_no_new_version_is_fresh(db, monkeypatched_munet):
+async def test_batch_supplement_is_idempotent(db, monkeypatched_munet):
     from nonebot_plugin_awmc_helper.core import store, songdb
     from nonebot_plugin_awmc_helper.core.ext import munet
 
     await songdb.rebuild(full_payloads())
-    await store.kv_set("munet_batch", {"addv": 27})
-    assert (await munet.run_version_batch())["status"] == "fresh"
+    async with store.session() as s:
+        s.add(
+            store.SongPending(
+                source="otoge-db",
+                key="title:Pending Song",
+                payload=json.dumps({"title": "Pending Song"}),
+            )
+        )
+        await s.commit()
+    first = await munet.run_batch_supplement()
+    assert first["status"] == "batch"
+    assert first["entries"] == 2
+    # 首轮已建曲 → 二轮候选为空（title-diff 幂等）
+    second = await munet.run_batch_supplement()
+    assert second["entries"] == 0
 
 
-async def test_batch_disabled(db, monkeypatch):
+async def test_batch_disabled(db, monkeypatched_munet, monkeypatch):
     from nonebot_plugin_awmc_helper.config import plugin_config
     from nonebot_plugin_awmc_helper.core.ext import munet
 
     monkeypatch.setattr(plugin_config, "awmc_munet_batch", False)
-    assert (await munet.run_version_batch())["status"] == "disabled"
+    assert (await munet.run_batch_supplement())["status"] == "disabled"
