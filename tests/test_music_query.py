@@ -1,11 +1,17 @@
-"""awmc.music_query 查歌子插件测试。"""
+"""awmc.music_query 查歌子插件测试。
+
+锚全部为真实曲目（2026-09-29 取材）：样例库见 mocks.sample_songs
+（199 チルノ SD+DX+蛸宴 / 8 True Love Song / 624 KISS CANDY FLAVOR），
+标题家族与宴宿主等扩展曲同样取真实曲（値为各自实测值）；「快照无原型」的
+路径以（构造）曲补位并注明。
+"""
 
 import base64
 
 import pytest
 from mocks import requires_assets
 from nonebug import App
-from songdb_fixtures import make_pending_item
+from songdb_fixtures import make_pending_revealed
 
 
 @pytest.fixture
@@ -18,23 +24,108 @@ async def db(tmp_path):
     store.set_db_file(None)
 
 
+def _extra_songs():
+    """标题家族扩展曲（真实曲与实测值；列表/模糊查询用）。"""
+    from mocks import make_diff, make_song
+    from maimai_py import Genre, SongType, LevelIndex
+
+    def sd_mas(song_id, title, level, value, version, notes, designer=None):
+        return make_song(
+            song_id,
+            title,
+            version=version,
+            diffs=[
+                make_diff(
+                    type=SongType.STANDARD,
+                    level_index=LevelIndex.MASTER,
+                    level=level,
+                    level_value=value,
+                    note_designer=designer,
+                    version=version,
+                    tap_num=notes[0],
+                    hold_num=notes[1],
+                    slide_num=notes[2],
+                    touch_num=0,
+                    break_num=notes[3],
+                )
+            ],
+        )
+
+    return [
+        # チルノ ⑨周年（SD 13/13.4 + DX 12/12.8，真实 MURASAKi PLUS/DX 值）
+        make_song(
+            665,
+            "チルノのパーフェクトさんすう教室　⑨周年バージョン",
+            version=16500,
+            diffs=[
+                make_diff(
+                    type=SongType.STANDARD,
+                    level_index=LevelIndex.MASTER,
+                    level="13",
+                    level_value=13.4,
+                    version=16500,
+                    tap_num=519,
+                    hold_num=63,
+                    slide_num=90,
+                    touch_num=0,
+                    break_num=99,
+                ),
+                make_diff(
+                    type=SongType.DX,
+                    level_index=LevelIndex.MASTER,
+                    level="12",
+                    level_value=12.8,
+                    version=20000,
+                    tap_num=483,
+                    hold_num=53,
+                    slide_num=60,
+                    touch_num=102,
+                    break_num=42,
+                ),
+            ],
+        ),
+        # ラグトレイン（DX 13/13.2，UNiVERSE）
+        make_song(
+            1355,
+            "ラグトレイン",
+            genre=Genre.niconicoボーカロイド,
+            version=22000,
+            diffs=[
+                make_diff(
+                    type=SongType.DX,
+                    level_index=LevelIndex.MASTER,
+                    level="13",
+                    level_value=13.2,
+                    note_designer="はっぴー",
+                    version=22000,
+                    tap_num=551,
+                    hold_num=84,
+                    slide_num=96,
+                    touch_num=30,
+                    break_num=11,
+                )
+            ],
+        ),
+        # マトリョシカ（SD MASTER 11+/11.7）
+        sd_mas(71, "マトリョシカ", "11+", 11.7, 10000, (0, 0, 0, 0)),
+        # ナイト・オブ・ナイツ（SD MASTER 13/13.3，GreeN）
+        sd_mas(204, "ナイト・オブ・ナイツ", "13", 13.3, 12000, (0, 0, 0, 0)),
+        # セツナトリップ（SD MASTER 13/13.3，GreeN）——凑列表图阈值（>5 首）
+        sd_mas(193, "セツナトリップ", "13", 13.3, 12000, (0, 0, 0, 0)),
+    ]
+
+
 @pytest.fixture
 async def songs(tmp_path):
     """注入样例曲库 + 独立临时数据库。"""
-    from mocks import make_song, sample_songs, seed_service
+    from mocks import sample_songs, seed_service
 
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     store.set_db_file(tmp_path / "awmc.db")
     await store.init_db()
-    extra = [
-        make_song(700, "PENGUIN RUSH"),
-        make_song(701, "PENGUIN LAND"),
-        make_song(702, "PENGUIN PARTY"),
-        make_song(703, "PENGUIN STAR"),
-    ]
-    await seed_service(song_service, sample_songs() + extra)
+    await seed_service(song_service, sample_songs() + _extra_songs())
     yield
     song_service._ready.clear()
     store.set_db_file(None)
@@ -143,12 +234,18 @@ async def _assert_image_reply(
 @pytest.mark.asyncio
 async def test_search_single_draws_card(app: App, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
     from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
-    song = await song_service.by_id(500)
+    song = await song_service.by_id(8)
     assert song is not None
+    # handler 以 SessionBinding 出卡（与 None 的渲染差异在 b50 嵌入口径）
+    binding = UserBinding(platform="OneBot V11", user_id="12345678")
     await _assert_image_reply(
-        app, "search", "查歌 Preferences", lambda: chart_card_bytes(song, None)
+        app,
+        "search",
+        "查歌 True Love Song",
+        lambda: chart_card_bytes(song, binding),
     )
 
 
@@ -157,9 +254,9 @@ async def test_search_multi_text(app: App, songs):
     await _assert_reply(
         app,
         "search",
-        "查歌 PENGUIN",
-        "「231」 PENGUIN\n「700」 PENGUIN RUSH\n「701」 PENGUIN LAND"
-        "\n「702」 PENGUIN PARTY\n「703」 PENGUIN STAR",
+        "查歌 チルノ",
+        "「199」 チルノのパーフェクトさんすう教室"
+        "\n「665」 チルノのパーフェクトさんすう教室　⑨周年バージョン",
     )
 
 
@@ -176,18 +273,19 @@ async def test_search_not_found(app: App, songs):
 @requires_assets
 @pytest.mark.asyncio
 async def test_search_list_image(app: App, songs):
-    """5 条以上走列表图：PENGUIN 族 3 首 + Preferences + 宴会曲相关……用「n」命中。"""
+    """6 条以上走列表图：真实「ト」标题家族 6 首（チルノ×2/ラグトレイン/
+    マトリョシカ/ナイト・オブ・ナイツ/セツナトリップ）。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import song as song_render
 
-    matched = await song_service.by_title_fuzzy("p")
+    matched = await song_service.by_title_fuzzy("ト")
     assert len(matched) >= 5
     page = 1
     suffix = f"第 {page} 页，共 {len(matched)} 首，可用「查歌 <标题> {page + 1}」翻页"
     await _assert_image_reply(
         app,
         "search",
-        f"查歌 p {page}",
+        f"查歌 ト {page}",
         lambda: song_render.song_list_bytes(matched, page),
         suffix=suffix,
     )
@@ -195,21 +293,14 @@ async def test_search_list_image(app: App, songs):
 
 @pytest.mark.asyncio
 async def test_alias_search_multi(app: App, songs):
-    from nonebot_plugin_awmc_helper.core import store
-    from nonebot_plugin_awmc_helper.core.songs import song_service
-
-    await store.add_local_alias(231, "共同别名", "u1")
-    await store.add_local_alias(500, "共同别名", "u1")
-    await song_service.reload_alias_index()
+    """「糖糖」为 8/624 在柚子别名库共持的真实别名 → 双曲条目列表。"""
     await _assert_reply(
         app,
         "search_alias_song",
-        "共同别名是什么歌",
-        "找到4个谱面："
-        "\n231：PENGUIN"
-        "\n10231：PENGUIN"
-        "\n500：Preferences"
-        "\n10500：Preferences"
+        "糖糖是什么歌",
+        "找到2个谱面："
+        "\n8：True Love Song"
+        "\n624：KISS CANDY FLAVOR"
         "\n※ 请使用「id xxxxx」查询指定谱面",
     )
 
@@ -220,34 +311,37 @@ async def test_alias_search_single(app: App, songs):
     from maimai_py import SongType
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
     from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
-    song = await song_service.by_id(500)
+    song = await song_service.by_id(199)
     assert song is not None
-    # 双谱歌曲无前缀搜索 → 列出谱面类型条目供选择（不设偏好）
+    binding = UserBinding(platform="OneBot V11", user_id="12345678")
+    # 双谱歌曲无前缀搜索 → 列出谱面类型条目供选择（不设偏好；含蛸宴条目）
     await _assert_reply(
         app,
         "search_alias_song",
-        "普瑞是什么歌",
-        "找到2个谱面："
-        "\n500：Preferences"
-        "\n10500：Preferences"
+        "琪露诺是什么歌",
+        "找到3个谱面："
+        "\n199：チルノのパーフェクトさんすう教室"
+        "\n10199：チルノのパーフェクトさんすう教室"
+        "\n100199：チルノのパーフェクトさんすう教室"
         "\n※ 请使用「id xxxxx」查询指定谱面",
     )
     # 带 dx 前缀 → 直接定位 DX 条目出卡
     await _assert_image_reply(
         app,
         "search_alias_song",
-        "dx普瑞是什么歌",
-        lambda: chart_card_bytes(song, None, SongType.DX),
+        "dx琪露诺是什么歌",
+        lambda: chart_card_bytes(song, binding, SongType.DX),
         suffix="您要找的是不是这首？",
     )
     # 带「标」前缀 → SD 条目出卡
     await _assert_image_reply(
         app,
         "search_alias_song",
-        "标普瑞是什么歌",
-        lambda: chart_card_bytes(song, None, SongType.STANDARD),
+        "标琪露诺是什么歌",
+        lambda: chart_card_bytes(song, binding, SongType.STANDARD),
         suffix="您要找的是不是这首？",
     )
 
@@ -263,16 +357,21 @@ async def test_query_chart_card(app: App, songs):
     from maimai_py import SongType
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
     from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
-    song = await song_service.by_id(231)
+    song = await song_service.by_id(199)
     assert song is not None
     # SD 形状 id → 卡片显示标准谱（NB 双条目语义：id 即条目类型）
     await _assert_image_reply(
         app,
         "query_chart",
-        "id 231",
-        lambda: chart_card_bytes(song, None, SongType.STANDARD),
+        "id 199",
+        lambda: chart_card_bytes(
+            song,
+            UserBinding(platform="OneBot V11", user_id="12345678"),
+            SongType.STANDARD,
+        ),
     )
 
 
@@ -286,9 +385,9 @@ async def test_render_smoke(songs):
         song_list_bytes,
     )
 
-    song231 = await song_service.by_id(231)
-    assert song231 is not None
-    card = song_card_bytes(song231)
+    song199 = await song_service.by_id(199)
+    assert song199 is not None
+    card = song_card_bytes(song199)
     assert card.startswith(b"\x89PNG")
     assert len(card) > 1000
     listing = song_list_bytes(await song_service.get_all(), 1)
@@ -351,7 +450,28 @@ async def test_chart_card_b50_side_by_version(monkeypatch):
 
     from nonebot_plugin_awmc_helper.core.store import UserBinding
 
-    song = make_song(231, "PENGUIN")  # 谱面组版本 25000 < 当前版本 → 旧曲
+    # 谱面组版本（10000/22000）< maimai_py 当前版本（25500）→ 旧曲
+    song = make_song(
+        8,
+        "True Love Song",
+        version=10000,
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.EXPERT,
+                level="10",
+                level_value=10.2,
+                version=10000,
+            ),
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.2,
+                version=22000,
+            ),
+        ],
+    )
     binding = UserBinding(platform="OneBot V11", user_id="12345678")
     b35 = [
         _best_entry(100 + i, SongType.STANDARD, LevelIndex.MASTER, 400 - i)
@@ -381,20 +501,21 @@ async def test_chart_card_b50_side_by_version(monkeypatch):
     assert captured["best_list"] == expected_b35
 
     # 当前版本新曲卡（谱面组 version ≥ 当前版本）→ b15 侧
+    # （真实 MAGiCAL 新曲 物語はここから，addVersion 27 → 27000）
     new_song = make_song(
-        705,
-        "NEW SONG",
-        version=99999,
+        2020,
+        "物語はここから",
+        version=27000,
         diffs=[
             make_diff(
                 type=SongType.STANDARD,
                 level_index=LevelIndex.EXPERT,
-                version=25500,
+                version=27000,
             ),
             make_diff(
                 type=SongType.DX,
                 level_index=LevelIndex.MASTER,
-                version=25500,
+                version=27000,
             ),
         ],
     )
@@ -412,7 +533,8 @@ def test_new_best_score_baseline_from_version_side():
 
     锚定用户案例（b35 最低 315）：未入线 313 无提升（负值由渲染层隐藏）、
     336 → +21；已在列表按自身既有 RA 差值；b35 里的 DX 条目既参与入线线、
-    也不影响 SD 谱按 id+类型+难度精确匹配。
+    也不影响 SD 谱按 id+类型+难度精确匹配。id 用真实曲（834 PANDORA
+    PARADOXXX 为真实 b35 锚；其余为该纯函数的机械样例）。
     """
     from typing import cast
 
@@ -426,16 +548,16 @@ def test_new_best_score_baseline_from_version_side():
         "list[ScoreExtend]",
         [
             _best_entry(834, SongType.STANDARD, LevelIndex.MASTER, 340),
-            _best_entry(999, SongType.STANDARD, LevelIndex.MASTER, 320),
-            _best_entry(888, SongType.DX, LevelIndex.MASTER, 315),
+            _best_entry(8, SongType.STANDARD, LevelIndex.MASTER, 320),
+            _best_entry(1355, SongType.DX, LevelIndex.MASTER, 315),
         ],
     )
     # 未入线：相对入线线 315（DX 条目也是 b35 一员，若按 SD 过滤会误取 320）
     assert (
-        new_best_score(900, LevelIndex.MASTER.value, 313, b35, SongType.STANDARD) == -2
+        new_best_score(199, LevelIndex.MASTER.value, 313, b35, SongType.STANDARD) == -2
     )
     assert (
-        new_best_score(900, LevelIndex.MASTER.value, 336, b35, SongType.STANDARD) == 21
+        new_best_score(199, LevelIndex.MASTER.value, 336, b35, SongType.STANDARD) == 21
     )
     # 已在列表：按自身既有 RA 差值（低于旧 RA → 0）
     assert (
@@ -445,21 +567,33 @@ def test_new_best_score_baseline_from_version_side():
         new_best_score(834, LevelIndex.MASTER.value, 330, b35, SongType.STANDARD) == 0
     )
     # b35 里的 DX 谱按类型精确匹配（同曲双谱互不串）
-    assert new_best_score(888, LevelIndex.MASTER.value, 330, b35, SongType.DX) == 15
+    assert new_best_score(1355, LevelIndex.MASTER.value, 330, b35, SongType.DX) == 15
 
 
 def _utage_host_song():
-    """纯宴曲宿主：title/别名含「牛奶」，宴谱 diff_id=100363。"""
+    """宴谱宿主：真实蛸チルノ（199，SD+DX+宴 三组并存），宴 diff_id=100199。"""
+    from mocks import make_song, make_utage
+
+    return make_song(
+        199,
+        "チルノのパーフェクトさんすう教室",
+        aliases=["琪露诺"],
+        utage=[make_utage()],
+    )
+
+
+def _utage_only_helper(**kw):
+    """纯宴曲宿主（快照无原型，构造补位）：宴 diff_id=100901。"""
     from mocks import make_song, make_utage
     from maimai_py import Genre
 
     return make_song(
-        363,
-        "Milky Beat",
+        901,
+        "（构造）纯宴样例",
         genre=Genre.宴会場,
-        aliases=["牛奶"],
+        aliases=["宴曲"],
         diffs=[],
-        utage=[make_utage(diff_id=100363, kanji="牛", description="牛奶宴会")],
+        utage=[make_utage(diff_id=100901, kanji="宴", **kw)],
     )
 
 
@@ -473,25 +607,25 @@ async def test_by_utage_id_and_keyword(db):
     host = _utage_host_song()
     await seed_service(song_service, [host])
 
-    hit = await song_service.by_utage_id(100363)
+    hit = await song_service.by_utage_id(100199)
     assert hit is not None
     host_got, utage_diff = hit
     # 一个 diff_id 对应一张宴谱：返回宿主曲与命中的那张谱
-    assert host_got.id == 363
-    assert utage_diff.diff_id == 100363
+    assert host_got.id == 199
+    assert utage_diff.diff_id == 100199
     assert await song_service.by_utage_id(999999) is None
 
-    ut_songs = await song_service.utage_by_keyword("牛奶")
-    assert [s.id for s in ut_songs] == [363]
-    # 宿主曲无 DX 谱面（纯宴曲）
-    assert not host.difficulties.dx
-    assert host.difficulties.utage
+    ut_songs = await song_service.utage_by_keyword("琪露诺")
+    assert [s.id for s in ut_songs] == [199]
+    # 宿主曲为混合形态（SD+DX+宴并存，真实蛸チルノ）
+    assert host_got.difficulties.utage
+    assert host_got.difficulties.dx
 
 
 @requires_assets
 @pytest.mark.asyncio
 async def test_utage_id_command_draws_banquet_card(app: App, db):
-    """id 100363（宴谱机台 id）→ 宴会场卡而非同号普通曲 DX 卡。"""
+    """id 100199（宴谱机台 id）→ 宴会场卡而非同号普通曲 DX 卡。"""
     from mocks import seed_service
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
@@ -502,7 +636,7 @@ async def test_utage_id_command_draws_banquet_card(app: App, db):
     await _assert_image_reply(
         app,
         "query_chart",
-        "id100363",
+        "id100199",
         lambda: nb_chart.song_chart_banquet_info(host),
     )
 
@@ -510,20 +644,34 @@ async def test_utage_id_command_draws_banquet_card(app: App, db):
 @requires_assets
 @pytest.mark.asyncio
 async def test_utage_alias_keyword_draws_banquet_card(app: App, db):
-    """「宴牛奶是什么歌」：别名命中普通曲无宴谱时，回退按关键词搜宴曲。"""
-    from mocks import make_song, seed_service
+    """「宴琪露诺是什么歌」：剥「宴」命中无宴谱的曲（⑨周年）→ 回退宴曲搜索。"""
+    from mocks import make_diff, make_song, seed_service
+    from maimai_py import SongType, LevelIndex
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import nb_chart
 
     host = _utage_host_song()
-    normal = make_song(364, "Milky Normal", aliases=["牛奶"])
+    normal = make_song(
+        665,
+        "チルノのパーフェクトさんすう教室　⑨周年バージョン",
+        aliases=["チルノ"],
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.4,
+                version=16500,
+            )
+        ],
+    )
     await seed_service(song_service, [host, normal])
-    # 「宴牛奶」精确未命中 → 剥「宴」命中普通曲 364（无宴谱）→ 回退宴曲搜索
+    # 「宴チルノ」精确未命中 → 剥「宴」命中 ⑨周年（无宴谱）→ 回退宴曲搜索
     await _assert_image_reply(
         app,
         "search_alias_song",
-        "宴牛奶是什么歌",
+        "宴チルノ是什么歌",
         lambda: nb_chart.song_chart_banquet_info(host),
         suffix="您要找的是不是这首？",
     )
@@ -531,32 +679,34 @@ async def test_utage_alias_keyword_draws_banquet_card(app: App, db):
 
 @pytest.mark.asyncio
 async def test_by_utage_id_jp_view_fallback(db, monkeypatch):
-    """日服宴曲不在 CN 视图：by_utage_id / utage_by_keyword 走 JP 视图兜底。"""
+    """日服宴曲不在 CN 视图：by_utage_id / utage_by_keyword 走 JP 视图兜底。
+
+    真实锚：[協]青春コンプレックス（CN 已于 2026-08-07 下架，宴体 121634 仅日服）。
+    """
     from mocks import make_song, make_utage, seed_service
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     host = make_song(
-        363,
-        "Milky Beat JP",
-        aliases=["牛奶"],
+        1634,
+        "[協]青春コンプレックス",
         diffs=[],
-        utage=[make_utage(diff_id=100363)],
+        utage=[make_utage(diff_id=121634, kanji="協", level="14+", level_value=14.7)],
     )
     await seed_service(song_service, [])  # CN 运行时视图为空
 
     async def fake_jp_map():
-        return {363: host}
+        return {1634: host}
 
     monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
 
-    hit = await song_service.by_utage_id(100363)
+    hit = await song_service.by_utage_id(121634)
     assert hit is not None
     host_got, utage_diff = hit
-    assert host_got.id == 363
-    assert utage_diff.diff_id == 100363
-    ut_songs = await song_service.utage_by_keyword("牛奶")
-    assert [s.id for s in ut_songs] == [363]
+    assert host_got.id == 1634
+    assert utage_diff.diff_id == 121634
+    ut_songs = await song_service.utage_by_keyword("青春")
+    assert [s.id for s in ut_songs] == [1634]
 
 
 @requires_assets
@@ -569,21 +719,22 @@ async def test_utage_id_jp_only_host_card(app: App, db, monkeypatch):
     from nonebot_plugin_awmc_helper.core.render import nb_chart
 
     host = make_song(
-        363,
-        "Milky Beat JP",
-        version=99999,  # 恒判「当前版本」：修复前宴会卡会错误挂新曲标
-        utage=[make_utage(diff_id=100363)],
+        1634,
+        "[協]青春コンプレックス",
+        version=24000,
+        diffs=[],
+        utage=[make_utage(diff_id=121634, kanji="協", level="14+", level_value=14.7)],
     )
     await seed_service(song_service, [])  # CN 运行时视图为空
 
     async def fake_jp_map():
-        return {363: host}
+        return {1634: host}
 
     monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
     await _assert_image_reply(
         app,
         "query_chart",
-        "id100363",
+        "id121634",
         lambda: nb_chart.song_chart_banquet_info(host, jp=True),
         suffix="\n此歌曲为日服限定",
     )
@@ -592,33 +743,33 @@ async def test_utage_id_jp_only_host_card(app: App, db, monkeypatch):
 @requires_assets
 @pytest.mark.asyncio
 async def test_utage_id_jp_chart_on_cn_host(app: App, db, monkeypatch):
-    """日服宴谱挂在国服宿主曲（悪戯センセーション形态）：仍按日服卡渲染。
+    """日服宴谱挂在国服宿主曲（[協]ラグトレイン 形态）：仍按日服卡渲染。
 
-    宿主曲国服有普通谱、宴谱仅日服——修复前按宿主曲级判定 jp，会出
-    国服卡（国服版本标志/挂新曲标/无日服标注）。
+    宿主曲国服有 DX 普通谱（1355）、宴谱（111355）仅日服——修复前按宿主曲级
+    判定 jp，会出国服卡（国服版本标志/挂新曲标/无日服标注）。
     """
     from mocks import make_song, make_utage, seed_service
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import nb_chart
 
-    cn_host = make_song(363, "Milky Beat CN", version=21004)  # 国服：仅普通谱
+    cn_host = make_song(1355, "ラグトレイン", version=22000)  # 国服：DX 普通谱
     jp_host = make_song(
-        363,
-        "Milky Beat JP",
-        version=21000,
-        utage=[make_utage(diff_id=100363, version=26509)],
+        1355,
+        "[協]ラグトレイン",
+        version=24000,
+        utage=[make_utage(diff_id=111355, kanji="協", version=24000)],
     )
     await seed_service(song_service, [cn_host])
 
     async def fake_jp_map():
-        return {363: jp_host}
+        return {1355: jp_host}
 
     monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
     await _assert_image_reply(
         app,
         "query_chart",
-        "id100363",
+        "id111355",
         lambda: nb_chart.song_chart_banquet_info(jp_host, jp=True),
         suffix="\n此歌曲为日服限定",
     )
@@ -627,33 +778,24 @@ async def test_utage_id_jp_chart_on_cn_host(app: App, db, monkeypatch):
 @requires_assets
 @pytest.mark.asyncio
 async def test_utage_id_on_mixed_host_draws_banquet_card(app: App, db):
-    """宴谱挂在普通曲上（宿主有 DX 谱）：id100363 也必须出宴会卡而非 DX 卡。"""
-    from mocks import make_diff, make_song, make_utage, seed_service
-    from maimai_py import SongType, LevelIndex
+    """宴谱挂在普通曲上（宿主有 DX 谱）：id111355 也必须出宴会卡而非 DX 卡。"""
+    from mocks import make_song, make_utage, seed_service
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import nb_chart
 
     host = make_song(
-        363,
-        "Milky Beat Mixed",
-        aliases=["牛奶"],
-        utage=[make_utage(diff_id=100363)],
-        diffs=[
-            make_diff(
-                type=SongType.DX,
-                level_index=LevelIndex.MASTER,
-                level="13",
-                level_value=13.5,
-            )
-        ],
+        1355,
+        "[協]ラグトレイン",
+        aliases=["ラグトレイン"],
+        utage=[make_utage(diff_id=111355, kanji="協")],
     )
     await seed_service(song_service, [host])
     # 回归锚点：宿主有 DX 谱，is_banquet 为 False（修复前误出 DX 卡）
     await _assert_image_reply(
         app,
         "query_chart",
-        "id100363",
+        "id111355",
         lambda: nb_chart.song_chart_banquet_info(host),
     )
 
@@ -720,10 +862,11 @@ async def _assert_pending_card(app: App, matcher_name: str, text: str):
 
 
 async def _seed_pending():
+    """真实 MAGiCAL 新曲 pending（定数揭晓形态 = MuNET 实测值，gate 可查）。"""
     from nonebot_plugin_awmc_helper.core.songdb import upsert_pending
 
     await upsert_pending(
-        "otoge-db", "title:物語はここから", "missing_id", make_pending_item()
+        "otoge-db", "title:物語はここから", "missing_id", make_pending_revealed()
     )
 
 
@@ -740,7 +883,7 @@ async def test_search_pending_fallback_card(app: App, songs):
 async def test_ds_search_pending_fallback_card(app: App, songs):
     """定数查歌：样例库无 7.5 定数 → pending 兜底出临时卡（定数揭晓即可查）。"""
     await _seed_pending()
-    await _assert_pending_card(app, "search", "定数查歌 7.5")
+    await _assert_pending_card(app, "search", "定数查歌 7.4 7.6")
 
 
 @requires_assets

@@ -697,7 +697,8 @@ class SongService:
         return [
             s
             for s in await self._songs_of_scope(scope)
-            if any(d.note_designer.lower() == kw for d in s.get_difficulties())
+            # 谱师缺省（真实数据 SD 低难度常无谱师）按「0 即 -」约定参与匹配
+            if any((d.note_designer or "-").lower() == kw for d in s.get_difficulties())
         ]
 
     async def random(
