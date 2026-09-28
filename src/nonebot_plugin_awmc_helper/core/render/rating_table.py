@@ -53,22 +53,8 @@ STATISTICS_KEYS = [
     "fsd",
     "fsdp",
 ]
-RANK_SP = [
-    "d",
-    "c",
-    "b",
-    "bb",
-    "bbb",
-    "a",
-    "aa",
-    "aaa",
-    "s",
-    "sp",
-    "ss",
-    "ssp",
-    "sss",
-    "sssp",
-]
+RANK_SP = ("s", "sp", "ss", "ssp", "sss", "sssp")
+"""评级统计键（NB 同名表的 S 及以上段；d..aaa 段从未被统计使用）。"""
 COMBO_SP = ["fc", "fcp", "ap", "app"]
 SYNC_D_SP = ["fs", "fsp", "fsd", "fsdp"]
 
@@ -90,8 +76,8 @@ class _Stats:
         self.data = dict.fromkeys(STATISTICS_KEYS, 0)
 
     def add_rank(self, rate: str) -> None:
-        if rate in RANK_SP[-6:]:
-            for r in RANK_SP[-6:][: RANK_SP[-6:].index(rate) + 1]:
+        if rate in RANK_SP:
+            for r in RANK_SP[: RANK_SP.index(rate) + 1]:
                 self.data[r] += 1
 
     def add_combo(self, fc: FCType) -> None:
@@ -180,7 +166,7 @@ def draw_rating_table(
     # 逐谱面盖章（按模板生成时的分组与排序：group_by_ds 降序 / lv15 特例）
     qualified: list[float] = []
 
-    def stamp_rank(x: int, y: int, ds: float, score, *, lv15: bool = False) -> None:
+    def stamp_rank(x: int, y: int, score, *, lv15: bool = False) -> None:
         ach = score.achievements or 0
         qualified.append(ach)
         rate = RATE_FILE[RateType._from_achievement(ach).name]
@@ -245,7 +231,7 @@ def draw_rating_table(
             if score is None:
                 continue
             if not combo_mode and not sync_mode:
-                stamp_rank(x, y, diff.level_value, score, lv15=True)
+                stamp_rank(x, y, score, lv15=True)
             elif combo_mode:
                 stamp_combo(x, y, score, lv15=True)
             else:
@@ -267,7 +253,7 @@ def draw_rating_table(
                 elif sync_mode:
                     stamp_sync(x, y, score)
                 else:
-                    stamp_rank(x, y, diff.level_value, score)
+                    stamp_rank(x, y, score)
             rows = (len(charts) - 1) // RATING_COLS + 1
             current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
 
@@ -295,7 +281,7 @@ def draw_rating_table(
             elif sync_mode:
                 name = _sync_allclear(SYNC_D_SP[r])
             else:
-                name = RATE_FILE.get(RANK_SP[-6:][r].upper(), "")
+                name = RATE_FILE.get(RANK_SP[r].upper(), "")
             p = (
                 assets.static_path()
                 / "mai"

@@ -202,7 +202,6 @@ def _rating_grid_15(
 
 def _plate_grid(
     entries: Sequence[tuple[Song, SongDifficulty]],
-    major_type: SongType,
     *,
     remaster_entries: Sequence[tuple[Song, SongDifficulty]] | None = None,
     pages: int | None = None,
@@ -360,11 +359,11 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
             if not any(group.values()):
                 continue
             flat = [pair for charts in group.values() for pair in charts]
-            img = _plate_grid(flat, major, remaster_entries=remaster, pages=pages)
+            img = _plate_grid(flat, remaster_entries=remaster, pages=pages)
             await asyncio.to_thread(img.save, out_dir / f"{version}-{pages + 1}.png")
             total += sum(len(v) for v in group.values())
         return total
-    img = _plate_grid(entries, major)
+    img = _plate_grid(entries)
     await asyncio.to_thread(img.save, out_dir / f"{version}{kind}.png")
     return len(entries)
 

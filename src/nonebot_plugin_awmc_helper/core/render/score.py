@@ -60,13 +60,11 @@ class DrawScore:
     """行卡画布：构造时生成装饰底图，draw_* 系列输出成品 bytes。"""
 
     def __init__(self, height: int, *, service: str | None = None) -> None:
-        base = assets.static_path() / "mai" / "pic"
         # 行卡画布固定 prism_plus 版式（generate_prism_bg 渐变与装饰层均
         # prism_plus 专属，无 circle 变体）——非「默认主题」语义，勿改常量
         theme = "prism_plus"
         im = generate_prism_bg(height)
         self._im = im
-        self._base = base
         self._theme = theme
         self._title_bg = assets.pic("title.png", theme)
         self._title_lengthen_bg = assets.pic("title_lengthen.png", theme)
