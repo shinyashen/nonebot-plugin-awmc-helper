@@ -229,7 +229,11 @@ class NetScoreService:
         return hit or None
 
     async def build_b50(self, records: list[NetRecord]) -> PlayerBests:
-        """NET 记录 → 日服 B50（纯组装，不触发抓取，供测试与未来复用）。"""
+        """NET 记录 → 日服 B50（纯组装，不触发抓取）。
+
+        非指令链路 API：生产路径走 :meth:`get_b50`（窗口缓存 + 抓取）；
+        本方法仅测试直灌记录用。
+        """
         return self._bests_of(await self.assemble(records))
 
     # -- 内部 ---------------------------------------------------------------
