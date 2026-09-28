@@ -177,7 +177,9 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
     monkeypatch.setattr(songdb, "refresh_all", fake_refresh_all)
     monkeypatch.setattr(song_service, "refresh", fake_runtime_refresh)
     monkeypatch.setattr(songs_mod, "prerender_templates", fake_prerender)
-    monkeypatch.setattr(songs_mod, "_notify_superusers", fake_notify)
+    from nonebot_plugin_awmc_helper.core import utils as core_utils
+
+    monkeypatch.setattr(core_utils, "notify_superusers", fake_notify)
     monkeypatch.setattr(plugin_config, "awmc_update_notify", True)
 
     await songs_mod._on_cn_update({9001}, set(), {9001: "Brand New Song"})

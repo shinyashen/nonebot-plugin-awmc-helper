@@ -1629,8 +1629,9 @@ async def flush_pending() -> int:
 
     async with store.session() as session:
         rows = list((await session.exec(select(store.SongPending))).all())
-        state = await State.load()
-        titles = {norm_title(row.title) for row in state.songs.values() if row.title}
+        # 只取标题一列：整库 State.load() 数千行全表物化只为对标题集，杀鸡用牛刀
+        db_titles = (await session.exec(select(store.SongRow.title))).all()
+        titles = {norm_title(t) for t in db_titles if t}
         merged = 0
         for row in rows:
             key = row.key.removeprefix("title:")
