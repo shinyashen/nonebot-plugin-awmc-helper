@@ -80,6 +80,7 @@ async def test_walk_full_and_root_folding(db, monkeypatch):
     assert set(snapshot[100]) == {"TYW", "TYW DX"}
     assert snapshot[1449] == ["拼图丝带"]
     state = await store.kv_get("munet_alias_walk")
+    assert state is not None  # 走查完成必落状态（basedpyright 收窄）
     assert state["cursor"] is None
     assert state["finished_at"]
 
@@ -150,8 +151,8 @@ async def test_provider_merges_munet_snapshot(db):
     from nonebot_plugin_awmc_helper.core.provider import AwmcAliasProvider
 
     await store.save_song_aliases("munet", {100: ["TYW"], 1449: ["拼图丝带"]})
-    provider = AwmcAliasProvider(None, None)  # 柚子/落雪拉取失败走空快照回退
-    merged = await provider.get_aliases(client=None)
+    provider = AwmcAliasProvider(None, None)  # type: ignore[arg-type]  # 柚子/落雪拉取失败走空快照回退
+    merged = await provider.get_aliases(client=None)  # type: ignore[arg-type]
     assert merged[100] == ["TYW"]
     assert merged[1449] == ["拼图丝带"]
     assert provider._hash() != "empty"  # 内容驱动哈希

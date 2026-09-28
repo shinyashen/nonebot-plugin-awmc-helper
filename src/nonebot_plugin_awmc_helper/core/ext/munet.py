@@ -102,6 +102,8 @@ async def fetch_browse_filters() -> dict[str, list[int]]:
     信号，每日 1 请求）。
     """
     resp = await _request("GET", "/api/v3/mai2/Mai2Music/BrowseFilters")
+    if resp is None:
+        raise ExtError("MuNET BrowseFilters 不存在（404）")
     data = _parse_json(resp, "MuNET BrowseFilters")
     if not isinstance(data, dict) or not isinstance(data.get("versions"), list):
         raise ExtError("MuNET BrowseFilters 返回了无效数据")
@@ -117,6 +119,8 @@ async def search_music(query: str) -> list[dict]:
         "/api/v3/mai2/Mai2Music/Search",
         json_body={"query": query, "cachedIds": []},
     )
+    if resp is None:
+        return []  # 404 = 无命中（对齐 fetch_music_by_id 的 404 语义）
     data = _parse_json(resp, "MuNET Search")
     return (data or {}).get("musicData") or []
 
@@ -188,7 +192,8 @@ def entry_to_doc(
     }
     if not doc["title"]:
         return None
-    genre = _GENRE_NAMES.get(entry.get("genre"))
+    genre_id = entry.get("genre")
+    genre = _GENRE_NAMES.get(genre_id) if isinstance(genre_id, int) else None
     if genre:
         doc["genre"] = genre
     if entry.get("bpm"):
