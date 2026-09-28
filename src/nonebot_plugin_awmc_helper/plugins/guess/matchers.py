@@ -9,7 +9,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .game import GUESS_FEATURE, _reveal, _game_of, _start_game, _handle_answer
 from ...core import store
-from ...core.utils import group_admin, group_id_of, handle_errors
+from ...core.utils import group_id_of, handle_errors, ensure_group_admin
 
 guess = on_command("猜歌", block=True)
 guess_pic = on_command("猜曲绘", block=True)
@@ -74,11 +74,7 @@ async def _(
     session: Session = UniSession(),
     groups: tuple = RegexGroup(),
 ):
-    group_id = group_id_of(session)
-    if group_id is None:
-        await UniMessage.text(" 猜歌开关仅群聊可用").finish(at_sender=True)
-    if not await group_admin()(bot, event):
-        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
+    group_id = await ensure_group_admin(session, bot, event, feature="猜歌开关")
     enabled = groups[0] == "开启"
     await store.set_group_switch(group_id, GUESS_FEATURE, enabled)
     if not enabled:

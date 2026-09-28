@@ -12,7 +12,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import store
 from ...config import plugin_config
-from ...core.utils import user_id_of, group_admin, group_id_of, handle_errors
+from ...core.utils import user_id_of, group_id_of, handle_errors, ensure_group_admin
 from ...core.render.tools import text_image_bytes
 
 ARCADE_HELP = (
@@ -170,11 +170,7 @@ async def _(
     session: Session = UniSession(),
     groups: tuple = RegexGroup(),
 ):
-    group_id = group_id_of(session)
-    if group_id is None:
-        await UniMessage.text(" 排卡开关仅群聊可用").finish(at_sender=True)
-    if not await group_admin()(bot, event):
-        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
+    group_id = await ensure_group_admin(session, bot, event, feature="排卡开关")
     enabled = groups[0] == "开启"
     await store.set_group_switch(group_id, ARCADE_FEATURE, enabled)
     state = "开启" if enabled else "关闭"
@@ -280,11 +276,7 @@ async def _(
     message: Message = CommandArg(),
     command: tuple = Command(),
 ):
-    group_id = group_id_of(session)
-    if group_id is None:
-        await UniMessage.text(" 订阅仅群聊可用").finish(at_sender=True)
-    if not await group_admin()(bot, event):
-        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
+    group_id = await ensure_group_admin(session, bot, event, feature="订阅")
     keyword = str(message).strip()
     arcade = await _find_arcade(keyword) if keyword else None
     if arcade is None:

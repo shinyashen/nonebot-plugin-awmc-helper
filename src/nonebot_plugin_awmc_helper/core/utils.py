@@ -161,3 +161,20 @@ async def notify_superusers(text: str) -> None:
             )
         except Exception as e:  # 平台不支持/未连接等一律跳过
             logger.debug(f"通知发送失败（superuser={user_id}）：{e}")
+
+
+async def ensure_group_admin(session, bot, event, *, feature: str) -> str | None:
+    """「仅群聊可用 → 群管权限 → 权限不足」门禁三连（各子插件开关类 handler 共用）。
+
+    通过返回群 id；非群聊 finish「仅群聊可用」、无权限 finish「权限不足」
+    （finish 抛 MatcherException 终止 handler，不返回）。``feature`` 用于
+    群聊文案（如「猜歌开关」）。
+    """
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    group_id = group_id_of(session)
+    if group_id is None:
+        await UniMessage.text(f" {feature}仅群聊可用").finish(at_sender=True)
+    if not await group_admin()(bot, event):
+        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
+    return group_id

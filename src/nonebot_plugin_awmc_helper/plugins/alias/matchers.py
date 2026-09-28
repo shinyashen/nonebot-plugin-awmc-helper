@@ -16,9 +16,9 @@ from ...core.utils import (
     paginate,
     parse_page,
     user_id_of,
-    group_admin,
     group_id_of,
     handle_errors,
+    ensure_group_admin,
 )
 from ...core.forward import is_ob11, try_send_forward
 from ...core.render.tools import text_image_bytes
@@ -230,11 +230,7 @@ async def _(
     groups: tuple = RegexGroup(),
 ):
     action = groups[0]
-    group_id = group_id_of(session)
-    if group_id is None:
-        await UniMessage.text(" 别名推送开关仅群聊可用").finish(at_sender=True)
-    if not await group_admin()(bot, event):
-        await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
+    group_id = await ensure_group_admin(session, bot, event, feature="别名推送开关")
 
     enabled = action == "开启"
     await store.set_group_switch(group_id, PUSH_FEATURE, enabled)
