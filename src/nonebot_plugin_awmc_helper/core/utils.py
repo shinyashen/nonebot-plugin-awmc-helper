@@ -132,19 +132,20 @@ def slow_notice(text: str = " 比预期时间要长，再稍等一下…"):
     return notify
 
 
-GROUP_ADMIN = None
-"""群管理权限（SUPERUSER ∨ 群管/群主；延迟装配见 :func:`group_admin`）。"""
+_admin_perm = None
+"""群管权限单例缓存（经 :func:`group_admin` 延迟装配，避免与 nonebot
+初始化次序纠缠；不暴露模块级名字防第三方 import 到 None）。"""
 
 
 def group_admin():
-    """群管权限单例（模块导入期装配，避免与 nonebot 初始化次序纠缠）。"""
-    global GROUP_ADMIN
-    if GROUP_ADMIN is None:
+    """群管权限（SUPERUSER ∨ 群管/群主）。"""
+    global _admin_perm
+    if _admin_perm is None:
         from nonebot.permission import SUPERUSER
         from nonebot_plugin_uninfo import ADMIN
 
-        GROUP_ADMIN = SUPERUSER | ADMIN()
-    return GROUP_ADMIN
+        _admin_perm = SUPERUSER | ADMIN()
+    return _admin_perm
 
 
 async def notify_superusers(text: str) -> None:
