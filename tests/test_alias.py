@@ -1,4 +1,10 @@
-"""awmc.alias 别名子插件测试（nonebug + respx）。"""
+"""awmc.alias 别名子插件测试（nonebug + respx）。
+
+锚全部为真实数据（2026-09-29 取材）：样例曲库见 mocks.sample_songs
+（199 チルノ / 8 True Love Song / 624 KISS CANDY FLAVOR，别名均为柚子实测，
+「糖糖」为 8/624 共持的真实多命中别名）；日服兜底用真实日服限定曲
+テリトリーバトル(1396，落雪实测别名 领土战争/小男娘/奈伊)。
+"""
 
 import pytest
 from nonebug import App
@@ -95,11 +101,13 @@ async def _assert_reply(
 async def test_alias_of_song(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import alias
 
+    # 199 チルノ：SD+DX+蛸宴三组 → 三 id 展示；别名 7 条均为柚子实测
     await _assert_reply(
         app,
         alias.alias_song,
-        "企鹅舞有什么别名",
-        "该曲目有以下别名：\nID：231、10231\n企鹅舞",
+        "⑨有什么别名",
+        "该曲目有以下别名：\nID：199、10199、100199\n"
+        "琪露诺的完美算术教室\n数学课堂\n⑨\n算数教室\n琪露诺\nbaka\n算术教室",
         with_session=True,
     )
 
@@ -108,18 +116,25 @@ async def test_alias_of_song(app: App, songs):
 async def test_alias_by_id(app: App, songs):
     from nonebot_plugin_awmc_helper.plugins import alias
 
+    # 8 True Love Song：仅 SD → 单 id；别名 8 条均为柚子实测
     await _assert_reply(
         app,
         alias.alias_song,
-        "id 500有什么别名",
-        "该曲目有以下别名：\nID：500、10500\n普瑞\n普雷呃伦斯",
+        "id 8有什么别名",
+        # 「true love song」与曲名归一相同 → 合并视图去重，不展示
+        "该曲目有以下别名：\nID：8\n"
+        "会员制餐厅\n真的爱情歌\n糖糖\n"
+        "小管弦乐\n真爱歌\n真爱\n真情歌",
         with_session=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_alias_dx_only_song_ids(app: App, songs):
-    """只有 DX 谱的曲：仅展示 DX id（根 id+10000），不纳入标准位根 id。"""
+    """只有 DX 谱的曲：仅展示 DX id（根 id+10000），不纳入标准位根 id。
+
+    用真实 DX 重制曲 BLACK ROSE（日服 11001，柚子实测别名）注入样例库。
+    """
     from mocks import make_diff, make_song, sample_songs, seed_service
     from maimai_py import SongType
 
@@ -127,59 +142,72 @@ async def test_alias_dx_only_song_ids(app: App, songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     dx_only = make_song(
-        603, "DXOnlySong", aliases=["敌敌畏"], diffs=[make_diff(type=SongType.DX)]
+        1001,
+        "BLACK ROSE",
+        aliases=["黑玫瑰", "迪卢克", "黑肉丝", "黑蔷薇"],
+        artist="Yunosuke",
+        diffs=[make_diff(type=SongType.DX)],
     )
     await seed_service(song_service, [*sample_songs(), dx_only])
     await _assert_reply(
         app,
         alias.alias_song,
-        "敌敌畏有什么别名",
-        "该曲目有以下别名：\nID：10603\n敌敌畏",
+        "黑玫瑰有什么别名",
+        "该曲目有以下别名：\nID：11001\n黑玫瑰\n迪卢克\n黑肉丝\n黑蔷薇",
         with_session=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_alias_utage_only_song_ids(app: App, songs):
-    """只有宴谱的曲：仅展示宴谱机台 id（无标准/DX 位）。"""
+    """只有宴谱的曲：仅展示宴谱机台 id（无标准/DX 位）。
+
+    真实数据中纯宴宿主仅出现在国服视图（基曲未进国服的宴谱），运行时样例以
+    构造曲补位（注明）；宴 diff_id 沿用 6 位机台命名。
+    """
+    from mocks import make_song, make_utage, sample_songs, seed_service
+
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import alias
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
+    utage_only = make_song(
+        901,
+        "（构造）纯宴样例",
+        diffs=[],
+        utage=[make_utage(diff_id=100901, kanji="宴")],
+    )
+    await seed_service(song_service, [*sample_songs(), utage_only])
     await store.add_local_alias(901, "宴曲", "u")
     await song_service.reload_alias_index()
     await _assert_reply(
         app,
         alias.alias_song,
         "id 901有什么别名",
-        "该曲目有以下别名：\nID：100001\n宴曲",
+        "该曲目有以下别名：\nID：100901\n宴曲",
         with_session=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_alias_multi_match_forward(app: App, songs):
-    """多曲命中别名：OB11 以合并转发逐曲展示（首条为命中数量）。"""
+    """多曲命中别名：OB11 以合并转发逐曲展示（首条为命中数量）。
+
+    「糖糖」为 8/624 在柚子别名库共持的真实别名，无需本地别名即可多命中。
+    """
     import nonebot
     from fake import fake_group_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
-    from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import alias
-    from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    # 本地别名让「企鹅」同时命中 231（柚子别名企鹅舞）与 500（本地+柚子别名）
-    await store.add_local_alias(231, "企鹅", "u")
-    await store.add_local_alias(500, "企鹅", "u")
-    await song_service.reload_alias_index()
-
-    event = fake_group_message_event_v11(message="企鹅有什么别名", user_id=12345678)
+    event = fake_group_message_event_v11(message="糖糖有什么别名", user_id=12345678)
     forward = _forward_nodes(
         [
             "找到2个相同别名的曲目：",
-            "ID：231、10231\n企鹅舞\n企鹅",
-            "ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅",
+            "ID：8\n会员制餐厅\n真的爱情歌\n糖糖\n小管弦乐\n真爱歌\n真爱\n真情歌",
+            "ID：624\n小女孩福瑞\nkcf\n糖糖\n亲甜滴\n糖的味道\n小红帽\n亲糖口味",
         ]
     )
     async with app.test_matcher(alias.alias_song) as ctx:
@@ -227,27 +255,13 @@ async def test_alias_multi_match_forward_fallback(app: App, songs):
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
-    from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import alias
-    from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    await store.add_local_alias(231, "企鹅", "u")
-    await store.add_local_alias(500, "企鹅", "u")
-    await song_service.reload_alias_index()
-
-    event = fake_group_message_event_v11(message="企鹅有什么别名", user_id=12345678)
-    forward = _forward_nodes(
-        [
-            "找到2个相同别名的曲目：",
-            "ID：231、10231\n企鹅舞\n企鹅",
-            "ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅",
-        ]
-    )
-    msg = (
-        "找到2个相同别名的曲目：\n"
-        "ID：231、10231\n企鹅舞\n企鹅\n======\n"
-        "ID：500、10500\n普瑞\n普雷呃伦斯\n企鹅"
-    )
+    event = fake_group_message_event_v11(message="糖糖有什么别名", user_id=12345678)
+    block8 = "ID：8\n会员制餐厅\n真的爱情歌\n糖糖\n小管弦乐\n真爱歌\n真爱\n真情歌"
+    block624 = "ID：624\n小女孩福瑞\nkcf\n糖糖\n亲甜滴\n糖的味道\n小红帽\n亲糖口味"
+    forward = _forward_nodes(["找到2个相同别名的曲目：", block8, block624])
+    msg = f"找到2个相同别名的曲目：\n{block8}\n======\n{block624}"
     async with app.test_matcher(alias.alias_song) as ctx:
         bot = ctx.create_bot(
             base=Bot,
@@ -325,6 +339,10 @@ def _seed_jp_view(monkeypatch, songs_by_id: dict):
     monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
 
 
+# テリトリーバトル(1396) 的落雪实测别名（真实日服限定曲）
+_TERRITORY_ALIASES = ["领土战争", "小男娘", "奈伊"]
+
+
 @pytest.mark.asyncio
 async def test_alias_jp_fallback_by_name(app: App, songs, monkeypatch):
     """仅日服曲目：国服别名未命中 → 日服视图兜底，ID 行带日服限定标注。"""
@@ -334,16 +352,17 @@ async def test_alias_jp_fallback_by_name(app: App, songs, monkeypatch):
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import alias
 
-    await store.save_song_aliases("munet", {2061: ["消毒水"]})
-    _seed_jp_view(
-        monkeypatch,
-        {2061: make_song(2061, "XODUS", diffs=[make_diff(type=SongType.DX)])},
+    territory = make_song(
+        1396, "テリトリーバトル", artist="MASAKI", diffs=[make_diff(type=SongType.DX)]
     )
+    # 不进国服样例库：1396 仅存在于日服视图（真实可见性）
+    await store.save_song_aliases("munet", {1396: _TERRITORY_ALIASES})
+    _seed_jp_view(monkeypatch, {1396: territory})
     await _assert_reply(
         app,
         alias.alias_song,
-        "消毒水有什么别名",
-        "该曲目有以下别名：\nID：12061（日服限定）\n消毒水",
+        "领土战争有什么别名",
+        "该曲目有以下别名：\nID：11396（日服限定）\n奈伊\n小男娘\n领土战争",
         with_session=True,
     )
 
@@ -357,23 +376,27 @@ async def test_alias_jp_fallback_by_id(app: App, songs, monkeypatch):
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import alias
 
-    await store.save_song_aliases("munet", {2061: ["消毒水"]})
-    _seed_jp_view(
-        monkeypatch,
-        {2061: make_song(2061, "XODUS", diffs=[make_diff(type=SongType.DX)])},
+    territory = make_song(
+        1396, "テリトリーバトル", artist="MASAKI", diffs=[make_diff(type=SongType.DX)]
     )
+    await store.save_song_aliases("munet", {1396: _TERRITORY_ALIASES})
+    _seed_jp_view(monkeypatch, {1396: territory})
     await _assert_reply(
         app,
         alias.alias_song,
-        "2061有什么别名",
-        "该曲目有以下别名：\nID：12061（日服限定）\n消毒水",
+        "1396有什么别名",
+        "该曲目有以下别名：\nID：11396（日服限定）\n奈伊\n小男娘\n领土战争",
         with_session=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_alias_jp_fallback_multi(app: App, songs, monkeypatch):
-    """仅日服曲目多曲命中：合并转发逐曲展示，各 ID 行带日服限定标注。"""
+    """仅日服曲目多曲命中：合并转发逐曲展示，各 ID 行带日服限定标注。
+
+    真实库中暂无「日限曲间共享别名」样本（落雪全量核查 0 组），第二首以
+    构造日限曲补位（注明）。
+    """
     import nonebot
     from fake import fake_group_message_event_v11
     from mocks import make_diff, make_song
@@ -384,21 +407,27 @@ async def test_alias_jp_fallback_multi(app: App, songs, monkeypatch):
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import alias
 
-    await store.save_song_aliases("munet", {2061: ["消毒水"], 2062: ["消毒水"]})
-    _seed_jp_view(
-        monkeypatch,
-        {
-            2061: make_song(2061, "XODUS", diffs=[make_diff(type=SongType.DX)]),
-            2062: make_song(2062, "XODUS II", diffs=[make_diff(type=SongType.DX)]),
-        },
+    territory = make_song(
+        1396, "テリトリーバトル", artist="MASAKI", diffs=[make_diff(type=SongType.DX)]
     )
+    ghost = make_song(
+        555,
+        "（构造）日服限定样例",
+        artist="构造条目",
+        diffs=[make_diff(type=SongType.DX)],
+    )
+    # 两首均不进国服样例库（仅日服可见）
+    await store.save_song_aliases(
+        "munet", {1396: _TERRITORY_ALIASES, 555: ["领土战争"]}
+    )
+    _seed_jp_view(monkeypatch, {1396: territory, 555: ghost})
 
-    event = fake_group_message_event_v11(message="消毒水有什么别名", user_id=12345678)
+    event = fake_group_message_event_v11(message="领土战争有什么别名", user_id=12345678)
     forward = _forward_nodes(
         [
             "找到2个相同别名的曲目：",
-            "ID：12061（日服限定）\n消毒水",
-            "ID：12062（日服限定）\n消毒水",
+            "ID：10555（日服限定）\n领土战争",
+            "ID：11396（日服限定）\n奈伊\n小男娘\n领土战争",
         ]
     )
     async with app.test_matcher(alias.alias_song) as ctx:
@@ -444,38 +473,39 @@ async def test_local_alias_apply(app: App, songs, tmp_path):
     from nonebot_plugin_awmc_helper.plugins import alias
 
     with respx.mock(assert_all_called=False) as m:
-        # 柚子无该别名 → 本地添加成功
+        # 柚子无该别名（「真正的爱之歌」为落雪实测别名，柚子未收录）→ 本地添加成功
         m.get(f"{BASE}/aliases/maimaidx/aliases").respond(json={"message": "未找到"})
         await _assert_reply(
             app,
             alias.alias_local_apply,
-            "添加本地别名 231 企鹅",
-            "已成功为ID「231」添加别名「企鹅」到本地别名库",
+            "添加本地别名 8 真正的爱之歌",
+            "已成功为ID「8」添加别名「真正的爱之歌」到本地别名库",
             with_session=True,
         )
         from nonebot_plugin_awmc_helper.core.songs import song_service
 
-        aliases = await song_service.aliases_of(231)
+        aliases = await song_service.aliases_of(8)
         assert aliases is not None
-        assert "企鹅" in aliases
+        assert "真正的爱之歌" in aliases
 
         # 重复添加 → 提示已存在（同样必须在 mock 上下文内，避免真实请求柚子）
         await _assert_reply(
             app,
             alias.alias_local_apply,
-            "添加本地别名 231 企鹅",
+            "添加本地别名 8 真正的爱之歌",
             "本地别名库已存在该别名",
             with_session=True,
         )
     from nonebot_plugin_awmc_helper.core import store as awmc_store
 
     assert (
-        await awmc_store.add_local_alias(500, "企鹅", "u") is True
+        await awmc_store.add_local_alias(624, "真正的爱之歌", "u") is True
     )  # 不同曲同别名允许
 
 
 @pytest.mark.asyncio
 async def test_local_alias_dup_on_server(app: App, songs):
+    """柚子已收录（真实别名「糖糖」在 8 名下）→ 判重命中。"""
     import respx
 
     from nonebot_plugin_awmc_helper.plugins import alias
@@ -483,17 +513,17 @@ async def test_local_alias_dup_on_server(app: App, songs):
     with respx.mock(assert_all_called=False) as m:
         m.get(f"{BASE}/aliases/maimaidx/aliases").respond(
             json={
-                "song_id": 231,
-                "name": "PENGUIN",
+                "song_id": 8,
+                "name": "True Love Song",
                 "is_votable": False,
-                "alias": ["企鹅"],
+                "alias": ["糖糖"],
             }
         )
         await _assert_reply(
             app,
             alias.alias_local_apply,
-            "添加本地别名 231 企鹅",
-            "该曲目的别名「企鹅」已存在别名服务器",
+            "添加本地别名 8 糖糖",
+            "该曲目的别名「糖糖」已存在别名服务器",
             with_session=True,
         )
 
@@ -508,7 +538,7 @@ async def test_apply_and_agree(app: App, songs):
         m.get(f"{BASE}/aliases/maimaidx/aliases").respond(json={"message": "未找到"})
         m.post(f"{BASE}/aliases/maimaidx/apply").respond(json={"message": "申请已提交"})
         await _assert_reply(
-            app, alias.alias_apply, "添加别名 231 企鹅", "申请已提交", with_session=True
+            app, alias.alias_apply, "添加别名 8 糖糖", "申请已提交", with_session=True
         )
 
         m.post(f"{BASE}/aliases/maimaidx/votes").respond(json={"message": "投票成功"})
@@ -519,6 +549,7 @@ async def test_apply_and_agree(app: App, songs):
 
 @pytest.mark.asyncio
 async def test_alias_status(app: App, songs):
+    """当前投票列表：用真实进行中投票（Pixel Galaxy/像素银河，2026-09-29 实测）。"""
     import base64
 
     import respx
@@ -530,12 +561,12 @@ async def test_alias_status(app: App, songs):
         m.get(f"{BASE}/aliases/maimaidx/votes").respond(
             json=[
                 {
-                    "song_id": 231,
-                    "apply_alias": "企鹅",
-                    "tag": "ABC123",
-                    "name": "PENGUIN",
-                    "agree_votes": 3,
-                    "votes": 10,
+                    "song_id": 11878,
+                    "apply_alias": "像素银河",
+                    "tag": "95V3R",
+                    "name": "Pixel Galaxy",
+                    "agree_votes": 0,
+                    "votes": 5,
                 }
             ]
         )
@@ -576,7 +607,7 @@ async def test_alias_status(app: App, songs):
 
 @pytest.mark.asyncio
 async def test_vote_hint_in_music_query(app: App, songs):
-    """是什么歌未命中别名但柚子有进行中投票 → 投票提示。"""
+    """是什么歌未命中别名但柚子有进行中投票 → 投票提示（真实投票条目）。"""
     import respx
 
     from nonebot_plugin_awmc_helper.plugins import music_query
@@ -587,12 +618,12 @@ async def test_vote_hint_in_music_query(app: App, songs):
                 "type": "ongoing",
                 "data": [
                     {
-                        "song_id": 231,
-                        "apply_alias": "企鹅",
-                        "tag": "T9",
-                        "name": "PENGUIN",
+                        "song_id": 11878,
+                        "apply_alias": "像素银河",
+                        "tag": "95V3R",
+                        "name": "Pixel Galaxy",
                         "agree_votes": 0,
-                        "votes": 10,
+                        "votes": 5,
                     }
                 ],
             }
@@ -603,13 +634,15 @@ async def test_vote_hint_in_music_query(app: App, songs):
         from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
         from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
-        event = fake_group_message_event_v11(message="企鹅是什么歌", user_id=event_user)
+        event = fake_group_message_event_v11(
+            message="像素银河是什么歌", user_id=event_user
+        )
         expected = Message(
             [
                 MessageSegment.at(event_user),
                 MessageSegment.text(
-                    " 未找到别名为「企鹅」的歌曲，但找到与此相同别名的投票："
-                    "\n- T9\n    ID 231: 企鹅\n"
+                    " 未找到别名为「像素银河」的歌曲，但找到与此相同别名的投票："
+                    "\n- 95V3R\n    ID 11878: 像素银河\n"
                     "※ 可以使用指令「同意别名 XXXXX」进行投票"
                 ),
             ]
