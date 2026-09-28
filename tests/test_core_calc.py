@@ -1,4 +1,5 @@
-"""core/calc.build_bests 纯函数单测：版本拆分、自定义排序键、截断与 RA 求和。
+"""core/calc 纯函数单测：B50 拆分（build_bests）、分数线（score_line）、
+RA（compute_rating）与推分推荐（rise_recommend）。
 
 导入放函数内：顶层 import 会在 nonebug 初始化前触发插件包加载（见 conftest）；
 maimai_py 本体是纯库，可顶层导入。
@@ -132,3 +133,265 @@ def test_bests_empty_input():
     assert bests.rating == 0
     assert bests.scores_b35 == []
     assert bests.scores_b15 == []
+
+
+# ---------------------------------------------------------------------------
+# score_line / compute_rating / rise_recommend
+# ---------------------------------------------------------------------------
+
+
+def test_score_line_formula():
+
+    """分数线公式对拍原版：紫799（DX Master）100% 线。"""
+    from mocks import make_diff
+
+    from nonebot_plugin_awmc_helper.core.calc import score_line
+
+    diff = make_diff(
+        tap_num=700, hold_num=100, slide_num=100, touch_num=100, break_num=20
+    )
+    result = score_line(diff, 100)
+    total = 700 * 500 + 100 * 1000 + 100 * 1500 + 100 * 500 + 20 * 2500
+    assert result is not None
+    assert result["total"] == total
+    assert result["tap_great"] == total * 1 / 10000
+    assert result["breaks"] == 20
+
+    assert score_line(diff, 101.5) is None  # 非法线
+    assert score_line(diff, -1) is None
+
+
+def test_compute_rating_consistent_with_library():
+    """RA 计算与 maimai-py ScoreCoefficient 一致。"""
+    from maimai_py.utils import ScoreCoefficient
+
+    from nonebot_plugin_awmc_helper.core.calc import compute_rating
+
+    assert compute_rating(13.5, 100.5) == ScoreCoefficient(100.5).ra(13.5)
+    assert compute_rating(13.5, 99.0) == ScoreCoefficient(99.0).ra(13.5)
+
+
+def test_rise_recommend_basic():
+    """推分推荐：未入线曲目按目标档位给出提升。"""
+    import dataclasses
+
+    from mocks import sample_songs
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    b50 = [
+        extend(
+            Score(
+                id=231,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=100.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=200,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="PENGUIN",
+            level_value=13.2,
+            level_dx_score=2100,
+            dx_star=4,
+            version=25000,
+        )
+    ]
+    candidates = [s for s in sample_songs() if s.id == 500]  # DX Master 13.7
+    rec = rise_recommend(b50, candidates, target=10, latest_version_value=20000)
+    assert rec
+    top = rec[0]
+    assert top["song"].id == 500
+    assert top["gain"] >= 10
+
+
+def test_rise_recommend_old_fields():
+    """推分输出携带旧成绩（推分行卡显示用）：未游玩 0 / 已游玩取 B50 成绩。"""
+    import dataclasses
+
+    from mocks import sample_songs
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    b50 = [
+        extend(
+            Score(
+                id=231,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=100.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=200,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="PENGUIN",
+            level_value=13.2,
+            level_dx_score=2100,
+            dx_star=4,
+            version=25000,
+        )
+    ]
+    candidates = [s for s in sample_songs() if s.id in (231, 500)]
+    rec = rise_recommend(b50, candidates, target=10, latest_version_value=20000)
+    by_chart = {(r["song"].id, r["diff"].type): r for r in rec}
+    # 500 未游玩：旧成绩 0（NB RiseResult 默认值语义）
+    assert by_chart[(500, SongType.DX)]["old_achievements"] == 0.0
+    assert by_chart[(500, SongType.DX)]["old_ra"] == 0
+    # 231 已游玩未入线：旧成绩取 B50 成绩
+    assert by_chart[(231, SongType.DX)]["old_achievements"] == 100.0
+    assert by_chart[(231, SongType.DX)]["old_ra"] == 200
+
+
+def test_rise_recommend_version_filter():
+    """推分双栏按版本划分（用户口径，NB 旧/新版本谱面推荐）：旧版本 =
+    当前版本以前全部谱面（b35 侧）、新版本 = 当前版本谱面（b15 侧），
+    SD/DX 均可入任一栏，side 由谱面版本决定而非类型。"""
+    import dataclasses
+
+    from mocks import make_diff, make_song
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+
+    def extend(base, **kw):
+        return ScoreExtend(**dataclasses.asdict(base), **kw)
+
+    b50 = [
+        extend(
+            Score(
+                id=900,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=99.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=200,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.STANDARD,
+            ),
+            title="oldSD",
+            level_value=13.0,
+            level_dx_score=2100,
+            dx_star=4,
+            version=24000,
+        ),
+        extend(
+            Score(
+                id=910,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=99.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=210,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="oldDX",
+            level_value=13.0,
+            level_dx_score=2100,
+            dx_star=4,
+            version=24000,
+        ),
+        extend(
+            Score(
+                id=911,
+                level="13",
+                level_index=LevelIndex.MASTER,
+                achievements=99.0,
+                fc=None,
+                fs=None,
+                dx_score=2000,
+                dx_rating=220,
+                play_count=None,
+                play_time=None,
+                rate=RateType.SSS,
+                type=SongType.DX,
+            ),
+            title="newDX",
+            level_value=13.0,
+            level_dx_score=2100,
+            dx_star=4,
+            version=25000,
+        ),
+    ]
+
+    def cand(song_id, type_, version):
+        return make_song(
+            song_id,
+            f"s{song_id}",
+            diffs=[
+                make_diff(
+                    type=type_,
+                    level_index=LevelIndex.MASTER,
+                    level="13",
+                    level_value=13.0,
+                    version=version,
+                )
+            ],
+        )
+
+    candidates = [
+        cand(921, SongType.DX, 25000),  # 当前版本 DX → 保留
+        cand(920, SongType.DX, 24000),  # 旧版本 DX → 排除（新版本栏只推当前版本）
+        cand(922, SongType.STANDARD, 25000),  # 当前版本 SD → 排除（旧版本栏语义）
+        cand(923, SongType.STANDARD, 24000),  # 旧版本 SD → 保留
+    ]
+
+    def by_id(song_id, rec):
+        return next(r for r in rec if r["song"].id == song_id)
+
+    rec = rise_recommend(b50, candidates, target=1, latest_version_value=25000)
+    # b50 两侧均有成绩（24000 旧版本侧 / 25000 新版本侧）→ 四首候选全部保留，
+    # 归栏只看谱面版本
+    got = {(r["song"].id, r["side"]) for r in rec}
+    assert got == {
+        (921, "new"),
+        (920, "old"),
+        (922, "new"),
+        (923, "old"),
+    }
+    # 入线基准方向：每栏取该侧**最低** RA（升序首位，NB play_result[-1] 语义）
+    from nonebot_plugin_awmc_helper.core.calc import compute_rating
+
+    expected_new_gain = compute_rating(13.0, 99.0) - 220  # 新版本侧最低 RA=911 的 220
+    assert by_id(921, rec)["gain"] == expected_new_gain
+    expected_old_gain = compute_rating(13.0, 99.0) - 200  # 旧版本侧最低 RA=900 的 200
+    assert by_id(923, rec)["gain"] == expected_old_gain
+
+
+def test_rise_recommend_default_latest_follows_library():
+    """latest_version_value 缺省跟随 maimai_py current_version（硬编码会过期）。"""
+    import inspect
+
+    from maimai_py import current_version
+
+    from nonebot_plugin_awmc_helper.core.calc import rise_recommend
+
+    sig = inspect.signature(rise_recommend)
+    assert sig.parameters["latest_version_value"].default is None
+    assert current_version.value > 25000  # CiRCLE 时代：默认值不能停在 PRiSM
