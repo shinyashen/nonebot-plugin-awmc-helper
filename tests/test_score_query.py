@@ -76,7 +76,7 @@ async def _assert_reply(
 async def test_b50_unbound_hint(db):
     """OneBot v11 运行时（platform 兜底 "unknown"）未绑定用户不再提示：
     user_id 可作 QQ 号装配凭据，b50 走水鱼 QQ 公开查询——
-    「尚未绑定」提示仅非 QQ 平台可达，语义覆盖见 test_binding.py。"""
+    「尚未绑定」提示仅非 QQ 平台可达，语义覆盖见 test_core_binding.py。"""
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     binding = await binding_service.ensure("OneBot V11", "12345678")

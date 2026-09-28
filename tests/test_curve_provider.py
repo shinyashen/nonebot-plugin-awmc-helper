@@ -3,7 +3,7 @@
 档位口径以 2026-09 全量实测为准：
 ``dist`` 14 档达成率分布升序 D..SSSP；``fc_dist`` 5 档 [未FC, FC, FCP, AP, APP]。
 解析实现已上游化（PR #64，随 1.6.0），本文件锁定上游行为防回退；装载降级
-（曲线失败不拖垮曲库加载）在 core.songs.SongService.load，用例见 test_songs.py。
+（曲线失败不拖垮曲库加载）在 core.songs.SongService.load，用例见 test_core_songs.py。
 """
 
 import pytest
