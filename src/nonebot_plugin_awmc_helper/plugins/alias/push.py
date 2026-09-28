@@ -40,6 +40,9 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
     default = plugin_config.awmc_alias_push
     if not ob11_available():
         return
+    # 按 bot 并发推送（各连接限速互不影响）：原先 bot 间串行 + 每群 sleep(5)，
+    # 200 群即 1000s/轮会压住 SSE 回调；单 bot 内仍逐群串行 + sleep 防风控
+    tasks = []
     for bot in list(get_bots().values()):
         if not is_ob11(bot):
             continue
@@ -48,14 +51,20 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
         except Exception as e:
             logger.debug(f"群列表拉取失败（bot={bot}），跳过该连接：{e}")
             continue
-        for g in group_list:
-            gid = str(g["group_id"])
-            if not await store.get_switch(gid, PUSH_FEATURE, default):
-                continue
-            # 合并转发优先（core/forward 统一构造），失败降级普通消息
-            if not await try_send_forward(bot, [text], group_id=gid):
-                try:
-                    await bot.send_group_msg(group_id=int(gid), message=ob11_text(text))
-                except Exception:
-                    logger.exception(f"别名推送到群 {gid} 失败")
-            await asyncio.sleep(5)
+        tasks.append(_push_to_groups(bot, group_list, text, default))
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
+async def _push_to_groups(bot, group_list, text: str, default: bool) -> None:
+    for g in group_list:
+        gid = str(g["group_id"])
+        if not await store.get_switch(gid, PUSH_FEATURE, default):
+            continue
+        # 合并转发优先（core/forward 统一构造），失败降级普通消息
+        if not await try_send_forward(bot, [text], group_id=gid):
+            try:
+                await bot.send_group_msg(group_id=int(gid), message=ob11_text(text))
+            except Exception:
+                logger.exception(f"别名推送到群 {gid} 失败")
+        await asyncio.sleep(5)
