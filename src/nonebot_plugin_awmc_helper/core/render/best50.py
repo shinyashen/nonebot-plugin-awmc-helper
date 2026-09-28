@@ -194,10 +194,16 @@ def game_song_id(score: ScoreExtend) -> int:
 
 
 def cover_song_id(score: ScoreExtend) -> int:
-    """曲绘文件 ID：素材包封面按去偏移序号命名，取模统一落雪缺位/水鱼全 id；
-    宴谱 id 100000+ 与常规序列不同源，取模会命中别的歌的封面，须用全 id 直查。"""
-    if score.type == SongType.UTAGE:
-        return score.id
+    """曲绘文件 ID：素材包封面按根 id 命名——DX 展示 id（根+DX_ID_OFFSET）与
+    水鱼全 id 取模归一到根 id，落雪缺位 id 本就是根 id。
+
+    宴谱 diff id = UTAGE_ID_BASE + level_id × UTAGE_LEVEL_STRIDE + 根 id
+    （步进恰 10000，取模即根 id）＝宿主曲 id：宿主曲的标准/DX 谱面封面与
+    宴谱同曲同图；纯宴谱曲（[宴]Oshama Scramble! (Cranky Remix)＝998、
+    [幸]犬日和。(はっぴー歌唱Ver)＝851，国服无标准/DX 谱面）素材包同样按
+    根 id 收录其官方曲绘（已与 otoge-db 官方 jacket 逐一比对确认），取模
+    同样命中。新版本素材包未收录的新宴谱宿主由 cover 候选链落占位图。
+    """
     return score.id % 10000
 
 

@@ -280,14 +280,18 @@ def test_score_row_sub_hook_swaps_subline():
     assert render(lambda s: f"pc: {s.id}") == render(lambda s: f"pc: {s.id}")
 
 
-def test_cover_song_id_utage_keeps_full_id():
-    """宴谱 id 100000+ 不得取模（修复前 100001 % 10000 = 1 命中别的歌的封面）。"""
+def test_cover_song_id_utage_uses_root_id():
+    """宴谱 diff id 取模即根 id＝宿主曲（id = 100000 + level_id×10000 + 根 id，
+    步进恰 10000）：宿主封面同曲同图，纯宴谱曲（998/851）素材包也按根 id
+    收录官方曲绘（与 otoge-db jacket 比对确认），不存在需要特判的例外。"""
     from maimai_py import SongType
 
     from nonebot_plugin_awmc_helper.core.render.best50 import cover_song_id
 
-    assert cover_song_id(_score(100001, SongType.UTAGE)) == 100001
-    # 常规谱维持取模归一化（落雪缺位 id 与水鱼全 id 落到同一封面文件）
+    assert cover_song_id(_score(100998, SongType.UTAGE)) == 998  # [宴]Oshama
+    assert cover_song_id(_score(140227, SongType.UTAGE)) == 227  # Garakuta 某
+    assert cover_song_id(_score(161852, SongType.UTAGE)) == 1852  # 惣菜 龙
+    # 常规谱：落雪缺位 id 与水鱼全 id 落到同一封面文件
     assert cover_song_id(_score(10231, SongType.DX)) == 231
     assert cover_song_id(_score(231, SongType.STANDARD)) == 231
 
