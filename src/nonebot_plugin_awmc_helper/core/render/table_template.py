@@ -319,6 +319,10 @@ async def generate_rating_template(level: str, song_service) -> int:
     return len(entries)
 
 
+_FULL_SET_PLATE_VERSIONS = ("舞", "霸")
+"""旧作全集双页版本：完成表输出文件名不含牌种（各牌种共用同一对底图）。"""
+
+
 async def generate_plate_template(version: str, kind: str, song_service) -> int:
     """NB 布局生成牌子完成表底图；舞/霸生成两页。返回谱面数。"""
     songs = await song_service.get_all()
@@ -337,7 +341,7 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
         return 0
     out_dir = plate_table_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    if version in ("舞", "霸"):
+    if version in _FULL_SET_PLATE_VERSIONS:
         remaster = [
             (song, diff)
             for song in songs
@@ -400,7 +404,14 @@ async def refresh_all_plate_tables(song_service) -> tuple[int, list[str]]:
     async with _template_lock:
         total, failed = 0, []
         for version in PLATE_CHARS:
-            for kind in plate_kinds_of(version):
+            # 舞/霸完成表按 {版本}-{页}.png 输出且 _plate_grid 与牌种无关：
+            # 多牌种只渲染一次，避免同一对 PNG 全量重算 N 遍
+            kinds = (
+                plate_kinds_of(version)[:1]
+                if version in _FULL_SET_PLATE_VERSIONS
+                else plate_kinds_of(version)
+            )
+            for kind in kinds:
                 try:
                     total += await generate_plate_template(version, kind, song_service)
                 except Exception:
