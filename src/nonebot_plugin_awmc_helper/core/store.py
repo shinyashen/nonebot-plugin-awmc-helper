@@ -313,8 +313,13 @@ _MIGRATE_COLUMNS: dict[str, dict[str, str]] = {
         # 日服 NET 凭据（2026-09-26 起支持数据源 net）
         "net_sega_id": "ALTER TABLE user_binding ADD COLUMN net_sega_id VARCHAR",
         "net_password": "ALTER TABLE user_binding ADD COLUMN net_password VARCHAR",
-        # 水鱼 OAuth 设备码绑定（2026-09-28 起：写路径强制 OAuth）
-        "divingfish_oauth": "ALTER TABLE user_binding ADD COLUMN divingfish_oauth BOOL",
+        # 水鱼 OAuth 设备码绑定（2026-09-28 起：写路径强制 OAuth）。
+        # BOOL 必须带 NOT NULL DEFAULT 0：无默认时存量行读出 NULL 而非 False，
+        # 与新建行不均匀，将来 `is True` 类判定会漏掉 NULL 行
+        "divingfish_oauth": (
+            "ALTER TABLE user_binding ADD COLUMN"
+            " divingfish_oauth BOOL NOT NULL DEFAULT 0"
+        ),
         "divingfish_sub": "ALTER TABLE user_binding ADD COLUMN divingfish_sub VARCHAR",
     },
 }

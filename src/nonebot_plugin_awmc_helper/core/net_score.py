@@ -29,6 +29,7 @@ from maimai_py import (
     current_version_jp,
 )
 from maimai_py.utils import ScoreCoefficient
+from maimai_py.maimai import MaimaiScores
 
 from . import store
 from .songs import song_service
@@ -45,17 +46,26 @@ _DIFFICULTY_TO_LEVEL_INDEX: dict[str, LevelIndex] = {
     "remaster": LevelIndex.ReMASTER,
 }
 
-_FC_TO_ENUM = {"fc": FCType.FC, "fcp": FCType.FCP, "ap": FCType.AP, "app": FCType.APP}
-_FS_TO_ENUM = {
-    "sync": FSType.SYNC,
-    "fs": FSType.FS,
-    "fsp": FSType.FSP,
-    "fsd": FSType.FSD,
-    "fsdp": FSType.FSDP,
-}
 
-# DX 星阈值（maimai_py MaimaiScores._calcuate_dx_star 同源）
-_DX_STAR_THRESHOLDS = (0.85, 0.90, 0.93, 0.95, 0.97)
+# NET 记录的 fc/fs 字符串（fc/fcp/ap/app、sync/fs/fsp/fsd/fsdp）本就是
+# maimai_py 枚举名的小写形式，直接按名转枚举（与上游 providers/lxns.py 同口径）
+def _fc_of(record: NetRecord) -> FCType | None:
+    if not record.fc:
+        return None
+    try:
+        return FCType[record.fc.upper()]
+    except KeyError:
+        return None
+
+
+def _fs_of(record: NetRecord) -> FSType | None:
+    if not record.fs:
+        return None
+    try:
+        return FSType[record.fs.upper()]
+    except KeyError:
+        return None
+
 
 # 抓取失败后的短退避（秒）：窗口缓存由成功抓取填充，失败不占窗口，
 # 但也不允许立刻重试轰炸官方（凭据错误连续重试是最典型场景）
@@ -279,8 +289,8 @@ class NetScoreService:
             level=diff.level,
             level_index=_DIFFICULTY_TO_LEVEL_INDEX[record.difficulty],
             achievements=record.achievement,
-            fc=_FC_TO_ENUM.get(record.fc) if record.fc else None,
-            fs=_FS_TO_ENUM.get(record.fs) if record.fs else None,
+            fc=_fc_of(record),
+            fs=_fs_of(record),
             dx_score=record.dx_score,
             dx_rating=ra,
             play_count=None,
@@ -301,13 +311,14 @@ class NetScoreService:
 
     @staticmethod
     def _dx_star(dx_score: int | None, level_dx_score: int) -> int | None:
+        """DX 星：阈值表单源 maimai_py（``MaimaiScores._calcuate_dx_star``）。
+
+        本地仅保留「dx_score 缺失返回 None」的空值回退（上游
+        ``_get_extended`` 在调用侧也是同款 ``if score.dx_score else None``）。
+        """
         if not dx_score or not level_dx_score:
             return None
-        ratio = dx_score / level_dx_score
-        for i, threshold in enumerate(_DX_STAR_THRESHOLDS):
-            if ratio < threshold:
-                return i
-        return 5
+        return MaimaiScores._calcuate_dx_star(dx_score, level_dx_score)
 
     @staticmethod
     def _bests_of(scores: list[ScoreExtend]) -> PlayerBests:
