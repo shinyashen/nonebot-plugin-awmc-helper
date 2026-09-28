@@ -39,7 +39,8 @@ def get_client() -> httpx.AsyncClient:
 
 
 async def fetch_json(url: str, *, name: str, timeout: float = 60) -> Any:
-    """GET JSON 公共封装：网络异常包装 ExtNetworkError，非 200 抛 ExtError。
+    """GET JSON 公共封装（错误三态样板见 wahlap）：网络异常包装 ExtNetworkError，
+    非 200 或 JSON 解析失败抛 ExtError。
 
     ``name`` 用于错误文案（如 ``"maimaiinfo all_data.json"``）。
     """
@@ -49,4 +50,7 @@ async def fetch_json(url: str, *, name: str, timeout: float = 60) -> Any:
         raise ExtNetworkError(f"{name} 网络异常") from e
     if resp.status_code != 200:
         raise ExtError(f"{name} 拉取失败（HTTP {resp.status_code}）")
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError as e:
+        raise ExtError(f"{name} 返回了无效数据") from e

@@ -12,7 +12,7 @@ from collections.abc import Callable, Awaitable, AsyncIterator
 import httpx
 from nonebot import logger
 
-from . import ExtError, get_client
+from . import ExtError, ExtNetworkError, get_client
 from ..http import build_smart_transport
 from ...config import plugin_config
 
@@ -86,7 +86,10 @@ class ApplySongs:
 
 def _check(resp: httpx.Response) -> dict | list:
     if 200 <= resp.status_code < 300:
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as e:
+            raise ExtError("柚子接口返回了无效数据") from e
     if 400 <= resp.status_code < 500:
         try:
             data = resp.json()
@@ -95,6 +98,16 @@ def _check(resp: httpx.Response) -> dict | list:
         message = data.get("message") if isinstance(data, dict) else None
         raise ExtError(str(message or f"柚子接口错误（HTTP {resp.status_code}）"))
     raise ExtError(f"柚子接口服务异常（HTTP {resp.status_code}）")
+
+
+async def _request(method: str, url: str, **kwargs) -> dict | list:
+    """请求 + _check 收口：网络异常包装 ExtNetworkError（上层只 catch ExtError，
+    裸 httpx 异常会被记成未捕获而非友好提示）。"""
+    try:
+        resp = await get_client().request(method, url, **kwargs)
+    except httpx.RequestError as e:
+        raise ExtNetworkError("柚子接口网络异常，请稍后再试") from e
+    return _check(resp)
 
 
 def _parse_vote(d: dict) -> AliasVote:
@@ -114,20 +127,22 @@ class YuzuClient:
 
     async def get_status(self) -> list[AliasVote]:
         """进行中的别名投票列表。"""
-        resp = await get_client().get(
-            f"{base_url()}/aliases/maimaidx/votes", params={"status": "ongoing"}
+        data = await _request(
+            "GET",
+            f"{base_url()}/aliases/maimaidx/votes",
+            params={"status": "ongoing"},
         )
-        data = _check(resp)
         if not isinstance(data, list):
             raise ExtError("柚子投票接口返回了意外结构")
         return [_parse_vote(x) for x in data]
 
     async def get_alias(self, song_id: int) -> ServerAlias | None:
         """查某曲目在别名服务器已收录的别名（无记录返回 None）。"""
-        resp = await get_client().get(
-            f"{base_url()}/aliases/maimaidx/aliases", params={"song_id": song_id}
+        data = await _request(
+            "GET",
+            f"{base_url()}/aliases/maimaidx/aliases",
+            params={"song_id": song_id},
         )
-        data = _check(resp)
         if isinstance(data, dict) and "message" in data:
             return None
         if isinstance(data, list):
@@ -143,10 +158,11 @@ class YuzuClient:
 
     async def get_apply_songs(self, name: str) -> ApplySongs | None:
         """按名称查申请/收录情况（别名查询投票中提示用）。"""
-        resp = await get_client().get(
-            f"{base_url()}/aliases/maimaidx/songs", params={"name": name}
+        data = await _request(
+            "GET",
+            f"{base_url()}/aliases/maimaidx/songs",
+            params={"name": name},
         )
-        data = _check(resp)
         if not isinstance(data, dict) or "message" in data:
             return None
         items: list[AliasVote | ServerAlias] = []
@@ -168,7 +184,8 @@ class YuzuClient:
         self, song_id: int, alias: str, user_id: str, group_id: str
     ) -> str:
         """提交别名公开申请，返回柚子提示文案。"""
-        resp = await get_client().post(
+        data = await _request(
+            "POST",
             f"{base_url()}/aliases/maimaidx/apply",
             json={
                 "song_id": song_id,
@@ -178,18 +195,17 @@ class YuzuClient:
                 "ws_uuid": "",  # 原版用 ws 标识；柚子接口允许空
             },
         )
-        data = _check(resp)
         if not isinstance(data, dict):
             return "提交成功"
         return str(data.get("message", "提交成功"))
 
     async def agree_alias(self, tag: str, user_id: str) -> str:
         """为指定投票提交赞成票，返回柚子提示文案。"""
-        resp = await get_client().post(
+        data = await _request(
+            "POST",
             f"{base_url()}/aliases/maimaidx/votes",
             json={"tag": tag, "agree_user": user_id},
         )
-        data = _check(resp)
         if not isinstance(data, dict):
             return "投票成功"
         return str(data.get("message", "投票成功"))

@@ -37,7 +37,10 @@ async def fetch_song_list(notes: bool = True) -> dict:
         raise ExtNetworkError("落雪曲库列表网络异常") from e
     if resp.status_code != 200:
         raise ExtError(f"落雪曲库列表拉取失败（HTTP {resp.status_code}）")
-    data = resp.json()
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise ExtError("落雪曲库列表返回了无效数据") from e
     if not data.get("success", True):
         raise ExtError(str(data.get("message", "落雪曲库列表拉取失败")))
     return data.get("data", data)
@@ -96,7 +99,10 @@ def build_authorize_url() -> str:
 
 async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
     """POST oauth/token 公共封装（两 grant 同端点同响应解析）。"""
-    resp = await get_client().post(f"{LXNS_BASE}/api/v0/oauth/token", json=payload)
+    try:
+        resp = await get_client().post(f"{LXNS_BASE}/api/v0/oauth/token", json=payload)
+    except httpx.RequestError as e:
+        raise ExtNetworkError("落雪授权接口网络异常，请稍后再试") from e
     data = (
         resp.json()
         if resp.headers.get("content-type", "").startswith("application/json")
