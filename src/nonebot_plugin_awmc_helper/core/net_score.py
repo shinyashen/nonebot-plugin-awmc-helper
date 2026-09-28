@@ -232,7 +232,7 @@ class NetScoreService:
         """NET 记录 → 日服 B50（纯组装，不触发抓取）。
 
         非指令链路 API：生产路径走 :meth:`get_b50`（窗口缓存 + 抓取）；
-        本方法仅测试直灌记录用。
+        现供测试直灌记录用，预留为外部复用入口（如第三方传分插件）。
         """
         return self._bests_of(await self.assemble(records))
 
