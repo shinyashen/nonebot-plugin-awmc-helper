@@ -222,7 +222,9 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
     「绑定水鱼」无参 → 发起设备码授权并回授权链接（绑定身份遮罩 + 有效期），
     开启 20 分钟回填会话；回填确认码 → confirmation-code 兑换 → 落
     divingfish_oauth 标志与水鱼用户 ID。"""
+    import hashlib
     import re
+    import urllib.parse
 
     import respx
 
@@ -278,9 +280,15 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
             ),
         )
         assert pending_bindings.is_active("OneBot V11", "12345678", "divingfish")
-        # 发起请求带 handoff=code 与 subject_ref 摘要
-        sent = [c for c in m.routes[-1].calls if c.request.content]
-        assert sent or True  # 路由调用已发生（细节由兑换用例覆盖）
+        # 发起请求确实带 handoff=code（device_code 换不到令牌）与 subject_ref 摘要
+        device_calls = [c for c in m.routes[-1].calls if c.request.content]
+        assert device_calls, "设备码发起请求未发出"
+        form = urllib.parse.parse_qs(device_calls[0].request.content.decode())
+        assert form["handoff"] == ["code"]
+        assert form["scope"] == ["prober.records.read prober.records.write"]
+        expect_ref = hashlib.sha256(b"cid:12345678").hexdigest()
+        assert form["subject_ref"] == [expect_ref]
+        assert form["binding_label"] == ["QQ 12****78"]
 
         # 回填确认码 → 兑换 → 落标志
         m.post(url__regex=r".*/oauth/token").respond(
@@ -305,8 +313,6 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
         assert row.divingfish_sub == "987654321"
         assert not pending_bindings.is_active("OneBot V11", "12345678", "divingfish")
         # subject 与水鱼侧公式一致
-        import hashlib
-
         from nonebot_plugin_awmc_helper.config import plugin_config as cfg
 
         expect = (
@@ -337,3 +343,39 @@ async def test_df_subject_derivable_regardless_of_service(db, monkeypatch):
     assert binding_service.divingfish_subject(b) == binding_service.divingfish_subject(
         UserBinding(platform="OneBot V11", user_id="935302685", service="divingfish")
     )
+
+
+def test_bind_command_names_disjoint():
+    """on_command 的命令名/别名两两不相交（撞名回归测试）。
+
+    「水鱼授权码」曾同时是 df_token 的别名与 df_code 的命令名：同优先级
+    matcher 在 NoneBot 中并发运行（block 只截断向更低优先级的传播），
+    两条会同时响应——确认码被当 Import-Token 落库污染凭据。matcher 级
+    nonebug 测试绕过真实 dispatch，测不出这类撞名，只能结构化断言。
+    """
+    from nonebot.rule import CommandRule
+    from nonebot_plugin_awmc_helper.plugins import bind
+
+    owners: dict[str, str] = {}
+    matchers = [
+        bind.df_bind,
+        bind.df_token,
+        bind.lx_bind,
+        bind.lx_code,
+        bind.df_code,
+        bind.net_bind,
+        bind.unbind,
+        bind.set_provider,
+        bind.set_theme,
+        bind.my_bind,
+    ]
+    for matcher in matchers:
+        for checker in matcher.rule.checkers:
+            if not isinstance(checker, CommandRule):
+                continue
+            for path in checker.commands:
+                name = "".join(path)
+                assert name not in owners, (
+                    f"命令撞名：「{name}」同时属于 {owners[name]} 与 {matcher}"
+                )
+                owners[name] = str(matcher)

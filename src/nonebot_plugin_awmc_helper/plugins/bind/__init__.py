@@ -1,8 +1,10 @@
 """awmc.bind：绑定与设置子插件。
 
 指令（对齐原版语义，绑定方案按规划 §5.3 与 maimai-py 对齐）：
+- `绑定水鱼`：水鱼 OAuth 设备码授权（QQ 平台，确认码回填完成绑定）
 - `绑定水鱼 <用户名>`：公开查询档（QQ 号自动识别）
-- `绑定水鱼token <Import-Token>` / `水鱼授权码 <token>`：全量成绩档
+- `绑定水鱼token <Import-Token>`：全量成绩档
+- `水鱼授权码 <确认码>` / `dfcode <确认码>`：回填水鱼 OAuth 确认码
 - `绑定落雪`：OAuth 授权（需部署配置）；`绑定落雪 <个人Token|好友码>` 直绑
 - `落雪授权码 <code>` / `lxcode <code>`：回填授权码
 - `绑定日服 <SEGA ID> <密码>`：日服 NET 直连（b50；密码落库，建议私聊操作）
@@ -34,9 +36,9 @@ __plugin_meta__ = PluginMetadata(
     name="awmc.bind",
     description="舞萌DX 查分器绑定与个人设置",
     usage=(
-        "绑定水鱼 <用户名>｜绑定水鱼token <Import-Token>｜绑定落雪｜"
-        "绑定落雪 <Token|好友码>｜落雪授权码 <code>｜绑定日服 <SEGA ID> <密码>｜"
-        "解绑｜数据源 <0|1|2>｜主题 <0|1>｜我的绑定"
+        "绑定水鱼（OAuth 授权）｜绑定水鱼 <用户名>｜绑定水鱼token <Import-Token>｜"
+        "水鱼授权码 <确认码>｜绑定落雪｜绑定落雪 <Token|好友码>｜落雪授权码 <code>｜"
+        "绑定日服 <SEGA ID> <密码>｜解绑｜数据源 <0|1|2>｜主题 <0|1>｜我的绑定"
     ),
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
@@ -57,7 +59,7 @@ DIVINGFISH_MISMATCH_MSG = (
 DIVINGFISH_BIND_SUCCESS_MSG = "水鱼查分器授权完成，现在可以直接使用查询指令了。"
 
 df_bind = on_command("绑定水鱼", aliases={"绑定df", "dfbind"}, block=True)
-df_token = on_command("绑定水鱼token", aliases={"水鱼授权码", "dftoken"}, block=True)
+df_token = on_command("绑定水鱼token", aliases={"dftoken"}, block=True)
 lx_bind = on_command("绑定落雪", aliases={"绑定lx", "lxbind"}, block=True)
 lx_code = on_command("落雪授权码", aliases={"lxcode"}, block=True)
 df_code = on_command("水鱼授权码", aliases={"dfcode"}, block=True)
@@ -206,7 +208,9 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     if not arg:
         if platform in QQ_PLATFORMS and df_ext.oauth_ready():
             # 设备码授权（sunset 文档 §3.2 完整版）：handoff=code 确认码回填，
-            # scope 一次带齐 read+write（水鱼已要求所有写入走 OAuth）
+            # scope 一次带齐 read+write（水鱼已要求所有写入走 OAuth）。
+            # 仅 QQ 平台提供：非 QQ 平台用户只有用户名公开档、无 OAuth 入口
+            # （写路径强制 OAuth 后的导分写目标缺口，已知边界，见审查报告 §七）。
             ref = binding_service.divingfish_subject(binding)
             if ref is None:  # pragma: no cover —— QQ 平台必可派生
                 await UniMessage.text(" 用法：绑定水鱼 <水鱼用户名>").finish(
@@ -215,13 +219,18 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
             label = df_ext.binding_label(user_id)
             try:
                 device = await df_ext.device_authorize(ref[4:], label)
-            except Exception as e:
+            except df_ext.ExtError as e:
                 await UniMessage.text(f" 水鱼授权发起失败：{e}").finish(at_sender=True)
-            pending_bindings.start(platform, user_id, "divingfish", ttl=1200)
+            expires_in = int(device.get("expires_in", 1200))
+            # 本地会话窗与服务端有效期取小：服务端更短时提前过期，
+            # 免得用户在死会话里反复回填（服务端兜底靠 invalid_grant）
+            pending_bindings.start(
+                platform, user_id, "divingfish", ttl=min(1200, expires_in)
+            )
             link = device.get("verification_uri_complete") or device.get(
                 "verification_uri", ""
             )
-            minutes = max(int(device.get("expires_in", 1200)) // 60, 1)
+            minutes = max(expires_in // 60, 1)
             await UniMessage.text(
                 "水鱼已要求所有成绩写入走 OAuth 授权，请完成一次绑定：\n\n"
                 "1. 打开以下链接并登录水鱼账号，授权本 BOT 访问您的水鱼查分器数据\n"
@@ -264,9 +273,9 @@ async def _complete_df(platform: str, user_id: str, code: str) -> None:
         ).finish(at_sender=True)
     try:
         result = await df_ext.redeem(ref[4:], code)
-    except Exception as e:
-        if str(e).startswith("mismatch"):
-            await UniMessage.text(" " + DIVINGFISH_MISMATCH_MSG).finish(at_sender=True)
+    except df_ext.DivingFishSubjectMismatch:
+        await UniMessage.text(" " + DIVINGFISH_MISMATCH_MSG).finish(at_sender=True)
+    except df_ext.ExtError as e:
         await UniMessage.text(f" {e}").finish(at_sender=True)
     sub = df_ext.token_subject(result.get("access_token", "")) or result.get("sub")
     await binding_service.bind_divingfish_oauth(binding, sub=sub)
