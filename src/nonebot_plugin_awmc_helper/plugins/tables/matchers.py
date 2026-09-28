@@ -115,7 +115,7 @@ async def _(
     """
     level, plan, category, page_raw = groups
     page = int(page_raw) if page_raw else 1
-    checker, _plan_name = _plan_checker(plan)
+    checker = _plan_checker(plan)
     scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
 

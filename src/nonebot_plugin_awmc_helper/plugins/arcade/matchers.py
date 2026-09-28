@@ -358,12 +358,11 @@ async def _(
     )
     if arcade is None:
         await UniMessage.text(" 已订阅的机厅中未找到该机厅").finish(at_sender=True)
+    # 正则已约束 amount_raw ∈ 数字/＋/+/－/-：else 分支不可达（死代码清理）
     if amount_raw in ("＋", "+", "－", "-"):
         amount = 1
-    elif amount_raw.isdigit():
-        amount = int(amount_raw)
     else:
-        await UniMessage.text(" 请输入正确的数字").finish(at_sender=True)
+        amount = int(amount_raw)
     mode = _op_mode(op)
     if unit == "卡":
         # 「+N卡」改机台数，不动排卡人数（原来单位被吞、卡数按人数入账）；

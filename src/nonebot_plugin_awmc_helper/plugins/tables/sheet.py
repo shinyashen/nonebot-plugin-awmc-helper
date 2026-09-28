@@ -36,10 +36,10 @@ _LEVEL_ORDER = {lv: i for i, lv in enumerate(LEVEL_LIST)}
 
 
 def _plan_checker(plan: str):
-    """评价计划 → (判定, 说明)。"""
+    """评价计划 → 判定谓词（说明文案无消费方，进度卡标题自拼）。"""
     kind, value = PLANS[plan].split(":")
     if kind == "rate":
-        return (lambda ach, fc, fs: (ach or 0) >= float(value)), f"达成率 ≥ {value}%"
+        return (lambda ach, fc, fs: (ach or 0) >= float(value))
     if kind == "fc":
         order = {
             "fc": (FCType.FC, FCType.FCP, FCType.AP, FCType.APP),
@@ -47,22 +47,14 @@ def _plan_checker(plan: str):
             "ap": (FCType.AP, FCType.APP),
         }
         allow = order[value]
-        return (lambda ach, fc, fs: fc in allow), {
-            "fc": "Full Combo",
-            "fcp": "Full Combo+",
-            "ap": "All Perfect",
-        }[value]
+        return (lambda ach, fc, fs: fc in allow)
     allow_fs = {
         "fs": (FSType.FS, FSType.FSP, FSType.FSD, FSType.FSDP),
         "fsp": (FSType.FSP, FSType.FSD, FSType.FSDP),
         "fsd": (FSType.FSD, FSType.FSDP),
     }
-    if kind == "fs":
-        allow = allow_fs[value]
-        return (lambda ach, fc, fs: fs in allow), "Full Sync+"
     allow = allow_fs[value]
-    names = {"fdx": "Full Sync DX"}
-    return (lambda ach, fc, fs: fs in allow), names.get(value, value.upper())
+    return (lambda ach, fc, fs: fs in allow)
 
 
 async def _level_entries(level: str) -> list[tuple]:
