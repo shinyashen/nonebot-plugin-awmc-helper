@@ -41,10 +41,11 @@ DIVINGFISH_BIND_SUCCESS_MSG = "水鱼查分器授权完成，现在可以直接�
 DIVINGFISH_TOKEN_LOOKALIKE_MSG = (
     "这串内容像是水鱼 Import-Token 而不是用户名，为避免误绑未做保存：\n"
     "保存 Token 请发送「绑定水鱼token <Import-Token>」；\n"
-    "绑定公开查询请发送「绑定水鱼 <水鱼用户名>」（水鱼个人页显示的用户名）。"
+    "绑定公开查询请发送「绑定水鱼用户名 <水鱼用户名>」（水鱼个人页显示的用户名）。"
 )
 
 df_bind = on_command("绑定水鱼", aliases={"绑定df", "dfbind"}, block=True)
+df_user = on_command("绑定水鱼用户名", aliases={"dfuser", "绑定df用户名"}, block=True)
 df_token = on_command("绑定水鱼token", aliases={"dftoken"}, block=True)
 lx_bind = on_command("绑定落雪", aliases={"绑定lx", "lxbind"}, block=True)
 lx_code = on_command("落雪授权码", aliases={"lxcode"}, block=True)
@@ -139,14 +140,11 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @df_bind.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    """「绑定水鱼」：无参 + OAuth 已配置 → 设备码授权（handoff=code 确认码
-    回填，对齐 Hoshino 上游与落雪同构 UX）；带确认码 → 回填收尾；带其他
-    参数 → 用户名公开档（既有行为）。"""
+    """「绑定水鱼」：OAuth 设备码授权（handoff=code 确认码回填，对齐
+    Hoshino 上游与落雪同构 UX）；带确认码 → 回填收尾；其他参数一律软引导
+    （用户名档走「绑定水鱼用户名」，拒绝输入不落行）。"""
     platform, user_id = session_keys(session)
     arg = str(message).strip()
-    if not arg and platform not in QQ_PLATFORMS:
-        # 无参且无凭据可用：先回用法，不 ensure（否则查一次用法就落一行库）
-        await UniMessage.text(" 用法：绑定水鱼 <水鱼用户名>").finish(at_sender=True)
     if arg:
         code = df_ext.extract_confirmation_code(arg)
         if code is not None:
@@ -161,60 +159,85 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
             await UniMessage.text(" " + DIVINGFISH_TOKEN_LOOKALIKE_MSG).finish(
                 at_sender=True
             )
-    binding = await binding_service.ensure(platform, user_id)
+        await UniMessage.text(
+            " 「绑定水鱼」是 OAuth 授权指令，不接收参数。\n"
+            f"绑定用户名公开查询请发送「绑定水鱼用户名 {arg}」"
+        ).finish(at_sender=True)
+    if platform in QQ_PLATFORMS and df_ext.oauth_ready():
+        # 设备码授权（sunset 文档 §3.2 完整版）：handoff=code 确认码回填，
+        # scope 一次带齐 read+write（水鱼已要求所有写入走 OAuth）。
+        # 仅 QQ 平台提供：非 QQ 平台用户没有 QQ 身份标识可派生 subject
+        # （导分写目标缺口，已知边界，见审查报告 §七）。
+        binding = await binding_service.ensure(platform, user_id)
+        ref = binding_service.divingfish_subject(binding)
+        if ref is None:  # pragma: no cover —— QQ 平台必可派生
+            await UniMessage.text(
+                " 当前绑定缺少水鱼授权所需的身份标识，请重新发送「绑定水鱼」"
+            ).finish(at_sender=True)
+        label = df_ext.binding_label(user_id)
+        try:
+            device = await df_ext.device_authorize(ref[4:], label)
+        except df_ext.ExtError as e:
+            await UniMessage.text(f" 水鱼授权发起失败：{e}").finish(at_sender=True)
+        expires_in = int(device.get("expires_in", 1200))
+        # 本地会话窗与服务端有效期取小：服务端更短时提前过期，
+        # 免得用户在死会话里反复回填（服务端兜底靠 invalid_grant）
+        pending_bindings.start(
+            platform, user_id, "divingfish", ttl=min(1200, expires_in)
+        )
+        link = device.get("verification_uri_complete") or device.get(
+            "verification_uri", ""
+        )
+        minutes = max(expires_in // 60, 1)
+        await UniMessage.text(
+            "水鱼已要求所有成绩写入走 OAuth 授权，请完成一次绑定：\n\n"
+            "1. 打开以下链接并登录水鱼账号，授权本 BOT 访问您的水鱼查分器数据\n"
+            "=======================\n"
+            f"{link}\n"
+            "=======================\n"
+            f"2. 确认页面显示的绑定身份为「{label}」后点击「同意授权」\n"
+            "3. 复制页面给出的确认码，直接发送给我（无需任何前缀）\n\n"
+            f"本次绑定 {minutes} 分钟内有效，确认码只能使用一次；"
+            "超时或失效后请重新发送「绑定水鱼」。\n"
+            "=======================\n"
+            "请注意！！链接与确认码都仅供您本人使用，请勿转发他人。\n"
+            "确认码建议在与 BOT 的私聊中发送，避免被他人看到。\n"
+            f"如需取消授权，请前往 {df_ext.REVOKE_URL}"
+        ).finish(at_sender=True)
+    if platform in QQ_PLATFORMS:
+        await UniMessage.text(
+            " BOT 管理员尚未配置水鱼 OAuth\n"
+            "（AWMC_DIVINGFISH_OAUTH_CLIENT_ID/SECRET）。\n"
+            "仍可直接绑定：绑定水鱼用户名 <水鱼用户名>（公开查询）"
+        ).finish(at_sender=True)
+    await UniMessage.text(
+        " 水鱼 OAuth 授权需要 QQ 身份标识，当前平台暂不支持。\n"
+        "请使用「绑定水鱼用户名 <水鱼用户名>」绑定公开查询"
+    ).finish(at_sender=True)
+
+
+@df_user.handle()
+@handle_errors("绑定失败，请稍后再试")
+async def _(session: Session = UniSession(), message: Message = CommandArg()):
+    """「绑定水鱼用户名」：用户名公开查询档（玩家信息/b50/RA 排名）。"""
+    platform, user_id = session_keys(session)
+    arg = str(message).strip()
     if not arg:
-        if platform in QQ_PLATFORMS and df_ext.oauth_ready():
-            # 设备码授权（sunset 文档 §3.2 完整版）：handoff=code 确认码回填，
-            # scope 一次带齐 read+write（水鱼已要求所有写入走 OAuth）。
-            # 仅 QQ 平台提供：非 QQ 平台用户只有用户名公开档、无 OAuth 入口
-            # （写路径强制 OAuth 后的导分写目标缺口，已知边界，见审查报告 §七）。
-            ref = binding_service.divingfish_subject(binding)
-            if ref is None:  # pragma: no cover —— QQ 平台必可派生
-                await UniMessage.text(" 用法：绑定水鱼 <水鱼用户名>").finish(
-                    at_sender=True
-                )
-            label = df_ext.binding_label(user_id)
-            try:
-                device = await df_ext.device_authorize(ref[4:], label)
-            except df_ext.ExtError as e:
-                await UniMessage.text(f" 水鱼授权发起失败：{e}").finish(at_sender=True)
-            expires_in = int(device.get("expires_in", 1200))
-            # 本地会话窗与服务端有效期取小：服务端更短时提前过期，
-            # 免得用户在死会话里反复回填（服务端兜底靠 invalid_grant）
-            pending_bindings.start(
-                platform, user_id, "divingfish", ttl=min(1200, expires_in)
-            )
-            link = device.get("verification_uri_complete") or device.get(
-                "verification_uri", ""
-            )
-            minutes = max(expires_in // 60, 1)
-            await UniMessage.text(
-                "水鱼已要求所有成绩写入走 OAuth 授权，请完成一次绑定：\n\n"
-                "1. 打开以下链接并登录水鱼账号，授权本 BOT 访问您的水鱼查分器数据\n"
-                "=======================\n"
-                f"{link}\n"
-                "=======================\n"
-                f"2. 确认页面显示的绑定身份为「{label}」后点击「同意授权」\n"
-                "3. 复制页面给出的确认码，直接发送给我（无需任何前缀）\n\n"
-                f"本次绑定 {minutes} 分钟内有效，确认码只能使用一次；"
-                "超时或失效后请重新发送「绑定水鱼」。\n"
-                "=======================\n"
-                "请注意！！链接与确认码都仅供您本人使用，请勿转发他人。\n"
-                "确认码建议在与 BOT 的私聊中发送，避免被他人看到。\n"
-                f"如需取消授权，请前往 {df_ext.REVOKE_URL}"
-            ).finish(at_sender=True)
-        if platform in QQ_PLATFORMS:
-            await binding_service.set_service(binding, SERVICE_DIVINGFISH)
-            await UniMessage.text(
-                "已使用 QQ 号作为水鱼公开查询凭据。\n"
-                "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」"
-                "（获取方式：水鱼个人页 → 设置 → Import-Token）"
-            ).finish(at_sender=True)
-        await UniMessage.text(" 用法：绑定水鱼 <水鱼用户名>").finish(at_sender=True)
+        await UniMessage.text(
+            " 用法：绑定水鱼用户名 <水鱼用户名>（水鱼个人页显示的用户名）"
+        ).finish(at_sender=True)
+    if df_ext.looks_like_import_token(arg):
+        # 误投 token 会把凭据存成用户名、b50 按用户名查必败（Q51）；
+        # 软引导到 token 指令，且不 ensure（拒绝输入不落行）
+        await UniMessage.text(" " + DIVINGFISH_TOKEN_LOOKALIKE_MSG).finish(
+            at_sender=True
+        )
+    binding = await binding_service.ensure(platform, user_id)
     await binding_service.bind_divingfish_username(binding, arg)
     await UniMessage.text(
         f" 已绑定水鱼账号「{arg}」（公开查询）。\n"
-        "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」"
+        "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」；"
+        "如需成绩写入/导分等全功能，请发送「绑定水鱼」走 OAuth 授权"
     ).finish(at_sender=True)
 
 

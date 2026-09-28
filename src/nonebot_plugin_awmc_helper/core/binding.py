@@ -1,8 +1,9 @@
 """用户绑定服务：绑定表 CRUD、PlayerIdentifier 装配、绑定回填会话（TTL）。
 
-与原版的最大差异（规划 §5.3）：maimai-py 不含水鱼 OAuth 设备授权——
-水鱼绑定采用「用户名/QQ 公开查询 + Import-Token 凭据」两档；落雪为
-「OAuth 授权码换个人 token」或「好友码 + 开发者 token」。
+与原版的差异（规划 §5.3）：maimai-py 不含水鱼 OAuth 设备授权（由
+core/ext/divingfish 直连补齐）——水鱼绑定三档：「绑定水鱼」OAuth 设备码
+授权、「绑定水鱼用户名」用户名/QQ 公开查询、「绑定水鱼token」Import-Token；
+落雪为「OAuth 授权码换个人 token」或「好友码 + 开发者 token」。
 """
 
 import time
@@ -316,8 +317,9 @@ class BindingService:
             ):
                 # 仅绑 Import-Token 且非 QQ 平台：全量可查，但 b50/单曲无公开键
                 raise BindingError(
-                    "水鱼 b50/单曲查询需要用户名或 QQ 号：请使用「绑定水鱼 <用户名>」"
-                    "补充绑定，或使用「b50 <水鱼用户名>」查询"
+                    "水鱼 b50/单曲查询需要用户名或 QQ 号：请使用"
+                    "「绑定水鱼用户名 <用户名>」补充绑定，"
+                    "或使用「b50 <水鱼用户名>」查询"
                 )
             raise BindingError(
                 "尚未绑定查分器，请先使用「绑定水鱼」或「绑定落雪」进行绑定"

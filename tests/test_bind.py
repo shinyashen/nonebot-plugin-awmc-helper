@@ -57,6 +57,27 @@ async def _assert_reply(app: App, matcher, text: str, reply: str, *, user_id=123
 
 @pytest.mark.asyncio
 async def test_bind_divingfish_username(app: App, db):
+    """「绑定水鱼用户名 <用户名>」：用户名公开查询档绑定。"""
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    await _assert_reply(
+        app,
+        bind.df_user,
+        "绑定水鱼用户名 测试者",
+        "已绑定水鱼账号「测试者」（公开查询）。\n"
+        "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」；"
+        "如需成绩写入/导分等全功能，请发送「绑定水鱼」走 OAuth 授权",
+    )
+    binding = await binding_service.get("OneBot V11", "12345678")
+    assert binding is not None
+    assert binding.divingfish_username == "测试者"
+
+
+@pytest.mark.asyncio
+async def test_bind_divingfish_rejects_username_arg(app: App, db):
+    """「绑定水鱼 <用户名>」：OAuth 指令不收参数，软引导到「绑定水鱼用户名」
+    且不落库（拒绝输入不 ensure）。"""
     from nonebot_plugin_awmc_helper.plugins import bind
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
@@ -64,12 +85,27 @@ async def test_bind_divingfish_username(app: App, db):
         app,
         bind.df_bind,
         "绑定水鱼 测试者",
-        "已绑定水鱼账号「测试者」（公开查询）。\n"
-        "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」",
+        "「绑定水鱼」是 OAuth 授权指令，不接收参数。\n"
+        "绑定用户名公开查询请发送「绑定水鱼用户名 测试者」",
     )
-    binding = await binding_service.get("OneBot V11", "12345678")
-    assert binding is not None
-    assert binding.divingfish_username == "测试者"
+    assert await binding_service.get("OneBot V11", "12345678") is None
+
+
+@pytest.mark.asyncio
+async def test_bind_divingfish_noarg_without_oauth(app: App, db):
+    """「绑定水鱼」无参 + OAuth 未配置：管理员配置提示 + 用户名档引导，不落库。"""
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    await _assert_reply(
+        app,
+        bind.df_bind,
+        "绑定水鱼",
+        "BOT 管理员尚未配置水鱼 OAuth\n"
+        "（AWMC_DIVINGFISH_OAUTH_CLIENT_ID/SECRET）。\n"
+        "仍可直接绑定：绑定水鱼用户名 <水鱼用户名>（公开查询）",
+    )
+    assert await binding_service.get("OneBot V11", "12345678") is None
 
 
 @pytest.mark.asyncio
@@ -90,7 +126,7 @@ async def test_bind_divingfish_token(app: App, db):
 
 @pytest.mark.asyncio
 async def test_bind_divingfish_rejects_token_lookalike(app: App, db):
-    """「绑定水鱼 <Import-Token>」：形似 token 的参数软引导且不落库。
+    """「绑定水鱼用户名 <Import-Token>」：形似 token 的参数软引导且不落库。
 
     生产事故（2026-09-28）：token 被当用户名落库后 b50 按用户名查必败。
     """
@@ -99,11 +135,11 @@ async def test_bind_divingfish_rejects_token_lookalike(app: App, db):
 
     await _assert_reply(
         app,
-        bind.df_bind,
-        f"绑定水鱼 {'c9ab' * 32}",
+        bind.df_user,
+        f"绑定水鱼用户名 {'c9ab' * 32}",
         "这串内容像是水鱼 Import-Token 而不是用户名，为避免误绑未做保存：\n"
         "保存 Token 请发送「绑定水鱼token <Import-Token>」；\n"
-        "绑定公开查询请发送「绑定水鱼 <水鱼用户名>」（水鱼个人页显示的用户名）。",
+        "绑定公开查询请发送「绑定水鱼用户名 <水鱼用户名>」（水鱼个人页显示的用户名）。",
     )
     assert await binding_service.get("OneBot V11", "12345678") is None
 
@@ -380,6 +416,7 @@ def test_bind_command_names_disjoint():
     owners: dict[str, str] = {}
     matchers = [
         bind.df_bind,
+        bind.df_user,
         bind.df_token,
         bind.lx_bind,
         bind.lx_code,
