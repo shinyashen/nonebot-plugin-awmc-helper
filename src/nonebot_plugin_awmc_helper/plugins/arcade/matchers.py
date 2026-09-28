@@ -1,7 +1,6 @@
 """排卡指令入口：机厅管理 / 订阅 / 查询 / 排卡人数操作。"""
 
 import re
-from datetime import datetime
 
 from nonebot import on_regex, on_command, on_fullmatch
 from nonebot.rule import Rule
@@ -56,6 +55,16 @@ DECREASE_OPS = ("减少", "降低", "减", "－", "-")
 # 操作符单一来源：正则交替由操作符表派生（增/减两表的长词均先于短词，
 # 与原手写正则等价），漏改 regex 导致「减」落成「加」的问题不再可能
 _ARCADE_OP_RE = "|".join(re.escape(op) for op in SET_OPS + INCREASE_OPS + DECREASE_OPS)
+
+
+def _op_mode(op: str) -> str:
+    """操作符 → store.update_arcade_count 的更新模式（set/dec/inc）。"""
+    if op in SET_OPS:
+        return "set"
+    if op in DECREASE_OPS:
+        return "dec"
+    return "inc"
+
 
 ARCADE_FEATURE = "arcade"
 """group_switch 表中的排卡特征名。"""
@@ -253,10 +262,14 @@ async def _(message: Message = CommandArg()):
         await UniMessage.text(" 没有这样的机厅哦").finish(at_sender=True)
     if not parts[2].isdigit():
         await UniMessage.text(" 数量需为数字").finish(at_sender=True)
-    arcade.machines = int(parts[2])
-    await store.save_arcade(arcade)
+    # 只改机台数（绝对值），不整行回写——快照里的排卡人数可能已过期
+    new_machines = await store.update_arcade_count(
+        arcade.id, "machines", "set", int(parts[2]), updated_by=None, touch=False
+    )
+    if new_machines is None:
+        await UniMessage.text(" 机厅数据已变更，请刷新后重试").finish(at_sender=True)
     await UniMessage.text(
-        f"已修改机厅「{arcade.name}」机台数量为「{parts[2]}」"
+        f"已修改机厅「{arcade.name}」机台数量为「{new_machines}」"
     ).finish(at_sender=True)
 
 
@@ -360,35 +373,47 @@ async def _(
         amount = int(amount_raw)
     else:
         await UniMessage.text(" 请输入正确的数字").finish(at_sender=True)
+    mode = _op_mode(op)
     if unit == "卡":
-        # 「+N卡」改机台数，不动排卡人数（原来单位被吞、卡数按人数入账）
-        if op in SET_OPS:
-            new_machines = amount
-        elif op in DECREASE_OPS:
-            new_machines = max(arcade.machines - amount, 0)
-        else:
-            new_machines = arcade.machines + amount
-        delta = 0
-        arcade.machines = new_machines
+        # 「+N卡」改机台数，不动排卡人数（原来单位被吞、卡数按人数入账）；
+        # 相对增量原子写入，回复值取 DB 实况（机台数变更不设 max 守卫，同旧版）
+        new_machines = await store.update_arcade_count(
+            arcade.id, "machines", mode, amount, updated_by=user_id_of(session)
+        )
+        if new_machines is None:
+            await UniMessage.text(" 机厅数据已变更，请刷新后重试").finish(
+                at_sender=True
+            )
+        await store.add_count_log(arcade.id, 0, new_machines, user_id_of(session))
         reply = f" 「{arcade.name}」当前机台 {new_machines} 卡"
     else:
+        # 守卫沿用快照口径估 delta 上界（与旧实现一致）；真实写入是相对增量，
+        # 「+1」们各自叠加而非整行回写，两人同时 +1 净加 2 不丢更新
         if op in SET_OPS:
-            new_person = amount
+            delta_bound = abs(amount - max(arcade.person, 0))
         elif op in DECREASE_OPS:
-            new_person = max(arcade.person - amount, 0)
+            delta_bound = min(amount, max(arcade.person, 0))
         else:
-            new_person = arcade.person + amount
-        delta = new_person - arcade.person
-        arcade.person = new_person
+            delta_bound = amount
+        if delta_bound > plugin_config.awmc_arcade_max_delta:
+            await UniMessage.text(
+                f"单次变更不能超过 {plugin_config.awmc_arcade_max_delta} 人"
+            ).finish(at_sender=True)
+        new_person = await store.update_arcade_count(
+            arcade.id, "person", mode, amount, updated_by=user_id_of(session)
+        )
+        if new_person is None:
+            await UniMessage.text(" 机厅数据已变更，请刷新后重试").finish(
+                at_sender=True
+            )
+        # 计数日志口径与旧实现一致：以本次操作者的快照为基线估 delta
+        await store.add_count_log(
+            arcade.id,
+            new_person - max(arcade.person, 0),
+            arcade.machines,
+            user_id_of(session),
+        )
         reply = f" 「{arcade.name}」当前排卡 {new_person} 人"
-    if abs(delta) > plugin_config.awmc_arcade_max_delta:
-        await UniMessage.text(
-            f"单次变更不能超过 {plugin_config.awmc_arcade_max_delta} 人"
-        ).finish(at_sender=True)
-    arcade.updated_by = user_id_of(session)
-    arcade.updated_at = datetime.now()
-    await store.save_arcade(arcade)
-    await store.add_count_log(arcade.id, delta, arcade.machines, user_id_of(session))
     await UniMessage.text(reply).finish(at_sender=True)
 
 

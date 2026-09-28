@@ -22,7 +22,7 @@ from datetime import datetime
 
 from pydantic import NaiveDatetime
 from sqlmodel import Field, SQLModel, col, delete, select
-from sqlalchemy import UniqueConstraint, or_, text, update, inspect
+from sqlalchemy import UniqueConstraint, or_, func, text, update, inspect
 from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
@@ -599,6 +599,56 @@ async def save_arcade(arcade: Arcade) -> None:
     async with session() as db:
         db.add(arcade)
         await db.commit()
+
+
+async def update_arcade_count(
+    arcade_id: int,
+    field: str,
+    mode: str,
+    amount: int,
+    *,
+    updated_by: str | None = None,
+    touch: bool = True,
+) -> int | None:
+    """原子更新机厅排卡人数/机台数，返回更新后的值（行不存在返回 None）。
+
+    「+1」类高频打卡走**相对增量**单语句 UPDATE，而非读快照→内存算→整行
+    回写——后者的并发窗口里两人同时 +1 会各写同一个值（丢更新），整行回写
+    还会顺带覆盖其它列的并发变更。``mode``：inc（钳下限 0 前的相对加）、
+    dec（下限钳 0 的相对减）、set（绝对值；并发下最后写入者胜，语义自洽）。
+    SQLite ≥3.35 支持单语句 RETURNING（Python 3.12 自带的 sqlite3 均满足）。
+
+    ``updated_by``/``touch``：默认记录操作人与时间；传 None/False 可只改数值
+    （如管理侧改机台数不产生「最近上报人」语义）。
+    """
+    column = {"person": Arcade.person, "machines": Arcade.machines}[field]
+    if mode == "inc":
+        expr = column + amount
+    elif mode == "dec":
+        expr = func.max(column - amount, 0)
+    elif mode == "set":
+        expr = amount
+    else:
+        raise ValueError(f"未知更新模式：{mode}")
+    values: dict[str, Any] = {field: expr}
+    if updated_by is not None:
+        values["updated_by"] = updated_by
+    if touch:
+        values["updated_at"] = datetime.now()
+    async with session() as db:
+        # db.exec 对 UPDATE…RETURNING 返回 Row 元组（SQLModel 的 exec 是
+        # select 语义的薄封装），取首列；不用 db.execute 是为免全库唯二
+        # 触发 SQLModel 的「请用 exec」弃用告警
+        row = (
+            await db.exec(
+                update(Arcade)
+                .where(Arcade.id == arcade_id)
+                .values(**values)
+                .returning(column)
+            )
+        ).first()
+        await db.commit()
+    return row[0] if row is not None else None
 
 
 async def upsert_arcades(arcades: list["Arcade"]) -> None:

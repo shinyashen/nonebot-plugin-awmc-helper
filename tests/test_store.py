@@ -1,8 +1,10 @@
 """core/store：统一 SQLite 存取测试。"""
 
+import asyncio
 from pathlib import Path
 
 import pytest
+from sqlmodel import select
 
 
 @pytest.fixture
@@ -94,6 +96,38 @@ async def test_arcade_tables(tmp_db):
 
     assert await store.delete_arcade(10000)
     assert await store.get_arcade(10000) is None
+
+
+@pytest.mark.asyncio
+async def test_update_arcade_count_atomic(tmp_db):
+    """排卡/机台数原子更新：相对增量单语句 UPDATE + RETURNING，防并发丢更新。"""
+    store = tmp_db
+    await store.save_arcade(store.Arcade(id=1, name="测试厅", machines=4, person=5))
+
+    # inc/dec/set 与 dec 的钳 0 下限
+    assert await store.update_arcade_count(1, "person", "inc", 2, updated_by="u1") == 7
+    assert await store.update_arcade_count(1, "person", "dec", 3) == 4
+    assert await store.update_arcade_count(1, "person", "dec", 99) == 0
+    assert await store.update_arcade_count(1, "machines", "set", 7, touch=False) == 7
+
+    async with store.session() as db:
+        row = (await db.exec(select(store.Arcade).where(store.Arcade.id == 1))).one()
+    assert (row.person, row.machines) == (0, 7)
+    assert row.updated_by == "u1"  # 只有带 updated_by 的调用记录操作人
+
+    # 行不存在返回 None
+    assert await store.update_arcade_count(999, "person", "inc", 1) is None
+
+    # 并发语义：模拟旧「读-改-写」路径下两人同时 +1 只净加 1 的场景——
+    # 原子增量下交错执行仍各计各的（同一事件循环内串行命中 DB，最终 +2）
+    await store.update_arcade_count(1, "person", "set", 0)
+    await asyncio.gather(
+        store.update_arcade_count(1, "person", "inc", 1),
+        store.update_arcade_count(1, "person", "inc", 1),
+    )
+    async with store.session() as db:
+        row = (await db.exec(select(store.Arcade).where(store.Arcade.id == 1))).one()
+    assert row.person == 2
 
 
 @pytest.mark.asyncio
