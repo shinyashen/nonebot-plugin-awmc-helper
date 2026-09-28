@@ -467,6 +467,31 @@ async def draw_plate_table_with_fallback(
 # ---------------------------------------------------------------------------
 
 
+def draw_level_header(dr: ImageDraw.ImageDraw, level: str, y: int) -> None:
+    """完成表「Level. {level}」大字表头（rating_table/table_template 共用）。
+
+    两版式 y 有意错位（普通分支统计头不同），由调用方传入。
+    """
+    dr.text(
+        (495, y),
+        "Level.",
+        font=font(70, FONT_RODIN),
+        fill=FONT_BLUE,
+        anchor="ld",
+        stroke_width=8,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    dr.text(
+        (750, y),
+        level,
+        font=font(100, FONT_RODIN),
+        fill=FONT_BLUE,
+        anchor="ld",
+        stroke_width=8,
+        stroke_fill=(255, 255, 255, 255),
+    )
+
+
 def rating_table_text_bytes(
     level: str, entries: Sequence[tuple[Song, SongDifficulty]]
 ) -> bytes:
@@ -481,24 +506,7 @@ def rating_table_text_bytes(
     else:
         im = _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
     dr = ImageDraw.Draw(im)
-    dr.text(
-        (495, 220),
-        "Level.",
-        font=font(70, FONT_RODIN),
-        fill=FONT_BLUE,
-        anchor="ld",
-        stroke_width=8,
-        stroke_fill=(255, 255, 255, 255),
-    )
-    dr.text(
-        (750, 220),
-        level,
-        font=font(100, FONT_RODIN),
-        fill=FONT_BLUE,
-        anchor="ld",
-        stroke_width=8,
-        stroke_fill=(255, 255, 255, 255),
-    )
+    draw_level_header(dr, level, 220)
     im = im.resize(
         (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS
     )

@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
-from .fonts import FONT_NUM, FONT_RODIN, font
+from .fonts import FONT_NUM, font
 from .tools import TEXT_BLUE, image_to_bytes
 from .assets import assets
 from ...constants import (
@@ -33,7 +33,6 @@ from .table_layout import (
     RATING_GROUP_GAP,
     group_by_ds,
 )
-from .table_template import FONT_BLUE
 
 # NB constants 同源：统计键序与阈值表
 STATISTICS_KEYS = [
@@ -151,24 +150,7 @@ def draw_rating_table(
 
     # 标题 + 统计头（普通分支坐标；lv15 由模板自身布局承载，统计同位）
     title_y = 160
-    dr.text(
-        (495, title_y),
-        "Level.",
-        font=font(70, FONT_RODIN),
-        fill=FONT_BLUE,
-        anchor="ld",
-        stroke_width=8,
-        stroke_fill=(255, 255, 255, 255),
-    )
-    dr.text(
-        (750, title_y),
-        level,
-        font=font(100, FONT_RODIN),
-        fill=FONT_BLUE,
-        anchor="ld",
-        stroke_width=8,
-        stroke_fill=(255, 255, 255, 255),
-    )
+    table_template.draw_level_header(dr, level, title_y)
 
     im.alpha_composite(assets.pic("complete.png"), (251, 190))
     dr.text(
