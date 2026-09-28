@@ -396,9 +396,9 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         await binding_service.set_service(binding, service)
     except Exception as e:
         await UniMessage.text(f" {e}").finish(at_sender=True)
-    await UniMessage.text(
-        f" 数据源已切换为{SERVICE_ZH.get(service, service)}"
-    ).finish(at_sender=True)
+    await UniMessage.text(f" 数据源已切换为{SERVICE_ZH.get(service, service)}").finish(
+        at_sender=True
+    )
 
 
 @set_theme.handle()
