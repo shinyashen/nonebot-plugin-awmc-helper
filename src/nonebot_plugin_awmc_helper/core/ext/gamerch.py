@@ -93,11 +93,11 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
     """
     m = re.search(r"/maimai/(\d+)", url)
     page_id = m.group(1) if m else None
+    # 调用方 URL 恒为 /maimai/{id} 形态：page_id 缺失直接不缓存（仅内存路径）
     cache_dir = _cache_dir()
-    cache_gz = cache_dir / f"{page_id or _norm_title(url)}.html.gz"
     meta_path = cache_dir / "meta.json"
     meta: dict = {}
-    if meta_path.exists():
+    if page_id and meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -105,7 +105,8 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
     entry = meta.get(page_id) if page_id else None
     fetched_at = float(entry.get("fetched_at", 0)) if entry else 0.0
     fresh = bool(fetched_at) and time.time() - fetched_at < max_age * 3600
-    if page_id and max_age > 0 and fresh:
+    cache_gz = cache_dir / f"{page_id}.html.gz" if page_id else None
+    if cache_gz is not None and max_age > 0 and fresh:
         try:
             with gzip.open(cache_gz, "rt", encoding="utf-8") as f:
                 return f.read()
@@ -125,7 +126,7 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
         resp = await http.get(url, headers=_REQUEST_HEADERS)
     resp.raise_for_status()
     text = resp.text
-    if page_id:
+    if cache_gz is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = cache_gz.with_suffix(".tmp")
         with gzip.open(tmp, "wt", encoding="utf-8") as f:
@@ -226,7 +227,6 @@ def parse_page(html: str) -> ParsedPage | None:
                 "cells": texts,
                 "spans": [c.has_attr("rowspan") for c in cells],
                 "right": None,
-                "right_spans": None,
             }
             # buddy 右行紧随左行：单元格更少且以 右/(右) 开头
             if idx + 1 < len(trs):
@@ -235,7 +235,6 @@ def parse_page(html: str) -> ParsedPage | None:
                     nxt_label = nxt[0].get_text(strip=True)
                     if nxt_label and "右" in nxt_label:
                         entry["right"] = [c.get_text(strip=True) for c in nxt]
-                        entry["right_spans"] = [c.has_attr("rowspan") for c in nxt]
             pt.label_rows.append(entry)
         page.tables.append(pt)
     return page if page.tables else None
