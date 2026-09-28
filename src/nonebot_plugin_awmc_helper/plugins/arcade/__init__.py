@@ -54,4 +54,13 @@ from .matchers import (  # noqa: F401
 )
 
 if scheduler is not None:
-    scheduler.add_job(sync_and_reset, "cron", hour=4, minute=0)
+    # misfire_grace_time=3600 + coalesce：进程繁忙或重启跨过 4 点时当日同步
+    # 补跑一次而非静默跳过
+    scheduler.add_job(
+        sync_and_reset,
+        "cron",
+        hour=4,
+        minute=0,
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
