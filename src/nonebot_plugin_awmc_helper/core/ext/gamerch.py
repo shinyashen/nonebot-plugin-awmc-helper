@@ -115,10 +115,11 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
     import asyncio
 
     await asyncio.sleep(_FETCH_DELAY)
-    # 首请求可能被 202 反爬（无 Cookie），Cookie 入共享客户端 jar 后重试一次
+    # 首请求可能被 202 反爬（无 Cookie），Cookie 入共享客户端 jar 后重试一次；
+    # 只重放 202/403（反爬信号），404/500 等真实失败不重放
     resp = await http.get(url, headers=_REQUEST_HEADERS)
     for _ in range(2):
-        if resp.status_code == 200:
+        if resp.status_code in (200, 202, 403):
             break
         await asyncio.sleep(1.0)
         resp = await http.get(url, headers=_REQUEST_HEADERS)
@@ -371,7 +372,7 @@ def _build_song_entry(state, song_id: int, page: ParsedPage) -> dict | None:
     return entry if entry["sheets"] else None
 
 
-async def build_fill_doc() -> tuple[dict, int]:
+async def _build_fill_doc() -> tuple[dict, int]:
     """缺口曲（sd/dx 物量全零）→ fill 文档。返回 (文档, 抓取了页面的曲数)。"""
     from .. import songdb
 
@@ -426,7 +427,7 @@ async def apply_fill() -> tuple[int, bool]:
     """
     from .. import songdb
 
-    doc, fetched = await build_fill_doc()
+    doc, fetched = await _build_fill_doc()
     if not doc:
         logger.info("songdb: gamerch 补充无缺口谱面，跳过")
         return 0, False

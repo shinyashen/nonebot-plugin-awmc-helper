@@ -3,6 +3,8 @@
 端点与字段对齐原版 maimaiDX 的 LXNS OAuth2 实现。
 """
 
+from dataclasses import dataclass
+
 import httpx
 
 from . import ExtError, ExtNetworkError, get_client
@@ -46,15 +48,21 @@ async def fetch_song_list(notes: bool = True) -> dict:
     return data.get("data", data)
 
 
+@dataclass
 class LxnsToken:
-    access_token: str
-    refresh_token: str | None
-    friend_code: int | None
+    """落雪 OAuth token 端点响应（``data`` 段；friend_code 可能缺省）。"""
 
-    def __init__(self, data: dict) -> None:
-        self.access_token = data["access_token"]
-        self.refresh_token = data.get("refresh_token")
-        self.friend_code = data.get("friend_code")
+    access_token: str
+    refresh_token: str | None = None
+    friend_code: int | None = None
+
+    @classmethod
+    def from_payload(cls, data: dict) -> "LxnsToken":
+        return cls(
+            access_token=data["access_token"],
+            refresh_token=data.get("refresh_token"),
+            friend_code=data.get("friend_code"),
+        )
 
 
 class LxnsGrantError(ExtError):
@@ -112,7 +120,7 @@ async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
         raise LxnsGrantError(str(data["error"]), str(data.get("error_description", "")))
     if resp.status_code != 200 or not data.get("success", True):
         raise ExtError(str(data.get("message", error_default)))
-    return LxnsToken(data.get("data", data))
+    return LxnsToken.from_payload(data.get("data", data))
 
 
 async def fetch_token(code: str) -> LxnsToken:

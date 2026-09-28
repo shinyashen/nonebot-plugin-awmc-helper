@@ -111,14 +111,13 @@ async def try_send_forward(
                     },
                 }
             )
-        forward = nodes
         if group_id is not None:
             await asyncio.wait_for(
                 bot.call_api(
                     "send_group_forward_msg",
                     group_id=int(group_id),
-                    message=forward,
-                    messages=forward,
+                    message=nodes,
+                    messages=nodes,
                 ),
                 timeout=FORWARD_SEND_TIMEOUT,
             )
@@ -127,8 +126,8 @@ async def try_send_forward(
                 bot.call_api(
                     "send_private_forward_msg",
                     user_id=int(user_id),
-                    message=forward,
-                    messages=forward,
+                    message=nodes,
+                    messages=nodes,
                 ),
                 timeout=FORWARD_SEND_TIMEOUT,
             )

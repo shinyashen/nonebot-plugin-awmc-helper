@@ -8,17 +8,12 @@
 - 宴的 ds/level 尾部垃圾一律不采信（§2.8）。
 """
 
-from typing import Any
+from . import fetch_github_raw
 
-from . import fetch_json
-
-RAW_BASE = "https://raw.githubusercontent.com/Dale2003/maimaiinfo/main/static"
-
-
-async def _fetch_json(name: str) -> Any:
-    return await fetch_json(
-        f"{RAW_BASE}/{name}", name=f"maimaiinfo {name}", timeout=120
-    )
+_fetch_json = fetch_github_raw(
+    "https://raw.githubusercontent.com/Dale2003/maimaiinfo/main/static",
+    source="maimaiinfo",
+)
 
 
 async def fetch_all_data() -> dict[str, dict]:

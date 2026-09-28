@@ -49,7 +49,10 @@ class SmartProxyTransport(httpx.AsyncBaseTransport):
         self, host: str
     ) -> tuple[httpx.AsyncBaseTransport, httpx.AsyncBaseTransport]:
         """返回（主通道，回退通道）：国外站代理优先，其余直连优先。"""
-        if host.endswith(self._foreign_hosts):
+        # 精确域名或子域命中（后缀子串匹配会把 notgithub.com 误判国外站）
+        if host in self._foreign_hosts or any(
+            host.endswith("." + h) for h in self._foreign_hosts
+        ):
             return self._proxied, self._direct
         return self._direct, self._proxied
 

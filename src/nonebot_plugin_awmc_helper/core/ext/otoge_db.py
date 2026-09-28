@@ -5,15 +5,12 @@
   下架记录 ∖ 现役列表，含单张期间限定宴谱）。
 """
 
-from typing import Any
+from . import fetch_github_raw
 
-from . import fetch_json
-
-RAW_BASE = "https://raw.githubusercontent.com/zvuc/otoge-db/main/maimai/data"
-
-
-async def _fetch_json(name: str) -> Any:
-    return await fetch_json(f"{RAW_BASE}/{name}", name=f"otoge-db {name}", timeout=120)
+_fetch_json = fetch_github_raw(
+    "https://raw.githubusercontent.com/zvuc/otoge-db/main/maimai/data",
+    source="otoge-db",
+)
 
 
 async def fetch_music_ex() -> list[dict]:

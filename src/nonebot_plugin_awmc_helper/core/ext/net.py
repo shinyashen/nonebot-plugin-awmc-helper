@@ -187,12 +187,16 @@ class MaimaiNetClient:
         data: dict | None = None,
         params: dict | None = None,
         error_code: str = "unknown_error",
+        maintenance_check: bool = False,
     ) -> httpx.Response:
-        """单请求：手动跟随语义 + 错误重定向/维护判定（dxrating fetch 同构）。
+        """单请求：手动跟随语义 + 错误重定向判定（dxrating fetch 同构）。
 
         302 且 Location 命中错误页 → 抛 ``error_code``（登录 POST 处传
         ``invalid_credentials``）；其余跳转不跟随（NET 内部各页均直接 200，
         与 dxrating redirect: manual 行为一致）。
+
+        维护页检测仅 ``maintenance_check=True`` 时做（导航/登录链小页）：
+        记录页 ~1MB×5 全文扫描代价不值——维护时导航页必然先命中。
         """
         try:
             resp = await self._http.request(
@@ -203,13 +207,13 @@ class MaimaiNetClient:
         location = resp.headers.get("location", "")
         if resp.is_redirect and _ERROR_PATH_MARK in location:
             raise NetError(error_code, "maimai NET 把请求重定向到了错误页")
-        if any(m in resp.text for m in _MAINTENANCE_MARKS):
+        if maintenance_check and any(m in resp.text for m in _MAINTENANCE_MARKS):
             raise NetError("maintenance")
         return resp
 
     async def login(self, creds: NetCredentials) -> None:
         """SEGA ID 登录并选定第一张 Aime 卡（dxrating MaimaiNETJpClient.login）。"""
-        login_page = await self._request("GET", f"{BASE}/")
+        login_page = await self._request("GET", f"{BASE}/", maintenance_check=True)
         token = _extract_login_token(login_page.text)
         if not token:
             raise NetError("token_error")
@@ -223,11 +227,17 @@ class MaimaiNetClient:
                 "token": token,
             },
             error_code="invalid_credentials",
+            maintenance_check=True,
         )
         # 选 Aime 卡（idx=0 = 第一张）→ 进 home 领全会话 cookie；顺带解析身份区
-        await self._request("GET", f"{BASE}/aimeList/")
-        await self._request("GET", f"{BASE}/aimeList/submit/", params={"idx": "0"})
-        home = await self._request("GET", f"{BASE}/home/")
+        await self._request("GET", f"{BASE}/aimeList/", maintenance_check=True)
+        await self._request(
+            "GET",
+            f"{BASE}/aimeList/submit/",
+            params={"idx": "0"},
+            maintenance_check=True,
+        )
+        home = await self._request("GET", f"{BASE}/home/", maintenance_check=True)
         self.player = _parse_player(home.text)
         if self.player is not None:
             equipped = await self._fetch_equipped_nameplate()
