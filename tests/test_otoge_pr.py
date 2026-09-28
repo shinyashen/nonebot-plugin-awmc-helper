@@ -132,3 +132,28 @@ async def test_load_open_pr_guards_entry_count(otoge_pr):
         )
     )
     assert await otoge_pr.load_open_pr_entries() == []
+
+
+@respx.mock
+async def test_pr_list_uses_github_token(otoge_pr, monkeypatch):
+    from nonebot_plugin_awmc_helper.config import plugin_config
+
+    route = respx.get("https://api.github.com/repos/zvuc/otoge-db/pulls").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    monkeypatch.setattr(plugin_config, "awmc_github_token", "gh_pat_test")
+    await otoge_pr.list_open_song_prs()
+    request = route.calls.last.request
+    assert request.headers["Authorization"] == "Bearer gh_pat_test"
+
+
+@respx.mock
+async def test_pr_list_anonymous_without_token(otoge_pr, monkeypatch):
+    from nonebot_plugin_awmc_helper.config import plugin_config
+
+    route = respx.get("https://api.github.com/repos/zvuc/otoge-db/pulls").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    monkeypatch.setattr(plugin_config, "awmc_github_token", None)
+    await otoge_pr.list_open_song_prs()
+    assert "authorization" not in route.calls.last.request.headers

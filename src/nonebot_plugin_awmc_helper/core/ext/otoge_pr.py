@@ -123,11 +123,20 @@ def extract_new_entries(entries: list[dict], known_titles: set[str]) -> list[dic
 
 
 async def list_open_song_prs() -> list[tuple[int, str, str]]:
-    """open 且 head 分支为 ``maimai/update-*`` 的 PR：[(number, branch, title)]。"""
+    """open 且 head 分支为 ``maimai/update-*`` 的 PR：[(number, branch, title)]。
+
+    配置了 ``AWMC_GITHUB_TOKEN`` 时携带 Bearer 认证（限额 5000 次/小时，
+    匿名 60 次/小时在共享出口 IP 上易触顶 403）。
+    """
+    from ...config import plugin_config
+
+    headers = {"accept": "application/vnd.github+json"}
+    if plugin_config.awmc_github_token:
+        headers["Authorization"] = f"Bearer {plugin_config.awmc_github_token}"
     resp = await get_client().get(
         f"{_GITHUB_API}/pulls",
         params={"state": "open", "per_page": "50"},
-        headers={"accept": "application/vnd.github+json"},
+        headers=headers,
         timeout=30,
     )
     resp.raise_for_status()

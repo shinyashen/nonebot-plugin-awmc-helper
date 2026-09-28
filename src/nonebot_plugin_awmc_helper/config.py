@@ -74,6 +74,9 @@ class Config(BaseModel):
     awmc_gamerch_fill: bool = True
     # gamerch 页面磁盘缓存 TTL（小时）
     awmc_gamerch_max_age: int = 24
+    # GitHub API 访问令牌（可选）：otoge-db 自动化 PR 预读等 api.github.com 调用；
+    # 配置后限额 5000 次/小时（匿名仅 60 次/小时，共享出口 IP 易触顶 403）
+    awmc_github_token: str | None = None
     # MuNET current_jp 版本批次补充（当批曲目谱面/当前定数/别名/发布日期，
     # fill 语义 + 创建缺失曲；每日管线内 title-diff 候选，默认关需显式开启）
     awmc_munet_batch: bool = False
