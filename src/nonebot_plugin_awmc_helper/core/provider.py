@@ -4,8 +4,7 @@
 ``docs/concepts/caches.md``「覆写 provider 即替换缓存源」：
 
 - ``_hash()`` 返回规范表内容指纹（``songdb.CURRENT_FINGERPRINT``，rebuild 末尾刷新），
-  数据变更后哈希自动变化，``client.songs()`` 自行重建缓存，**无需手动删键**——
-  这正是 ``core/client.py:refresh_songs_cache`` 缓存键 hack 要退役的原因；
+  数据变更后哈希自动变化，``client.songs()`` 自行重建缓存，**无需手动删键**；
 - ``get_songs()`` 按 scope（cn/jp）从规范表物化 ``Song`` 列表（§5.5 转化层）；
 - CN 运行时视图暂仍由落雪构造（§5.1「行为与现状零漂移」，切换时机待作者定，
   见 QUESTIONS Q23），本 provider 现阶段服务 JP 视图与数据入口统一（§5.4）。
@@ -16,6 +15,7 @@ import time
 import asyncio
 import hashlib
 
+import httpx
 from nonebot import logger
 from maimai_py import FCType, RateType, SongType, CurveObject
 from maimai_py.models import Song
@@ -24,6 +24,7 @@ from maimai_py.providers.lxns import LXNSProvider
 from maimai_py.providers.yuzu import YuzuProvider
 
 from . import store, songdb
+from .http import build_smart_transport
 from .songdb import Scope
 from ..constants import DX_ID_OFFSET, normalize_text, strip_chart_prefix
 
@@ -205,9 +206,13 @@ class DivingFishCurveProvider(ICurveProvider):
 
     async def get_curves(self, client) -> dict[tuple[int, SongType], list[CurveObject]]:
         # 曲线是增强数据：失败返回空表降级（不拖垮曲库加载），哈希随失败变化
-        # 以保证下次曲库加载必然重试（成功后回到稳定哈希）
+        # 以保证下次曲库加载必然重试（成功后回到稳定哈希）。
+        # 自持短命客户端（songdb 补充文档同款）：不碰 MaimaiClient 私有实例
         try:
-            resp = await client._client.get(self.base_url + "chart_stats")
+            async with httpx.AsyncClient(
+                timeout=30, transport=build_smart_transport()
+            ) as http:
+                resp = await http.get(self.base_url + "chart_stats")
             resp.raise_for_status()
             charts = resp.json()["charts"]
         except Exception as e:

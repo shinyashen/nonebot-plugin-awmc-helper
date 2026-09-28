@@ -72,34 +72,25 @@ def test_deser_legacy_format_without_fc_dist():
 @pytest.mark.asyncio
 async def test_get_curves_maps_ids_and_filters_empty():
     """id → (根id, 类型) 映射；尾部 {} 占位过滤后按位对齐。"""
+    import respx
     from maimai_py import SongType
 
     from nonebot_plugin_awmc_helper.core.provider import DivingFishCurveProvider
 
-    class _FakeResp:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {
-                "charts": {
-                    # SD：4 谱面有数据 + remaster 槽 {} 占位
-                    "8": [_chart(), _chart(), _chart(), _chart(), {}],
-                    # DX id：映射为 (999, DX)
-                    "10999": [_chart(), {}],
-                }
-            }
-
-    class _FakeHttp:
-        async def get(self, url):
-            assert url.endswith("chart_stats")
-            return _FakeResp()
-
-    class _FakeClient:
-        _client = _FakeHttp()
-
-    provider = DivingFishCurveProvider()
-    curves = await provider.get_curves(_FakeClient())  # type: ignore[arg-type]
+    payload = {
+        "charts": {
+            # SD：4 谱面有数据 + remaster 槽 {} 占位
+            "8": [_chart(), _chart(), _chart(), _chart(), {}],
+            # DX id：映射为 (999, DX)
+            "10999": [_chart(), {}],
+        }
+    }
+    with respx.mock(assert_all_called=True) as m:
+        m.get("https://www.diving-fish.com/api/maimaidxprober/chart_stats").respond(
+            200, json=payload
+        )
+        provider = DivingFishCurveProvider()
+        curves = await provider.get_curves(None)  # type: ignore[arg-type]
     assert set(curves) == {(8, SongType.STANDARD), (999, SongType.DX)}
     # {} 过滤后不占位：SD 列表 4 项、DX 列表 1 项
     assert len(curves[(8, SongType.STANDARD)]) == 4
@@ -110,16 +101,14 @@ async def test_get_curves_maps_ids_and_filters_empty():
 @pytest.mark.asyncio
 async def test_get_curves_failure_degrades():
     """拉取失败返回空表（不阻断曲库加载），哈希变化保证下次重试。"""
+    import respx
 
     from nonebot_plugin_awmc_helper.core.provider import DivingFishCurveProvider
 
-    class _BrokenHttp:
-        async def get(self, url):
-            raise RuntimeError("network down")
-
-    class _FakeClient:
-        _client = _BrokenHttp()
-
-    provider = DivingFishCurveProvider()
-    assert await provider.get_curves(_FakeClient()) == {}  # type: ignore[arg-type]
+    with respx.mock(assert_all_called=True) as m:
+        m.get("https://www.diving-fish.com/api/maimaidxprober/chart_stats").side_effect = (  # noqa: E501
+            RuntimeError("network down")
+        )
+        provider = DivingFishCurveProvider()
+        assert await provider.get_curves(None) == {}  # type: ignore[arg-type]
     assert provider._hash() != DivingFishCurveProvider._OK_HASH
