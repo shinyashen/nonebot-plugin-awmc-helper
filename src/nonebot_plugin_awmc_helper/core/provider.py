@@ -15,7 +15,6 @@ import time
 import asyncio
 import hashlib
 
-import httpx
 from nonebot import logger
 from maimai_py import FCType, RateType, SongType, CurveObject
 from maimai_py.models import Song
@@ -24,7 +23,7 @@ from maimai_py.providers.lxns import LXNSProvider
 from maimai_py.providers.yuzu import YuzuProvider
 
 from . import store, songdb
-from .http import build_smart_transport
+from .http import create_smart_client
 from .songdb import Scope
 from ..constants import DX_ID_OFFSET, normalize_text, strip_chart_prefix
 
@@ -209,9 +208,7 @@ class DivingFishCurveProvider(ICurveProvider):
         # 以保证下次曲库加载必然重试（成功后回到稳定哈希）。
         # 自持短命客户端（songdb 补充文档同款）：不碰 MaimaiClient 私有实例
         try:
-            async with httpx.AsyncClient(
-                timeout=30, transport=build_smart_transport()
-            ) as http:
+            async with create_smart_client(timeout=30) as http:
                 resp = await http.get(self.base_url + "chart_stats")
             resp.raise_for_status()
             charts = resp.json()["charts"]

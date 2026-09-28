@@ -13,7 +13,7 @@ import httpx
 from nonebot import logger
 
 from . import ExtError, ExtNetworkError, get_client
-from ..http import build_smart_transport
+from ..http import create_smart_client
 from ...config import plugin_config
 
 YUZU_DOMAIN_MOE = "https://www.yuzuchan.moe"
@@ -265,9 +265,7 @@ async def run_alias_sse(on_apply: Callable[[AliasPush], Awaitable[None]]) -> Non
     reconnect_delay = SSE_RECONNECT_DELAY
     last_event_id: str | None = None
     timeout = httpx.Timeout(connect=30, read=None, write=30, pool=30)
-    async with httpx.AsyncClient(
-        timeout=timeout, follow_redirects=True, transport=build_smart_transport()
-    ) as session:
+    async with create_smart_client(timeout=timeout) as session:
         while True:
             try:
                 headers = {"Accept": "text/event-stream"}

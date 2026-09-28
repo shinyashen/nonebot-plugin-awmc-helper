@@ -41,7 +41,7 @@ from maimai_py.models import (
 )
 
 from . import store
-from .http import build_smart_transport
+from .http import create_smart_client
 from ..constants import (
     GENRE_TO_ZH,
     DX_ID_OFFSET,
@@ -1897,8 +1897,6 @@ async def _load_extra_docs() -> list[tuple[str, str, dict]]:
     """
     from pathlib import Path
 
-    import httpx
-
     from ..config import plugin_config
 
     docs: list[tuple[str, str, dict]] = []
@@ -1907,9 +1905,7 @@ async def _load_extra_docs() -> list[tuple[str, str, dict]]:
         mode = mode if mode in ("fill", "override") else "override"
         try:
             if source.startswith(("http://", "https://")):
-                async with httpx.AsyncClient(
-                    timeout=30, transport=build_smart_transport()
-                ) as http:
+                async with create_smart_client(timeout=30) as http:
                     resp = await http.get(source)  # 匿名读取，不加鉴权头（作者拍板）
                     resp.raise_for_status()
                     data = resp.json()

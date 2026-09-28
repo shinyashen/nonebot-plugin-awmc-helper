@@ -18,7 +18,7 @@ from collections.abc import Callable, Awaitable
 import httpx
 from tenacity import retry, stop_after_attempt, retry_if_exception_type
 
-from ..http import build_smart_transport
+from ..http import create_smart_client
 
 
 class ExtError(Exception):
@@ -36,10 +36,8 @@ def get_client() -> httpx.AsyncClient:
     """ext 层共享的 httpx 客户端（懒创建）。"""
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
-            follow_redirects=True,
-            transport=build_smart_transport(),
+        _client = create_smart_client(
+            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10)
         )
     return _client
 

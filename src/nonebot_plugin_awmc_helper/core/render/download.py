@@ -15,7 +15,7 @@ from collections.abc import Callable, Hashable, Coroutine
 import httpx
 from nonebot import logger
 
-from ..http import build_smart_transport
+from ..http import create_smart_client
 
 _DOWNLOAD_TIMEOUT = httpx.Timeout(connect=10, read=30, write=10, pool=10)
 
@@ -28,12 +28,9 @@ async def download_to_file(
     verify: ssl.SSLContext | bool = True,
 ) -> bool:
     """GET url → 落盘 path（父目录自动创建）；成功 True，失败 warning False。"""
-    transport = build_smart_transport(verify=verify)
     try:
-        async with httpx.AsyncClient(
-            timeout=_DOWNLOAD_TIMEOUT,
-            follow_redirects=True,
-            transport=transport,
+        async with create_smart_client(
+            timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True, verify=verify
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()

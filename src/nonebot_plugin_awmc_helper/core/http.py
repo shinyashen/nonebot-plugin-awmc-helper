@@ -111,6 +111,33 @@ _transport_cache: dict[ssl.SSLContext | bool, SmartProxyTransport] = {}
 """按 verify 键进程级持有的共享 transport（模块级引用，防 GC/被关）。"""
 
 
+def create_smart_client(
+    *,
+    timeout: httpx.Timeout | float,
+    headers: dict[str, str] | None = None,
+    follow_redirects: bool = True,
+    verify: ssl.SSLContext | bool = True,
+) -> httpx.AsyncClient:
+    """智能代理 httpx 客户端工厂（awmc 生态三仓懒创建统一入口）。
+
+    配置了 ``AWMC_PROXY`` 时挂共享智能 transport（连接池跨客户端复用，见
+    :func:`build_smart_transport`）；未配置时不挂 transport、把 ``verify``
+    交给 client 本身——两种模式下自定义 CA 语义一致（直建写法在无代理时
+    会静默丢掉 verify，本工厂顺带修掉这一坑）。
+    """
+    transport = build_smart_transport(verify=verify)
+    kwargs: dict = {
+        "timeout": timeout,
+        "headers": headers,
+        "follow_redirects": follow_redirects,
+    }
+    if transport is not None:
+        kwargs["transport"] = transport
+    else:
+        kwargs["verify"] = verify
+    return httpx.AsyncClient(**kwargs)
+
+
 # maimaidx.jp 官方站 TLS 只下发叶子证书（缺 GlobalSign 中间件），httpx 严格校验
 # 会失败：下述中间证书并入信任上下文补齐链（CA 名含年份，官方轮换后需更新）。
 # GlobalSign GCC R46 OV TLS CA 2025 中间证书（AIA: secure.globalsign.com/cacert/

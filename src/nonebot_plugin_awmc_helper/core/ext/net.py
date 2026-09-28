@@ -22,7 +22,7 @@ import httpx
 from bs4 import Tag, BeautifulSoup
 
 from . import ExtError, ExtNetworkError
-from ..http import maimaidx_ssl_context, build_smart_transport
+from ..http import create_smart_client, maimaidx_ssl_context
 
 BASE = "https://maimaidx.jp/maimai-mobile"
 
@@ -161,18 +161,12 @@ class MaimaiNetClient:
     """单次查询会话：登录 + 记录抓取（cookie 会话级，用完 aclose）。"""
 
     def __init__(self) -> None:
-        transport = build_smart_transport(verify=maimaidx_ssl_context())
-        kwargs: dict = {
-            "follow_redirects": False,
-            "headers": COMMON_HEADERS,
-            "timeout": httpx.Timeout(connect=10, read=30, write=10, pool=10),
-            # Referer 由逐请求设置（dxrating fetch() 同语义）
-        }
-        if transport is not None:
-            kwargs["transport"] = transport
-        else:
-            kwargs["verify"] = maimaidx_ssl_context()
-        self._http = httpx.AsyncClient(**kwargs)
+        self._http = create_smart_client(
+            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
+            headers=COMMON_HEADERS,
+            follow_redirects=False,
+            verify=maimaidx_ssl_context(),
+        )
         self.player: NetPlayer | None = None
         """登录时从首页身份区解析的玩家信息（登录失败/页面无身份块为 None）。"""
 
