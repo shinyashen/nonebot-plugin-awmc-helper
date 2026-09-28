@@ -17,7 +17,7 @@ import asyncio
 from nonebot.log import logger
 from nonebot_plugin_apscheduler import scheduler
 
-from . import store
+from . import store, utils
 from ..config import plugin_config
 from .binding import binding_service
 
@@ -51,20 +51,6 @@ async def lxns_keepalive() -> tuple[str, int]:
     return summary, counts["dead"]
 
 
-async def _notify_superusers(text: str) -> None:
-    """SUPERUSER 私聊推送（与 core.songs 同款形态；失败静默记 debug）。"""
-    from nonebot import get_driver
-    from nonebot_plugin_alconna.uniseg import Target, UniMessage, SupportAdapter
-
-    for user_id in get_driver().config.superusers:
-        try:
-            await UniMessage.text(text).send(
-                target=Target.user(user_id, adapter=SupportAdapter.onebot11)
-            )
-        except Exception as e:  # 平台不支持/未连接等一律跳过
-            logger.debug(f"保活汇总发送失败（superuser={user_id}）：{e}")
-
-
 async def _daily_keepalive() -> None:
     try:
         summary, dead = await lxns_keepalive()
@@ -72,7 +58,7 @@ async def _daily_keepalive() -> None:
         logger.exception("落雪令牌保活任务失败")
         return
     if dead:
-        await _notify_superusers(summary)
+        await utils.notify_superusers(summary)
 
 
 if plugin_config.awmc_lxns_keepalive:

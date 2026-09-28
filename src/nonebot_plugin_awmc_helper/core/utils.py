@@ -145,3 +145,18 @@ def group_admin():
 
         GROUP_ADMIN = SUPERUSER | ADMIN()
     return GROUP_ADMIN
+
+
+async def notify_superusers(text: str) -> None:
+    """向全部 SUPERUSER 经 OneBot v11 主动私聊推送（多适配器部署其余适配器
+    不覆盖；发送失败静默记 debug，不影响主流程）。"""
+    from nonebot import get_driver
+    from nonebot_plugin_alconna.uniseg import Target, UniMessage, SupportAdapter
+
+    for user_id in get_driver().config.superusers:
+        try:
+            await UniMessage.text(text).send(
+                target=Target.user(user_id, adapter=SupportAdapter.onebot11)
+            )
+        except Exception as e:  # 平台不支持/未连接等一律跳过
+            logger.debug(f"通知发送失败（superuser={user_id}）：{e}")

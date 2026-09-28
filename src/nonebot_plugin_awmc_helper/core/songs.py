@@ -19,7 +19,7 @@ from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDiffic
 from maimai_py.models import SongDifficulties, SongDifficultyUtage
 from nonebot_plugin_apscheduler import scheduler
 
-from . import store, songdb
+from . import store, utils, songdb
 from .client import client, lxns_provider, yuzu_provider
 from .songdb import Scope
 from ..config import plugin_config
@@ -780,20 +780,6 @@ async def jp_songs() -> list[Song]:
     return list((await song_service._jp_songs_map()).values())
 
 
-async def _notify_superusers(text: str) -> None:
-    """向全部 SUPERUSER 经 OneBot v11 主动私聊推送（多适配器部署其余适配器
-    不覆盖；发送失败记 debug，不影响主流程）。"""
-    from nonebot_plugin_alconna.uniseg import Target, UniMessage, SupportAdapter
-
-    for user_id in get_driver().config.superusers:
-        try:
-            await UniMessage.text(text).send(
-                target=Target.user(user_id, adapter=SupportAdapter.onebot11)
-            )
-        except Exception as e:  # 平台不支持/未连接等一律跳过
-            logger.debug(f"更新通知发送失败（superuser={user_id}）：{e}")
-
-
 async def prerender_templates() -> str:
     """预渲染全部底图（core 实现，自动触发与 SUPERUSER 指令共用），返回结果描述。"""
     from .render import table_template
@@ -921,7 +907,7 @@ async def _on_cn_update(
         gone_names = (
             "、".join(f"「{titles.get(i, i)}」" for i in sorted(removed)) or "无"
         )
-        await _notify_superusers(
+        await utils.notify_superusers(
             f"检测到国服曲库更新：新增 {len(added)} 首（{new_names}），"
             f"下架 {len(removed)} 首（{gone_names}）；底图重建：{template_msg}"
         )
