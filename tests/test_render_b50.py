@@ -316,3 +316,45 @@ async def test_b50_footer_color_follows_theme(monkeypatch):
 
     await best50.draw_b50_nb("t", 15000, 7500, 7500, [], [], theme="circle")
     assert seen == [best50.FOOTER_COLORS["circle"]]
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_b50_render_smoke():
+    """B50 与成绩列表绘图冒烟。"""
+    import dataclasses
+
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.render.score import DrawScore
+    from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
+
+    base = Score(
+        id=1,
+        level="13",
+        level_index=LevelIndex.MASTER,
+        achievements=99.5,
+        fc=None,
+        fs=None,
+        dx_score=2000,
+        dx_rating=250,
+        play_count=None,
+        play_time=None,
+        rate=RateType.SSP,
+        type=SongType.DX,
+    )
+    sc = ScoreExtend(
+        **dataclasses.asdict(base),
+        title="RenderSong",
+        level_value=13.0,
+        level_dx_score=2400,
+        dx_star=4,
+        version=25000,
+    )
+    png = await best50_bytes("tester", 250, 250, 0, [sc], [])
+    assert png.startswith(b"\x89PNG")
+    assert len(png) > 1000
+    listing = DrawScore(280 + 4 * 109 + 130, service=None).draw_score_list(
+        "13", [sc], 1, 1
+    )
+    assert listing.startswith(b"\x89PNG")

@@ -1,4 +1,4 @@
-"""awmc.songdb `重载补充数据`：进度提示后工作逻辑必须执行（finish 截断回归）。"""
+"""awmc.songdb 指令测试：`刷新歌曲库`/`重载补充数据`（finish 截断回归、MuNET 走查启动）。"""
 
 import pytest
 from nonebug import App

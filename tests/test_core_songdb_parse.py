@@ -7,6 +7,7 @@ from songdb_fixtures import (
     make_dschange,
     make_otoge_live,
     make_otoge_deleted,
+    make_pending_item,
 )
 
 
@@ -281,3 +282,85 @@ def test_normalize_text_and_strip_chart_prefix():
     assert strip_chart_prefix("dx") is None  # 剥完为空
     # 只剥一层：前缀命中即返回，不再剥后缀
     assert strip_chart_prefix("dx牛奶猫dx") == ("牛奶猫dx", "dx", "prefix")
+
+
+def test_parse_gate_requires_constant():
+    """可查 gate：至少一张谱面有具体定数；无定数/问号定数/空标题均不可查。"""
+    from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
+
+    pending = parse_pending_item(make_pending_item())
+    assert pending is not None
+    assert [c.level_value for c in pending.charts] == [4.0, 7.5, 10.9, 13.5]
+    assert all(c.is_dx for c in pending.charts)
+    assert pending.genre == "POPSアニメ"
+    assert pending.version == 27000
+    assert pending.bpm == "190"
+
+    # 全部定数缺失 → None（继续等 otoge 补数）
+    item = make_pending_item()
+    for k in list(item):
+        if k.endswith("_i"):
+            del item[k]
+    assert parse_pending_item(item) is None
+    # 定数为 "?" 不可解析；但其余谱面仍有时整曲可查
+    assert parse_pending_item(make_pending_item(dx_lev_mas_i="?")) is not None
+    item = make_pending_item()
+    for suffix in ("bas", "adv", "exp", "mas"):
+        item[f"dx_lev_{suffix}_i"] = "?"
+    assert parse_pending_item(item) is None
+    # 空标题不可查
+    assert parse_pending_item(make_pending_item(title="")) is None
+
+
+def test_parse_missing_fields_render_as_none():
+    """缺字段 → None（渲染层画 -）：标级 ?、物量缺、曲师/BPM/分类/封面缺。"""
+    from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
+
+    pending = parse_pending_item(
+        make_pending_item(
+            artist=None,
+            bpm=None,
+            catcode="未知分类",
+            image_url=None,
+            dx_lev_mas="?",
+            dx_lev_exp_designer=None,
+        )
+    )
+    assert pending is not None
+    assert pending.artist is None
+    assert pending.bpm is None
+    assert pending.genre is None  # catcode 映射不到
+    assert pending.image_url is None
+    mas = next(c for c in pending.charts if c.level_id == 3)
+    assert mas.level is None  # "?" 形标级视为未知
+    assert mas.level_value == 13.5
+    assert mas.notes is None  # 无物量锚点
+    exp = next(c for c in pending.charts if c.level_id == 2)
+    assert exp.designer is None
+    # 标级 "13+" 与 "13?" 均为可展示形态
+    p_plus = parse_pending_item(make_pending_item(dx_lev_mas="13+"))
+    p_q = parse_pending_item(make_pending_item(dx_lev_mas="13?"))
+    assert p_plus is not None
+    assert p_plus.charts[3].level == "13+"
+    assert p_q is not None
+    assert p_q.charts[3].level == "13?"
+
+
+def test_parse_notes_partial_missing():
+    """物量部分缺失：「0 即 -」约定——缺失列填 0（渲染层画 -），tap 为锚点。"""
+    from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
+
+    pending = parse_pending_item(
+        make_pending_item(
+            dx_lev_mas_notes_tap="564",
+            dx_lev_mas_notes_hold="65",
+            dx_lev_mas_notes_slide=None,
+            dx_lev_mas_notes_touch=None,
+            dx_lev_mas_notes_break="68",
+        )
+    )
+    assert pending is not None
+    mas = next(c for c in pending.charts if c.level_id == 3)
+    assert mas.notes == (564, 65, 0, 0, 68)
+    bas = next(c for c in pending.charts if c.level_id == 0)
+    assert bas.notes is None  # tap 缺 → 整行无物量（物化为全 0，画 -）

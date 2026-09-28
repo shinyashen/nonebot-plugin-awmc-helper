@@ -10,6 +10,7 @@ from songdb_fixtures import (
     make_divingfish,
     make_otoge_live,
     make_otoge_deleted,
+    make_pending_item,
 )
 
 
@@ -795,3 +796,106 @@ async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
         chart.notes_break,
     ) == (30, 6, 9, 12, 15)
     assert state.groups[(1903, "utage")].version == 27000
+
+
+def test_pending_to_song_placeholder_fields():
+    """物化为临时 Song：id=0、缺失字段按「0 即 -」约定、版本未知 logo 缺席。"""
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.songdb import (
+        pending_to_song,
+        parse_pending_item,
+    )
+
+    bare = parse_pending_item(
+        make_pending_item(artist=None, bpm=None, catcode="未知分类", version=None)
+    )
+    assert bare is not None
+    assert bare.genre_display is None
+    song = pending_to_song(bare)
+    assert song.id == 0  # 临时 id，不参与任何 id 键路径
+    assert song.bpm == 0  # 「0 即 -」：卡面画 -
+    assert song.artist == "-"
+    assert song.version == 0  # from_value(0) 为 None → 版本 logo 自然缺席
+    assert all(d.version == 0 for d in song.difficulties.dx)
+    assert [d.level for d in song.difficulties.dx] == ["4", "7", "10+", "13"]
+    # 谱师仅 exp 有（base 条目只有 dx_lev_exp_designer），其余画 -
+    assert (
+        next(d for d in song.difficulties.dx if d.level_index.value == 2).note_designer
+        == "譜面作者X"
+    )
+    assert (
+        next(d for d in song.difficulties.dx if d.level_index.value == 3).note_designer
+        == "-"
+    )
+    assert all(
+        d.type == SongType.DX and d.level_value > 0 for d in song.difficulties.dx
+    )
+
+    full = parse_pending_item(make_pending_item())
+    assert full is not None
+    assert full.genre_display == "流行&动漫"
+    song = pending_to_song(full)
+    assert song.bpm == 190
+    assert song.artist == "OSTER project feat. Kanata.N"
+    mas = next(d for d in song.difficulties.dx if d.level_index.value == 3)
+    assert mas.level == "13"
+    assert mas.level_value == 13.5
+
+
+def test_cover_key_stable_per_title():
+    """封面缓存键按标题派生（pending 曲无 id，不能按 id 缓存）。"""
+    from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
+
+    a = parse_pending_item(make_pending_item())
+    b = parse_pending_item(make_pending_item(title="別の新曲"))
+    assert a is not None
+    assert b is not None
+    assert a.cover_key == a.cover_key
+    assert a.cover_key != b.cover_key
+
+
+@pytest.mark.asyncio
+async def test_pending_search_filters(db):
+    """搜索过滤：gate 排除无定数行、reason 限定 missing_id、标题归一子串与定数区间。"""
+    from nonebot_plugin_awmc_helper.core.songdb import pending_search, upsert_pending
+
+    await upsert_pending(
+        "otoge-db", "title:物語はここから", "missing_id", make_pending_item()
+    )
+    # 无定数：gate 不过
+    item = make_pending_item(title="定数未決の曲")
+    for suffix in ("bas", "adv", "exp", "mas"):
+        item[f"dx_lev_{suffix}_i"] = None
+    await upsert_pending("otoge-db", "title:定数未決の曲", "missing_id", item)
+    # 非 missing_id 行不参与
+    await upsert_pending(
+        "otoge-db", "title:別理由", "other_reason", make_pending_item(title="別理由")
+    )
+
+    all_pending = await pending_search()
+    assert [p.title for p in all_pending] == ["物語はここから"]
+
+    hit = await pending_search(title="物語")  # 子串
+    assert len(hit) == 1
+    assert hit[0].key == "title:物語はここから"
+    assert hit[0].source == "otoge-db"
+    assert not await pending_search(title="ここからじゃない")  # 不含关键词
+
+    in_range = await pending_search(ds_range=(13.0, 14.0))
+    assert len(in_range) == 1
+    assert not await pending_search(ds_range=(15.0, 16.0))
+
+
+@pytest.mark.asyncio
+async def test_song_service_pending_wrappers(db):
+    """SongService 包装层透传（music_query 实际调用入口）。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.songdb import upsert_pending
+
+    await upsert_pending(
+        "otoge-db", "title:物語はここから", "missing_id", make_pending_item()
+    )
+    assert len(await song_service.pending_by_title_fuzzy("物語")) == 1
+    assert len(await song_service.pending_by_level_value(7.0, 8.0)) == 1
+    assert await song_service.pending_by_title_fuzzy("没有的歌") == []

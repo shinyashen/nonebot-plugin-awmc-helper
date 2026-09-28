@@ -347,6 +347,34 @@ def make_otoge_deleted() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# song_pending：MAGiCAL 新曲形态的 otoge 条目
+# ---------------------------------------------------------------------------
+
+
+def make_pending_item(**over: Any) -> dict:
+    """MAGiCAL 新曲形态的 otoge 条目（定数齐、物量/封面可缺）。"""
+    base = {
+        "title": "物語はここから",
+        "artist": "OSTER project feat. Kanata.N",
+        "catcode": "POPS＆アニメ",
+        "bpm": "190",
+        "version": "27000",
+        "image_url": None,
+        "dx_lev_bas": "4",
+        "dx_lev_bas_i": "4.0",
+        "dx_lev_adv": "7",
+        "dx_lev_adv_i": "7.5",
+        "dx_lev_exp": "10+",
+        "dx_lev_exp_i": "10.9",
+        "dx_lev_mas": "13",
+        "dx_lev_mas_i": "13.5",
+        "dx_lev_exp_designer": "譜面作者X",
+    }
+    base.update(over)
+    return base
+
+
+# ---------------------------------------------------------------------------
 # 落雪 song/list + 水鱼 music_data（国服）
 # ---------------------------------------------------------------------------
 

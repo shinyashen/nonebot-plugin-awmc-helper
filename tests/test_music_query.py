@@ -4,6 +4,7 @@ import base64
 
 import pytest
 from mocks import requires_assets
+from songdb_fixtures import make_pending_item
 from nonebug import App
 
 
@@ -655,3 +656,145 @@ async def test_utage_id_on_mixed_host_draws_banquet_card(app: App, db):
         "id100363",
         lambda: nb_chart.song_chart_banquet_info(host),
     )
+
+
+# ---------------------------------------------------------------------------
+# 指令链路（nonebug）
+# ---------------------------------------------------------------------------
+
+
+async def _assert_pending_card(app: App, matcher_name: str, text: str):
+    """断言回复 = at + pending 提示文本 + pending 临时卡（与实现同源渲染）。"""
+    import base64
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.core.songdb import pending_search
+    from nonebot_plugin_awmc_helper.plugins.music_query.render import (
+        PENDING_NOTE,
+        _pending_card,
+    )
+
+    matcher = getattr(music_query, matcher_name)
+    pending = (await pending_search(title="物語はここから"))[0]
+    png = await _pending_card(pending)  # 与 handler 同源
+    note = PENDING_NOTE
+
+    event = fake_group_message_event_v11(message=text)
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        expected = Message(
+            [
+                MessageSegment.at(12345678),
+                MessageSegment.text(f" {note}"),
+                MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+            ]
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+async def _seed_pending():
+    from nonebot_plugin_awmc_helper.core.songdb import upsert_pending
+
+    await upsert_pending(
+        "otoge-db", "title:物語はここから", "missing_id", make_pending_item()
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_search_pending_fallback_card(app: App, songs):
+    """查歌：CN/JP 视图均 miss → pending 兜底出临时卡。"""
+    await _seed_pending()
+    await _assert_pending_card(app, "search", "查歌 物語")
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_ds_search_pending_fallback_card(app: App, songs):
+    """定数查歌：样例库无 7.5 定数 → pending 兜底出临时卡（定数揭晓即可查）。"""
+    await _seed_pending()
+    await _assert_pending_card(app, "search", "定数查歌 7.5")
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_alias_song_pending_fallback_card(app: App, songs, monkeypatch):
+    """是什么歌：输入为新曲歌名（无别名）→ 投票提示落空后 pending 兜底。"""
+    from nonebot_plugin_awmc_helper.core.ext.yuzu import yuzu_client
+
+    async def _boom(*a, **k):
+        raise RuntimeError("测试跳过网络")
+
+    monkeypatch.setattr(yuzu_client, "get_apply_songs", _boom)
+    await _seed_pending()
+    await _assert_pending_card(app, "search_alias_song", "物語はここから是什么歌")
+
+
+@pytest.mark.asyncio
+async def test_search_pending_empty_falls_through(app: App, songs):
+    """pending 无命中时回落既有「未找到」路径（不吞掉回复，回归 bool 返回修复）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.plugins.music_query.render import NOT_FOUND
+
+    event = fake_group_message_event_v11(message="查歌 查無此曲XYZ")
+    async with app.test_matcher(music_query.search) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        note = NOT_FOUND
+        expected = Message(
+            [MessageSegment.at(12345678), MessageSegment.text(f" {note}")]
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
