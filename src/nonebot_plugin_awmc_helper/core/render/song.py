@@ -158,13 +158,8 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         assets.pic("chara_left.png", "prism_plus").resize((156, 187)), (800, 0)
     )
     im.alpha_composite(assets.pic("moon.png").resize((120, 120)), (60, 20))
-    logo_path = (
-        assets.static_path() / "mai" / "pic" / "maimai でらっくす PRiSM PLUS.png"
-    )
-    if logo_path.exists():
-        im.alpha_composite(
-            Image.open(logo_path).convert("RGBA").resize((210, 101)), (15, 20)
-        )
+    if (logo := assets.pic_optional("maimai でらっくす PRiSM PLUS.png")) is not None:
+        im.alpha_composite(logo.resize((210, 101)), (15, 20))
     draw = ImageDraw.Draw(im)
 
     x_gap, y_gap, start_x, start_y = 450, 145, 70, 200

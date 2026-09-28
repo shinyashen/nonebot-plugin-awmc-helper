@@ -321,7 +321,7 @@ def draw_rating_table(
                 / f"UI_MSS_Allclear_Icon_{name}.png"
             )
             if p.exists():
-                im.alpha_composite(Image.open(p).convert("RGBA"), (40, 40))
+                im.alpha_composite(assets.get(p), (40, 40))
 
     im = im.resize(
         (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS

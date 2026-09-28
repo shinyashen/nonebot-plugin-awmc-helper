@@ -153,14 +153,14 @@ def version_image(version: int, jp: bool = False) -> Image.Image | None:
         if jp_name:
             path = assets.static_path() / "mai" / "pic" / "jp" / f"{jp_name}.png"
             if path.exists():
-                return Image.open(path).convert("RGBA")
+                return assets.get(path)
     ver = Version.from_value(version)
     if ver is None:
         return None
     name = VERSION_IMAGE.get(ver) or version_zh(version)
     path = assets.static_path() / "mai" / "pic" / f"{name}.png"
     if path.exists():
-        return Image.open(path).convert("RGBA")
+        return assets.get(path)
     return None
 
 

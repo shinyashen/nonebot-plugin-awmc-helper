@@ -271,13 +271,7 @@ async def _qq_avatar(qqid: int) -> Image.Image | None:
 def _dx_star_badge(theme: str, star: int) -> Image.Image | None:
     if star <= 0:
         return None
-    pic = assets.static_path() / "mai" / "pic"
-    path = pic / theme / DX_STAR_FILE.format(num=star)
-    if not path.exists():
-        path = pic / DX_STAR_FILE.format(num=star)
-    if not path.exists():
-        return None
-    return Image.open(path).convert("RGBA")
+    return assets.pic_optional(DX_STAR_FILE.format(num=star), theme)
 
 
 def _rate_badge(theme: str, rate: RateType) -> Image.Image | None:
@@ -285,18 +279,20 @@ def _rate_badge(theme: str, rate: RateType) -> Image.Image | None:
     return assets.pic_optional(f"UI_TTR_Rank_{name}.png", theme)
 
 
-def _combo_icon(fc: FCType | None) -> Image.Image | None:
-    if fc is None:
+def _icon_file(file_map: dict[str, str], value) -> Image.Image | None:
+    """FC/Sync 徽章共用取图：枚举名小写映射文件名，pic 主题回退缺失 None。"""
+    if value is None:
         return None
-    name = COMBO_FILE.get(fc.name.lower())
+    name = file_map.get(value.name.lower())
     return assets.pic_optional(f"UI_MSS_MBase_Icon_{name}.png")
+
+
+def _combo_icon(fc: FCType | None) -> Image.Image | None:
+    return _icon_file(COMBO_FILE, fc)
 
 
 def _sync_icon(fs: FSType | None) -> Image.Image | None:
-    if fs is None:
-        return None
-    name = SYNC_FILE.get(fs.name.lower())
-    return assets.pic_optional(f"UI_MSS_MBase_Icon_{name}.png")
+    return _icon_file(SYNC_FILE, fs)
 
 
 def _fit_into(
@@ -346,10 +342,7 @@ async def _draw_header(
     生效。边框 NET 收藏品页有但本卡版式不渲染，不采集。
     """
     pic = assets.static_path() / "mai" / "pic"
-    im.alpha_composite(
-        Image.open(pic / theme / "logo.png").convert("RGBA").resize((249, 120)),
-        (14, 60),
-    )
+    im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (14, 60))
 
     # 名牌：水鱼版本牌字符串 → plate_version；落雪收藏牌 → 在线素材；
     # NET 装备中姓名框 → 官方原图放大适配；缺省 550101
@@ -358,7 +351,7 @@ async def _draw_header(
     if isinstance(plate_item, str):
         candidate = assets.static_path() / "mai" / "plate_version" / f"{plate_item}.png"
         if candidate.exists():
-            plate_img = Image.open(candidate).convert("RGBA")
+            plate_img = assets.get(candidate)
     elif plate_item is not None:
         plate_img = await fetch_item_image("plate", plate_item.id)
     if plate_img is None and nameplate_image:
@@ -368,7 +361,7 @@ async def _draw_header(
             allow_upscale=True,
         )
     if plate_img is None:
-        plate_img = Image.open(pic / "UI_Plate_550101.png").convert("RGBA")
+        plate_img = assets.get(pic / "UI_Plate_550101.png")
     im.alpha_composite(plate_img.resize((800, 130)), (300, 60))
 
     # 头像：落雪 icon → NET 头像 bytes → QQ 头像 → 缺省 509506
@@ -381,7 +374,7 @@ async def _draw_header(
     if icon_img is None and qqid is not None:
         icon_img = await _qq_avatar(qqid)
     if icon_img is None:
-        icon_img = Image.open(pic / "UI_Icon_509506.png").convert("RGBA")
+        icon_img = assets.get(pic / "UI_Icon_509506.png")
     im.alpha_composite(icon_img.resize((120, 120)), (305, 65))
 
     # DXRating 段位徽章 + rating 数字（circle 高 rating 用带星版式）
@@ -389,29 +382,25 @@ async def _draw_header(
     num_x, num_y, num_gap, num_size = 520, 80, 15, (17, 20)
     if theme == "circle" and rating >= 14000:
         badge_size = (170, 35)
-        star_img = (
-            Image.open(pic / theme / f"UI_CMN_DXRating_Star_{ra_star_num(rating)}.png")
-            .convert("RGBA")
-            .resize((21, 35))
-        )
+        star_img = assets.pic(
+            f"UI_CMN_DXRating_Star_{ra_star_num(rating)}.png", theme
+        ).resize((21, 35))
         num_x, num_y, num_gap, num_size = 515, 82, 13, (14, 17)
     im.alpha_composite(
-        Image.open(pic / theme / f"UI_CMN_DXRating_{ra_badge_num(rating, theme)}.png")
-        .convert("RGBA")
-        .resize(badge_size),
+        assets.pic(f"UI_CMN_DXRating_{ra_badge_num(rating, theme)}.png", theme).resize(
+            badge_size
+        ),
         (435, 72),
     )
     if star_img is not None:
         im.alpha_composite(star_img, (590, 72))
     for n, digit in enumerate(f"{rating:05d}"):
         im.alpha_composite(
-            Image.open(pic / f"UI_NUM_Drating_{digit}.png")
-            .convert("RGBA")
-            .resize(num_size),
+            assets.get(pic / f"UI_NUM_Drating_{digit}.png").resize(num_size),
             (num_x + num_gap * n, num_y),
         )
 
-    im.alpha_composite(Image.open(pic / "Name.png").convert("RGBA"), (435, 115))
+    im.alpha_composite(assets.get(pic / "Name.png"), (435, 115))
 
     # 段位认定牌：NET 官方徽章图优先（哈希名无数字，等比贴入槽位）；
     # 其余源按数字取本地素材（水鱼无该字段时回退 additional_rating，再回退 0）
@@ -423,11 +412,9 @@ async def _draw_header(
             Image.open(BytesIO(course_image)).convert("RGBA"), (80, 32)
         )
     else:
-        course_badge = (
-            Image.open(pic / f"UI_DNM_DaniPlate_{dani_plate_num(course_rank)}.png")
-            .convert("RGBA")
-            .resize((80, 32))
-        )
+        course_badge = assets.get(
+            pic / f"UI_DNM_DaniPlate_{dani_plate_num(course_rank)}.png"
+        ).resize((80, 32))
     im.alpha_composite(course_badge, (625, 120))
     if class_image:
         class_badge = _fit_into(
@@ -435,10 +422,8 @@ async def _draw_header(
         )
     else:
         class_rank = getattr(player, "class_rank", 0) or 0
-        class_badge = (
-            Image.open(pic / f"UI_FBR_Class_{class_rank:02d}.png")
-            .convert("RGBA")
-            .resize((90, 54))
+        class_badge = assets.get(pic / f"UI_FBR_Class_{class_rank:02d}.png").resize(
+            (90, 54)
         )
     im.alpha_composite(class_badge, (620, 60))
 
@@ -449,7 +434,7 @@ async def _draw_header(
         color = trophy.color if trophy.color else "Normal"
         if not (shougou_dir / f"UI_CMN_Shougou_{color}.png").exists():
             color = "Normal"
-        shougou = Image.open(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
+        shougou = assets.get(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
             (270, 27)
         )
         trophy_text, trophy_font = trophy.name, font(14, FONT_HAN)
@@ -457,12 +442,12 @@ async def _draw_header(
         color = trophy_color or "Normal"
         if not (shougou_dir / f"UI_CMN_Shougou_{color}.png").exists():
             color = "Normal"
-        shougou = Image.open(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
+        shougou = assets.get(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
             (270, 27)
         )
         trophy_text, trophy_font = trophy_name, font(14, FONT_HAN)
     else:
-        shougou = Image.open(shougou_dir / "UI_CMN_Shougou_Rainbow.png").resize(
+        shougou = assets.get(shougou_dir / "UI_CMN_Shougou_Rainbow.png").resize(
             (270, 27)
         )
         trophy_text = f"B35: {rating_b35} + B15: {rating_b15} = {rating}"
@@ -584,8 +569,7 @@ async def draw_b50_nb(
     icon_image/trophy_name/trophy_color/course_image/class_image/nameplate_image
     为 NET 数据源身份注入（player 缺失或对应字段缺失时生效）。
     """
-    pic = assets.static_path() / "mai" / "pic"
-    im = Image.open(pic / theme / "b50.png").convert("RGBA")
+    im = assets.canvas("b50.png", theme)
     draw = ImageDraw.Draw(im)
 
     await _draw_header(
