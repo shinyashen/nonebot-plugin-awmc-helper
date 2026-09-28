@@ -601,7 +601,7 @@ async def draw_b50_nb(
             draw_score_row(im, draw, x, y, score, theme)
 
     service_name = SERVICE_DISPLAY.get(service or "", "")
-    footer_color = FOOTER_COLORS[DEFAULT_THEME]
+    footer_color = FOOTER_COLORS[theme]
     draw.text(
         (700, 1570),
         credit_text(service_name or None),

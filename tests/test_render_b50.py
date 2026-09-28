@@ -5,6 +5,7 @@
 
 import dataclasses
 
+import pytest
 from mocks import requires_assets
 
 
@@ -277,3 +278,25 @@ def test_score_row_sub_hook_swaps_subline():
     assert render(lambda s: None) == default  # 提取器返回 None → 默认定数行
     assert render(lambda s: f"pc: {s.id}") != default  # 自定义文字生效
     assert render(lambda s: f"pc: {s.id}") == render(lambda s: f"pc: {s.id}")
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_b50_footer_color_follows_theme(monkeypatch):
+    """页脚颜色随入参主题：circle 用户页脚应为 CIRCLE_PINK（修复前恒 prism 蓝）。"""
+    from PIL import ImageDraw
+
+    from nonebot_plugin_awmc_helper.core.render import best50
+
+    seen = []
+    real_text = ImageDraw.ImageDraw.text
+
+    def spy_text(self, xy, *args, **kwargs):
+        if tuple(xy) == (700, 1570):
+            seen.append(kwargs.get("fill"))
+        return real_text(self, xy, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy_text)
+
+    await best50.draw_b50_nb("t", 15000, 7500, 7500, [], [], theme="circle")
+    assert seen == [best50.FOOTER_COLORS["circle"]]
