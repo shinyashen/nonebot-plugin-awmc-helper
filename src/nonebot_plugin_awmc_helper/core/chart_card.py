@@ -52,8 +52,8 @@ async def chart_card_bytes(
                 # SD/DX 均可，老曲补的 DX 谱也在 b35）：按谱面类型过滤拍平列表
                 # 会剔掉 b35 里的 DX 条目，is_full 误判 False、入线线失真，
                 # 加分预测全量虚高——侧别对齐 NB 的 song.isnew 选段语义
-                is_new_chart = nb_chart._is_new(
-                    nb_chart._chart_version(song, prefer_sd)
+                is_new_chart = nb_chart.is_new_chart(
+                    nb_chart.chart_version_of(song, prefer_sd)
                 )
                 # 降序（NB b50 列表语义）
                 best_list = sorted(

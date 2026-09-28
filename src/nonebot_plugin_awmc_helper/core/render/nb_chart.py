@@ -99,14 +99,14 @@ def major_diffs(song: Song, prefer_type: SongType | None = None) -> list:
     return sorted(diffs, key=lambda d: d.level_index.value)
 
 
-def _is_new(version: int) -> bool:
+def is_new_chart(version: int) -> bool:
     """当前版本曲目标「新曲」（NB isnew 语义，以 maimai-py 当前版本为准）。"""
     from maimai_py import current_version
 
     return version >= current_version.value
 
 
-def _chart_version(song: Song, prefer_sd: bool) -> int:
+def chart_version_of(song: Song, prefer_sd: bool) -> int:
     """卡片主类型谱面组的登场版本（组内谱面版本一致，取首谱面，§2.3）。
 
     SD/DX 同曲不同版本（老曲补 DX，如 835/10835）时显示版本跟随卡片主类型
@@ -120,7 +120,7 @@ def _chart_version(song: Song, prefer_sd: bool) -> int:
 
 
 def _display_card_id(song: Song, prefer_sd: bool) -> int:
-    """卡片展示 id 跟随主类型谱面组（与 :func:`_chart_version` 同口径）。
+    """卡片展示 id 跟随主类型谱面组（与 :func:`chart_version_of` 同口径）。
 
     老曲补 DX（如 835/10835）：DX 卡显示查分器 id = 根 id + 10000，SD 卡显示
     根 id；无谱面回落曲级 :func:`display_song_id`。
@@ -216,9 +216,9 @@ def song_chart_info(
     im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (65, 25))
     prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
     type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
-    chart_version = _chart_version(song, prefer_sd)
+    chart_version = chart_version_of(song, prefer_sd)
     # 日服视图与国服新曲标无关：统一不渲染「新曲だよ!」徽章
-    if _is_new(chart_version) and not jp:
+    if is_new_chart(chart_version) and not jp:
         im.alpha_composite(
             assets.pic("UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (842, 100),
@@ -426,7 +426,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     # 宴谱组无版本时回落整曲版本。日服限定卡（jp）用日服世代图（pic/jp/）
     chart_version = getattr(first, "version", 0) or song.version
     # 「新曲」标是国服当前版本口径：日服限定曲不渲染（对齐 song_chart_info）
-    if _is_new(chart_version) and not jp:
+    if is_new_chart(chart_version) and not jp:
         im.alpha_composite(
             assets.pic("UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
             (950, 165),
