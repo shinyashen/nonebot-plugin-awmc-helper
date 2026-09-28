@@ -5,7 +5,9 @@ import json
 import base64
 from dataclasses import dataclass
 
-from . import ExtError, fetch_json, get_client
+import httpx
+
+from . import ExtError, ExtNetworkError, fetch_json, get_client
 from ...config import plugin_config
 
 RANKING_URL = "https://www.diving-fish.com/api/maimaidxprober/rating_ranking"
@@ -102,11 +104,25 @@ def oauth_ready() -> bool:
     )
 
 
-def subject_ref(client_id: str, external_id: str) -> str:
-    """ref 摘要（不含 ``ref:`` 前缀）：client_id 与 external_id 的 sha256 小写 hex。"""
-    import hashlib
+class DivingFishSubjectMismatch(ExtError):
+    """确认码对应的授权不属于发起绑定的账号（subject_ref 比对失败）。
 
-    return hashlib.sha256(f"{client_id}:{external_id}".encode()).hexdigest()
+    供调用方与一般 ExtError 区分：mismatch 是钓鱼/转发场景，要给专项
+    文案；其余错误统一兜底即可。
+    """
+
+
+async def _post_form(url: str, data: dict) -> tuple[int, dict]:
+    """OAuth 端点公共封装：网络错误包装 ExtNetworkError、JSON 解析转 ExtError。"""
+    try:
+        resp = await get_client().post(url, data=data)
+    except httpx.RequestError as e:
+        raise ExtNetworkError("水鱼授权服务网络异常，请稍后再试") from e
+    try:
+        resp_data = resp.json()
+    except Exception as e:
+        raise ExtError(f"水鱼授权服务响应异常（HTTP {resp.status_code}）") from e
+    return resp.status_code, resp_data
 
 
 async def device_authorize(ref: str, label: str) -> dict:
@@ -120,9 +136,9 @@ async def device_authorize(ref: str, label: str) -> dict:
     返回含 ``verification_uri_complete``（用户码 20 分钟有效窗口内可重复
     进入）等字段的原始响应 dict；OAuth 错误体转 :class:`ExtError`。
     """
-    resp = await get_client().post(
+    status, data = await _post_form(
         f"{DF_AUTH_BASE}/oauth/device_authorization",
-        data={
+        {
             "client_id": plugin_config.awmc_divingfish_oauth_client_id,
             "client_secret": plugin_config.awmc_divingfish_oauth_client_secret,
             "scope": OAUTH_SCOPE,
@@ -131,12 +147,8 @@ async def device_authorize(ref: str, label: str) -> dict:
             "handoff": "code",
         },
     )
-    try:
-        data = resp.json()
-    except Exception as e:
-        raise ExtError(f"水鱼授权服务响应异常（HTTP {resp.status_code}）") from e
-    if resp.status_code != 200 or "error" in data:
-        detail = data.get("error_description") or data.get("error") or resp.status_code
+    if status != 200 or "error" in data:
+        detail = data.get("error_description") or data.get("error") or status
         raise ExtError(f"水鱼设备码发起失败：{detail}")
     return data
 
@@ -147,9 +159,9 @@ async def redeem(ref: str, confirmation_code: str) -> dict:
     一并送上发起绑定时提交的 ref，让水鱼比对「回填的人」和「发起的人」；
     不匹配时水鱼回 ``invalid_grant`` 且不消费那串码。
     """
-    resp = await get_client().post(
+    status, data = await _post_form(
         f"{DF_AUTH_BASE}/oauth/token",
-        data={
+        {
             "grant_type": "urn:diving-fish:params:oauth:grant-type:confirmation-code",
             "client_id": plugin_config.awmc_divingfish_oauth_client_id,
             "client_secret": plugin_config.awmc_divingfish_oauth_client_secret,
@@ -157,16 +169,12 @@ async def redeem(ref: str, confirmation_code: str) -> dict:
             "subject_ref": ref,
         },
     )
-    try:
-        data = resp.json()
-    except Exception as e:
-        raise ExtError(f"水鱼授权服务响应异常（HTTP {resp.status_code}）") from e
-    if resp.status_code != 200 or "error" in data:
+    if status != 200 or "error" in data:
         error = data.get("error", "")
         if error == "subject_mismatch":
-            raise ExtError("mismatch: 这串确认码对应的授权不属于发起绑定的账号")
+            raise DivingFishSubjectMismatch("这串确认码对应的授权不属于发起绑定的账号")
         if error == "invalid_grant":
             raise ExtError("确认码不存在、已过期或已使用")
-        detail = data.get("error_description") or error or resp.status_code
+        detail = data.get("error_description") or error or status
         raise ExtError(f"水鱼确认码兑换失败：{detail}")
     return data
