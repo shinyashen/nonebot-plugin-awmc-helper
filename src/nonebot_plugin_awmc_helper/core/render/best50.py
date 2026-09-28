@@ -569,11 +569,13 @@ async def draw_b50_nb(
     course_image: bytes | None = None,
     class_image: bytes | None = None,
     nameplate_image: bytes | None = None,
+    sub_of: Callable[[ScoreExtend], str | None] | None = None,
 ) -> Image.Image:
     """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。
 
     icon_image/trophy_name/trophy_color/course_image/class_image/nameplate_image
-    为 NET 数据源身份注入（player 缺失或对应字段缺失时生效）。
+    为 NET 数据源身份注入（player 缺失或对应字段缺失时生效）；
+    ``sub_of`` 透传成绩行副行钩子（pc50 等变体替换「定数 -> 单曲Ra」）。
     """
     im = assets.canvas("b50.png", theme)
     draw = ImageDraw.Draw(im)
@@ -602,7 +604,7 @@ async def draw_b50_nb(
             row, col = divmod(num, SCORE_ROW_COLS)
             x = SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP
             y = initial_y + row * SCORE_ROW_GAP
-            draw_score_row(im, draw, x, y, score, theme)
+            draw_score_row(im, draw, x, y, score, theme, sub_of=sub_of)
 
     service_name = SERVICE_DISPLAY.get(service or "", "")
     footer_color = FOOTER_COLORS[theme]
@@ -636,6 +638,7 @@ async def best50_bytes(
     course_image: bytes | None = None,
     class_image: bytes | None = None,
     nameplate_image: bytes | None = None,
+    sub_of: Callable[[ScoreExtend], str | None] | None = None,
 ) -> bytes:
     return image_to_bytes(
         await draw_b50_nb(
@@ -655,5 +658,6 @@ async def best50_bytes(
             course_image=course_image,
             class_image=class_image,
             nameplate_image=nameplate_image,
+            sub_of=sub_of,
         )
     )
