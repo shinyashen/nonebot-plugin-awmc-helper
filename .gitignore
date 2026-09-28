@@ -178,7 +178,7 @@ pyrightconfig.json
 !.vscode/*.code-snippets
 
 cache/
-data/
+/data/
 config/
 
 .DS_Store
