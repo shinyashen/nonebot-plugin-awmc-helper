@@ -24,6 +24,13 @@ from ...constants import DIFF_DISPLAY_NAMES
 
 _START_X, _START_Y, _GAP = 84, 455, 96
 
+_GRID_COLS = 13
+"""未达成封面网格列数（NB DrawPlateProgress 同款）。"""
+_FOLD_AFTER = 51
+"""折叠阈值：自此下标起画「余 N 个未完成」；只剩 1 个时仍画完封面。"""
+_MAX_ROWS = 4
+"""每槽节网格最大行数（NB _get_display_row_count）。"""
+
 
 def _progress_bar(im: Image.Image, y: int, progress: float) -> None:
     """总进度条（progress_big 按 993 宽裁剪；高度以素材实际为准）。"""
@@ -79,7 +86,9 @@ def plate_progress_bytes(
     current_y = 395
     for slot in slots:
         count = len(slot["items"])
-        rows = 1 if count <= 0 else min((count - 1) // 13 + 1, 4)
+        rows = (
+            1 if count <= 0 else min((count - 1) // _GRID_COLS + 1, _MAX_ROWS)
+        )
         current_y += rows * _GAP + 100
     height = current_y + 180
 
@@ -136,11 +145,11 @@ def plate_progress_bytes(
         max_row = 0
         id_bg = assets.pic("border_table_base.png")
         for num, (song_id, li_v, _lv) in enumerate(items):
-            row, col = divmod(num, 13)
+            row, col = divmod(num, _GRID_COLS)
             max_row = max(max_row, row)
             x = _START_X + col * _GAP
             y = start_y + row * _GAP
-            if num >= 51 and len(items[num:]) != 1:
+            if num >= _FOLD_AFTER and len(items[num:]) != 1:
                 dr.multiline_text(
                     (x, y + 35),
                     f"余「{len(items[num:])}」\n个未完成",
