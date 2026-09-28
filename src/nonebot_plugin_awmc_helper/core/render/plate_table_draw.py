@@ -10,7 +10,7 @@ from maimai_py import Song, FCType, FSType, RateType, LevelIndex, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_RODIN, font
-from .tools import TEXT_BLUE, ID_TEXT_COLORS, image_to_bytes
+from .tools import TEXT_BLUE, ID_TEXT_COLORS, scale_output, image_to_bytes
 from .assets import assets
 from ..plates import major_type_of_plate
 from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
@@ -271,7 +271,4 @@ def draw_plate_table(
             stroke_fill=(255, 255, 255, 255),
         )
 
-    im = im.resize(
-        (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS
-    )
-    return image_to_bytes(im)
+    return image_to_bytes(scale_output(im))

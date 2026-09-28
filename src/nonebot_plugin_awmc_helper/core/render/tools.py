@@ -155,6 +155,15 @@ def image_to_bytes(img: Image.Image, fmt: Literal["PNG", "JPEG"] = "PNG") -> byt
     return buf.getvalue()
 
 
+def scale_output(img: Image.Image, factor: float = 0.8) -> Image.Image:
+    """出图前整体缩放（NB 完成表系版式同款 0.8×LANCZOS：1400 宽底图按
+    0.8 缩到 1120 发送）。"""
+    return img.resize(
+        (round(img.size[0] * factor), round(img.size[1] * factor)),
+        Image.Resampling.LANCZOS,
+    )
+
+
 def text_size(text: str, f: ImageFont.FreeTypeFont) -> tuple[int, int]:
     left, top, right, bottom = f.getbbox(text)
     return int(right - left), int(bottom - top)

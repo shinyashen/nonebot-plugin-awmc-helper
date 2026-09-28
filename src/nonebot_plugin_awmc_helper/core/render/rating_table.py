@@ -11,7 +11,7 @@ from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_NUM, font
-from .tools import TEXT_BLUE, image_to_bytes
+from .tools import TEXT_BLUE, scale_output, image_to_bytes
 from .assets import assets
 from ...constants import (
     RATE_FILE,
@@ -305,10 +305,7 @@ def draw_rating_table(
             if p.exists():
                 im.alpha_composite(assets.get(p), (40, 40))
 
-    im = im.resize(
-        (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS
-    )
-    return image_to_bytes(im)
+    return image_to_bytes(scale_output(im))
 
 
 def _sync_allclear(key: str) -> str:

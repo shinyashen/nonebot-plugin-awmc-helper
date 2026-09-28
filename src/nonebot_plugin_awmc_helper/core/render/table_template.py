@@ -25,6 +25,7 @@ from .tools import (
     TITLE_BLUE,
     DIFF_TEXT_COLORS,
     credit_text,
+    scale_output,
     image_to_bytes,
     generate_prism_bg,
     generate_frosted_card,
@@ -507,7 +508,4 @@ def rating_table_text_bytes(
         im = _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
     dr = ImageDraw.Draw(im)
     draw_level_header(dr, level, 220)
-    im = im.resize(
-        (round(im.size[0] * 0.8), round(im.size[1] * 0.8)), Image.Resampling.LANCZOS
-    )
-    return image_to_bytes(im)
+    return image_to_bytes(scale_output(im))
