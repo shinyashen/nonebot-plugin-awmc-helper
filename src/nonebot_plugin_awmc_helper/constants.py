@@ -322,6 +322,13 @@ SERVICE_DISPLAY = {
     "net": "maimai NET (JP)",
 }
 
+# 数据源 → 中文短名（面向用户的绑定/切换文案用，bind 等处共用）
+SERVICE_ZH = {
+    "divingfish": "水鱼",
+    "lxns": "落雪",
+    "net": "日服 NET",
+}
+
 # RateType 枚举名 → UI_TTR_Rank_*.png 文件名后缀（由 RATE_TO_ZH 派生：
 # 素材名把显示名的 + 写作小写 p，如 "SS+" → "SSp"）
 RATE_FILE = {m.name: zh.replace("+", "p") for m, zh in RATE_TO_ZH.items()}

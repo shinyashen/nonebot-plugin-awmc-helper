@@ -21,6 +21,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.ext import lxns as lxns_ext
 from ...core.ext import divingfish as df_ext
+from ...constants import SERVICE_ZH
 from ...core.utils import handle_errors
 from ...core.binding import (
     SERVICE_NET,
@@ -395,10 +396,9 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         await binding_service.set_service(binding, service)
     except Exception as e:
         await UniMessage.text(f" {e}").finish(at_sender=True)
-    name = {SERVICE_DIVINGFISH: "水鱼", SERVICE_LXNS: "落雪", SERVICE_NET: "日服 NET"}[
-        service
-    ]
-    await UniMessage.text(f" 数据源已切换为{name}").finish(at_sender=True)
+    await UniMessage.text(
+        f" 数据源已切换为{SERVICE_ZH.get(service, service)}"
+    ).finish(at_sender=True)
 
 
 @set_theme.handle()
@@ -422,11 +422,7 @@ async def _(session: Session = UniSession()):
     binding = await binding_service.get(platform, user_id)
     if binding is None:
         await UniMessage.text(" 尚未绑定").finish(at_sender=True)
-    service_name = {
-        SERVICE_DIVINGFISH: "水鱼",
-        SERVICE_LXNS: "落雪",
-        SERVICE_NET: "日服 NET",
-    }.get(binding.service, binding.service)
+    service_name = SERVICE_ZH.get(binding.service, binding.service)
     lines = [f" 数据源：{service_name}"]
     if binding.divingfish_username:
         lines.append(f"水鱼用户名：{binding.divingfish_username}")
