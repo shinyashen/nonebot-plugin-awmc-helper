@@ -276,7 +276,7 @@ async def _(
         and s.achievements is not None
     ]
     if not ap_scores:
-        await UniMessage.text("  没有查到 AP/APP 成绩").finish(at_sender=True)
+        await UniMessage.text(" 没有查到 AP/APP 成绩").finish(at_sender=True)
     # 两侧各自取满（旧 35 / 新 15）：先全局截 50 再切分会把一侧掏空、
     # 总 RA 与模板 35/15 行数布局对不上
     latest = current_version.value

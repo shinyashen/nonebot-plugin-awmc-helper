@@ -102,7 +102,7 @@ async def _(
 async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
     got = await song_service.random(exclude_utage=True)
     if got is None:
-        await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
+        await UniMessage.text(" 曲库为空，请稍后再试").finish(at_sender=True)
     song, _diff = got
     # Hoshino/NB 同设计：mai什么 同样渲染通常的谱面卡
     await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
@@ -126,7 +126,7 @@ async def _(session: Session = UniSession(), binding: UserBinding = SessionBindi
     if song is None:  # 未绑定或无候选 → 普通随机
         got = await song_service.random(exclude_utage=True)
         if got is None:
-            await UniMessage.text("  曲库为空，请稍后再试").finish(at_sender=True)
+            await UniMessage.text(" 曲库为空，请稍后再试").finish(at_sender=True)
         song, _diff = got
     await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
         at_sender=True

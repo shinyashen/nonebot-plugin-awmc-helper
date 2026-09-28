@@ -173,11 +173,11 @@ async def _(message: Message = CommandArg()):
         png = text_image_bytes(msg)
         await UniMessage.image(raw=png).finish(at_sender=True)
     if args and not args.isdigit():
-        await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(at_sender=True)
+        await UniMessage.text(" 未在查分器排行榜中找到该玩家。").finish(at_sender=True)
     page = parse_page(args)
     page_data, total = paginate(users, page, 50)
     if not page_data:
-        await UniMessage.text(f"  页码超出范围（共 {total} 页）").finish(at_sender=True)
+        await UniMessage.text(f" 页码超出范围（共 {total} 页）").finish(at_sender=True)
     lines = [f"水鱼 RA 排行榜（第 {page}/{total} 页，共 {len(users)} 人）"]
     lines += [
         f"{(page - 1) * 50 + i + 1:5d}  {u.username[:16]}  {u.ra}"

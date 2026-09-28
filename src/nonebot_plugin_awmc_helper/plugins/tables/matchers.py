@@ -136,7 +136,7 @@ async def _(
             unfinished.append(sc)
     total = len(completed) + len(unfinished) + len(notplayed)
     if total == 0:
-        await UniMessage.text(f"  没有找到等级为「{level}」的谱面").finish(
+        await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
         )
 
@@ -245,7 +245,7 @@ async def _(
         title = ds_raw
     matched.sort(key=lambda s: s.achievements or 0, reverse=True)
     if not matched:
-        await UniMessage.text("  没有找到符合条件的成绩").finish(at_sender=True)
+        await UniMessage.text(" 没有找到符合条件的成绩").finish(at_sender=True)
     end_page = max(1, -(-len(matched) // 80))
     real = min(max(page, 1), end_page)
     # NB 高度公式已下沉 core（pc 列表等第三方扩展共用）

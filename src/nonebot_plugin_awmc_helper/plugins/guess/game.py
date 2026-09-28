@@ -194,7 +194,7 @@ async def _start_game(session: Session, pic_mode: bool, bot: Bot, event: Event) 
         # 开始/曲绘消息先发，再同步占位并起循环（占位与起 task 之间无 await）：
         # 对局可被作答时「开始」必已发出，不会出现揭晓先于开始消息
         mode_text = "猜曲绘开始" if pic_mode else "猜歌开始"
-        await UniMessage.text(f"  {mode_text}，直接回复曲目名称/别名/ID 作答").send(
+        await UniMessage.text(f" {mode_text}，直接回复曲目名称/别名/ID 作答").send(
             at_sender=True
         )
         game = GuessGame(
