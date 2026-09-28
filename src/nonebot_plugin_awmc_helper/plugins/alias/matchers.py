@@ -21,7 +21,7 @@ from ...core.utils import (
     handle_errors,
 )
 from ...core.forward import is_ob11, try_send_forward
-from ...core.render.tools import text_to_image, image_to_bytes
+from ...core.render.tools import text_image_bytes
 
 NOT_FOUND_ALIAS = " 未找到此歌曲\n可以使用「添加别名」指令给该乐曲添加别名"
 
@@ -217,7 +217,7 @@ async def _(message: Message = CommandArg()):
             f"\n- 别名：{apply_alias}\n- 票数：{s.agree_votes}/{s.votes}"
         )
     lines.append(f"第「{page}」页，共「{total}」页")
-    png = image_to_bytes(text_to_image("\n".join(lines)))
+    png = text_image_bytes("\n".join(lines))
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

@@ -13,7 +13,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core import store
 from ...config import plugin_config
 from ...core.utils import user_id_of, group_admin, group_id_of, handle_errors
-from ...core.render.tools import text_to_image, image_to_bytes
+from ...core.render.tools import text_image_bytes
 
 ARCADE_HELP = (
     "排卡指令如下：\n"
@@ -159,9 +159,7 @@ def _arcade_msg(a: store.Arcade) -> str:
 
 @arcade_help.handle()
 async def _():
-    await UniMessage.image(raw=image_to_bytes(text_to_image(ARCADE_HELP))).finish(
-        at_sender=True
-    )
+    await UniMessage.image(raw=text_image_bytes(ARCADE_HELP)).finish(at_sender=True)
 
 
 @arcade_switch.handle()
@@ -326,7 +324,7 @@ async def _(message: Message = CommandArg()):
     result = [" 为您找到以下机厅："] + [_arcade_msg(a) for a in found]
     if len(found) < 5:
         await UniMessage.text("\n==========\n".join(result)).finish(at_sender=True)
-    await UniMessage.image(raw=image_to_bytes(text_to_image("\n".join(result)))).finish(
+    await UniMessage.image(raw=text_image_bytes("\n".join(result))).finish(
         at_sender=True
     )
 

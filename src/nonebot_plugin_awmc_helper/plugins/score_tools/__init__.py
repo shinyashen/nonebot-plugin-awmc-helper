@@ -25,7 +25,7 @@ from ...core.songs import song_service
 from ...core.types import SongType
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
 from ...core.binding import session_keys, binding_service, service_display
-from ...core.render.tools import text_to_image, image_to_bytes
+from ...core.render.tools import text_image_bytes
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.score_tools",
@@ -64,7 +64,7 @@ my_rating_ranking = on_command("我的排名", block=True)
 async def _(message: Message = CommandArg()):
     args = str(message).strip()
     if args in ("帮助", ""):
-        png = image_to_bytes(text_to_image(SCORE_LINE_HELP))
+        png = text_image_bytes(SCORE_LINE_HELP)
         await UniMessage.image(raw=png).finish(at_sender=True)
     m = re.search(r"([绿黄红紫白])\s?([0-9]+)", args)
     if not m:
@@ -166,7 +166,7 @@ async def _(message: Message = CommandArg()):
             f"截止至「{now}」玩家「{u.username}」\n"
             f"在查分器已注册用户 RA 排行第「{rank}」位（RA {u.ra}）"
         )
-        png = image_to_bytes(text_to_image(msg))
+        png = text_image_bytes(msg)
         await UniMessage.image(raw=png).finish(at_sender=True)
     if args and not args.isdigit():
         await UniMessage.text("  未在查分器排行榜中找到该玩家。").finish(at_sender=True)
@@ -179,7 +179,7 @@ async def _(message: Message = CommandArg()):
         f"{(page - 1) * 50 + i + 1:5d}  {u.username[:16]}  {u.ra}"
         for i, u in enumerate(page_data)
     ]
-    png = image_to_bytes(text_to_image("\n".join(lines), size=22))
+    png = text_image_bytes("\n".join(lines), size=22)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

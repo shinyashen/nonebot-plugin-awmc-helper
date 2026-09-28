@@ -8,7 +8,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.utils import handle_errors
-from ...core.render.tools import text_to_image, image_to_bytes
+from ...core.render.tools import text_image_bytes
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.base",
@@ -55,9 +55,9 @@ repo_cmd = on_command("项目地址maimaiDX", aliases={"项目地址maimaidx"}, 
 @help_cmd.handle()
 @handle_errors()
 async def _():
-    await UniMessage.image(
-        raw=image_to_bytes(text_to_image(HELP_TEXT, size=22))
-    ).finish(at_sender=True)
+    await UniMessage.image(raw=text_image_bytes(HELP_TEXT, size=22)).finish(
+        at_sender=True
+    )
 
 
 @repo_cmd.handle()

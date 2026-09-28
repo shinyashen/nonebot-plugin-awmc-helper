@@ -299,3 +299,8 @@ def generate_frosted_card(
     temp_layer.paste(card, (box[0], box[1]), mask=mask)
 
     return Image.alpha_composite(im, temp_layer)
+
+
+def text_image_bytes(text: str, size: int = DEFAULT_TEXT_SIZE) -> bytes:
+    """文字 → PNG bytes（帮助/列表类纯文本出图的统一出口）。"""
+    return image_to_bytes(text_to_image(text, size=size))

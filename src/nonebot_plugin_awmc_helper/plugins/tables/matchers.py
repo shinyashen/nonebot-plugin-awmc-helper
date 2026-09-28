@@ -20,7 +20,7 @@ from ...core.utils import parse_page, slow_notice, handle_errors
 from ...core.plates import PLATE_KINDS, is_valid_plate, plate_kinds_hint
 from ...core.binding import session_keys, binding_service, service_display
 from ...core.render.score import DrawScore, score_list_height
-from ...core.render.tools import text_to_image, image_to_bytes
+from ...core.render.tools import text_image_bytes
 
 # 牌种正则（牌种并集取自 core.plates 单源；正则交替最长优先，
 # 防将来新增牌种被单字牌种遮蔽）
@@ -208,7 +208,7 @@ async def _():
     lines = ["牌子达成条件说明："]
     lines += [f"{kind}：{desc}" for kind, desc in PLATE_KIND_ZH.items()]
     lines.append("舞/霸：旧作（含 Re:MASTER 单列）全曲谱面")
-    png = image_to_bytes(text_to_image("\n".join(lines)))
+    png = text_image_bytes("\n".join(lines))
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
