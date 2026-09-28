@@ -26,14 +26,13 @@ async def fetch_music_data() -> list[dict]:
 class RankUser:
     username: str
     ra: int
-    rating: int | None = None
 
 
 async def rating_ranking() -> list[RankUser]:
     """全量 RA 排行（按 RA 从高到低）。"""
     data = await fetch_json(RANKING_URL, name="水鱼排行榜")
     users = [
-        RankUser(username=u["username"], ra=int(u["ra"]), rating=u.get("rating"))
+        RankUser(username=u["username"], ra=int(u["ra"]))
         for u in data
     ]
     users.sort(key=lambda x: x.ra, reverse=True)

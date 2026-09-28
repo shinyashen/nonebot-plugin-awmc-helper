@@ -45,8 +45,6 @@ class AliasVote:
     song_id: int
     apply_alias: str
     tag: str
-    name: str = ""
-    created_at: str = ""
     agree_votes: int = 0
     votes: int = 0
 
@@ -65,7 +63,6 @@ class ServerAlias:
 
     song_id: int
     name: str
-    is_votable: bool = False
     alias: list[str] = field(default_factory=list)
 
     def has(self, alias: str) -> bool:
@@ -115,8 +112,6 @@ def _parse_vote(d: dict) -> AliasVote:
         song_id=int(d["song_id"]),
         apply_alias=d.get("apply_alias", ""),
         tag=d.get("tag", ""),
-        name=d.get("name", ""),
-        created_at=d.get("created_at", ""),
         agree_votes=int(d.get("agree_votes") or 0),
         votes=int(d.get("votes") or 0),
     )
@@ -152,7 +147,6 @@ class YuzuClient:
         return ServerAlias(
             song_id=int(data["song_id"]),
             name=data.get("name", ""),
-            is_votable=bool(data.get("is_votable", False)),
             alias=list(data.get("alias", [])),
         )
 
