@@ -222,8 +222,8 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
     「绑定水鱼」无参 → 发起设备码授权并回授权链接（绑定身份遮罩 + 有效期），
     开启 20 分钟回填会话；回填确认码 → confirmation-code 兑换 → 落
     divingfish_oauth 标志与水鱼用户 ID。"""
-    import hashlib
     import re
+    import hashlib
     import urllib.parse
 
     import respx
@@ -354,6 +354,7 @@ def test_bind_command_names_disjoint():
     nonebug 测试绕过真实 dispatch，测不出这类撞名，只能结构化断言。
     """
     from nonebot.rule import CommandRule
+
     from nonebot_plugin_awmc_helper.plugins import bind
 
     owners: dict[str, str] = {}
