@@ -44,6 +44,7 @@ from . import store
 from .http import build_smart_transport
 from ..constants import (
     GENRE_TO_ZH,
+    DX_ID_OFFSET,
     UTAGE_ID_BASE,
     DX_VERSION_CODES,
     UTAGE_LEVEL_STRIDE,
@@ -73,7 +74,7 @@ def utage_ids(diff_id: int) -> tuple[int, int]:
 
     已实测：100018→(18, 0)、161852→(1852, 6)。
     """
-    return diff_id % 10000, (diff_id // 10000) % 10
+    return diff_id % UTAGE_LEVEL_STRIDE, (diff_id // UTAGE_LEVEL_STRIDE) % 10
 
 
 def utage_diff_id(song_id: int, level_id: int) -> int:
@@ -195,7 +196,7 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
             song_id, level_id = utage_ids(int(key))
         else:
             kind = "sd" if item.get("type") == "SD" else "dx"
-            song_id, level_id = int(key) % 10000, 0
+            song_id, level_id = int(key) % DX_ID_OFFSET, 0
         info = item.get("basic_info", {})
         entry = songs.setdefault(song_id, Entry(song_id=song_id))
         entry.title = entry.title or info.get("title", "")
@@ -353,7 +354,8 @@ def parse_lxns(song_list: dict) -> dict[int, Entry]:
     songs: dict[int, Entry] = {}
     for item in song_list.get("songs", []):
         raw_id = int(item["id"])
-        song_id = raw_id % 10000
+        # 落雪 raw_id 三命名空间（SD/DX/宴）统一取根：DX_OFFSET 与宴步进同为 10000
+        song_id = raw_id % DX_ID_OFFSET
         entry = songs.setdefault(song_id, Entry(song_id=song_id))
         entry.title = entry.title or item.get("title", "")
         entry.artist = entry.artist or item.get("artist", "")
@@ -405,9 +407,9 @@ def _df_known_kinds(music_data: dict[str, dict]) -> set[tuple[int, str]]:
     for raw_id in music_data:
         i = int(raw_id)
         if i > 99999:
-            known.add((i % 10000, "utage"))
+            known.add((i % DX_ID_OFFSET, "utage"))
         elif i > 9999:
-            known.add((i % 10000, "dx"))
+            known.add((i % DX_ID_OFFSET, "dx"))
         else:
             known.add((i, "sd"))
     return known
@@ -922,7 +924,10 @@ def _crosscheck_df(
     """水鱼对账：version_cn（组级 from）与定数；仅告警，写入侧唯一来源仍是落雪。"""
     if not df:
         return
-    for kind, raw_id in (("sd", str(song_id)), ("dx", str(song_id + 10000))):
+    for kind, raw_id in (
+        ("sd", str(song_id)),
+        ("dx", str(song_id + DX_ID_OFFSET)),
+    ):
         item = df.get(raw_id)
         if not item:
             continue
