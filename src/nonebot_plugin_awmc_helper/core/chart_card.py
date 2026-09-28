@@ -39,6 +39,8 @@ async def chart_card_bytes(
     calc, is_full, best_list = False, False, []
     theme = DEFAULT_THEME
     if binding is not None and not jp:
+        # 主题取用户偏好且不受 B50 拉取成败影响：失败只丢成绩嵌入，不退默认配色
+        theme = binding.theme or DEFAULT_THEME
         ident = binding_service_ident(binding)
         if ident is not None:
             try:
@@ -61,7 +63,6 @@ async def chart_card_bytes(
                 )
                 is_full = len(best_list) >= (15 if is_new_chart else 35)
                 calc = True
-                theme = binding.theme or DEFAULT_THEME
             except UserScoreError as e:
                 # 成绩卡照常出（不带 B50 信息），但留痕排障
                 logger.debug(f"谱面卡 B50 信息拉取失败（song={song.id}）：{e}")
