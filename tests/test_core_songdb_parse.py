@@ -1,13 +1,17 @@
-"""core/songdb 解析层：纯函数与源解析（不走网络、不写库）。"""
+"""core/songdb 解析层：纯函数与源解析（不走网络、不写库）。
+
+除少数「机制构造」迷你条目（已注明）外，断言值全部取自 tests/data/snapshots/
+真实快照（2026-09-29 取材）。
+"""
 
 from songdb_fixtures import (
     make_lxns,
-    _info_basic,
     make_all_data,
     make_dschange,
     make_otoge_live,
     make_pending_item,
     make_otoge_deleted,
+    make_pending_revealed,
 )
 
 
@@ -20,12 +24,17 @@ def test_norm_title_and_utage_ids():
 
     assert norm_title("LOVE ＆ JOY") == norm_title("love&joy")
     assert norm_title("Garakuta  Doll Play") == "garakutadollplay"
-    # 宴 6 位 id 双向（实测样本：100018→(18,0)、161852→(1852,6)）
+    # 宴 6 位 id 双向（真实样本：100018→(18,0)、161852→(1852,6)）
     assert utage_ids(100018) == (18, 0)
     assert utage_ids(161852) == (1852, 6)
+    # 快照真实宴体：100199（蛸チルノ）→(199,0)、111355（協ラグトレイン）→(1355,1)、
+    # 121634（協青春コンプレックス第二体）→(1634,2)
+    assert utage_ids(100199) == (199, 0)
+    assert utage_ids(111355) == (1355, 1)
+    assert utage_ids(121634) == (1634, 2)
     assert all(
         utage_diff_id(si, lv) == 100000 + lv * 10000 + si
-        for si, lv in [(18, 0), (1852, 6)]
+        for si, lv in [(18, 0), (1852, 6), (199, 0), (1355, 1)]
     )
 
 
@@ -51,37 +60,45 @@ def test_parse_maimaiinfo_skeleton_and_history():
     from nonebot_plugin_awmc_helper.core.songdb import parse_maimaiinfo
 
     jp = parse_maimaiinfo(make_all_data(), make_dschange())
-    # SD 8：变化点 20000→4.0、23000→4.4，末值以 all_data 4.5 校正（§2.13）
+    # SD 8 True Love Song：BASIC 在 UNiVERSE PLUS 4.0→5.0（快照真实变化点）
     h = jp[8].charts["sd"][0].history
-    assert h == [(20000, 4.0), (23000, 4.5)]
-    # 无变化的谱面单变化点
-    assert jp[8].charts["sd"][1].history == [(20000, 6.0)]
-    # DX 10021：登场版本 20500 起 + CiRCLE 变化点
-    assert jp[21].charts["dx"][3].history == [(20500, 12.3), (26000, 12.5)]
-    assert jp[21].versions["dx"] == 20500
-    # 宴：定数由标级串 12? 推导 12.0，ds 垃圾不采信；kanji 取自标题前缀
-    utage_chart = jp[18].charts["utage"][0]
-    assert utage_chart.history == [(24000, 12.0)]
-    assert utage_chart.kanji == "宴"
+    assert h == [(20000, 4.0), (22500, 5.0)]
+    # ADV 在 FESTiVAL 6.4→7.2
+    assert jp[8].charts["sd"][1].history == [(20000, 6.4), (23000, 7.2)]
+    # 11396 テリトリーバトル MASTER：dschange 末值 13.5 旧于 all_data 13.6，
+    # 末变化点以 all_data 校正（§2.13，真实数据源滞后样本）
+    assert jp[1396].charts["dx"][3].history == [
+        (22500, 13.0),
+        (23000, 13.2),
+        (23500, 13.6),
+    ]
+    # 30/10030 ネコ日和。：双谱曲——SD 自 maimai（10000）、DX 自 PRiSM PLUS（25500），
+    # SD MASTER 带 PRiSM 变化点 11.8→12.6
+    assert jp[30].versions["sd"] == 10000
+    assert jp[30].versions["dx"] == 25500
+    assert jp[30].charts["sd"][3].history == [
+        (20000, 10.6),
+        (20500, 10.8),
+        (21000, 11.1),
+        (22500, 11.8),
+        (25000, 12.6),
+    ]
+    # 宴：定数由标级串 12+? 推导 12.7，ds/level 垃圾不采信；kanji 取自标题前缀
+    utage_chart = jp[199].charts["utage"][0]
+    assert utage_chart.history == [(24000, 12.7)]
+    assert utage_chart.kanji == "蛸"
     # 宴条目保留自身标题（带前缀、≠ 基曲标题）：otoge join 与 pending 判定的依据
-    assert utage_chart.title == "[宴]Test Party"
+    assert utage_chart.title == "[蛸]チルノのパーフェクトさんすう教室"
     # 宴谱物量（入库即存主物量五元组）：5 元组含 touch
-    assert utage_chart.notes == (200, 40, 30, 0, 10)
-    # 宴 buddy：charts 2 张 = 左右两组，主物量入库即存左右合计；
-    # 4 元组末位是 break（SD 约定，otoge 同谱面交叉验证 21:0）
+    assert utage_chart.notes == (58, 217, 27, 0, 7)
+    # 宴 buddy（真实 [協]ラグトレイン）：charts 2 张 = 左右两组，主物量入库即存左右合计
+    buddy = jp[1355].charts["utage"][1]
+    assert buddy.is_buddy
+    assert buddy.left == [183, 76, 53, 164, 173]
+    assert buddy.right == [172, 63, 53, 102, 216]
+    assert buddy.notes == (355, 139, 106, 266, 389)
+    # 4 元组语义（机制构造迷你条目）：末位是 break（SD 约定），5 元组才含 touch
     buddy_data = {
-        "110019": {
-            "id": "110019",
-            "title": "[帯]Test Buddy",
-            "type": "DX",
-            "ds": [13.7],
-            "level": ["13+?"],
-            "charts": [
-                {"notes": [10, 2, 3, 4, 5], "charter": "-"},
-                {"notes": [20, 4, 6, 8, 10], "charter": "-"},
-            ],
-            "basic_info": _info_basic("[帯]Test Buddy"),
-        },
         "100020": {
             "id": "100020",
             "title": "[宴]Test Four",
@@ -89,27 +106,28 @@ def test_parse_maimaiinfo_skeleton_and_history():
             "ds": [12.7],
             "level": ["12+?"],
             "charts": [{"notes": [51, 0, 292, 6], "charter": "-"}],
-            "basic_info": _info_basic("[宴]Test Four"),
+            "basic_info": {
+                "title": "[宴]Test Four",
+                "artist": "A",
+                "genre": "宴会場",
+                "bpm": "150",
+                "from": "maimai でらっくす",
+            },
         },
     }
-    buddy_jp = parse_maimaiinfo(buddy_data, {})
-    buddy = buddy_jp[19].charts["utage"][1]
-    assert buddy.is_buddy
-    assert buddy.left == [10, 2, 3, 4, 5]
-    assert buddy.right == [20, 4, 6, 8, 10]
-    assert buddy.notes == (30, 6, 9, 12, 15)  # 左右合计入库
-    four = buddy_jp[20].charts["utage"][0]
+    four_jp = parse_maimaiinfo(buddy_data, {})
+    four = four_jp[20].charts["utage"][0]
     assert not four.is_buddy
     assert four.notes == (51, 0, 292, 0, 6)
-    # from=未知 且无 dschange → 版本不可知
+    # from=未知 且无 dschange → 版本不可知（12 レーザービーム，otoge 亦未收录）
     assert jp[12].versions["sd"] is None
     assert jp[12].charts["sd"][0].history == []
-    # __increments__ 合并：CiRCLE PLUS (26500) 登场的新曲
-    assert jp[777].versions["dx"] == 26500
-    assert jp[777].charts["dx"][0].history == [(26500, 3.0)]
-    # SD/DX 谱面物量（SD 4 元组 touch=0 / DX 5 元组）
+    # __increments__ 合并：10267 Ignite Infinity（CiRCLE PLUS 26500 登场 → 根 267）
+    assert jp[267].versions["dx"] == 26500
+    assert jp[267].charts["dx"][0].history == [(26500, 3.0)]
+    # SD/DX 谱面物量（SD 4 元组 touch=0 / DX 5 元组，真实值）
     assert jp[8].charts["sd"][0].notes == (63, 23, 8, 0, 2)
-    assert jp[21].charts["dx"][0].notes == (40, 10, 5, 0, 3)
+    assert jp[30].charts["dx"][0].notes == (97, 11, 6, 4, 8)
     # 谱师 '-' 视为未知
     assert jp[8].charts["sd"][1].designer is None
 
@@ -118,11 +136,13 @@ def test_parse_otoge_live_and_deleted():
     from nonebot_plugin_awmc_helper.core.songdb import norm_title, parse_otoge
 
     data = parse_otoge(make_otoge_live(), make_otoge_deleted())
-    # 当前下架集 = 下架记录 ∖ 现役列表（复活的不算）
-    assert norm_title("Stale Song") in data.deleted_titles
-    assert norm_title("[宴]Rotated Out") not in data.deleted_titles
-    assert norm_title("Test Song SD") not in data.deleted_titles
-    # 同名多义保留为列表（'Link' ×2）
+    # 当前下架集 = 下架记录 ∖ 现役列表（复活的不算）：
+    # 青春コンプレックス 2026-08-07 下架且不在现役 → 在；
+    # True Love Song 有下架记录（20240321）但已复活在役 → 不在
+    assert norm_title("青春コンプレックス") in data.deleted_titles
+    assert norm_title("[協]青春コンプレックス") in data.deleted_titles
+    assert norm_title("True Love Song") not in data.deleted_titles
+    # 同名多义保留为列表（真实 'Link' ×2）
     assert len(data.by_title[norm_title("Link")]) == 2
 
 
@@ -130,35 +150,40 @@ def test_parse_lxns_cn_structure():
     from nonebot_plugin_awmc_helper.core.songdb import parse_lxns
 
     cn = parse_lxns(make_lxns())
-    assert set(cn) == {8, 21, 18, 355, 9002}
-    # 国服谱面 version / 定数实测值
+    # 落雪 raw id % 10000 取根：CN 本地 id 1001（BLACK ROSE ↔ 日服 11001）同规则
+    assert set(cn) == {8, 30, 131, 199, 239, 267, 383, 624, 665, 9002, 1001, 1355}
+    # 国服谱面 version / 定数实测值（8 BASIC：国服 10000 / 5.0）
     chart = cn[8].charts["sd"][0]
-    assert chart.cn_version == 20000
-    assert chart.cn_level_value == 4.5
-    assert chart.designer == "譜面-100号"
-    # 宴：level_id 取 6 位 id 右起第 5 位；buddy 左右物量
-    assert cn[18].charts["utage"][0].cn_version == 24000
-    buddy = cn[355].charts["utage"][1]  # 6 位 id 110355 → level_id 1
+    assert chart.cn_version == 10000
+    assert chart.cn_level_value == 5.0
+    # 谱师 '-' 视为未知
+    assert chart.designer is None
+    # 宴：level_id 取 6 位 id 右起第 5 位（真实蛸チルノ 100199 → level_id 0）
+    assert cn[199].charts["utage"][0].cn_version == 24010
+    # buddy 左右物量（真实 [協]ラグトレイン 111355 → (1355, 1)）
+    buddy = cn[1355].charts["utage"][1]
     assert buddy.is_buddy
-    assert buddy.left == [150, 20, 25, 0, 5]
-    assert buddy.right == [130, 25, 20, 0, 5]
+    assert buddy.left == [183, 76, 53, 164, 173]
+    assert buddy.right == [172, 63, 53, 102, 216]
     # 落雪不提供 comment（解析层无该字段；comment 仅来自 otoge-db，在合并层验证）
-    assert not hasattr(cn[18].charts["utage"][0], "comment")
+    assert not hasattr(cn[199].charts["utage"][0], "comment")
 
 
 def test_parse_lxns_disabled_flag():
     from nonebot_plugin_awmc_helper.core.songdb import parse_lxns
 
-    cn = parse_lxns(make_lxns(disable_ids={9002}))
-    assert cn[9002].disabled
-    assert not cn[8].disabled
+    cn = parse_lxns(make_lxns(disable_ids={8}))
+    assert cn[8].disabled
+    assert not cn[30].disabled
 
 
 def test_detect_cn_update():
     from nonebot_plugin_awmc_helper.core.songdb import DetectKey, detect_cn_update
 
-    # 检测键为 (song_id, kind)；宴键不参与检测（见 songs._poll_keys）
-    known: set[DetectKey] = {(8, "sd"), (21, "dx"), (9002, "sd")}
+    # 检测键为 (song_id, kind)；宴排除由调用方负责（songs._poll_keys 侧过滤），
+    # 本函数是纯集合运算——宴键同样触发（真实宴轮换新曲 ハム太郎 根 11113 验证）。
+    # 新增锚另用真实曲 BLACK ROSE DX 组（根 1001）
+    known: set[DetectKey] = {(8, "sd"), (9002, "sd")}
     lx = known
     df = known
     # 首次运行（无基线）不触发
@@ -166,14 +191,18 @@ def test_detect_cn_update():
     # 无变化
     assert detect_cn_update(known, lx, df) is None
     # 单源新增不触发
-    assert detect_cn_update(known, lx | {(9001, "sd")}, df) is None
-    assert detect_cn_update(known, lx, df | {(9001, "sd")}) is None
+    assert detect_cn_update(known, lx | {(1001, "dx")}, df) is None
+    assert detect_cn_update(known, lx, df | {(1001, "dx")}) is None
     # 双源新增交集 → 触发（国服更新确定）
-    result = detect_cn_update(known, lx | {(9001, "sd")}, df | {(9001, "sd")})
+    result = detect_cn_update(known, lx | {(1001, "dx")}, df | {(1001, "dx")})
     assert result is not None
     added, removed = result
-    assert added == {(9001, "sd")}
+    assert added == {(1001, "dx")}
     assert not removed
+    # 宴键同语义（真实宴轮换新曲 [回]ハム太郎とっとこうた）
+    result = detect_cn_update(known, lx | {(11113, "utage")}, df | {(11113, "utage")})
+    assert result is not None
+    assert result[0] == {(11113, "utage")}
     # 双源消失交集 → 下架确认；单源消失不触发
     assert detect_cn_update(known, lx - {(9002, "sd")}, df) is None
     result = detect_cn_update(known, lx - {(9002, "sd")}, df - {(9002, "sd")})
@@ -225,14 +254,14 @@ def test_normalize_text_and_strip_chart_prefix():
     # 剥离：单层；静态前缀穷举 dx/标准/标/宴
     assert strip_chart_prefix("dx圣诞") == ("圣诞", "dx", "prefix")
     assert strip_chart_prefix("标39") == ("39", "标", "prefix")
-    assert strip_chart_prefix("标准企鹅") == ("企鹅", "标准", "prefix")
+    assert strip_chart_prefix("标准チルノ") == ("チルノ", "标准", "prefix")
     assert strip_chart_prefix("宴Oshama") == ("Oshama", "宴", "prefix")
     # 叠层只剥最外层：「dx标39」→「标39」（去前缀库中不存在，自然不命中）
     assert strip_chart_prefix("dx标39") == ("标39", "dx", "prefix")
     # 纯前缀 / 无前缀
     assert strip_chart_prefix("dx") is None
     assert strip_chart_prefix("圣诞") is None
-    # 宴谱汉字：动态前缀 + 简繁归一（協/协、蔵/藏 互认）
+    # 宴谱汉字：动态前缀 + 简繁归一（協/协、蔵/藏 互认；快照真实宴字 協/蛸）
     assert strip_chart_prefix("協love you", extra_prefixes={"協"}) == (
         "love you",
         "協",
@@ -285,31 +314,38 @@ def test_normalize_text_and_strip_chart_prefix():
 
 
 def test_parse_gate_requires_constant():
-    """可查 gate：至少一张谱面有具体定数；无定数/问号定数/空标题均不可查。"""
+    """可查 gate：至少一张谱面有具体定数；无定数/问号定数/空标题均不可查。
+
+    真实形态：otoge 现役 MAGiCAL 曲定数未揭（无 *_i）→ gate 拒之门外；
+    揭晓形态以 MuNET 实测值构造（4.0/7.5/10.9/13.5）。
+    """
     from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
 
-    pending = parse_pending_item(make_pending_item())
+    # 现役形态（定数未揭）：不可查
+    assert parse_pending_item(make_pending_item()) is None
+
+    pending = parse_pending_item(make_pending_revealed())
     assert pending is not None
     assert [c.level_value for c in pending.charts] == [4.0, 7.5, 10.9, 13.5]
     assert all(c.is_dx for c in pending.charts)
-    assert pending.genre == "POPSアニメ"
+    assert pending.genre == "maimai"
     assert pending.version == 27000
-    assert pending.bpm == "190"
+    assert pending.bpm is None  # 真实现役条目未收录 bpm
 
     # 全部定数缺失 → None（继续等 otoge 补数）
-    item = make_pending_item()
+    item = make_pending_revealed()
     for k in list(item):
         if k.endswith("_i"):
             del item[k]
     assert parse_pending_item(item) is None
-    # 定数为 "?" 不可解析；但其余谱面仍有时整曲可查
-    assert parse_pending_item(make_pending_item(dx_lev_mas_i="?")) is not None
-    item = make_pending_item()
+    # 定数为 "?" 不可解析；但其余谱面仍有值时整曲可查
+    assert parse_pending_item(make_pending_revealed(dx_lev_mas_i="?")) is not None
+    item = make_pending_revealed()
     for suffix in ("bas", "adv", "exp", "mas"):
         item[f"dx_lev_{suffix}_i"] = "?"
     assert parse_pending_item(item) is None
     # 空标题不可查
-    assert parse_pending_item(make_pending_item(title="")) is None
+    assert parse_pending_item(make_pending_revealed(title="")) is None
 
 
 def test_parse_missing_fields_render_as_none():
@@ -317,29 +353,30 @@ def test_parse_missing_fields_render_as_none():
     from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
 
     pending = parse_pending_item(
-        make_pending_item(
+        make_pending_revealed(
             artist=None,
-            bpm=None,
+            bpm="190",
             catcode="未知分类",
             image_url=None,
             dx_lev_mas="?",
             dx_lev_exp_designer=None,
+            dx_lev_mas_notes_tap=None,
         )
     )
     assert pending is not None
     assert pending.artist is None
-    assert pending.bpm is None
+    assert pending.bpm == "190"
     assert pending.genre is None  # catcode 映射不到
     assert pending.image_url is None
     mas = next(c for c in pending.charts if c.level_id == 3)
     assert mas.level is None  # "?" 形标级视为未知
     assert mas.level_value == 13.5
-    assert mas.notes is None  # 无物量锚点
+    assert mas.notes is None  # 无物量锚点（tap 被置空）
     exp = next(c for c in pending.charts if c.level_id == 2)
     assert exp.designer is None
     # 标级 "13+" 与 "13?" 均为可展示形态
-    p_plus = parse_pending_item(make_pending_item(dx_lev_mas="13+"))
-    p_q = parse_pending_item(make_pending_item(dx_lev_mas="13?"))
+    p_plus = parse_pending_item(make_pending_revealed(dx_lev_mas="13+"))
+    p_q = parse_pending_item(make_pending_revealed(dx_lev_mas="13?"))
     assert p_plus is not None
     assert p_plus.charts[3].level == "13+"
     assert p_q is not None
@@ -347,20 +384,22 @@ def test_parse_missing_fields_render_as_none():
 
 
 def test_parse_notes_partial_missing():
-    """物量部分缺失：「0 即 -」约定——缺失列填 0（渲染层画 -），tap 为锚点。"""
+    """物量部分缺失：「0 即 -」约定——缺失列填 0（渲染层画 -），tap 为锚点。
+
+    物量值取 MuNET 真实实测（mas 564/65/80/32/68）。
+    """
     from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
 
     pending = parse_pending_item(
-        make_pending_item(
-            dx_lev_mas_notes_tap="564",
-            dx_lev_mas_notes_hold="65",
+        make_pending_revealed(
             dx_lev_mas_notes_slide=None,
             dx_lev_mas_notes_touch=None,
-            dx_lev_mas_notes_break="68",
         )
     )
     assert pending is not None
     mas = next(c for c in pending.charts if c.level_id == 3)
     assert mas.notes == (564, 65, 0, 0, 68)
-    bas = next(c for c in pending.charts if c.level_id == 0)
-    assert bas.notes is None  # tap 缺 → 整行无物量（物化为全 0，画 -）
+    bas = parse_pending_item(make_pending_revealed(dx_lev_bas_notes_tap=None))
+    assert bas is not None
+    bas_chart = next(c for c in bas.charts if c.level_id == 0)
+    assert bas_chart.notes is None  # tap 缺 → 整行无物量（物化为全 0，画 -）

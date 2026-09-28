@@ -1,4 +1,9 @@
-"""core/songdb 双视图与 core/provider：规范表 → maimai_py 对象（§5.5/§5.6）。"""
+"""core/songdb 双视图与 core/provider：规范表 → maimai_py 对象（§5.5/§5.6）。
+
+断言值全部取自 tests/data/snapshots/ 真实快照（2026-09-29 取材）的派生结果；
+「均日服限定列表」场景的真实原型只有一个（テリトリーバトル），第二个日限曲为
+构造条目补位（已注明）。
+"""
 
 import pytest
 from mocks import requires_assets
@@ -10,6 +15,31 @@ from songdb_fixtures import (
     make_otoge_live,
     make_otoge_deleted,
 )
+
+# 构造条目（快照无原型）：第二个日服限定曲。当前快照中 CN 不可见曲只有
+# テリトリーバトル一首，「整列表均为日服限定」的多曲列表需构造补位。
+JP_ONLY_EXTRA = {
+    "10555": {
+        "id": "10555",
+        "title": "（构造）日服限定样例",
+        "type": "DX",
+        "ds": [4.0, 7.2, 10.2, 13.6],
+        "level": ["4", "7", "10", "13+"],
+        "charts": [
+            {"notes": [60, 12, 8, 4, 3], "charter": "-"},
+            {"notes": [110, 25, 18, 10, 6], "charter": "-"},
+            {"notes": [190, 40, 30, 18, 10], "charter": "-"},
+            {"notes": [300, 55, 48, 28, 16], "charter": "构造"},
+        ],
+        "basic_info": {
+            "title": "（构造）日服限定样例",
+            "artist": "构造条目",
+            "genre": "舞萌",
+            "bpm": "150",
+            "from": "maimai でらっくす UNiVERSE",
+        },
+    }
+}
 
 
 @pytest.fixture
@@ -51,86 +81,99 @@ async def test_jp_view_object_shape(built):
 
     from nonebot_plugin_awmc_helper.core.songdb import build_song
 
-    song = build_song(built, 18, "jp")
+    # チルノ：SD（GreeN）+ DX（CiRCLE 重制）+ 蛸宴三组并存；卡片版本取 SD 组
+    song = build_song(built, 199, "jp")
     assert song is not None
-    assert song.title == "[宴]Test Party"
-    assert song.version == 24000
-    diff = song.get_difficulty(SongType.UTAGE, 100018)  # 按 6 位 diff_id 查找
+    assert song.title == "チルノのパーフェクトさんすう教室"
+    assert song.version == 12000
+    diff = song.get_difficulty(SongType.UTAGE, 100199)  # 按 6 位 diff_id 查找
     assert isinstance(diff, SongDifficultyUtage)
-    assert diff.diff_id == 100018
-    assert diff.kanji == "宴"
-    assert diff.description == "パーティーだ！"
+    assert diff.diff_id == 100199
+    assert diff.kanji == "蛸"
+    assert diff.description == "パーフェクトホールド教室"
     assert diff.level_index == LevelIndex(0)  # 库约定：宴 level_index 恒为 0
-    assert diff.level_value == 12.0
-    assert diff.level == "12"  # 标级由定数纯函数推导
+    assert diff.level_value == 12.7
+    assert diff.level == "12+"  # 标级由定数纯函数推导（x.7 → 有 +）
     assert diff.version == 24000
     # get_divingfish_id 三态（§5.5）
-    assert song.get_divingfish_id(SongType.UTAGE, 100018) == 100018
-    dx_song = build_song(built, 21, "jp")
+    assert song.get_divingfish_id(SongType.UTAGE, 100199) == 100199
+    # 双谱曲（ネコ日和。）：DX 组 id = 根 id + 10000（真实 30/10030）
+    dx_song = build_song(built, 30, "jp")
     assert dx_song is not None
-    assert dx_song.get_divingfish_id(SongType.DX, LevelIndex.MASTER) == 21 + 10000
-    # buddy 宴
-    buddy_song = build_song(built, 355, "jp")
+    assert dx_song.get_divingfish_id(SongType.DX, LevelIndex.MASTER) == 10030
+    # buddy 宴（真实 [協]ラグトレイン）
+    buddy_song = build_song(built, 1355, "jp")
     assert buddy_song is not None
+    assert buddy_song.version == 22000  # 无 SD 组 → 取 DX 组版本
     bdiff = buddy_song.get_difficulties(SongType.UTAGE)[0]
     assert isinstance(bdiff, SongDifficultyUtage)
     assert bdiff.is_buddy
     assert bdiff.buddy_notes is not None
-    assert bdiff.buddy_notes.left_tap_num == 150
-    assert bdiff.buddy_notes.right_tap_num == 130
-    # JP 定数（含 CiRCLE 变更后的最新值）
+    assert bdiff.buddy_notes.left_tap_num == 183
+    assert bdiff.buddy_notes.right_tap_num == 172
+    # JP 定数最新值（真实 30 DX MASTER：PRiSM PLUS 登场 13.7）
     dx_master = dx_song.get_difficulty(SongType.DX, LevelIndex.MASTER)
     assert dx_master is not None
-    assert dx_master.level_value == 12.5
-    assert dx_master.level == "12"  # 标级由定数推导：x.5 → 无+
+    assert dx_master.level_value == 13.7
+    assert dx_master.level == "13+"  # 标级由定数推导：x.7 → 有 +
 
 
 @pytest.mark.asyncio
 async def test_cn_view_uses_cn_values(built):
-    """CN 视图：定数取国服推导值（非日服最新）；JP-only 曲不可见、CN-only 曲可见。"""
+    """CN 视图：定数取国服推导值（非日服最新）；JP-only 曲不可见、CN-only 曲可见。
+
+    真实锚：System "Z" Re:MASTER 日服 CiRCLE PLUS 已变 14.2，国服仍 14.0。
+    """
     from maimai_py import SongType, LevelIndex
 
     from nonebot_plugin_awmc_helper.core.songdb import build_song
 
-    song = build_song(built, 21, "cn")
+    song = build_song(built, 239, "cn")
     assert song is not None
-    master = song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+    master = song.get_difficulty(SongType.STANDARD, LevelIndex(4))  # Re:MASTER
     assert master is not None
-    # 日服 CiRCLE 已变 12.5，国服应为变更前 12.3（§2.11 差异模式）
-    assert master.level_value == 12.3
-    assert master.version == 20000  # 国服批次码
-    # 国服限定曲仅 CN 视图可见；JP-only 曲仅 JP 视图可见
+    assert master.level_value == 14.0
+    assert master.version == 12005  # 国服批次码（落雪实测）
+    jp_song = build_song(built, 239, "jp")
+    assert jp_song is not None
+    jp_master = jp_song.get_difficulty(SongType.STANDARD, LevelIndex(4))
+    assert jp_master is not None
+    assert jp_master.level_value == 14.2  # 日服最新
+    # 国服限定曲仅 CN 视图可见；JP-only 曲仅 JP 视图可见（テリトリーバトル）
     assert build_song(built, 9002, "cn") is not None
     assert build_song(built, 9002, "jp") is None
-    assert build_song(built, 555, "jp") is not None
-    assert build_song(built, 555, "cn") is None
-    # JP 视图不含国服限定曲；整库物化按 scope 过滤
+    assert build_song(built, 1396, "jp") is not None
+    assert build_song(built, 1396, "cn") is None
+    # 整库物化按 scope 过滤；from=未知曲（12）版本不可知，两视图均不可见
     from nonebot_plugin_awmc_helper.core.songdb import all_songs
 
     cn_ids = {s.id for s in all_songs(built, "cn")}
     jp_ids = {s.id for s in all_songs(built, "jp")}
     assert 9002 in cn_ids
     assert 9002 not in jp_ids
-    assert 555 in jp_ids
-    assert 555 not in cn_ids
+    assert 1396 in jp_ids
+    assert 1396 not in cn_ids
+    assert 12 not in cn_ids
+    assert 12 not in jp_ids
 
 
 @pytest.mark.asyncio
 async def test_snapshot_roundtrip_matches_runtime_serializer(built):
     """视图对象与既有快照序列化（song_to_dict/song_from_dict）行为对齐（同一模型类）。"""
+    from maimai_py import SongType
     from maimai_py.models import SongDifficultyUtage
 
     from nonebot_plugin_awmc_helper.core.songs import song_to_dict, song_from_dict
     from nonebot_plugin_awmc_helper.core.songdb import build_song
 
-    song = build_song(built, 355, "jp")
+    song = build_song(built, 1355, "jp")
     assert song is not None
     restored = song_from_dict(song_to_dict(song))
     assert restored.id == song.id
     assert restored.title == song.title
-    orig = song.get_difficulties()[0]
+    orig = song.get_difficulties(SongType.UTAGE)[0]
     assert isinstance(orig, SongDifficultyUtage)
-    back = restored.get_difficulties()[0]
+    back = restored.get_difficulties(SongType.UTAGE)[0]
     assert isinstance(back, SongDifficultyUtage)  # 宴谱重建为 SongDifficultyUtage
     assert back.diff_id == orig.diff_id
     assert back.is_buddy == orig.is_buddy
@@ -155,19 +198,19 @@ async def test_awmc_provider_hash_and_get_songs(db, monkeypatch):
     fp1 = provider._hash()
     assert fp1 != "empty"
     jp_songs = await provider.get_songs(None)  # type: ignore[arg-type]
-    assert {s.id for s in jp_songs} >= {8, 21, 18, 355, 555}
-    # 新歌入库 → 指纹变化
+    assert {s.id for s in jp_songs} >= {8, 30, 199, 1355, 1396}
+    # 新歌入库 → 指纹变化（构造条目，测指纹机制）
     payloads = full_payloads()
     payloads["maimaiinfo"]["100888"] = {
         "id": "100888",
-        "title": "Fingerprint Song",
+        "title": "（构造）指纹歌",
         "type": "DX",
         "ds": [10.0],
         "level": ["10"],
         "charts": [{"notes": [100, 20, 15, 8, 5], "charter": "F"}],
         "basic_info": {
-            "title": "Fingerprint Song",
-            "artist": "A",
+            "title": "（构造）指纹歌",
+            "artist": "构造条目",
             "genre": "舞萌",
             "bpm": "160",
             "from": "maimai でらっくす CiRCLE",
@@ -221,14 +264,14 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
         assert await song_service.load()
         song = await song_service.by_id(8)
         assert song is not None
-        assert song.title == "Test Song SD"
-        assert await song_service.by_id(555) is None  # JP-only
+        assert song.title == "True Love Song"
+        assert await song_service.by_id(1396) is None  # JP-only
         assert await song_service.by_id(9002) is not None  # CN-only
-        dx_song = await song_service.by_id(21)
-        assert dx_song is not None
-        master = dx_song.get_difficulty(SongType.DX, LevelIndex.MASTER)
-        assert master is not None
-        assert master.level_value == 12.3  # 日服 12.5 未进国服（§5.3）
+        sys_z = await song_service.by_id(239)
+        assert sys_z is not None
+        remaster = sys_z.get_difficulty(SongType.STANDARD, LevelIndex(4))
+        assert remaster is not None
+        assert remaster.level_value == 14.0  # 日服 14.2 未进国服（§5.3）
 
         # 规范表被清空（离线首启模拟）：空数据视为失败 → 快照降级恢复
         from sqlmodel import delete
@@ -318,21 +361,21 @@ async def test_jp_fallback_search(db, monkeypatch):
     monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
     monkeypatch.setattr(lxns_provider, "get_aliases", fake_aliases)
     await songdb.rebuild(full_payloads())
-    await store.add_local_alias(555, "日限", "tester")
+    await store.add_local_alias(1396, "日限", "tester")
     try:
         assert await song_service.load()
         # 国服视图查不到 JP-only 曲
         assert not await song_service.by_alias("日限")
-        assert await song_service.by_id(555) is None
+        assert await song_service.by_id(1396) is None
         # 日服 fallback：别名命中；谱面前缀剥离同样生效
         jp_songs, _ = await song_service.jp_by_alias_detail("日限")
-        assert [s.id for s in jp_songs] == [555]
+        assert [s.id for s in jp_songs] == [1396]
         jp_pref, _ = await song_service.jp_by_alias_detail("dx日限")
-        assert [s.id for s in jp_pref] == [555]
+        assert [s.id for s in jp_pref] == [1396]
         # id fallback
-        jp_song = await song_service.jp_by_id(555)
+        jp_song = await song_service.jp_by_id(1396)
         assert jp_song is not None
-        assert jp_song.version == 22000
+        assert jp_song.version == 22500  # UNiVERSE PLUS（真实 from）
     finally:
         song_service._ready.clear()
 
@@ -355,10 +398,10 @@ async def test_jp_fallback_handler(db, monkeypatch, app):
     monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
     monkeypatch.setattr(lxns_provider, "get_aliases", fake_aliases)
     await songdb.rebuild(full_payloads())
-    await store.add_local_alias(555, "日限", "tester")
+    await store.add_local_alias(1396, "日限", "tester")
     try:
         await song_service.load()
-        song = await song_service.jp_by_id(555)
+        song = await song_service.jp_by_id(1396)
         assert song is not None
         await _assert_image_reply(
             app,
@@ -372,7 +415,7 @@ async def test_jp_fallback_handler(db, monkeypatch, app):
         song_service._ready.clear()
 
 
-async def _rebuild_load(monkeypatch) -> None:
+async def _rebuild_load(monkeypatch, *, jp_extra: bool = False) -> None:
     """重建样例曲库并加载运行时（日服 fallback 列表系列测试共用）。"""
     from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.core.songs import song_service
@@ -383,36 +426,36 @@ async def _rebuild_load(monkeypatch) -> None:
 
     monkeypatch.setattr(yuzu_provider, "get_aliases", fake_aliases)
     monkeypatch.setattr(lxns_provider, "get_aliases", fake_aliases)
-    await songdb.rebuild(full_payloads())
+    payloads = full_payloads()
+    if jp_extra:
+        payloads["maimaiinfo"].update(JP_ONLY_EXTRA)
+    await songdb.rebuild(payloads)
     assert await song_service.load()
 
 
 @pytest.mark.asyncio
 async def test_jp_fallback_mixed_list(db, monkeypatch, app):
-    """日服标题兜底命中国服也有的曲（实测 ROND）：混合列表只标注日服限定曲，
-    列表级说明用「包含」而非「此歌曲为」。"""
+    """日服标题兜底命中国服也有的曲（真实「バ」前缀：⑨周年×2 体 + テリトリーバトル）：
+    混合列表只标注日服限定曲，列表级说明用「包含」而非「此歌曲为」。"""
     from test_music_query import _assert_reply
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     await _rebuild_load(monkeypatch)
     try:
-        # 标题子串 song 同时命中：国服有的 8/21 + 仅日服的 555/777
-        assert [s.id for s in await song_service.jp_by_title_fuzzy("song")] == [
-            8,
-            21,
-            555,
-            777,
+        # 标题子串 バ 同时命中：国服有的 ⑨周年（SD/DX 两体）+ 仅日服的テリトリーバトル
+        assert [s.id for s in await song_service.jp_by_title_fuzzy("バ")] == [
+            665,
+            1396,
         ]
         await _assert_reply(
             app,
             "search_alias_song",
-            "song是什么歌",
-            "找到4个谱面："
-            "\n8：Test Song SD"
-            "\n10021：Test Song DX"
-            "\n10555：JP Only Song（日服限定）"
-            "\n10777：Increment Song（日服限定）"
+            "バ是什么歌",
+            "找到3个谱面："
+            "\n665：チルノのパーフェクトさんすう教室　⑨周年バージョン"
+            "\n10665：チルノのパーフェクトさんすう教室　⑨周年バージョン"
+            "\n11396：テリトリーバトル（日服限定）"
             "\n※ 请使用「id xxxxx」查询指定谱面"
             "\n列表中包含日服限定歌曲",
         )
@@ -422,25 +465,29 @@ async def test_jp_fallback_mixed_list(db, monkeypatch, app):
 
 @pytest.mark.asyncio
 async def test_jp_fallback_all_jp_list(db, monkeypatch, app):
-    """日服 fallback 整列表均为日服限定：逐条标注 + 列表级说明用「均为」。"""
+    """日服 fallback 整列表均为日服限定：逐条标注 + 列表级说明用「均为」。
+
+    真实锚 テリトリーバトル（13.6）；第二条为构造日限曲（快照中 CN 不可见曲
+    仅一首，多曲列表需补位，见模块头注）。
+    """
     from test_music_query import _assert_reply
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
-    await _rebuild_load(monkeypatch)
+    await _rebuild_load(monkeypatch, jp_extra=True)
     try:
-        # 国服定数 [9.8, 10.4] 为空，日服口径命中 555/777（均仅日服）
-        assert not await song_service.by_level_value(9.8, 10.4)
-        assert [s.id for s in await song_service.jp_by_level_value(9.8, 10.4)] == [
+        # 国服定数 [13.55, 13.65] 为空；日服口径命中两首 13.6（构造曲 + バトル）
+        assert not await song_service.by_level_value(13.55, 13.65)
+        assert [s.id for s in await song_service.jp_by_level_value(13.55, 13.65)] == [
             555,
-            777,
+            1396,
         ]
         await _assert_reply(
             app,
             "search",
-            "定数查歌 9.8 10.4",
-            "「10555」 JP Only Song（日服限定）"
-            "\n「10777」 Increment Song（日服限定）"
+            "定数查歌 13.55 13.65",
+            "「10555」 （构造）日服限定样例（日服限定）"
+            "\n「11396」 テリトリーバトル（日服限定）"
             "\n列表中曲目均为日服限定歌曲",
         )
     finally:
@@ -450,7 +497,11 @@ async def test_jp_fallback_all_jp_list(db, monkeypatch, app):
 @requires_assets
 @pytest.mark.asyncio
 async def test_jp_fallback_all_cn_delegates(db, monkeypatch, app):
-    """日服 fallback 整列表国服都有（日服定数口径变更命中）：按普通结果渲染。"""
+    """日服 fallback 整列表国服都有（日服定数口径变更命中）：按普通结果渲染。
+
+    真实锚：国服定数 [14.1, 14.3] 为空，日服口径命中 System "Z" Re:MASTER
+    （CiRCLE PLUS 变 14.2，国服 14.0）→ 回取国服对象按普通卡渲染。
+    """
     from test_music_query import _assert_image_reply
 
     from nonebot_plugin_awmc_helper.core.songs import song_service
@@ -461,14 +512,13 @@ async def test_jp_fallback_all_cn_delegates(db, monkeypatch, app):
     monkeypatch.setattr(binding_service, "identifier_or_none", lambda b: None)
     await _rebuild_load(monkeypatch)
     try:
-        # 国服定数 [12.4, 12.6] 为空，日服口径命中 21（日服 CiRCLE 变 12.5，国服 12.3）
-        assert not await song_service.by_level_value(12.4, 12.6)
-        song = await song_service.by_id(21)
+        assert not await song_service.by_level_value(14.1, 14.3)
+        song = await song_service.by_id(239)
         assert song is not None
         await _assert_image_reply(
             app,
             "search",
-            "定数查歌 12.4 12.6",
+            "定数查歌 14.1 14.3",
             lambda: chart_card_bytes(song, None),
         )
     finally:

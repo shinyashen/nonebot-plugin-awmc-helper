@@ -1,4 +1,8 @@
-"""core/songdb 合并管线：rebuild 入库、缺失/删除规则、pending、外部源。"""
+"""core/songdb 合并管线：rebuild 入库、缺失/删除规则、pending、外部源。
+
+断言值全部取自 tests/data/snapshots/ 真实快照（2026-09-29 取材）的派生结果；
+外部源合并机制类用例的临时文档为构造 fixture（测机制不测数据，已注明）。
+"""
 
 import json
 
@@ -11,6 +15,7 @@ from songdb_fixtures import (
     make_otoge_live,
     make_pending_item,
     make_otoge_deleted,
+    make_pending_revealed,
 )
 
 
@@ -45,43 +50,48 @@ async def test_rebuild_full_union(db):
 
     result = await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
-    # 并集：maimaiinfo 8 曲（8/21/18/12/777/355/42/555）+ 国服独有 9002 = 9，
-    # 其中 42（maimaiinfo 滞留 × otoge 已下架 × 国服无）当轮即被删除 → 8
-    assert result["songs"] == 8
-    assert 42 not in state.songs
-    # from=未知 且国服源没有（12）：版本未知 ≠ 两侧皆无，记录保留、不被误删
+    # 并集：快照 14 根曲 − 青春コンプレックス（maimaiinfo 滞留 × otoge 已下架
+    # 20260807 × 国服已无）+ 构造国服限定 9002 = 14
+    assert result["songs"] == 14
+    assert result["removed"] == 1
+    assert 1634 not in state.songs
+    # from=未知 且国服源没有（12 レーザービーム，otoge 亦无）：版本未知 ≠ 两侧
+    # 皆无，记录保留、不被误删（maimaiinfo 在列即 JP 在列信号）
     assert 12 in state.songs
     assert state.groups[(12, "sd")].version is None
-    # 国服独有曲（日侧无）：version=None、version_cn=25000
+    # 构造国服限定曲（日侧无）：version=None、version_cn=25500
     g = state.groups[(9002, "sd")]
     assert g.version is None
-    assert g.version_cn == 25000
-    # JP-only 曲（国服源完全没有）：version=22000、version_cn=None
-    g = state.groups[(555, "dx")]
-    assert g.version == 22000
+    assert g.version_cn == 25500
+    # 日服限定组（199 DX＝チルノ CiRCLE 重制，国服源无）：version=26000、version_cn=None
+    g = state.groups[(199, "dx")]
+    assert g.version == 26000
     assert g.version_cn is None
-    # 组级版本：SD 来自 from、DX 来自 PLUS；version_cn 取组内谱面值
-    assert state.groups[(8, "sd")].version == 20000
-    assert state.groups[(8, "sd")].version_cn == 20000
-    assert state.groups[(21, "dx")].version == 20500
-    assert state.groups[(21, "dx")].version_cn == 20000
-    # 日期规则：sd=date_added；dx=release 优先；宴=release（复活日）
-    assert state.groups[(8, "sd")].date == 20120711
-    assert state.groups[(21, "dx")].date == 230914
-    assert state.groups[(18, "utage")].date == 230622
-    # 封面与宴字段（otoge-db 唯一来源）
-    assert state.songs[8].image_url == "abc123.png"
-    utage = state.charts[(18, "utage", 0)]
-    assert utage.kanji == "宴"
-    assert utage.comment == "パーティーだ！"
+    # increments 新曲组（10267 Ignite Infinity，CiRCLE PLUS 登场）：version=26500
+    assert state.groups[(267, "dx")].version == 26500
+    assert state.groups[(267, "dx")].version_cn is None
+    # 组级版本：8 True Love Song SD 来自 from（maimai）；version_cn 取组内谱面值
+    assert state.groups[(8, "sd")].version == 10000
+    assert state.groups[(8, "sd")].version_cn == 10000
+    # 落雪 CN 本地 id（BLACK ROSE 落雪 1001 ↔ 水鱼/日服 11001）正常合流
+    assert state.songs[1001].title == "BLACK ROSE"
+    assert state.groups[(1001, "dx")].version_cn == 20000
+    # 日期规则（当前 otoge 现役 payload 已不含 date_added，只保留 release）：
+    # sd/dx 无可得日期 → None；宴 = release（复活日）优先
+    assert state.groups[(8, "sd")].date is None
+    assert state.groups[(199, "utage")].date == 231225
+    assert state.groups[(1355, "utage")].date == 230914
+    # 封面（otoge-db 唯一来源）与宴字段
+    assert state.songs[8].image_url == "c7cfd8a91e0436ac.png"
+    utage = state.charts[(199, "utage", 0)]
+    assert utage.kanji == "蛸"
+    assert utage.comment == "パーフェクトホールド教室"
     assert not utage.is_buddy
-    # buddy 宴左右物量
-    buddy = state.charts[(355, "utage", 1)]
+    # buddy 宴左右物量（[協]ラグトレイン，otoge/all_data/lxns 三源同值）
+    buddy = state.charts[(1355, "utage", 1)]
     assert buddy.is_buddy
-    assert buddy.notes_left is not None
-    assert buddy.notes_right is not None
-    assert json.loads(buddy.notes_left) == [150, 20, 25, 0, 5]
-    assert json.loads(buddy.notes_right) == [130, 25, 20, 0, 5]
+    assert json.loads(buddy.notes_left) == [183, 76, 53, 164, 173]
+    assert json.loads(buddy.notes_right) == [172, 63, 53, 102, 216]
     # 主物量不变式：buddy 行主列 ≡ 左右之和（dx 星按主物量算 max DX）
     assert (
         buddy.notes_tap,
@@ -89,40 +99,49 @@ async def test_rebuild_full_union(db):
         buddy.notes_slide,
         buddy.notes_touch,
         buddy.notes_break,
-    ) == (280, 45, 45, 0, 10)
-    # 定数历史（变化点）与宴推导值
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5)]
-    assert state.history_of(18, "utage", 0) == [(24000, 12.0)]
+    ) == (355, 139, 106, 266, 389)
+    # 定数历史（变化点）与宴推导值：8 BASIC 在 UNiVERSE PLUS 4.0→5.0；
+    # 蛸宴标级 12+? 推导 12.7
+    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (22500, 5.0)]
+    assert state.history_of(199, "utage", 0) == [(24000, 12.7)]
     # 标准 JSON 与指纹已生成
     doc = await db.kv_get("songdb_json")
-    assert doc["8"]["sheets"]["sd"]["version_cn"] == 20000
-    # 01 文档线格式：level 自登场版本（此处 DX 初代）逐版本共 14 值，23000 起变 4.5
-    assert doc["8"]["sheets"]["sd"]["contents"][0]["level"] == [4.0] * 6 + [4.5] * 8
+    assert doc["8"]["sheets"]["sd"]["version_cn"] == 10000
+    # 01 文档线格式：自登场版本（DX 初代）起 14 值，UNiVERSE PLUS 起变 5.0
+    assert doc["8"]["sheets"]["sd"]["contents"][0]["level"] == [4.0] * 5 + [5.0] * 9
     assert doc["8"]["sheets"]["sd"]["contents"][0]["notes"] == [63, 23, 8, 0, 2]
     # 宴为单元素标级浮点列表
-    assert doc["18"]["sheets"]["utage"]["contents"][0]["level"] == [12.0]
+    assert doc["199"]["sheets"]["utage"]["contents"][0]["level"] == [12.7]
     fp = songdb.CURRENT_FINGERPRINT
     assert fp is not None
     assert len(fp) == 32
-    # 国服当前版本 = max(version_cn) = 25000（PRiSM）
-    assert state.cn_current_version() == 25000
+    # 国服当前版本 = max(version_cn) = 25500（PRiSM PLUS，快照时点）
+    assert state.cn_current_version() == 25500
 
 
 @pytest.mark.asyncio
 async def test_cn_derivation_and_fallback(db):
-    """国服定数推导：≤ 国服版本末值；同步上线曲走首值兜底（§5.3）。"""
+    """国服定数推导：≤ 国服版本末值；同步上线曲走首值兜底（§5.3）。
+
+    真实锚：239 System "Z" Re:MASTER 在 CiRCLE PLUS 由 14.0→14.2，国服
+    （PRiSM PLUS）仍为 14.0——落雪实测与推导一致。
+    """
     from nonebot_plugin_awmc_helper.core.songdb import State, rebuild, cn_level_value
 
     await rebuild(full_payloads())
     state = await State.load()
-    # 日服 CiRCLE 变 12.5 未进国服（国服 20000）→ 推导取变更前 12.3，与落雪一致
-    assert state.resolve_chart_level(21, "dx", 3) == 12.5  # JP 最新
-    assert state.resolve_chart_level(21, "dx", 3, version=25000) == 12.3  # 国服视角
-    assert cn_level_value(state.history_of(21, "dx", 3), 25000) == 12.3
+    assert state.history_of(239, "sd", 4) == [
+        (21000, 13.9),
+        (21500, 14.0),
+        (26500, 14.2),
+    ]
+    assert state.resolve_chart_level(239, "sd", 4) == 14.2  # JP 最新
+    assert state.resolve_chart_level(239, "sd", 4, version=25500) == 14.0  # 国服视角
+    assert cn_level_value(state.history_of(239, "sd", 4), 25500) == 14.0
     # carry-forward 边界：早于首行 → None（该版本尚无此谱面）
-    assert state.resolve_chart_level(21, "dx", 3, version=20000) is None
+    assert state.resolve_chart_level(239, "sd", 4, version=20000) is None
     # 国服推导的首值兜底：区间无值取日服首值（同步上线的曲，§5.3 已验证 20/20）
-    assert cn_level_value(state.history_of(21, "dx", 3), 20000) == 12.3
+    assert cn_level_value(state.history_of(239, "sd", 4), 20000) == 13.9
 
 
 @pytest.mark.asyncio
@@ -144,7 +163,7 @@ async def test_cn_missing_and_restore(db):
     # 回归：国服重新上架 → version_cn 回填
     await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
-    assert state.groups[(9002, "sd")].version_cn == 25000
+    assert state.groups[(9002, "sd")].version_cn == 25500
 
 
 @pytest.mark.asyncio
@@ -153,13 +172,12 @@ async def test_jp_missing_and_cn_absence_delete(db):
     from nonebot_plugin_awmc_helper.core import songdb
 
     await songdb.rebuild(full_payloads())
-    # JP-only 曲（555）：国服源始终无 → version_cn=None，记录与 JP 定数历史保留
+    # 日服限定组（199 DX）：国服源始终无 → version_cn=None，记录与 JP 定数历史保留
     state = await songdb.State.load()
-    assert 555 in state.songs
-    g = state.groups[(555, "dx")]
-    assert g.version == 22000
+    g = state.groups[(199, "dx")]
+    assert g.version == 26000
     assert g.version_cn is None
-    assert state.history_of(555, "dx", 0) == [(22000, 4.0)]
+    assert state.history_of(199, "dx", 0) == [(26000, 3.0)]
     # 国服在列曲（9002）双源同时消失：JP 也无 → 两侧信号皆无 → 整曲删除
     await songdb.rebuild(
         full_payloads(
@@ -169,7 +187,7 @@ async def test_jp_missing_and_cn_absence_delete(db):
     state = await songdb.State.load()
     assert 9002 not in state.songs
     # JP 侧波动不影响其余曲（8 仍在且历史完好）
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5)]
+    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (22500, 5.0)]
 
 
 @pytest.mark.asyncio
@@ -180,17 +198,21 @@ async def test_source_failure_tolerated(db):
     await songdb.rebuild(full_payloads())
     await songdb.rebuild(full_payloads(lxns=None, divingfish=None))
     state = await songdb.State.load()
-    assert state.groups[(8, "sd")].version_cn == 20000  # 未被误清
+    assert state.groups[(8, "sd")].version_cn == 10000  # 未被误清
     assert 9002 in state.songs
     # maimaiinfo 失败：otoge 充实跳过，JP/CN 列保持
     await songdb.rebuild(full_payloads(maimaiinfo=None, dschange=None))
     state = await songdb.State.load()
-    assert state.groups[(8, "sd")].version == 20000
+    assert state.groups[(8, "sd")].version == 10000
 
 
 @pytest.mark.asyncio
 async def test_disabled_means_cn_absent(db):
-    """落雪 disabled（删除/宴下架）= CN 缺失：version_cn 置 NULL；组粒度互不影响。"""
+    """落雪 disabled（删除/宴下架）= CN 缺失：version_cn 置 NULL；组粒度互不影响。
+
+    落雪对删除曲打标留在列表，宴条目（11xxxx 命名空间）独立于普通谱条目——
+    按真实 payload 粒度（raw id）禁用。
+    """
     from nonebot_plugin_awmc_helper.core import songdb
 
     await songdb.rebuild(full_payloads())
@@ -204,21 +226,23 @@ async def test_disabled_means_cn_absent(db):
     state = await songdb.State.load()
     assert 8 in state.songs
     g = state.groups[(8, "sd")]
-    assert g.version == 20000
+    assert g.version == 10000
     assert g.version_cn is None
     # 其他曲不受影响
-    assert state.groups[(21, "dx")].version_cn == 20000
-    # 宴条目单独禁用：仅宴组置 NULL（组粒度）
+    assert state.groups[(30, "sd")].version_cn == 10000
+    # 宴条目单独禁用（[協]ラグトレイン 宴条目 111355）：仅宴组置 NULL，
+    # 同曲 DX 普通谱组（ラグトレイン 1355 条目）version_cn 保持
     await songdb.rebuild(
         full_payloads(
-            lxns=make_lxns(disable_ids={355}),
-            divingfish=make_divingfish(drop_ids={355}),
+            lxns=make_lxns(disable_ids={111355}),
+            divingfish=make_divingfish(drop_ids={111355}),
         )
     )
     state = await songdb.State.load()
-    assert state.groups[(355, "utage")].version_cn is None
-    assert state.groups[(355, "utage")].version == 24500
-    # 国服限定曲 9002 被禁用 + JP 也无 → 整曲删除
+    assert state.groups[(1355, "utage")].version_cn is None
+    assert state.groups[(1355, "utage")].version == 24000
+    assert state.groups[(1355, "dx")].version_cn == 22007
+    # 构造国服限定曲 9002 被禁用 + JP 也无 → 整曲删除
     await songdb.rebuild(
         full_payloads(
             lxns=make_lxns(disable_ids={9002}),
@@ -231,7 +255,12 @@ async def test_disabled_means_cn_absent(db):
 
 @pytest.mark.asyncio
 async def test_pending_and_flush(db):
-    """otoge 独有的无 id 条目进 pending；id 到位后归并清理。"""
+    """otoge 独有的无 id 条目进 pending；id 到位后归并清理。
+
+    真实锚：MAGiCAL 新曲「物語はここから」已在 otoge 现役（version 27000）但
+    maimaiinfo 快照未收录 → 唯一 pending；「id 到位」按真实演进模拟——maimaiinfo
+    未来收录（此处以 MuNET 真实条目 id 2020 转换为 all_data 形态注入）。
+    """
     from nonebot_plugin_awmc_helper.core import store, songdb
 
     await songdb.rebuild(full_payloads())
@@ -239,42 +268,51 @@ async def test_pending_and_flush(db):
 
     async with store.session() as session:
         pending = list((await session.exec(select(store.SongPending))).all())
-    assert {p.key for p in pending} == {
-        "title:[狂]Otoge Only Uta",
-        "title:[宴]Rotated Out",
-        "title:Link",  # 同名多义两体均无 id
-    }
-    assert all(p.reason == "missing_id" for p in pending)
-    # id 到位：maimaiinfo 新增该曲 → 重建 + flush 归并
+    assert [(p.key, p.reason) for p in pending] == [
+        ("title:物語はここから", "missing_id")
+    ]
+    # id 到位：maimaiinfo 收录（MuNET 真实值：DX id 10202 → 根 id 202，DX 四谱，
+    # 定数 4.0/7.5/10.9/13.5）
     payloads = full_payloads()
-    payloads["maimaiinfo"]["100999"] = {
-        "id": "100999",
-        "title": "[狂]Otoge Only Uta",
-        "type": "SD",
-        "ds": [13.7],
-        "level": ["13+"],
-        "charts": [{"notes": [250, 45, 35, 5, 12], "charter": "K-A"}],
+    payloads["maimaiinfo"]["10202"] = {
+        "id": "10202",
+        "title": "物語はここから",
+        "type": "DX",
+        "ds": [4.0, 7.5, 10.9, 13.5],
+        "level": ["4", "7", "10+", "13"],
+        "charts": [
+            {"notes": [192, 12, 4, 4, 4], "charter": "-"},
+            {"notes": [262, 14, 7, 40, 4], "charter": "-"},
+            {"notes": [348, 73, 39, 12, 25], "charter": "けんけん法師"},
+            {"notes": [564, 65, 80, 32, 68], "charter": "Luxizhel"},
+        ],
         "basic_info": {
-            "title": "[狂]Otoge Only Uta",
-            "artist": "A",
-            "genre": "宴会場",
-            "bpm": "150",
-            "from": "maimai でらっくす BUDDiES PLUS",
+            "title": "物語はここから",
+            "artist": "OSTER project feat. Kanata.N",
+            "genre": "舞萌",
+            "bpm": "190",
+            "from": "maimai でらっくす MAGiCAL",
         },
     }
     await songdb.rebuild(payloads)
     merged = await songdb.flush_pending()
-    assert merged == 1  # 仅拿到 id 的「Otoge Only Uta」归并；其余仍无 id 保留
+    assert merged == 1
     state = await songdb.State.load()
-    assert 999 in state.songs
+    assert 202 in state.songs
+    assert state.groups[(202, "dx")].version == 27000
+    assert state.history_of(202, "dx", 3) == [(27000, 13.5)]
     async with store.session() as session:
         remain = list((await session.exec(select(store.SongPending))).all())
-    assert {p.key for p in remain} == {"title:[宴]Rotated Out", "title:Link"}
+    assert remain == []
 
 
 @pytest.mark.asyncio
 async def test_external_sources_merge(db, tmp_path, monkeypatch):
-    """外部补充源：仅日服侧、override/fill、version_cn 拒写、哈希变化才应用。"""
+    """外部补充源：仅日服侧、override/fill、version_cn 拒写、哈希变化才应用。
+
+    被合并非真实数据（构造文档测机制）；被操作的真实行是 8 True Love Song
+    （sd1 designer 为空「-」、sd0 已有 UNiVERSE PLUS 变更点）。
+    """
     from nonebot_plugin_awmc_helper.core import songdb
 
     await songdb.rebuild(full_payloads())
@@ -319,9 +357,12 @@ async def test_external_sources_merge(db, tmp_path, monkeypatch):
     state = await songdb.State.load()
     assert state.charts[(8, "sd", 1)].designer == "FILLED"  # 原 designer 为空 → 填充
     assert state.charts[(8, "sd", 1)].notes_tap == 85  # 已有物量不被 fill 覆盖
-    assert state.history_of(8, "sd", 1) == [(20000, 6.0)]  # 已有历史不被 fill 覆盖
-    assert state.groups[(8, "sd")].version_cn == 20000  # version_cn 拒写（国服唯二源）
-    assert state.groups[(8, "sd")].version == 20000  # fill：已有 version 不动
+    assert state.history_of(8, "sd", 1) == [
+        (20000, 6.4),
+        (23000, 7.2),
+    ]  # 已有历史不被 fill 覆盖
+    assert state.groups[(8, "sd")].version_cn == 10000  # version_cn 拒写（国服唯二源）
+    assert state.groups[(8, "sd")].version == 10000  # fill：已有 version 不动
     # 阶段二：override 模式 —— 日服字段被覆盖、version_cn 仍被拒绝
     monkeypatch.setattr(
         "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
@@ -331,7 +372,7 @@ async def test_external_sources_merge(db, tmp_path, monkeypatch):
     assert summary["changed"]
     state = await songdb.State.load()
     assert state.groups[(8, "sd")].version == 21000
-    assert state.groups[(8, "sd")].version_cn == 20000
+    assert state.groups[(8, "sd")].version_cn == 10000
     assert state.charts[(8, "sd", 0)].designer == "EXTRA!"
     assert state.charts[(8, "sd", 1)].notes_tap == 1  # override 覆盖物量
     # 扁平列表按登场版本 21000 对位重建变化点（连续去重后单点）
@@ -356,7 +397,7 @@ async def test_external_source_invalid_not_blocking(db, tmp_path, monkeypatch):
     assert not summary["changed"]
     assert summary["applied"] == 0
     state = await songdb.State.load()
-    assert state.groups[(8, "sd")].version == 20000  # 数据无恙
+    assert state.groups[(8, "sd")].version == 10000  # 数据无恙
 
 
 @pytest.mark.asyncio
@@ -375,7 +416,7 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
     doc.write_text(
         json.dumps(
             {
-                # sd0 已有历史 [(20000, 4.0), (23000, 4.5)]，快照当前定数 4.8
+                # sd0 已有历史 [(20000,4.0),(22500,5.0)]，快照当前定数 4.8（构造）
                 "8": {
                     "sheets": {
                         "sd": {
@@ -405,7 +446,11 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
     assert summary["changed"]
     state = await songdb.State.load()
     # 既有变化点保留，末尾按日服当前版本（夹具 max 组版本 = 26500 increments 曲）追加
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5), (26500, 4.8)]
+    assert state.history_of(8, "sd", 0) == [
+        (20000, 4.0),
+        (22500, 5.0),
+        (26500, 4.8),
+    ]
     # 无历史 → 登场版本单行（§6 退化口径）
     assert state.groups[(12, "sd")].version == 23000
     assert state.history_of(12, "sd", 0) == [(23000, 5.2)]
@@ -414,7 +459,11 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
         [("magical.json", "override", json.loads(doc.read_text(encoding="utf-8")))]
     )
     state = await songdb.State.load()
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5), (26500, 4.8)]
+    assert state.history_of(8, "sd", 0) == [
+        (20000, 4.0),
+        (22500, 5.0),
+        (26500, 4.8),
+    ]
     # fill 模式：已有历史不动
     fill_doc = tmp_path / "fill.json"
     fill_doc.write_text(
@@ -430,7 +479,11 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
     )
     await songdb.apply_external_sources()
     state = await songdb.State.load()
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5), (26500, 4.8)]
+    assert state.history_of(8, "sd", 0) == [
+        (20000, 4.0),
+        (22500, 5.0),
+        (26500, 4.8),
+    ]
 
 
 @pytest.mark.asyncio
@@ -483,7 +536,7 @@ async def test_external_source_forced_reapply_after_rebuild(db, tmp_path, monkey
     await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
     assert state.charts[(8, "sd", 0)].notes_tap == 63
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (23000, 4.5)]
+    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (22500, 5.0)]
 
     # 文件未变，force 重放：校正恢复且 changed 反映真实变化
     summary = await songdb.apply_external_sources(force=True)
@@ -495,7 +548,7 @@ async def test_external_source_forced_reapply_after_rebuild(db, tmp_path, monkey
     ) == (9, 9)
     assert state.history_of(8, "sd", 0) == [
         (20000, 4.0),
-        (23000, 4.5),
+        (22500, 5.0),
         (26500, 7.7),
     ]
 
@@ -527,7 +580,7 @@ async def test_external_source_none_fields_do_not_wipe(db, tmp_path, monkeypatch
         json.dumps(
             {
                 "8": {
-                    "title": "Test Song SD",
+                    "title": "True Love Song",
                     "image_url": None,
                     "sheets": {},
                 }
@@ -548,7 +601,12 @@ async def test_external_source_none_fields_do_not_wipe(db, tmp_path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_external_source_creates_missing_song(db, tmp_path, monkeypatch):
-    """骨架外新曲（文档自带 id）直接创建日侧行，并经 extra 在列信号免于误删。"""
+    """骨架外新曲（文档自带 id）直接创建日侧行，并经 extra 在列信号免于误删。
+
+    真实演进锚：MAGiCAL 曲「物語はここから」先经机台快照（MuNET）建行——
+    maimaiinfo 未收录，但 otoge 现役在列，title 在列信号即可保行（真实链路：
+    MAGiCAL 曲不会因 maimaiinfo 滞后被误删）。
+    """
     from nonebot_plugin_awmc_helper.core import songdb
 
     await songdb.rebuild(full_payloads())
@@ -556,35 +614,24 @@ async def test_external_source_creates_missing_song(db, tmp_path, monkeypatch):
     doc.write_text(
         json.dumps(
             {
-                "6001": {
-                    "title": "Magical New Song",
-                    "artist": " Someone ",
-                    "genre": "オニゲー",
-                    "bpm": "200",
+                # MuNET 真实条目（id 2020）转换为标准 JSON 形态
+                "2020": {
+                    "title": "物語はここから",
+                    "artist": "OSTER project feat. Kanata.N",
+                    "genre": "maimai",
+                    "bpm": "190",
                     "sheets": {
-                        "sd": {
+                        "dx": {
                             "version": 27000,
                             "contents": [
-                                {"level_id": 0, "level": [3.0]},
+                                {"level_id": 0, "level": [4.0]},
                                 {
                                     "level_id": 3,
                                     "level": [13.5],
-                                    "designer": "MAGI",
+                                    "designer": "Luxizhel",
                                 },
                             ],
-                        },
-                        "utage": {
-                            "version": 27000,
-                            "contents": [
-                                {
-                                    "level_id": 0,
-                                    "level": [12.7],
-                                    "kanji": "魔",
-                                    "comment": "マジカル",
-                                    "is_buddy": False,
-                                }
-                            ],
-                        },
+                        }
                     },
                 }
             },
@@ -599,21 +646,44 @@ async def test_external_source_creates_missing_song(db, tmp_path, monkeypatch):
     summary = await songdb.apply_external_sources()
     assert summary["changed"]
     state = await songdb.State.load()
-    assert state.songs[6001].title == "Magical New Song"
-    assert state.groups[(6001, "sd")].version == 27000
-    assert state.groups[(6001, "sd")].version_cn is None  # 恒 NULL（日侧行）
-    assert state.history_of(6001, "sd", 3) == [(27000, 13.5)]
-    assert state.charts[(6001, "utage", 0)].kanji == "魔"
-    assert state.charts[(6001, "utage", 0)].comment == "マジカル"
+    assert state.songs[2020].title == "物語はここから"
+    assert state.groups[(2020, "dx")].version == 27000
+    assert state.groups[(2020, "dx")].version_cn is None  # 恒 NULL（日侧行）
+    assert state.history_of(2020, "dx", 3) == [(27000, 13.5)]
     doc_json = songdb.standard_json(state)
-    assert doc_json["6001"]["title"] == "Magical New Song"
-    # 下次全量重建：extra id 作为 JP 在列信号 → 曲与组版本保留
-    await songdb.rebuild(full_payloads(), extra_jp_ids={6001})
+    assert doc_json["2020"]["title"] == "物語はここから"
+    # 无 extra 信号重建：otoge 现役 title 在列 → 曲与组版本保留（真实在列信号）
+    await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
-    assert 6001 in state.songs
-    assert state.groups[(6001, "sd")].version == 27000
-    assert state.history_of(6001, "sd", 3) == [(27000, 13.5)]
-    # 无信号时（maimaiinfo/otoge 均不知晓）→ 两侧皆无 → 整曲删除
+    assert 2020 in state.songs
+    assert state.groups[(2020, "dx")].version == 27000
+    assert state.history_of(2020, "dx", 3) == [(27000, 13.5)]
+
+    # 对照（构造条目，测「两侧皆无」路径）：otoge/maimaiinfo 均不知晓 → 整曲删除
+    doc2 = tmp_path / "ghost.json"
+    doc2.write_text(
+        json.dumps(
+            {
+                "6001": {
+                    "title": "（构造）幽灵样例曲",
+                    "sheets": {
+                        "dx": {
+                            "version": 27000,
+                            "contents": [{"level_id": 3, "level": [13.5]}],
+                        }
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.config.plugin_config.awmc_extra_song_sources",
+        [str(doc2)],
+    )
+    summary = await songdb.apply_external_sources()
+    assert summary["changed"]
     await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
     assert 6001 not in state.songs
@@ -645,8 +715,9 @@ async def test_external_merge_syncs_fingerprint(db, tmp_path, monkeypatch):
     extra.write_text(
         json.dumps(
             {
+                # 构造条目（测指纹机制，快照中无此 id）
                 "2041": {
-                    "title": "指纹新曲",
+                    "title": "（构造）指纹新曲",
                     "sheets": {
                         "dx": {
                             "version": 27000,
@@ -668,12 +739,18 @@ async def test_external_merge_syncs_fingerprint(db, tmp_path, monkeypatch):
     assert songdb.CURRENT_FINGERPRINT != fp_before
     # 全库标准 JSON 同步包含新曲
     doc = await store.kv_get("songdb_json")
-    assert "指纹新曲" in json.dumps(doc, ensure_ascii=False)
+    assert "（构造）指纹新曲" in json.dumps(doc, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
 async def test_otoge_fills_external_created_row(db, tmp_path, monkeypatch):
-    """maimaiinfo 未收录、外部源已建行的曲：otoge title join 直接充实，不进暂存。"""
+    """maimaiinfo 未收录、外部源已建行的曲：otoge title join 直接充实，不进暂存。
+
+    真实链路：MAGiCAL 曲「物語はここから」先经机台快照建行（此时 otoge 载荷
+    在场）→ otoge 现役条目（封面 7562b43964819ada.png / release 260917）title
+    join 充实，pending 不再收纳；物量列按 otoge「后续补数」的演进形态断言
+    （值取 MuNET 真实物量，字段名按 otoge 约定构造）。
+    """
     from sqlmodel import select
 
     from nonebot_plugin_awmc_helper.core import store, songdb
@@ -683,8 +760,9 @@ async def test_otoge_fills_external_created_row(db, tmp_path, monkeypatch):
     extra.write_text(
         json.dumps(
             {
-                "2041": {
-                    "title": "Test Song First",
+                # 键为根 id（标准 JSON 契约空间；MuNET musicId 2020 ↔ 根 202）
+                "202": {
+                    "title": "物語はここから",
                     "sheets": {
                         "dx": {
                             "version": 27000,
@@ -703,47 +781,47 @@ async def test_otoge_fills_external_created_row(db, tmp_path, monkeypatch):
     )
     summary = await songdb.apply_external_sources()
     assert summary["changed"]
-    # 下一轮重建：otoge 载荷含同名条目（带封面与物量）→ 直接充实已有行
+    # 下一轮重建：otoge 载荷含同名条目 → 直接充实已有行；此处同时模拟 otoge
+    # 为 MAGiCAL 新曲补数的真实演进（追加物量字段，值取 MuNET 实测）
     payloads = full_payloads()
-    payloads["otoge_db"].append(
-        {
-            "title": "Test Song First",
-            "catcode": "niconico＆ボーカロイド",
-            "version": "27000",
-            "bpm": "162",
-            "image_url": "halo123.png",
-            "release": "250918",
-            "dx_lev_bas": "3",
-            "dx_lev_mas": "13.5",
-            "dx_lev_mas_notes_tap": 1000,
-            "dx_lev_mas_notes_hold": 100,
-            "dx_lev_mas_notes_slide": 80,
-            "dx_lev_mas_notes_touch": 0,
-            "dx_lev_mas_notes_break": 25,
-            "dx_lev_mas_designer": "otoge 谱师",
-        }
-    )
+    for item in payloads["otoge_db"]:
+        if item["title"] == "物語はここから":
+            item.update(
+                {
+                    "dx_lev_mas_notes_tap": "564",
+                    "dx_lev_mas_notes_hold": "65",
+                    "dx_lev_mas_notes_slide": "80",
+                    "dx_lev_mas_notes_touch": "32",
+                    "dx_lev_mas_notes_break": "68",
+                }
+            )
     await songdb.rebuild(payloads)
+    # 首轮重建留下的 pending 行由周期 flush 清理（真实生产流程）
+    merged = await songdb.flush_pending()
+    assert merged == 1
     state = await songdb.State.load()
-    assert state.songs[2041].image_url == "halo123.png"
-    assert state.songs[2041].genre == "niconicoボーカロイド"
-    chart = state.charts[(2041, "dx", 3)]
+    assert state.songs[202].image_url == "7562b43964819ada.png"
+    assert state.songs[202].genre == "maimai"
+    assert state.groups[(202, "dx")].date == 260917  # dx = release 优先
+    chart = state.charts[(202, "dx", 3)]
     assert (
         chart.notes_tap,
         chart.notes_hold,
         chart.notes_slide,
         chart.notes_touch,
         chart.notes_break,
-    ) == (1000, 100, 80, 0, 25)
-    assert state.groups[(2041, "dx")].date == 250918
+    ) == (564, 65, 80, 32, 68)
     async with store.session() as session:
         pend = list((await session.exec(select(store.SongPending))).all())
-    assert all("Test Song First" not in p.key for p in pend)
+    assert all("物語はここから" not in p.key for p in pend)
 
 
 @pytest.mark.asyncio
 async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
-    """外部源宴 buddy 谱：notes_left/notes_right 与 is_buddy 合并进谱面行。"""
+    """外部源宴 buddy 谱：notes_left/notes_right 与 is_buddy 合并进谱面行。
+
+    构造行（外部源测机制），左右物量取真实 [協]ラグトレイン 值。
+    """
     from nonebot_plugin_awmc_helper.core import songdb
 
     await songdb.rebuild(full_payloads())
@@ -752,18 +830,18 @@ async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
         json.dumps(
             {
                 "1903": {
-                    "title": "Test Buddy Uta",
+                    "title": "（构造）外部源 buddy 宴样例",
                     "sheets": {
                         "utage": {
                             "version": 27000,
                             "contents": [
                                 {
                                     "level_id": 1,
-                                    "kanji": "奏",
+                                    "kanji": "協",
                                     "is_buddy": True,
                                     "level": [13.0],
-                                    "notes_left": [10, 2, 3, 4, 5],
-                                    "notes_right": [20, 4, 6, 8, 10],
+                                    "notes_left": [183, 76, 53, 164, 173],
+                                    "notes_right": [172, 63, 53, 102, 216],
                                 }
                             ],
                         }
@@ -784,9 +862,9 @@ async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
     chart = state.charts[(1903, "utage", 1)]
     assert chart.is_buddy
     assert chart.notes_left is not None
-    assert json.loads(chart.notes_left) == [10, 2, 3, 4, 5]
+    assert json.loads(chart.notes_left) == [183, 76, 53, 164, 173]
     assert chart.notes_right is not None
-    assert json.loads(chart.notes_right) == [20, 4, 6, 8, 10]
+    assert json.loads(chart.notes_right) == [172, 63, 53, 102, 216]
     # 主物量入库即存左右合计（dx 星按主物量算 max DX，留 0 会除零）
     assert (
         chart.notes_tap,
@@ -794,12 +872,17 @@ async def test_external_merge_buddy_utage(db, tmp_path, monkeypatch):
         chart.notes_slide,
         chart.notes_touch,
         chart.notes_break,
-    ) == (30, 6, 9, 12, 15)
+    ) == (355, 139, 106, 266, 389)
     assert state.groups[(1903, "utage")].version == 27000
 
 
 def test_pending_to_song_placeholder_fields():
-    """物化为临时 Song：id=0、缺失字段按「0 即 -」约定、版本未知 logo 缺席。"""
+    """物化为临时 Song：id=0、缺失字段按「0 即 -」约定、版本未知 logo 缺席。
+
+    真实形态：MAGiCAL 曲「物語はここから」otoge 现役条目定数未揭 → gate 拒之
+    门外；MuNET 揭晓形态（make_pending_revealed）物化后，谱师/物量缺的难度行
+    仍按「0 即 -」展示。
+    """
     from maimai_py import SongType
 
     from nonebot_plugin_awmc_helper.core.songdb import (
@@ -807,8 +890,11 @@ def test_pending_to_song_placeholder_fields():
         parse_pending_item,
     )
 
+    # 定数未揭（真实现役形态）：gate 直接拒之门外
+    assert parse_pending_item(make_pending_item()) is None
+
     bare = parse_pending_item(
-        make_pending_item(artist=None, bpm=None, catcode="未知分类", version=None)
+        make_pending_revealed(artist=None, bpm=None, catcode="未知分类", version=None)
     )
     assert bare is not None
     assert bare.genre_display is None
@@ -818,37 +904,50 @@ def test_pending_to_song_placeholder_fields():
     assert song.artist == "-"
     assert song.version == 0  # from_value(0) 为 None → 版本 logo 自然缺席
     assert all(d.version == 0 for d in song.difficulties.dx)
+    # 真实标级串：otoge 现役 4/7/10+/13
     assert [d.level for d in song.difficulties.dx] == ["4", "7", "10+", "13"]
-    # 谱师仅 exp 有（base 条目只有 dx_lev_exp_designer），其余画 -
+    # 谱师仅 exp/mas 有（MuNET 实测），bas/adv 画 -
     assert (
         next(d for d in song.difficulties.dx if d.level_index.value == 2).note_designer
-        == "譜面作者X"
+        == "けんけん法師"
     )
     assert (
-        next(d for d in song.difficulties.dx if d.level_index.value == 3).note_designer
+        next(d for d in song.difficulties.dx if d.level_index.value == 0).note_designer
         == "-"
     )
     assert all(
         d.type == SongType.DX and d.level_value > 0 for d in song.difficulties.dx
     )
 
-    full = parse_pending_item(make_pending_item())
+    full = parse_pending_item(make_pending_revealed())
     assert full is not None
-    assert full.genre_display == "流行&动漫"
+    assert full.genre_display == "舞萌"
     song = pending_to_song(full)
-    assert song.bpm == 190
+    # 真实现役条目未收录 bpm（MAGiCAL 新曲常态）→ 0 画 -
+    assert song.bpm == 0
     assert song.artist == "OSTER project feat. Kanata.N"
     mas = next(d for d in song.difficulties.dx if d.level_index.value == 3)
     assert mas.level == "13"
-    assert mas.level_value == 13.5
+    assert mas.level_value == 13.5  # MuNET 实测
+    assert mas.note_designer == "Luxizhel"
+    exp = next(d for d in song.difficulties.dx if d.level_index.value == 2)
+    assert exp.note_designer == "けんけん法師"
+    # 无谱师字段的两级画 -
+    assert (
+        next(d for d in song.difficulties.dx if d.level_index.value == 0).note_designer
+        == "-"
+    )
+    assert all(
+        d.type == SongType.DX and d.level_value > 0 for d in song.difficulties.dx
+    )
 
 
 def test_cover_key_stable_per_title():
     """封面缓存键按标题派生（pending 曲无 id，不能按 id 缓存）。"""
     from nonebot_plugin_awmc_helper.core.songdb import parse_pending_item
 
-    a = parse_pending_item(make_pending_item())
-    b = parse_pending_item(make_pending_item(title="別の新曲"))
+    a = parse_pending_item(make_pending_revealed())
+    b = parse_pending_item(make_pending_revealed(title="別の新曲"))
     assert a is not None
     assert b is not None
     assert a.cover_key == a.cover_key
@@ -857,22 +956,23 @@ def test_cover_key_stable_per_title():
 
 @pytest.mark.asyncio
 async def test_pending_search_filters(db):
-    """搜索过滤：gate 排除无定数行、reason 限定 missing_id、标题归一子串与定数区间。"""
+    """搜索过滤：gate 排除无定数行、reason 限定 missing_id、标题归一子串与定数区间。
+
+    真实两态：otoge 现役条目定数未揭（gate 拒之门外）；MuNET 定数揭晓后可查。
+    """
     from nonebot_plugin_awmc_helper.core.songdb import pending_search, upsert_pending
 
     await upsert_pending(
         "otoge-db", "title:物語はここから", "missing_id", make_pending_item()
     )
-    # 无定数：gate 不过
-    item = make_pending_item(title="定数未決の曲")
-    for suffix in ("bas", "adv", "exp", "mas"):
-        item[f"dx_lev_{suffix}_i"] = None
-    await upsert_pending("otoge-db", "title:定数未決の曲", "missing_id", item)
-    # 非 missing_id 行不参与
-    await upsert_pending(
-        "otoge-db", "title:別理由", "other_reason", make_pending_item(title="別理由")
-    )
+    # 定数未揭（真实现役形态）：gate 不过，任何搜索都不出
+    assert await pending_search() == []
+    assert await pending_search(title="物語") == []
 
+    # 定数揭晓（MuNET 实测值）：可查
+    await upsert_pending(
+        "otoge-db", "title:物語はここから", "missing_id", make_pending_revealed()
+    )
     all_pending = await pending_search()
     assert [p.title for p in all_pending] == ["物語はここから"]
 
@@ -886,6 +986,15 @@ async def test_pending_search_filters(db):
     assert len(in_range) == 1
     assert not await pending_search(ds_range=(15.0, 16.0))
 
+    # 非 missing_id 行不参与
+    await upsert_pending(
+        "otoge-db",
+        "title:（构造）別理由",
+        "other_reason",
+        make_pending_revealed(title="（构造）別理由"),
+    )
+    assert [p.title for p in await pending_search()] == ["物語はここから"]
+
 
 @pytest.mark.asyncio
 async def test_song_service_pending_wrappers(db):
@@ -894,8 +1003,8 @@ async def test_song_service_pending_wrappers(db):
     from nonebot_plugin_awmc_helper.core.songdb import upsert_pending
 
     await upsert_pending(
-        "otoge-db", "title:物語はここから", "missing_id", make_pending_item()
+        "otoge-db", "title:物語はここから", "missing_id", make_pending_revealed()
     )
     assert len(await song_service.pending_by_title_fuzzy("物語")) == 1
-    assert len(await song_service.pending_by_level_value(7.0, 8.0)) == 1
+    assert len(await song_service.pending_by_level_value(13.0, 14.0)) == 1
     assert await song_service.pending_by_title_fuzzy("没有的歌") == []
