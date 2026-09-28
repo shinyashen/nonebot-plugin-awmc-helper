@@ -37,7 +37,7 @@ async def test_theme_survives_b50_failure(monkeypatch):
     monkeypatch.setattr(chart_card.score_service, "get_b50", fail_b50)
     monkeypatch.setattr(chart_card.nb_chart, "song_chart_info", fake_chart_info)
 
-    out = await chart_card.chart_card_bytes(_plain_song(), binding)
+    out = await chart_card.chart_card_bytes(_plain_song(), binding)  # type: ignore[arg-type]
     assert out == b"img"
     assert seen["theme"] == "circle"
     assert seen["calc"] is False
@@ -61,5 +61,5 @@ async def test_theme_applies_without_identifier(monkeypatch):
     monkeypatch.setattr(chart_card, "binding_service_ident", lambda b: None)
     monkeypatch.setattr(chart_card.nb_chart, "song_chart_info", fake_chart_info)
 
-    await chart_card.chart_card_bytes(_plain_song(), binding)
+    await chart_card.chart_card_bytes(_plain_song(), binding)  # type: ignore[arg-type]
     assert seen["theme"] == "circle"

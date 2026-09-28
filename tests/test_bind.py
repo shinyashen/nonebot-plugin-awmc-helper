@@ -374,7 +374,7 @@ def test_bind_command_names_disjoint():
         for checker in matcher.rule.checkers:
             if not isinstance(checker, CommandRule):
                 continue
-            for path in checker.commands:
+            for path in checker.commands:  # type: ignore[attr-defined]
                 name = "".join(path)
                 assert name not in owners, (
                     f"命令撞名：「{name}」同时属于 {owners[name]} 与 {matcher}"

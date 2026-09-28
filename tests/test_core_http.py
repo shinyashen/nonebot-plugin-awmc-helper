@@ -119,7 +119,7 @@ def test_build_transport_merges_foreign_hosts(monkeypatch, fresh_cache):
     monkeypatch.setattr(plugin_config, "awmc_proxy", "http://127.0.0.1:7796")
     monkeypatch.setattr(plugin_config, "awmc_foreign_hosts", ["sub.example.org"])
     transport = build_smart_transport()
-    inner = transport._inner
+    inner = transport._inner  # type: ignore[attr-defined]
     assert isinstance(inner, SmartProxyTransport)
     assert "sub.example.org" in inner._foreign_hosts
     assert "github.com" in inner._foreign_hosts
@@ -143,14 +143,14 @@ async def test_shared_transport_delegates_and_survives_client_close(
             resp = await client.get("https://domestic.cn/x")
             assert resp.json() == {"ok": True}
 
-    inner = transport._inner
+    inner = transport._inner  # type: ignore[attr-defined]
     # 第二个客户端复用同一底层 transport，且仍可用（修复前会被首个 client 关闭）
     async with httpx.AsyncClient(transport=build_smart_transport()) as client2:
         with respx.mock(assert_all_called=False) as mock2:
             mock2.get("https://domestic.cn/y").respond(json={"ok": 2})
             resp2 = await client2.get("https://domestic.cn/y")
             assert resp2.json() == {"ok": 2}
-    assert build_smart_transport()._inner is inner
+    assert build_smart_transport()._inner is inner  # type: ignore[attr-defined]
 
 
 def test_build_transport_cached_by_verify(monkeypatch, fresh_cache):
@@ -163,8 +163,8 @@ def test_build_transport_cached_by_verify(monkeypatch, fresh_cache):
     t1 = build_smart_transport()
     t2 = build_smart_transport()
     assert t1 is not t2  # 每客户端独立薄壳
-    assert t1._inner is t2._inner  # 底层连接池共享
+    assert t1._inner is t2._inner  # type: ignore[attr-defined]  # 底层连接池共享
 
     ctx = ssl.create_default_context()
     t3 = build_smart_transport(verify=ctx)
-    assert t3._inner is not t1._inner  # 不同 verify 各建一套通道
+    assert t3._inner is not t1._inner  # type: ignore[attr-defined]  # 不同 verify 各建一套通道
