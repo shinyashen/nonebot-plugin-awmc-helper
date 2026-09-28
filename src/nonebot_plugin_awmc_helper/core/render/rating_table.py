@@ -252,6 +252,8 @@ def draw_rating_table(
         )
 
     if level == "15":
+        # 同序契约：与 table_template._rating_grid_15 的底图摆放同一排序
+        # （定数降序、稳定等值保序；Level.15 现全为 15.0，排序今日为无操作）
         ordered = sorted(entries, key=lambda pair: pair[1].level_value, reverse=True)
         for i, (song, diff) in enumerate(ordered):
             row, col = divmod(i, LV15_COLS)

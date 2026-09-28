@@ -7,11 +7,11 @@
 """
 
 from PIL import Image, ImageDraw
-from maimai_py import Song, FCType, SongDifficulty
+from maimai_py import Song, FCType, RateType, SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import image_to_bytes
-from ...constants import DIFF_DISPLAY_NAMES, chart_display_id
+from ...constants import RATE_TO_ZH, DIFF_DISPLAY_NAMES, chart_display_id
 
 W, H = 1000, 900
 TITLE_COLOR = (44, 52, 60, 255)
@@ -153,24 +153,6 @@ def song_global_data(song: Song, diff: SongDifficulty) -> bytes:
     return image_to_bytes(im)
 
 
-_RATE_DISPLAY = {
-    "SSSP": "SSS+",
-    "SSS": "SSS",
-    "SSP": "SS+",
-    "SS": "SS",
-    "SP": "S+",
-    "S": "S",
-    "AAA": "AAA",
-    "AA": "AA",
-    "A": "A",
-    "BBB": "BBB",
-    "BB": "BB",
-    "B": "B",
-    "C": "C",
-    "D": "D",
-}
-
-
 def rate_name(enum_name: str) -> str:
-    """RateType 枚举名 → 显示名（SSSP → SSS+）。"""
-    return _RATE_DISPLAY.get(enum_name, enum_name)
+    """RateType 枚举名 → 显示名（SSSP → SSS+，单源 constants.RATE_TO_ZH）。"""
+    return RATE_TO_ZH.get(RateType[enum_name], enum_name)

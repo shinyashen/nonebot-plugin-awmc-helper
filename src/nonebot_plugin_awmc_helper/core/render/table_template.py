@@ -23,6 +23,7 @@ from maimai_py import Song, SongType, SongDifficulty
 from .fonts import FONT_NUM, FONT_RODIN, font
 from .tools import (
     TITLE_BLUE,
+    DIFF_TEXT_COLORS,
     credit_text,
     image_to_bytes,
     generate_prism_bg,
@@ -56,13 +57,6 @@ from .table_layout import (
 )
 
 FONT_BLUE = TITLE_BLUE
-_DIFF_TEXT_COLOR = [
-    (255, 255, 255, 255),
-    (255, 255, 255, 255),
-    (255, 255, 255, 255),
-    (255, 255, 255, 255),
-    (138, 0, 226, 255),
-]
 
 
 def rating_table_dir() -> Path:
@@ -132,7 +126,7 @@ def _rating_grid(
                 (x + 56, y + 4),
                 str(chart_display_id(song, diff)),
                 font=font(13, FONT_NUM),
-                fill=_DIFF_TEXT_COLOR[li],
+                fill=DIFF_TEXT_COLORS[li],
                 anchor="mm",
             )
         start_y += (max_row + 1) * RATING_GRID_STEP + RATING_GROUP_GAP
@@ -142,7 +136,15 @@ def _rating_grid(
 def _rating_grid_15(
     entries: Sequence[tuple[Song, SongDifficulty]],
 ) -> Image.Image:
-    """NB update_level_15_rating_table：lv15 三列大图（含 UNKNOWN 占位）。"""
+    """NB update_level_15_rating_table：lv15 三列大图（含 UNKNOWN 占位）。
+
+    底图摆放与 rating_table 盖章侧**必须同序**（见下方排序契约）；lv7-14
+    两侧同走 table_layout.group_by_ds，唯 lv15 需各自显式排序。
+    """
+    # 同序契约：两侧同一「定数降序」排序（sorted 稳定，等值保序）。当前游戏内
+    # Level.15 谱面定数全部恰为 15.0（无 15+ 记法，出厂顺序即 id 序），此排序
+    # 今日为无操作；两侧统一是防未来出现分档定数时底图封面与章错位。
+    entries = sorted(entries, key=lambda pair: pair[1].level_value, reverse=True)
     count = len(entries)
     lines = count // LV15_COLS + (1 if count % LV15_COLS else 0)
     height = 650 + lines * LV15_ROW_STEP
@@ -282,7 +284,7 @@ def _plate_grid(
                 (x + 56, y + 4),
                 str(chart_display_id(song, diff)),
                 font=font(16, FONT_NUM),
-                fill=(138, 0, 226, 255) if is_rem else (255, 255, 255, 255),
+                fill=DIFF_TEXT_COLORS[4] if is_rem else DIFF_TEXT_COLORS[0],
                 anchor="mm",
             )
         start_y += (max_row + 1) * PLATE_ROW_STEP + PLATE_GROUP_GAP
