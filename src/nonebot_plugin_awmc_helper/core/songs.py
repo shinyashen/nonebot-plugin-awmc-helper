@@ -922,6 +922,17 @@ async def full_refresh() -> dict:
         extra = result.get("extra") or {}
     except Exception:
         logger.exception("歌曲库全量刷新失败（不影响曲库运行时）")
+    if plugin_config.awmc_munet_batch:
+        # MuNET current_jp 版本批次补充（fill + 创建缺失曲）：在重建后执行，
+        # 新建曲随下方底图重建/运行时刷新自然生效
+        try:
+            from .ext import munet
+
+            batch = await munet.run_version_batch()
+            if batch.get("status") == "batch":
+                extra["changed"] = True
+        except Exception:
+            logger.exception("MuNET 版本批次补充失败（不影响规范表管线）")
     if extra.get("changed"):
         # 外部源已在 refresh_all 内应用（含新曲创建），此处只负责底图重建
         logger.info(f"外部补充源有变化，重建底图（{extra}）")
@@ -940,8 +951,24 @@ async def _daily_songdb() -> None:
     await full_refresh()
 
 
+async def _munet_alias_walk() -> None:
+    """MuNET 别名全量走查（断点续走，间隔由 awmc_munet_alias_days 控制）。"""
+    from .ext import munet
+
+    try:
+        await munet.refresh_aliases_full()
+    except Exception:
+        logger.exception("MuNET 别名走查失败（下次任务从断点继续）")
+
+
 scheduler.add_job(_daily_songdb, "cron", hour=4, minute=5)
 """每日 4:05 执行歌曲库全量管线（四源重建 → 运行时刷新 → 外部源 → 底图兜底）。"""
+
+if plugin_config.awmc_munet_alias_days > 0:
+    scheduler.add_job(
+        _munet_alias_walk, "cron", hour=5, minute=30, id="awmc_munet_alias"
+    )
+    """每日 5:30 MuNET 别名走查（间隔 awmc_munet_alias_days，未到期自动跳过）。"""
 
 if plugin_config.awmc_cn_poll_minutes > 0:
     scheduler.add_job(

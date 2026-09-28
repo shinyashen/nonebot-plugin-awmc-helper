@@ -1941,7 +1941,7 @@ async def apply_external_sources(
 
     specs = plugin_config.awmc_extra_song_sources
     summary: dict[str, Any] = {"sources": len(specs), "applied": 0, "changed": False}
-    if not specs:
+    if not specs and preloaded is None:
         return summary
     docs = preloaded if preloaded is not None else await _load_extra_docs()
     digest = hashlib.md5(
