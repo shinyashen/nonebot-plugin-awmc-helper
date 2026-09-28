@@ -108,7 +108,7 @@ async def test_get_curves_failure_degrades():
     with respx.mock(assert_all_called=True) as m:
         m.get(
             "https://www.diving-fish.com/api/maimaidxprober/chart_stats"
-        ).side_effect = (  # noqa: E501
+        ).side_effect = (
             RuntimeError("network down")
         )
         provider = DivingFishCurveProvider()
