@@ -75,15 +75,37 @@ def build_smart_transport(
     """按当前配置构造智能 transport；未配置代理时返回 None（保持默认行为）。
 
     ``verify`` 透传给底层通道：特定站点需自带补充 CA（如省略中间证书的站）。
+    底层 transport 按 ``verify`` 键进程级缓存（连接池跨客户端复用，INFO 仅
+    首次），但每次调用返回独立薄壳——httpx 会在 client.aclose() 时关闭其持有
+    的 transport，短命客户端（每次图片下载、NET 查询、SSE 重连）关闭的是壳，
+    共享连接池不受单个客户端生命周期影响。
     """
     proxy_url = plugin_config.awmc_proxy
     if not proxy_url:
         return None
-    foreign = _BUILTIN_FOREIGN_HOSTS + tuple(plugin_config.awmc_foreign_hosts)
-    logger.info(
-        f"HTTP 智能代理已启用：{proxy_url}（国外站代理优先，命中后缀 {foreign}）"
-    )
-    return SmartProxyTransport(proxy_url, foreign_hosts=foreign, verify=verify)
+    inner = _transport_cache.get(verify)
+    if inner is None:
+        foreign = _BUILTIN_FOREIGN_HOSTS + tuple(plugin_config.awmc_foreign_hosts)
+        inner = SmartProxyTransport(proxy_url, foreign_hosts=foreign, verify=verify)
+        _transport_cache[verify] = inner
+        logger.info(
+            f"HTTP 智能代理已启用：{proxy_url}（国外站代理优先，命中后缀 {foreign}）"
+        )
+    return _SharedTransport(inner)
+
+
+class _SharedTransport(httpx.AsyncBaseTransport):
+    """共享 transport 的每客户端薄壳：请求透传，关闭不穿透（基类 aclose 为 no-op）。"""
+
+    def __init__(self, inner: SmartProxyTransport) -> None:
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        return await self._inner.handle_async_request(request)
+
+
+_transport_cache: dict[ssl.SSLContext | bool, SmartProxyTransport] = {}
+"""按 verify 键进程级持有的共享 transport（模块级引用，防 GC/被关）。"""
 
 
 # maimaidx.jp 官方站 TLS 只下发叶子证书（缺 GlobalSign 中间件），httpx 严格校验
