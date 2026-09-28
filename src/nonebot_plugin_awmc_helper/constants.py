@@ -5,7 +5,9 @@ maimai-py 的 `Genre` 枚举值是日文分类，库未公开导出中文映射�
 """
 
 import re
+import unicodedata
 
+from zhconv import convert
 from maimai_py import (
     Genre,
     Version,
@@ -215,10 +217,6 @@ _t2s_cache: dict[str, str] = {}
 
 def normalize_text(text: str) -> str:
     """别名匹配归一：小写 + NFKC（全角→半角）+ 简体化（和制汉字简体输入兼容）。"""
-    import unicodedata
-
-    from zhconv import convert
-
     lowered = unicodedata.normalize("NFKC", text).lower()
     if lowered not in _t2s_cache:
         _t2s_cache[lowered] = convert(lowered, "zh-cn").translate(_T2S_SUPPLEMENT)
