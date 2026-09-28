@@ -144,7 +144,6 @@ PLATE_KIND_ZH: dict[str, str] = {
 PLATE_CHARS = "舞霸" + "".join(
     ch for ch, ver in plate_to_version.items() if ver <= current_version and ch != "初"
 )
-PLATE_KINDS = ("将", "者", "极", "神", "舞舞")
 
 # ---------------------------------------------------------------------------
 # 版本名 → Version（歌曲库日侧骨架用；只收录库表 divingfish_to_version 之外的

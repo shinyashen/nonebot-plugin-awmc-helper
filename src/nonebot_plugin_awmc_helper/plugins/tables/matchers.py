@@ -13,17 +13,17 @@ from .sheet import (
     _plate_completion_sheet,
     _plate_progress_overview,
 )
-from ...constants import PLATE_CHARS, PLATE_KINDS, DEFAULT_THEME, chart_display_id
+from ...constants import PLATE_CHARS, DEFAULT_THEME, chart_display_id
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.utils import parse_page, slow_notice, handle_errors
-from ...core.plates import is_valid_plate, plate_kinds_hint
+from ...core.plates import PLATE_KINDS, is_valid_plate, plate_kinds_hint
 from ...core.binding import session_keys, binding_service, service_display
 from ...core.render.score import DrawScore, score_list_height
 from ...core.render.tools import text_to_image, image_to_bytes
 
-# 牌种正则（牌子字符与牌种均取自 constants——PLATE_CHARS/PLATE_KINDS 与 core
-# 预渲染共用一份；正则交替最长优先，防将来新增牌种被单字牌种遮蔽）
+# 牌种正则（牌种并集取自 core.plates 单源；正则交替最长优先，
+# 防将来新增牌种被单字牌种遮蔽）
 PLATE_KIND_ALT = "|".join(sorted(PLATE_KINDS, key=len, reverse=True))
 
 LEVEL_RE = r"([0-9]+\+?)"

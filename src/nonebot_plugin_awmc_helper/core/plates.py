@@ -30,6 +30,15 @@ _SD_FIRST_PLATES = {"真": "初"}
 （库算）与「完成表」底图（本地算）会差出一整代曲目。"""
 
 
+PLATE_KINDS = tuple(
+    dict.fromkeys(
+        _DEFAULT_PLATE_KINDS
+        + tuple(k for kinds in _PLATE_KINDS_ROSTER.values() for k in kinds)
+    )
+)
+"""全部牌种字符并集（输入解析/正则用；各版本**真实牌单**见 :func:`plate_kinds`）。"""
+
+
 def plate_kinds(version: str) -> tuple[str, ...]:
     """该版本**真实存在**的牌种（牌单例外表；未知版本按四牌齐全兜底）。"""
     return _PLATE_KINDS_ROSTER.get(version, _DEFAULT_PLATE_KINDS)
