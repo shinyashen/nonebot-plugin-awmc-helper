@@ -134,11 +134,13 @@ async def test_update_arcade_count_atomic(tmp_db):
 async def test_save_song_aliases_dedupes(tmp_db):
     """远端源内同曲完全重复的别名（柚子数据实测存在）入库前精确去重。"""
     store = tmp_db
-    await store.save_song_aliases("yuzu", {8: ["糖糖", "糖糖", "真 Love"], 9: ["糖糖"]})
+    await store.save_song_aliases(
+        "yuzu", {8: ["糖糖", "糖糖", "会员制餐厅"], 624: ["糖糖"]}
+    )
     merged = await store.load_song_aliases(["yuzu"])
     assert len(merged[8]) == 2  # 重复对被去掉
-    assert set(merged[8]) == {"糖糖", "真 Love"}  # 存储层不保证顺序
-    assert merged[9] == ["糖糖"]
+    assert set(merged[8]) == {"糖糖", "会员制餐厅"}  # 存储层不保证顺序
+    assert merged[624] == ["糖糖"]
 
     # 整源替换：第二次写入覆盖第一次
     await store.save_song_aliases("yuzu", {8: ["糖糖"]})

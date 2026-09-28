@@ -40,53 +40,54 @@ def jp_view(monkeypatch):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 
     songs = [
-        # 旧版本 DX 曲（v=24000 → b35）：定数 13.0
+        # 旧版本 DX 曲（v=20500 → b35）：コネクト MASTER 真实定数 12.8
         make_song(
-            1,
-            "旧曲テスト",
+            21,
+            "コネクト",
+            diffs=[
+                make_diff(
+                    type=SongType.DX,
+                    level_index=LevelIndex.MASTER,
+                    level="12",
+                    level_value=12.8,
+                    version=20500,
+                )
+            ],
+        ),
+        # MAGiCAL 曲（v=27000 → b15）：物語はここから MASTER 真实定数 13.5
+        make_song(
+            2020,
+            "物語はここから",
+            version=27000,
             diffs=[
                 make_diff(
                     type=SongType.DX,
                     level_index=LevelIndex.MASTER,
                     level="13",
-                    level_value=13.0,
-                    version=24000,
-                )
-            ],
-        ),
-        # MAGiCAL 曲（v=27000 → b15）：定数 14.0
-        make_song(
-            2,
-            "新曲テスト",
-            version=27000,
-            diffs=[
-                make_diff(
-                    type=SongType.DX,
-                    level_index=LevelIndex.ReMASTER,
-                    level="14",
-                    level_value=14.0,
+                    level_value=13.5,
                     version=27000,
                 )
             ],
         ),
-        # SD/DX 折叠曲：SD master 12.0（旧）、DX master 13.7（新）
+        # SD/DX 折叠曲（真实老曲补 DX）：Believe the Rainbow——
+        # SD master 13.4（FiNALE 19999 → b35）、DX master 13.0（PRiSM PLUS → b15）
         make_song(
-            3,
-            "折曲",
+            835,
+            "Believe the Rainbow",
             diffs=[
                 make_diff(
                     type=SongType.STANDARD,
                     level_index=LevelIndex.MASTER,
-                    level="12",
-                    level_value=12.0,
-                    version=24000,
+                    level="13",
+                    level_value=13.4,
+                    version=19999,
                 ),
                 make_diff(
                     type=SongType.DX,
                     level_index=LevelIndex.MASTER,
-                    level="13+",
-                    level_value=13.7,
-                    version=27000,
+                    level="13",
+                    level_value=13.0,
+                    version=25500,
                 ),
             ],
         ),
@@ -120,9 +121,9 @@ def _records():
     from nonebot_plugin_awmc_helper.core.ext.net import NetRecord
 
     return [
-        # 旧曲 100.5% → ra = int(22.4 * 13.0 * 1.005)（b35）
+        # コネクト 100.5% → ra = int(22.4 * 12.8 * 1.005)（b35）
         NetRecord(
-            title="旧曲テスト",
+            title="コネクト",
             type="dx",
             difficulty="master",
             achievement=100.5,
@@ -131,20 +132,20 @@ def _records():
             fc="ap",
             fs=None,
         ),
-        # 新曲 100.0% → ra = int(21.6 * 14.0)（b15）
+        # 物語はここから 100.0% → ra = int(21.6 * 13.5)（b15）
         NetRecord(
-            title="新曲テスト",
+            title="物語はここから",
             type="dx",
-            difficulty="remaster",
+            difficulty="master",
             achievement=100.0,
             dx_score=1800,
             dx_score_total=2000,
             fc=None,
             fs="fsd",
         ),
-        # 折曲 DX master 13.7（v=27000 → b15）+ SD master 12.0（v=24000 → b35）
+        # Believe the Rainbow DX master 13.0 + SD master 13.4（老曲补 DX，真实双版本）
         NetRecord(
-            title="折曲",
+            title="Believe the Rainbow",
             type="dx",
             difficulty="master",
             achievement=100.5,
@@ -154,7 +155,7 @@ def _records():
             fs=None,
         ),
         NetRecord(
-            title="折曲",
+            title="Believe the Rainbow",
             type="standard",
             difficulty="master",
             achievement=98.0,
@@ -163,9 +164,9 @@ def _records():
             fc=None,
             fs=None,
         ),
-        # 未匹配（数据滞后）→ 跳过并 warning
+        # 未匹配（数据滞后）→ 跳过并 warning（构造条目）
         NetRecord(
-            title="不存在曲",
+            title="（构造）不在库曲",
             type="dx",
             difficulty="master",
             achievement=95.0,
@@ -182,27 +183,31 @@ async def test_build_b50_mapping_and_split(net_service, jp_view):
     all_scores = bests.scores
     assert len(all_scores) == 4  # 未匹配曲被跳过
 
-    old = next(s for s in all_scores if s.title == "旧曲テスト")
-    assert old.id == 1 + 10000  # DX 谱 id = 根 id + 10000
+    old = next(s for s in all_scores if s.title == "コネクト")
+    assert old.id == 21 + 10000  # DX 谱 id = 根 id + 10000
     assert old.dx_rating == int(
-        22.4 * 13.0 * 1.005
+        22.4 * 12.8 * 1.005
     )  # ra = int(c * ds * min(100.5, a)/100)
     assert old.rate.name == "SSSP"
     assert old.fc.name == "AP"
-    assert old.version == 24000
+    assert old.version == 20500
 
-    new = next(s for s in all_scores if s.title == "新曲テスト")
-    assert new.dx_rating == int(21.6 * 14.0)  # 100% → c=21.6, a=100
+    new = next(s for s in all_scores if s.title == "物語はここから")
+    assert new.dx_rating == int(21.6 * 13.5)  # 100% → c=21.6, a=100
     assert new.fs.name == "FSD"
 
-    assert {s.title for s in bests.scores_b15} == {"新曲テスト", "折曲"}
-    assert {s.title for s in bests.scores_b35} == {"旧曲テスト", "折曲"}
+    # b35/b15 用日服现行版本（current_version_jp = MAGiCAL 27000）划分：
+    # 仅物語はここから（27000）入 b15；835 新旧两体与コネクト全在 b35
+    assert {s.title for s in bests.scores_b15} == {"物語はここから"}
+    assert {s.title for s in bests.scores_b35} == {"コネクト", "Believe the Rainbow"}
     # SD 与 DX 是两条成绩（同曲折叠视图，谱面类型区分）
-    assert {s.type for s in bests.scores_b15} == {SongType.DX}
-    # rating = b35 + b15 的 ra 合计（折曲 SD 98% → c=20.3 × 12.0 × 0.98）
+    assert {s.type for s in bests.scores_b35} == {SongType.STANDARD, SongType.DX}
+    # rating = b35 + b15 的 ra 合计（835 SD 98% → c=20.3 × 13.4 × 0.98）
     assert bests.rating == bests.rating_b35 + bests.rating_b15
-    assert bests.rating_b35 == int(22.4 * 13.0 * 1.005) + int(20.3 * 12.0 * 0.98)
-    assert bests.rating_b15 == int(21.6 * 14.0) + int(22.4 * 13.7 * 1.005)
+    assert bests.rating_b35 == int(22.4 * 12.8 * 1.005) + int(20.3 * 13.4 * 0.98) + int(
+        22.4 * 13.0 * 1.005
+    )
+    assert bests.rating_b15 == int(21.6 * 13.5)
 
 
 @pytest.mark.asyncio
@@ -212,7 +217,7 @@ async def test_build_b50_sorted_and_capped(net_service, jp_view):
 
     records = [
         NetRecord(
-            title="旧曲テスト",
+            title="コネクト",
             type="dx",
             difficulty="master",
             achievement=100.5,
@@ -222,7 +227,7 @@ async def test_build_b50_sorted_and_capped(net_service, jp_view):
         for i in range(40)
     ]
     bests = await net_service.build_b50(records)
-    # 全部映射到同一谱面（标题相同）→ b35 35 条（v=24000），b15 空
+    # 全部映射到同一谱面（标题相同）→ b35 35 条（v=20500），b15 空
     assert len(bests.scores_b35) == 35
     assert bests.scores_b15 == []
     ratings = [s.dx_rating for s in bests.scores_b35]
@@ -246,7 +251,7 @@ async def test_title_index_with_none_fingerprint(net_service, jp_view, monkeypat
     index = await net_service._title_index_map()
     assert index  # 空索引未误命中：已按 JP 视图构建
     chart = net_service._resolve_chart(index, _records()[0])
-    assert chart is not None  # 「旧曲テスト」可匹配
+    assert chart is not None  # 「コネクト」可匹配
 
 
 @pytest.mark.asyncio
@@ -646,7 +651,7 @@ async def test_b50_net_command(app: App, db, net_service, jp_view, monkeypatch):
         name="Ｔｅｆｇ",  # 全角字符（真实玩家名形态）
         rating=10516,
         icon_url=None,
-        trophy_name="テスト称号",
+        trophy_name="アウラ、フルコンしろ。",
         trophy_color="Normal",
     )
 
@@ -739,7 +744,7 @@ async def test_minfo_net_command(app: App, db, net_service, jp_view, monkeypatch
     assert not from_cache
     _scores2, from_cache2 = await net_service.get_scores(binding)
     assert from_cache2  # minfo 查询时命中缓存（不发抓取提示、0 请求）
-    song = next(s for s in jp_view if s.title == "旧曲テスト")
+    song = next(s for s in jp_view if s.title == "コネクト")
     expected_png = song_play_data(
         song,
         [s for s in scores if s.id % 10000 == song.id],
@@ -747,7 +752,7 @@ async def test_minfo_net_command(app: App, db, net_service, jp_view, monkeypatch
         theme="prism_plus",
         prefer_type=None,
     )
-    event = fake_private_message_event_v11(message="minfo 旧曲テスト", user_id=12345678)
+    event = fake_private_message_event_v11(message="minfo コネクト", user_id=12345678)
     async with app.test_matcher(score_query.minfo) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot_get_adapter())
         ctx.receive_event(bot, event)

@@ -33,10 +33,10 @@ async def test_get_status(yuzu_mock, yuzu_ext):
     yuzu_mock.get(f"{BASE}/aliases/maimaidx/votes").respond(
         json=[
             {
-                "song_id": 231,
-                "apply_alias": "企鹅",
+                "song_id": 8,
+                "apply_alias": "糖糖",
                 "tag": "ABC123",
-                "name": "PENGUIN",
+                "name": "True Love Song",
                 "created_at": "2026-09-21",
                 "agree_votes": 3,
                 "votes": 10,
@@ -45,7 +45,7 @@ async def test_get_status(yuzu_mock, yuzu_ext):
     )
     votes = await yuzu_ext.yuzu_client.get_status()
     assert len(votes) == 1
-    assert votes[0].song_id == 231
+    assert votes[0].song_id == 8
     assert votes[0].tag == "ABC123"
     assert votes[0].agree_votes == 3
 
@@ -54,16 +54,16 @@ async def test_get_status(yuzu_mock, yuzu_ext):
 async def test_get_alias(yuzu_mock, yuzu_ext):
     yuzu_mock.get(f"{BASE}/aliases/maimaidx/aliases").respond(
         json={
-            "song_id": 231,
-            "name": "PENGUIN",
+            "song_id": 8,
+            "name": "True Love Song",
             "is_votable": True,
-            "alias": ["penguin"],
+            "alias": ["糖糖"],
         }
     )
-    alias = await yuzu_ext.yuzu_client.get_alias(231)
+    alias = await yuzu_ext.yuzu_client.get_alias(8)
     assert alias is not None
-    assert alias.has("PENGUIN")  # 大小写不敏感
-    assert not alias.has("企鹅")
+    assert alias.has("糖糖")  # 大小写不敏感
+    assert not alias.has("真爱")  # 未收录别名（真爱的真实柚子别名，不在此响应内）
 
     # MessageResult 形态 → None
     yuzu_mock.get(f"{BASE}/aliases/maimaidx/aliases").respond(
@@ -103,13 +103,13 @@ async def test_apply_and_agree(yuzu_mock, yuzu_ext):
     apply_route = yuzu_mock.post(f"{BASE}/aliases/maimaidx/apply").respond(
         json={"message": "申请已提交"}
     )
-    msg = await yuzu_ext.yuzu_client.apply_alias(231, "企鹅", "10001", "20001")
+    msg = await yuzu_ext.yuzu_client.apply_alias(8, "糖糖", "10001", "20001")
     assert msg == "申请已提交"
     import json as j
 
     sent = j.loads(apply_route.calls.last.request.content)
-    assert sent["song_id"] == 231
-    assert sent["apply_alias"] == "企鹅"
+    assert sent["song_id"] == 8
+    assert sent["apply_alias"] == "糖糖"
     assert sent["apply_uid"] == "10001"
     assert sent["group_id"] == "20001"
 
@@ -130,7 +130,7 @@ async def test_error_mapping(yuzu_mock, yuzu_ext):
     from nonebot_plugin_awmc_helper.core.ext import ExtError
 
     with pytest.raises(ExtError, match="别名已存在"):
-        await yuzu_ext.yuzu_client.apply_alias(231, "x", "1", "1")
+        await yuzu_ext.yuzu_client.apply_alias(8, "x", "1", "1")
 
 
 def test_iter_sse_parsing(yuzu_ext):
@@ -168,7 +168,7 @@ async def test_sse_runner_pushes_apply(yuzu_mock, yuzu_ext):
     """SSE 常驻协程：收到 alias/Apply 事件触发回调。"""
     sse_payload = (
         'event: alias\nid: 1\ndata: {"type": "Apply", "status": '
-        '[{"song_id": 231, "apply_alias": "企鹅", "tag": "T1",'
+        '[{"song_id": 8, "apply_alias": "糖糖", "tag": "T1",'
         ' "agree_votes": 0, "votes": 10}]}\n\n'
     )
     yuzu_mock.get(f"{BASE}/events").respond(
@@ -191,4 +191,4 @@ async def test_sse_runner_pushes_apply(yuzu_mock, yuzu_ext):
     except (asyncio.TimeoutError, asyncio.CancelledError):
         pass
     assert received
-    assert received[0].status[0].song_id == 231
+    assert received[0].status[0].song_id == 8

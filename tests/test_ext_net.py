@@ -85,11 +85,14 @@ NAMEPLATE_DEFAULT_PAGE = """
 """
 
 
+# 记录页为 dxrating 版式最小构造（真实记录页含个人成绩，不入库，见 AGENTS.md
+# 规则 5 与测试数据方针）；曲目锚定为真实曲（物語はここから/True Love Song），
+# 达成率等成绩数值按「真实曲目 + 合理值」口径。
 RECORD_PAGE = """
 <html><body><div class="wrapper">
 <form id="f1"><div class="w_450 m_15 p_r f_0">
   <img class="music_kind_icon" src="/maimai-mobile/img/Music/music_dx.png">
-  <div class="music_name_block">テスト曲</div>
+  <div class="music_name_block">物語はここから</div>
   <img class="h_20 f_l" src="/maimai-mobile/img/diff_master.png">
   <div class="music_score_block w_112">100.5000%</div>
   <div class="music_score_block w_190">1,234,567 / 2,000,000</div>
@@ -98,7 +101,7 @@ RECORD_PAGE = """
 <form id="f2"><div class="w_450 m_15 p_r f_0">
   <img class="music_kind_icon" src="/maimai-mobile/img/Music/music_dx.png">
   <div class="music_kind_icon_standard _btn_on"></div>
-  <div class="music_name_block">標準曲</div>
+  <div class="music_name_block">True Love Song</div>
   <img class="h_20 f_l" src="/maimai-mobile/img/diff_expert.png">
   <div class="music_score_block w_112">99.1234%</div>
   <div class="music_score_block w_190">500,000 / 1,000,000</div>
@@ -150,7 +153,7 @@ async def test_parse_record_block(net_ext):
     assert len(records) == 2  # 坏块（无达成率）被跳过
 
     dx = records[0]
-    assert dx.title == "テスト曲"
+    assert dx.title == "物語はここから"
     assert dx.type == "dx"
     assert dx.difficulty == "master"
     assert dx.achievement == 100.5
@@ -180,7 +183,7 @@ async def test_login_and_fetch(net_mock, net_ext):
     finally:
         await client.aclose()
     assert len(records) == 10  # 5 页 × 2 有效块
-    assert {r.title for r in records} == {"テスト曲", "標準曲"}
+    assert {r.title for r in records} == {"物語はここから", "True Love Song"}
 
 
 @pytest.mark.asyncio
@@ -246,7 +249,7 @@ async def test_achievement_out_of_range_dropped(net_ext):
     """达成率越界（>101）的块整条丢弃（dxrating validateAchievement 同语义）。"""
     page = RECORD_PAGE.replace("100.5000%", "200.0000%")
     records = net_ext._parse_music_records(page)
-    assert [r.title for r in records] == ["標準曲"]
+    assert [r.title for r in records] == ["True Love Song"]
 
 
 def test_parse_player_identity(net_ext):
