@@ -68,11 +68,6 @@ def plate_table_dir() -> Path:
     return assets.static_path() / "mai" / "plate_table"
 
 
-def _generate_bg(height: int, separator_height: int) -> Image.Image:
-    """NB UpdateTable._generate_bg：三色渐变 + 装饰层 + 分割线。"""
-    return generate_prism_bg(height, separator_height)
-
-
 def _credit(im: Image.Image, height: int) -> None:
     ImageDraw.Draw(im).text(
         (700, height - 75),
@@ -95,7 +90,9 @@ def _rating_grid(
         current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
     height = current_y + 230
 
-    im = generate_frosted_card(_generate_bg(height, 360), (50, 404, 1350, current_y))
+    im = generate_frosted_card(
+        generate_prism_bg(height, 360), (50, 404, 1350, current_y)
+    )
     dr = ImageDraw.Draw(im)
 
     _credit(im, height)
@@ -150,7 +147,7 @@ def _rating_grid_15(
     lines = count // LV15_COLS + (1 if count % LV15_COLS else 0)
     height = 650 + lines * LV15_ROW_STEP
 
-    im = _generate_bg(height, 360)
+    im = generate_prism_bg(height, 360)
     dr = ImageDraw.Draw(im)
     _credit(im, height)
 
@@ -243,7 +240,9 @@ def _plate_grid(
         current_y += rows * PLATE_ROW_STEP + PLATE_GROUP_GAP
     height = current_y + 180
 
-    im = generate_frosted_card(_generate_bg(height, 400), (50, 444, 1350, current_y))
+    im = generate_frosted_card(
+        generate_prism_bg(height, 400), (50, 444, 1350, current_y)
+    )
     dr = ImageDraw.Draw(im)
     if pages is not None:
         dr.text(
