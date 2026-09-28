@@ -54,13 +54,20 @@ class UserScoreError(Exception):
     """查分业务错误，message 为面向用户的文案。"""
 
 
-_DF_CREDENTIAL_HINT = (
-    "该水鱼账号的凭据不可用（未授权或 token 已在水鱼侧重置）：\n"
-    "请发送「绑定水鱼」完成授权（推荐，约 1 分钟），\n"
-    "或「绑定水鱼token <Import-Token>」换绑后重试"
-    "（获取：水鱼个人页 → 设置 → Import-Token）"
+_DF_OAUTH_HINT = (
+    "该水鱼账号未授权本 bot 查询成绩：\n请发送「绑定水鱼」完成授权（推荐，约 1 分钟）"
 )
-"""全量路径凭据失败的统一收口文案（Q50：不做跨凭据回落，一跳定论）。"""
+"""全量路径**未授权**（consent_required）收口文案：subject 路径的失败形态
+（oauth=1 用户 consent 被撤、或无 token 档的公开键 subject 尝试未命中快照）。"""
+
+_DF_TOKEN_HINT = (
+    "水鱼 Import-Token 已失效（可能已在水鱼侧重置）：\n"
+    "请发送「绑定水鱼token <新token>」换绑\n"
+    "（获取：水鱼个人页 → 设置 → Import-Token），\n"
+    "或发送「绑定水鱼」改用授权绑定（推荐，全功能可用）"
+)
+"""全量路径 **token 失效**（400「导入token有误」）收口文案：路由到 token 的
+绑定专属——两类失败凭路由天然可分，各自给最直接的行动指引。"""
 
 
 def _has_scores(
@@ -208,9 +215,10 @@ class ScoreService:
 
         10-01 后定稿（Q50）：全量成绩没有公开键形态（developer 端点已从库中
         删除，``full_identifier`` 又按绑定标志确定性路由 subject/token），故
-        不做任何跨凭据/公开键回落——未授权（consent_required）与 token 已重置
-        （「导入token有误」400）统一给可行动文案。单曲查询无公开键形态也无需
-        凭据回退（get_minfo 自带专项文案）。
+        不做任何跨凭据/公开键回落——失败按异常类型区分收口：未授权
+        （PlayerNotAuthorizedError）与 token 已重置（「导入token有误」400）各自
+        给最直接的行动指引。单曲查询无公开键形态也无需凭据回退（get_minfo
+        自带专项文案）。
         """
         try:
             return await self._run(
@@ -220,11 +228,13 @@ class ScoreService:
                 propagate_identifier_error=True,
             )
         except PlayerNotAuthorizedError as e:
-            raise UserScoreError(_DF_CREDENTIAL_HINT) from e
+            raise UserScoreError(_DF_OAUTH_HINT) from e
         except InvalidPlayerIdentifierError as e:
             if binding.service != SERVICE_DIVINGFISH:
                 raise _map_error(e) from e  # 落雪：维持「没有找到」既有语义
-            raise UserScoreError(_DF_CREDENTIAL_HINT) from e
+            # 路由到 token 的绑定 401 合流＝token 已在水鱼侧重置（授权缺失走
+            # PlayerNotAuthorizedError 分支，两类失败凭路由天然可分）
+            raise UserScoreError(_DF_TOKEN_HINT) from e
 
     async def get_player(self, binding: UserBinding, notify_slow=None):
         self._guard_cn(binding)

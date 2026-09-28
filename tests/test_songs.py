@@ -294,10 +294,10 @@ async def test_jp_attribute_fallbacks(songs):
 async def test_load_passes_curve_provider(db, monkeypatch):
     """load() 接线：曲库 / 别名 / 水鱼曲线三 provider 一并传入 client.songs。"""
     from mocks import sample_songs
+    from maimai_py import DivingFishProvider
 
     from nonebot_plugin_awmc_helper.core import client as client_mod
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.provider import DivingFishCurveProvider
 
     captured = {}
 
@@ -313,7 +313,34 @@ async def test_load_passes_curve_provider(db, monkeypatch):
     assert await song_service.load() is True
     assert captured["provider"] is not None
     assert captured["alias_provider"] is not None
-    assert isinstance(captured["curve_provider"], DivingFishCurveProvider)
+    assert type(captured["curve_provider"]) is DivingFishProvider
+
+
+@pytest.mark.asyncio
+async def test_load_curves_failure_degrades(db, monkeypatch):
+    """曲线失败不拖垮曲库加载：本轮无曲线重载成功（下轮 load 才重试曲线）。"""
+    from mocks import sample_songs
+
+    from nonebot_plugin_awmc_helper.core import client as client_mod
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    class _FakeSongs:
+        async def get_all(self):
+            return sample_songs()
+
+    calls: list[dict] = []
+
+    async def fake_songs(**kwargs):
+        calls.append(kwargs)
+        if "curve_provider" in kwargs:  # 曲线与曲表同 gather：曲线炸＝整次装载炸
+            raise RuntimeError("chart_stats down")
+        return _FakeSongs()
+
+    monkeypatch.setattr(client_mod.client, "songs", fake_songs)
+    assert await song_service.load() is True
+    assert len(calls) == 2
+    assert "curve_provider" in calls[0]
+    assert "curve_provider" not in calls[1]
 
 
 @pytest.fixture

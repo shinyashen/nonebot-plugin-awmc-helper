@@ -184,14 +184,14 @@ async def test_scores_full_unauthorized_copy(db, songs, oauth):
             status_code=400,
             json={"error": "consent_required", "error_description": "not consented"},
         )
-        with pytest.raises(UserScoreError, match="绑定水鱼"):
+        with pytest.raises(UserScoreError, match="未授权本 bot"):
             await score_service.get_scores_all(binding)
 
 
 @pytest.mark.asyncio
 async def test_scores_reset_token_copy(db, songs, oauth):
     """oauth=0 纯 token 用户：token 已在水鱼侧重置（400 导入token有误）→
-    同一条收口文案（不做跨凭据回落）。"""
+    token 专属收口文案（与未授权文案区分，不做跨凭据回落）。"""
     from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
@@ -201,7 +201,7 @@ async def test_scores_reset_token_copy(db, songs, oauth):
         records_route = m.get(f"{BASE_DF}/player/records").respond(
             status_code=400, json={"message": "导入token有误", "status": "error"}
         )
-        with pytest.raises(UserScoreError, match="绑定水鱼"):
+        with pytest.raises(UserScoreError, match="Import-Token 已失效"):
             await score_service.get_scores_all(binding)
     assert records_route.called
 

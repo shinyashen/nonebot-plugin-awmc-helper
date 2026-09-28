@@ -15,7 +15,15 @@ from datetime import datetime
 from dataclasses import asdict, fields
 
 from nonebot import logger, get_driver
-from maimai_py import Song, Genre, SongType, LevelIndex, MaimaiSongs, SongDifficulty
+from maimai_py import (
+    Song,
+    Genre,
+    SongType,
+    LevelIndex,
+    MaimaiSongs,
+    SongDifficulty,
+    DivingFishProvider,
+)
 from maimai_py.models import SongDifficulties, SongDifficultyUtage
 from nonebot_plugin_apscheduler import scheduler
 
@@ -27,7 +35,6 @@ from .provider import (
     AwmcSongProvider,
     ListSongProvider,
     AwmcAliasProvider,
-    DivingFishCurveProvider,
     songs_list_digest,
 )
 from ..constants import (
@@ -47,8 +54,10 @@ CN_POLL_STATE_KEY = "cn_poll_state"
 # chart_stats。规范表重建后 provider 指纹变化 → maimai_py 自动重建缓存。
 _SONG_PROVIDER = AwmcSongProvider(scope="cn")
 _ALIAS_PROVIDER = AwmcAliasProvider(yuzu_provider, lxns_provider)
-_CURVE_PROVIDER = DivingFishCurveProvider()
-"""曲线 provider：增强数据，拉取失败自动降级为无曲线（不影响曲库可用性）。"""
+_CURVE_PROVIDER = DivingFishProvider()
+"""曲线 provider：上游原生实例（fc_dist 解析已随 1.6.0/PR #64 修复）。曲线是
+增强数据，拉取失败由 :meth:`SongService.load` 降级为无曲线重载，不影响曲库
+可用性——不在这里包异常，因为曲线与曲表同处 configure 的一个 gather。"""
 
 
 def _convert_curve_dict(curve: dict[str, Any] | None) -> None:
@@ -254,11 +263,23 @@ class SongService:
         """加载曲库（规范表构造 + 别名 + 水鱼曲线）。成功后例行写快照；失败降级快照。"""
         started = time.monotonic()
         try:
-            songs = await client.songs(
-                provider=_SONG_PROVIDER,
-                alias_provider=_ALIAS_PROVIDER,
-                curve_provider=_CURVE_PROVIDER,
-            )
+            try:
+                songs = await client.songs(
+                    provider=_SONG_PROVIDER,
+                    alias_provider=_ALIAS_PROVIDER,
+                    curve_provider=_CURVE_PROVIDER,
+                )
+            except Exception as curve_err:
+                # 曲线是增强数据：拉取失败不拖垮曲库加载。曲线与曲表同处
+                # configure 的一个 gather，异常会中止整次装载且**不写任何缓存**
+                # ——直接无曲线重载即可；带/无曲线是两个缓存键，下轮 load 必然
+                # 重试曲线。（重载可能与首轮未完成的别名合并并发一次，幂等无害）
+                logger.warning(
+                    f"水鱼曲线（chart_stats）拉取失败，本轮降级无曲线加载：{curve_err}"
+                )
+                songs = await client.songs(
+                    provider=_SONG_PROVIDER, alias_provider=_ALIAS_PROVIDER
+                )
             all_songs = await songs.get_all()
             if not all_songs:
                 # 规范表未初始化（离线首启）等场景：空数据按失败处理走降级

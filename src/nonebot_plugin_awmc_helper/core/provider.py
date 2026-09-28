@@ -16,14 +16,12 @@ import asyncio
 import hashlib
 
 from nonebot import logger
-from maimai_py import SongType, CurveObject, DivingFishProvider
 from maimai_py.models import Song
 from maimai_py.providers.base import ISongProvider, IAliasProvider
 from maimai_py.providers.lxns import LXNSProvider
 from maimai_py.providers.yuzu import YuzuProvider
 
 from . import store, songdb
-from .http import create_smart_client
 from .songdb import Scope
 from ..constants import DX_ID_OFFSET, normalize_text, strip_chart_prefix
 
@@ -169,52 +167,3 @@ class AwmcAliasProvider(IAliasProvider):
 
     def _hash(self) -> str:
         return self._fingerprint or "empty"
-
-
-class DivingFishCurveProvider(DivingFishProvider):
-    """水鱼 chart_stats 曲线 provider（拟合定数/游玩分布，查歌「擬」行与统计卡）。
-
-    反序列化自 maimai-py 1.6.0 起已修正（独立 ``fc_dist`` 字段 + 旧合并式 dist
-    兜底，本项目 PR #64 上游化），``_deser_curve`` 直接继承、不再自建。保留子类
-    的唯一理由是**失败降级语义**：上游 ``get_curves`` 失败直接抛异常会拖垮整库
-    加载，而曲线只是增强数据——失败返回空表，挥发哈希保证下轮曲库加载必然重试。
-
-    - 档位口径（2026-09 全量实测核对）：``dist`` 为 14 档达成率分布，升序
-      D..SSSP；``fc_dist`` 为 5 档 [未FC, FC, FCP, AP, APP]；
-    - 每曲列表按谱面槽位升序，无样本/不存在的槽以 ``{}`` 占位且只出现在尾部
-      （全量校验 0 例中间空位），过滤后按位对齐谱面是安全的。
-    """
-
-    _OK_HASH = "divingfish-curve"
-    """拉取成功后的稳定哈希（与曲库指纹共同参与 maimai_py 缓存键）。"""
-
-    def __init__(
-        self, base_url: str = "https://www.diving-fish.com/api/maimaidxprober/"
-    ):
-        super().__init__()
-        self.base_url = base_url
-        self._hash_value = self._OK_HASH
-
-    async def get_curves(self, client) -> dict[tuple[int, SongType], list[CurveObject]]:
-        # 曲线是增强数据：失败返回空表降级（不拖垮曲库加载），哈希随失败变化
-        # 以保证下次曲库加载必然重试（成功后回到稳定哈希）。
-        # 自持短命客户端（songdb 补充文档同款）：不碰 MaimaiClient 私有实例
-        try:
-            async with create_smart_client(timeout=30) as http:
-                resp = await http.get(self.base_url + "chart_stats")
-            resp.raise_for_status()
-            charts = resp.json()["charts"]
-        except Exception as e:
-            logger.warning(f"水鱼曲线（chart_stats）拉取失败，本轮曲库无拟合数据：{e}")
-            self._hash_value = f"divingfish-curve-failed-{time.monotonic()}"
-            return {}
-        self._hash_value = self._OK_HASH
-        return {
-            (int(idx) % DX_ID_OFFSET, SongType._from_id(int(idx))): [
-                self._deser_curve(chart) for chart in curve_list if chart != {}
-            ]
-            for idx, curve_list in charts.items()
-        }
-
-    def _hash(self) -> str:
-        return self._hash_value
