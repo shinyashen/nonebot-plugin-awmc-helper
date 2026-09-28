@@ -221,5 +221,5 @@ async def test_run_fallback_retry_uses_refreshed_ident(db, monkeypatch):
 
         return factory
 
-    assert await score_service._run_with_public_fallback(binding, make) == "ok"
+    assert await score_service._run_full(binding, make) == "ok"
     assert attempts == [old_token, new_token]

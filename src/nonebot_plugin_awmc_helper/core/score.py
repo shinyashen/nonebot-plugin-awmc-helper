@@ -33,9 +33,11 @@ if TYPE_CHECKING:
 from .ext import ExtError
 from .calc import build_bests
 from .songs import song_service
-from .client import client, divingfish_provider
+from .client import client, divingfish_provider, divingfish_public_provider
 from .binding import (
     SERVICE_NET,
+    SERVICE_LXNS,
+    SERVICE_DIVINGFISH,
     NET_UNSUPPORTED_HINT,
     UserBinding,
     BindingError,
@@ -50,6 +52,15 @@ __all__ = ["UserScoreError", "build_bests", "score_service"]
 
 class UserScoreError(Exception):
     """查分业务错误，message 为面向用户的文案。"""
+
+
+_DF_CREDENTIAL_HINT = (
+    "该水鱼账号的凭据不可用（未授权或 token 已在水鱼侧重置）：\n"
+    "请发送「绑定水鱼」完成授权（推荐，约 1 分钟），\n"
+    "或「绑定水鱼token <Import-Token>」换绑后重试"
+    "（获取：水鱼个人页 → 设置 → Import-Token）"
+)
+"""全量路径凭据失败的统一收口文案（Q50：不做跨凭据回落，一跳定论）。"""
 
 
 def _has_scores(
@@ -72,12 +83,11 @@ def _map_error(e: Exception) -> UserScoreError:
     if isinstance(e, ExtError):
         return UserScoreError(str(e))
     if isinstance(e, PlayerNotAuthorizedError):
-        # 水鱼 OAuth 未授权（consent_required 与「用户不存在」服务端有意不可区分，
-        # 文案只引导绑定）；大多在 scores/plates 层被回退逻辑消化，此处兜底
+        # 水鱼 OAuth 未授权（consent_required 与「用户不存在」服务端有意不可区分）；
+        # scores/plates 层有单条文案收口，b50 有公开键回退，此处是漏网兜底
         return UserScoreError(
             "该水鱼账号未授权本 bot 查询成绩：\n"
-            "全量成绩请补录「绑定水鱼token <Import-Token>」恢复（b50 不受影响）；\n"
-            "账号授权绑定即将上线，届时按指引绑定后全功能可用"
+            "请发送「绑定水鱼」完成授权（推荐，约 1 分钟）"
         )
     if isinstance(e, RateLimitError):
         return UserScoreError("水鱼今日查询配额已用完（按 UTC 日重置），请明天再试")
@@ -92,14 +102,9 @@ def _map_error(e: Exception) -> UserScoreError:
             "落雪请在 落雪查分器 → 隐私设置 中允许通过好友码查询"
         )
     if isinstance(e, InvalidDeveloperTokenError):
-        if "sunset" in str(e):
-            # maimai_py 对 developer 端点 410 的映射（2026-10-01 日落）
-            return UserScoreError(
-                "水鱼开发者接口已于 2026-10-01 停止服务：\n"
-                "全量成绩（牌子/表格/ap50）请补录「绑定水鱼token <Import-Token>」恢复\n"
-                "（获取：水鱼个人页 → 设置 → Import-Token）；b50 不受影响"
-            )
-        return UserScoreError("机器人开发者令牌无效或缺失，请联系管理员检查部署配置")
+        # 1.6.0 起 dev 端点及其 410 映射已从库中删除，此异常只剩 OAuth 应用凭据
+        # 缺失/无效（换票被拒、scope 未获批）一类部署问题
+        return UserScoreError("水鱼 OAuth 应用凭据无效或缺失，请联系管理员检查部署配置")
     if isinstance(e, InvalidPlateError):
         return UserScoreError(
             "牌子名称有误，请检查版本与牌种（如：真将 / 樱极 / 舞舞）"
@@ -120,10 +125,20 @@ class ScoreService:
         if binding.service == SERVICE_NET:
             raise UserScoreError(NET_UNSUPPORTED_HINT)
 
-    async def _run(self, binding: UserBinding | None, make_coro, notify_slow=None):
+    async def _run(
+        self,
+        binding: UserBinding | None,
+        make_coro,
+        notify_slow=None,
+        *,
+        propagate_identifier_error: bool = False,
+    ):
         """统一执行 maimai-py 查询：异常映射 + 落雪 token 过期自动续期重试。
 
         ``make_coro`` 是无参协程工厂，重试时重新装配 identifier（token 已刷新）。
+        ``propagate_identifier_error``：401 合流异常（InvalidPlayerIdentifierError，
+        水鱼即 token 已重置/凭据身份不存在）不做映射直接上抛，由调用方单条文案
+        收口——仅对**非落雪**绑定生效，落雪恒走下方续期阶梯。
         入口先做落雪 token 预检（JWT exp 已过/临近则先续期，省掉必败首跳；
         best-effort 不上抛）。续期成功后走 :meth:`_retry_after_refresh` 阶梯
         （落雪对新令牌的生效有短延迟，见 local/QUESTIONS.md Q43）；
@@ -138,13 +153,15 @@ class ScoreService:
             raise UserScoreError(str(e)) from e
         except PlayerNotAuthorizedError:
             # 水鱼 OAuth 未授权：不在 _run 内吃掉——它常意味着换一条凭据路径
-            # 仍有戏（scores/plates 回退公开键），由调用方决定回退或映射文案
+            # 仍有戏（b50 回退公开键），由调用方决定回退或映射文案
             raise
         except (MaimaiPyError, httpx.RequestError) as e:
             if binding is None:
                 raise _map_error(e) from e
             if not isinstance(e, InvalidPlayerIdentifierError):
                 raise _map_error(e) from e
+            if propagate_identifier_error and binding.service != SERVICE_LXNS:
+                raise
             status = await binding_service.refresh_lxns(binding)
             if status == "refreshed":
                 return await self._retry_after_refresh(make_coro, e, notify_slow)
@@ -182,31 +199,32 @@ class ScoreService:
         logger.warning(f"落雪续期后阶梯重试（0/5/10s）仍 401：{last!r}")
         raise UserScoreError("落雪查分器暂时无法访问，请一分钟后再试") from last
 
-    async def _run_with_public_fallback(
-        self, binding: UserBinding, make, notify_slow=None
-    ):
-        """凭据形态回退收口（get_scores_all/get_plates 逐行同构）。
+    async def _run_full(self, binding: UserBinding, make, notify_slow=None):
+        """全量成绩路径收口（get_scores_all/get_plates 共用）：完整凭据一跳。
 
         ``make(get_ident)`` 收到的是标识**装配函数**而非实例：工厂每次调用
         重新装配 identifier，401 续期后的阶梯重试才能用上新 token（预检救活
         首跳，生效延迟窗口内的重试靠这里保证不拿旧凭据硬撞）。
-        先用完整标识（OAuth subject / Import-Token）执行 ``make``；
-        PlayerNotAuthorizedError（未覆盖补齐名单）回退公开键重试——developer
-        端点日落后的迁移语义，指引补录 Import-Token，比裸「未授权」更有行动
-        价值。单曲查询无公开键形态，不走此处（get_minfo 专项文案）。
+
+        10-01 后定稿（Q50）：全量成绩没有公开键形态（developer 端点已从库中
+        删除，``full_identifier`` 又按绑定标志确定性路由 subject/token），故
+        不做任何跨凭据/公开键回落——未授权（consent_required）与 token 已重置
+        （「导入token有误」400）统一给可行动文案。单曲查询无公开键形态也无需
+        凭据回退（get_minfo 自带专项文案）。
         """
         try:
             return await self._run(
                 binding,
                 make(lambda: binding_service.full_identifier(binding)),
                 notify_slow=notify_slow,
+                propagate_identifier_error=True,
             )
-        except PlayerNotAuthorizedError:
-            return await self._run(
-                binding,
-                make(lambda: binding_service.identifier(binding, with_oauth=False)),
-                notify_slow=notify_slow,
-            )
+        except PlayerNotAuthorizedError as e:
+            raise UserScoreError(_DF_CREDENTIAL_HINT) from e
+        except InvalidPlayerIdentifierError as e:
+            if binding.service != SERVICE_DIVINGFISH:
+                raise _map_error(e) from e  # 落雪：维持「没有找到」既有语义
+            raise UserScoreError(_DF_CREDENTIAL_HINT) from e
 
     async def get_player(self, binding: UserBinding, notify_slow=None):
         self._guard_cn(binding)
@@ -237,14 +255,31 @@ class ScoreService:
         if binding.service == SERVICE_NET:
             return await self._get_b50_net(binding)
         await song_service.ensure_loaded()
-        return await self._run(
-            binding,
-            lambda: client.bests(
-                binding_service.identifier(binding),
-                provider=binding_service.provider(binding),
-            ),
-            notify_slow=notify_slow,
-        )
+
+        def make(get_ident, get_provider):
+            return lambda: client.bests(get_ident(), provider=get_provider())
+
+        try:
+            return await self._run(
+                binding,
+                make(
+                    lambda: binding_service.identifier(binding),
+                    lambda: binding_service.provider(binding),
+                ),
+                notify_slow=notify_slow,
+            )
+        except PlayerNotAuthorizedError:
+            # 1.6.0 起 subject 走 Bearer b50（公开 /query/player 不收 subject）：
+            # 未授权用户回退公开键 + 无凭据 provider——无凭据是必须的，否则裸
+            # username 会被拼成 username: subject 再走 Bearer，回退必败
+            return await self._run(
+                binding,
+                make(
+                    lambda: binding_service.identifier(binding, with_oauth=False),
+                    lambda: divingfish_public_provider,
+                ),
+                notify_slow=notify_slow,
+            )
 
     async def get_minfo_net(
         self, binding: UserBinding, song: Song, song_type: SongType | None = None
@@ -265,9 +300,10 @@ class ScoreService:
     async def get_scores_all(
         self, binding: UserBinding, notify_slow=None
     ) -> MaimaiScores:
-        """全量成绩（牌子 / ap50 / 表格的基础）：Import-Token 优先。
+        """全量成绩（牌子 / ap50 / 表格的基础）：凭据按绑定标志确定性路由。
 
-        无 Import-Token 时尝试 OAuth subject（未覆盖用户回退公开键 → 迁移文案）。
+        失败（未授权 / token 已在水鱼侧重置）由 :meth:`_run_full` 单条可行动
+        文案收口。
         """
         self._guard_cn(binding)
         await song_service.ensure_loaded()
@@ -280,18 +316,27 @@ class ScoreService:
 
             return factory
 
-        return await self._run_with_public_fallback(binding, make, notify_slow)
+        return await self._run_full(binding, make, notify_slow)
 
     async def get_b50_by_username(
         self, username: str
     ) -> tuple["DivingFishPlayer", MaimaiScores]:
-        """水鱼公开代查：b50 <水鱼用户名>（无需绑定）。"""
+        """水鱼公开代查：b50 <水鱼用户名>（无需绑定）。
+
+        必须用无凭据 provider（:data:`divingfish_public_provider`）：1.6.0 起
+        配了 client 凭据的 provider 会把裸 username 拼成 ``username:`` subject
+        走 Bearer，对未授权的陌生人必然 consent_required。
+        """
         ident = PlayerIdentifier(username=username)
         player, bests = await asyncio.gather(
             self._run(
-                None, lambda: client.players(ident, provider=divingfish_provider)
+                None,
+                lambda: client.players(ident, provider=divingfish_public_provider),
             ),
-            self._run(None, lambda: client.bests(ident, provider=divingfish_provider)),
+            self._run(
+                None,
+                lambda: client.bests(ident, provider=divingfish_public_provider),
+            ),
         )
         return player, bests  # type: ignore[return-value]
 
@@ -354,9 +399,10 @@ class ScoreService:
     async def get_plates(
         self, binding: UserBinding, plate: str, notify_slow=None
     ) -> MaimaiPlates:
-        """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，Import-Token 优先。
+        """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，凭据按绑定标志路由。
 
-        无 Import-Token 时尝试 OAuth subject（未覆盖用户回退公开键 → 迁移文案）。
+        失败（未授权 / token 已在水鱼侧重置）由 :meth:`_run_full` 单条可行动
+        文案收口。
         """
         self._guard_cn(binding)
         await song_service.ensure_loaded()
@@ -366,7 +412,7 @@ class ScoreService:
                 get_ident(), plate, provider=binding_service.provider(binding)
             )
 
-        return await self._run_with_public_fallback(binding, make, notify_slow)
+        return await self._run_full(binding, make, notify_slow)
 
 
 score_service = ScoreService()

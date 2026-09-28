@@ -1,8 +1,8 @@
-"""水鱼 Developer-Token 日落迁移：OAuth 路由 / 回退 / 迁移文案测试。
+"""水鱼凭据路由（maimai-py 1.6.0，OAuth-only）：装配 / 收口文案 / 回退测试。
 
-库侧（maimai-py ≥1.5.3 的 ``DivingFishProvider`` OAuth Bearer 支持，PR #63 合入
-上游）提供 OAuth Bearer 路径；本文件验证
-插件层的 subject 装配、Import-Token 优先序、未覆盖用户的回退与专项文案。
+库侧（maimai-py 1.6.0 的 ``DivingFishProvider``）：developer_token 整体移除、
+OAuth Bearer 为全量/单曲唯一凭据形态、换票缓存迁 ``client._cache``。本文件验证
+插件层的 subject 装配、按绑定标志的确定性路由（Q50）、b50 公开回退与收口文案。
 subject 口径：``sha256(f"{client_id}:{external_id}")``，external_id 与 dev 时代
 ``/dev/*`` 实际传参一致（用户名 > QQ 号），与水鱼迁移快照的等值映射对齐。
 """
@@ -57,13 +57,15 @@ async def songs(db):
 
 
 @pytest.fixture
-def oauth(monkeypatch):
-    """打开 OAuth 配置（provider 单例属性 + 配置对象），结束自动还原并清换票缓存。
+async def oauth(monkeypatch):
+    """打开 OAuth 配置（provider 单例属性 + 配置对象），并清 client 级换票缓存。
 
-    developer_token 一并补位：生产环境 .env 仍保留该 token（未覆盖用户回退
-    developer 端点拿 410 → 迁移文案，token 缺失会退化为「令牌缺失」的误导文案）。
+    1.6.0 起换票缓存迁到 ``client._cache``（namespace ``divingfish_oauth``），
+    provider 实例内已无 ``_oauth_tokens``、构造函数已无 ``developer_token``；
+    跨测试全清缓存防 token 桩泄漏（db/songs 种子各自重建，全清无副作用）。
     """
     from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.client import client as maimai_client
     from nonebot_plugin_awmc_helper.core.client import divingfish_provider
 
     monkeypatch.setattr(
@@ -74,12 +76,11 @@ def oauth(monkeypatch):
     )
     monkeypatch.setattr(divingfish_provider, "client_id", CID, raising=False)
     monkeypatch.setattr(divingfish_provider, "client_secret", SECRET, raising=False)
-    monkeypatch.setattr(
-        divingfish_provider, "developer_token", "legacy-developer-token", raising=False
-    )
-    divingfish_provider._oauth_tokens.clear()
+    # 只清换票命名空间：全清会连 songs fixture 经 client.songs 种下的
+    # 「provider/ids」键一起清掉，configure() 内 songs() 将回落默认 lxns 源
+    await maimai_client._cache.clear(namespace="divingfish_oauth")
     yield
-    divingfish_provider._oauth_tokens.clear()
+    await maimai_client._cache.clear(namespace="divingfish_oauth")
 
 
 def _token_ok() -> dict:
@@ -94,7 +95,7 @@ def _token_ok() -> dict:
 @pytest.mark.asyncio
 async def test_identifier_oauth_routing(db, oauth):
     """subject 装配：identifier 带 subject（minfo 走 Bearer），full_identifier
-    无 token 时尝试 OAuth、有 token 时 Import-Token 最优先。"""
+    在 oauth=0 档直走 token（无谓换票零浪费，flag 路由另有专项测试）。"""
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     binding = await binding_service.ensure("qq", "10001")
@@ -104,7 +105,7 @@ async def test_identifier_oauth_routing(db, oauth):
     full = binding_service.full_identifier(binding)
     assert full.credentials == _subject("10001")
 
-    # Import-Token 最优先（读/写/传分实证路径，OAuth 不抢全量）
+    # oauth=0 档：token 直走全量（10-01 后仅剩全量只读，不做无谓换票）
     await binding_service.bind_divingfish_token(binding, "import-token-1")
     assert binding_service.full_identifier(binding).credentials == "import-token-1"
     # minfo 公开键仍带 subject（token 用户也能走 Bearer 单曲）
@@ -116,6 +117,22 @@ async def test_identifier_oauth_routing(db, oauth):
     assert ident3.username == "tester"
     assert ident3.qq is None
     assert ident3.credentials == _subject("tester")
+
+
+@pytest.mark.asyncio
+async def test_full_identifier_flag_routing(db, oauth):
+    """Q50 路由定稿：oauth=1（设备授权）直走 subject——token 死了也不回落；
+    oauth=0 的纯 token 绑定直走 token。"""
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    binding = await binding_service.ensure("qq", "10001")
+    await binding_service.bind_divingfish_oauth(binding, sub=20560)
+    await binding_service.bind_divingfish_token(binding, "dead-token")
+    assert binding_service.full_identifier(binding).credentials == _subject("10001")
+
+    other = await binding_service.ensure("qq", "10002")
+    await binding_service.bind_divingfish_token(other, "import-token-1")
+    assert binding_service.full_identifier(other).credentials == "import-token-1"
 
 
 @pytest.mark.asyncio
@@ -134,7 +151,7 @@ async def test_identifier_without_oauth_unchanged(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_scores_all_oauth_covered(db, songs, oauth):
-    """补齐名单内用户：全量成绩走 OAuth Bearer，不触 developer 端点。"""
+    """设备授权用户：全量成绩走 OAuth Bearer（records 端点）。"""
     from nonebot_plugin_awmc_helper.core.score import score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
@@ -144,21 +161,20 @@ async def test_scores_all_oauth_covered(db, songs, oauth):
         records_route = m.get(f"{BASE_DF}/player/records").respond(
             json={"records": [SCORE_JSON]}
         )
-        dev_route = m.get(f"{BASE_DF}/dev/player/records").respond(
-            status_code=410, json={"message": "sunset"}
-        )
         scores = await score_service.get_scores_all(binding)
 
     assert token_route.called
     assert records_route.called
-    assert not dev_route.called
     assert len(scores.scores) == 1
     assert scores.scores[0].id == 231  # maimai_py 归一化：10231 % 10000
 
 
 @pytest.mark.asyncio
-async def test_scores_all_uncovered_falls_back_to_migration_copy(db, songs, oauth):
-    """未覆盖用户：OAuth consent_required → 回退公开键 → 日落 410 → 迁移文案。"""
+async def test_scores_full_unauthorized_copy(db, songs, oauth):
+    """未授权用户（oauth=0 无 token）：全量路径单条可行动文案收口。
+
+    公开键回退已随 1.6.0 删除（全量成绩无公开键形态，developer 端点不存在）。
+    """
     from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
@@ -168,11 +184,26 @@ async def test_scores_all_uncovered_falls_back_to_migration_copy(db, songs, oaut
             status_code=400,
             json={"error": "consent_required", "error_description": "not consented"},
         )
-        m.get(f"{BASE_DF}/dev/player/records").respond(
-            status_code=410, json={"message": "gone"}
-        )
-        with pytest.raises(UserScoreError, match="2026-10-01"):
+        with pytest.raises(UserScoreError, match="绑定水鱼"):
             await score_service.get_scores_all(binding)
+
+
+@pytest.mark.asyncio
+async def test_scores_reset_token_copy(db, songs, oauth):
+    """oauth=0 纯 token 用户：token 已在水鱼侧重置（400 导入token有误）→
+    同一条收口文案（不做跨凭据回落）。"""
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    binding = await binding_service.ensure("qq", "10001")
+    await binding_service.bind_divingfish_token(binding, "reset-token")
+    with respx.mock(assert_all_called=False) as m:
+        records_route = m.get(f"{BASE_DF}/player/records").respond(
+            status_code=400, json={"message": "导入token有误", "status": "error"}
+        )
+        with pytest.raises(UserScoreError, match="绑定水鱼"):
+            await score_service.get_scores_all(binding)
+    assert records_route.called
 
 
 @pytest.mark.asyncio
@@ -192,33 +223,35 @@ async def test_scores_all_quota_copy(db, songs, oauth):
 
 
 @pytest.mark.asyncio
-async def test_plates_oauth_covered(db, songs, oauth):
-    """补齐名单内用户：牌子进度走 OAuth Bearer 全量（get_plates 装配回归）。
-
-    55f52a4 曾把 ``_run_with_public_fallback`` 传入的标识工厂未调用直接传给
-    ``client.plates`` → maimai_py 读 ``identifier.credentials`` AttributeError；
-    本用例走真实 maimai_py 链路（respx 只 mock 上游 HTTP），装配错即炸。
-    """
+async def test_b50_public_fallback(db, songs, oauth):
+    """oauth=0 用户：b50 首跳 subject 换票被拒 → 回退公开键 + 无凭据 provider。"""
     from nonebot_plugin_awmc_helper.core.score import score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     binding = await binding_service.ensure("qq", "10001")
+    player_payload = {
+        "username": "tester",
+        "rating": 300,
+        "nickname": "tester",
+        "plate": "",
+        "additional_rating": 1,
+        "charts": {"sd": [SCORE_JSON], "dx": []},
+    }
     with respx.mock(assert_all_called=False) as m:
-        token_route = m.post(AUTH_TOKEN).respond(json=_token_ok())
-        records_route = m.get(f"{BASE_DF}/player/records").respond(
-            json={"records": [SCORE_JSON]}
+        m.post(AUTH_TOKEN).respond(
+            status_code=400,
+            json={"error": "consent_required", "error_description": "not consented"},
         )
-        plates = await score_service.get_plates(binding, "真将")
+        public_route = m.post(f"{BASE_DF}/query/player").respond(json=player_payload)
+        bests = await score_service.get_b50(binding)
 
-    assert token_route.called
-    assert records_route.called
-    assert plates._version == "真"
-    assert plates._kind == "将"
+    assert public_route.called
+    assert bests.rating == 300
 
 
 @pytest.mark.asyncio
 async def test_minfo_oauth_covered(db, songs, oauth):
-    """补齐名单内用户：单曲成绩走 OAuth Bearer（music_id-only 请求体）。"""
+    """设备授权用户：单曲成绩走 OAuth Bearer（music_id-only 请求体）。"""
     from nonebot_plugin_awmc_helper.core.score import score_service
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service

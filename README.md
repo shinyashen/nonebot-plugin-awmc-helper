@@ -117,7 +117,7 @@ NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名�
 | `awmc_static_path` | ✔ | 无 | 素材包 static 目录绝对路径 |
 | `awmc_disabled_plugins` | 否 | `[]` | 停用的子插件目录名列表，如 `["arcade","guess"]` |
 | `awmc_default_provider` | 否 | `divingfish` | 默认查分器 `divingfish` / `lxns` |
-| `awmc_divingfish_developer_token` | 否 | 无 | 水鱼开发者 token |
+| `awmc_divingfish_oauth_client_id` / `awmc_divingfish_oauth_client_secret` | 否 | 无 | 水鱼 OAuth 应用（`绑定水鱼` 必需；未配置时水鱼仅公开查询/Import-Token 路径可用） |
 | `awmc_lxns_developer_token` | 否 | 无 | 落雪开发者 token |
 | `awmc_lxns_client_id` / `awmc_lxns_client_secret` / `awmc_lxns_redirect_uri` | 否 | 无 | 落雪 OAuth 应用（`绑定落雪` 必需） |
 | `awmc_yuzu_proxy` | 否 | `false` | 柚子 API 走 `.cn` 中转域 |

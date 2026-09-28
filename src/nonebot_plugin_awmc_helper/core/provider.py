@@ -16,9 +16,9 @@ import asyncio
 import hashlib
 
 from nonebot import logger
-from maimai_py import FCType, RateType, SongType, CurveObject
+from maimai_py import SongType, CurveObject, DivingFishProvider
 from maimai_py.models import Song
-from maimai_py.providers.base import ISongProvider, IAliasProvider, ICurveProvider
+from maimai_py.providers.base import ISongProvider, IAliasProvider
 from maimai_py.providers.lxns import LXNSProvider
 from maimai_py.providers.yuzu import YuzuProvider
 
@@ -171,20 +171,18 @@ class AwmcAliasProvider(IAliasProvider):
         return self._fingerprint or "empty"
 
 
-class DivingFishCurveProvider(ICurveProvider):
+class DivingFishCurveProvider(DivingFishProvider):
     """水鱼 chart_stats 曲线 provider（拟合定数/游玩分布，查歌「擬」行与统计卡）。
 
-    maimai_py 1.5.3 自带的 ``DivingFishProvider.get_curves`` 仍按旧版合并式
-    ``dist``（[1..4] 槽为全连分布）反序列化，且 ``get_curves`` 内写死
-    ``DivingFishProvider._deser_curve``（子类覆写反序列化不会被采用）；
-    水鱼 API 现已把全连分布独立为 ``fc_dist`` 字段，故自行实现接口
-    （上游修正随 maimai-py 发版后本类可退役）。
+    反序列化自 maimai-py 1.6.0 起已修正（独立 ``fc_dist`` 字段 + 旧合并式 dist
+    兜底，本项目 PR #64 上游化），``_deser_curve`` 直接继承、不再自建。保留子类
+    的唯一理由是**失败降级语义**：上游 ``get_curves`` 失败直接抛异常会拖垮整库
+    加载，而曲线只是增强数据——失败返回空表，挥发哈希保证下轮曲库加载必然重试。
 
     - 档位口径（2026-09 全量实测核对）：``dist`` 为 14 档达成率分布，升序
       D..SSSP；``fc_dist`` 为 5 档 [未FC, FC, FCP, AP, APP]；
     - 每曲列表按谱面槽位升序，无样本/不存在的槽以 ``{}`` 占位且只出现在尾部
-      （全量校验 0 例中间空位），过滤后按位对齐谱面是安全的；
-    - 接口公开，无需开发者 token。
+      （全量校验 0 例中间空位），过滤后按位对齐谱面是安全的。
     """
 
     _OK_HASH = "divingfish-curve"
@@ -193,26 +191,9 @@ class DivingFishCurveProvider(ICurveProvider):
     def __init__(
         self, base_url: str = "https://www.diving-fish.com/api/maimaidxprober/"
     ):
+        super().__init__()
         self.base_url = base_url
         self._hash_value = self._OK_HASH
-
-    @staticmethod
-    def _deser_curve(chart: dict) -> CurveObject:
-        dist = chart["dist"]
-        fc_dist = chart.get("fc_dist")
-        if fc_dist:  # 新版：[未FC, FC, FCP, AP, APP] → FCType 值序 APP/AP/FCP/FC
-            fc = {v: fc_dist[4 - i] for i, v in enumerate(FCType)}
-        else:  # 兼容旧版合并式 dist（[1..4] 槽为全连分布）
-            fc = {v: dist[4 - i] for i, v in enumerate(FCType)}
-        return CurveObject(
-            sample_size=int(chart["cnt"]),
-            fit_level_value=chart["fit_diff"],
-            avg_achievements=chart["avg"],
-            stdev_achievements=chart["std_dev"],
-            avg_dx_score=chart["avg_dx"],
-            rate_sample_size={v: dist[13 - i] for i, v in enumerate(RateType)},
-            fc_sample_size=fc,
-        )
 
     async def get_curves(self, client) -> dict[tuple[int, SongType], list[CurveObject]]:
         # 曲线是增强数据：失败返回空表降级（不拖垮曲库加载），哈希随失败变化

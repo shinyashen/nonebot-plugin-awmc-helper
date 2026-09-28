@@ -329,31 +329,32 @@ class BindingService:
     def full_identifier(self, binding: UserBinding) -> PlayerIdentifier:
         """装配**全量成绩**查询键（scores/plates 等 records 类查询）。
 
-        与公开键的差异在水鱼，迁移期（developer-token 2026-10-01 日落）顺序：
+        10-01 后定稿（Q50）：按绑定标志**确定性路由**，零换票浪费、零回落阶梯——
 
-        1. Import-Token 最优先——maimai_py 把 ``username + credentials`` 视为
-           「用户名 + 密码」登录，token 必须独占 credentials（score-updater 的
-           credentials-only 写路径同理）；读/写/传分三条路径均实证可用；
-        2. 无 token 时尝试 OAuth subject——补齐名单内的用户免迁移直通，
-           未覆盖用户由 score 层捕获 PlayerNotAuthorizedError 回退公开键，
-           给出可行动的迁移文案而非裸「未授权」；
-        3. 公开键兜底（developer 端点已日落，将得到 410 → 迁移文案）。
+        1. ``divingfish_oauth=1``（完成过设备码授权，consent 在手）→ OAuth
+           subject：全量/单曲/写全凭据，token 死了也不受影响；
+        2. 有 Import-Token → token：10-01 后仅剩全量只读一项能力，oauth=0 的
+           纯 token 用户直走（实测 27/28 存活），不做无谓的换票尝试；
+        3. 都无 → subject 尝试：仅 QQ 档的水鱼迁移快照或然命中（实测命中率低），
+           败则由 score 层单条可行动文案收口。
 
-        b50/单曲公开查询不经本方法。落雪与公开键相同
-        （token 优先的语义已含在 identifier）。
+        不做跨凭据回落：token 已重置（400「导入token有误」）与未授权
+        （consent_required）都是「重新授权 / 换绑 token」的文案场景。
+        b50/单曲公开查询不经本方法（:meth:`identifier`）。落雪与公开键相同。
         """
         if binding.service == SERVICE_NET:
             raise BindingError(NET_UNSUPPORTED_HINT)
         if binding.service == SERVICE_DIVINGFISH:
-            if binding.divingfish_import_token:
-                ident = PlayerIdentifier(
-                    qq=self.qq_of(binding),
-                    credentials=binding.divingfish_import_token,
-                )
-                return ident
+            qq = self.qq_of(binding)
             subject = self.divingfish_subject(binding)
+            if binding.divingfish_oauth and subject:
+                return PlayerIdentifier(qq=qq, credentials=subject)
+            if binding.divingfish_import_token:
+                return PlayerIdentifier(
+                    qq=qq, credentials=binding.divingfish_import_token
+                )
             if subject:
-                return PlayerIdentifier(qq=self.qq_of(binding), credentials=subject)
+                return PlayerIdentifier(qq=qq, credentials=subject)
         return self.identifier(binding)
 
     def identifier_or_none(self, binding: UserBinding) -> PlayerIdentifier | None:

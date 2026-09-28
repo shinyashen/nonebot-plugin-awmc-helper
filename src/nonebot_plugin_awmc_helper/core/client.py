@@ -37,12 +37,19 @@ client = MaimaiClient(
 """唯一的 MaimaiClient 实例（进程单例），全插件共享；transport 挂智能代理层。"""
 
 divingfish_provider = DivingFishProvider(
-    developer_token=plugin_config.awmc_divingfish_developer_token,
     client_id=plugin_config.awmc_divingfish_oauth_client_id,
     client_secret=plugin_config.awmc_divingfish_oauth_client_secret,
 )
-"""水鱼 provider：developer token 已随 2026-10-01 日落失去作用；OAuth 凭据启用
-Bearer 路径（全量/单曲），未配置时水鱼仅公开查询/Import-Token 路径可用。"""
+"""水鱼 provider：OAuth 凭据启用 Bearer 路径（全量/单曲/写）；未配置时水鱼仅
+公开查询/Import-Token 路径可用（developer token 已随 2026-10-01 端点日落整体移除，
+1.6.0 构造函数不再接受该参数）。"""
+
+divingfish_public_provider = DivingFishProvider()
+"""水鱼**无凭据** provider：专供公开端点（b50 代查、公开键回退）。
+
+1.6.0 起配了 client 凭据的 provider 会把「裸 username」拼成 ``username:`` subject
+换票走 Bearer（未授权陌生人必败）；公开查询（/query/player 系）不收 subject，
+必须用本实例保住匿名语义。不要给它配置任何凭据。"""
 
 lxns_provider = LXNSProvider(developer_token=plugin_config.awmc_lxns_developer_token)
 """落雪 provider：开发者 token 用于 friend_code/QQ 查询。"""
