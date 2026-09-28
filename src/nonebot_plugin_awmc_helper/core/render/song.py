@@ -113,7 +113,8 @@ def draw_song_card(song: Song, id_override: int | None = None) -> Image.Image:
             f"{diff.level_value:.1f}　"
             f"TAP {diff.tap_num}　HOLD {diff.hold_num}　"
             f"SLIDE {diff.slide_num}　TOUCH {diff.touch_num}　BRK {diff.break_num}　"
-            f"谱师 {fit_text(diff.note_designer, f_small, 150)}"
+            # 谱师缺省（真实数据 SD BASIC/ADVANCED 常无谱师）按「0 即 -」约定画 -
+            f"谱师 {fit_text(diff.note_designer or '-', f_small, 150)}"
         )
         draw.text((152, y + 4), info, font=f_small, fill="#555")
         y += row_h
