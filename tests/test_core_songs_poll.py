@@ -45,15 +45,15 @@ def no_templates(monkeypatch):
     return calls
 
 
-def _update_mock(cn_mock, *, with_9001: bool, drop: set[int] | None = None):
+def _update_mock(cn_mock, *, with_new: bool = False, drop: set[int] | None = None):
     cn_mock.get(f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}).mock(
         return_value=httpx.Response(
-            200, json=make_lxns(with_9001=with_9001, drop_ids=drop)
+            200, json=make_lxns(with_new=with_new, drop_ids=drop)
         )
     )
     cn_mock.get(DF_URL).mock(
         return_value=httpx.Response(
-            200, json=make_divingfish(with_9001=with_9001, drop_ids=drop)
+            200, json=make_divingfish(with_new=with_new, drop_ids=drop)
         )
     )
 
@@ -77,7 +77,7 @@ async def test_poll_baseline_and_idempotent(db, cn_mock, no_templates, monkeypat
     await songs_mod._hourly_cn_poll()  # 无变化
     assert triggered == []
 
-    _update_mock(cn_mock, with_9001=False)  # 与基线相同的载荷
+    _update_mock(cn_mock)  # 与基线相同的载荷
     await songs_mod._hourly_cn_poll()
     assert triggered == []
 
@@ -95,13 +95,13 @@ async def test_poll_triggers_on_both_sources(db, cn_mock, no_templates, monkeypa
     monkeypatch.setattr(songs_mod, "_on_cn_update", fake_on_update)
 
     await songs_mod._hourly_cn_poll()  # 基线
-    _update_mock(cn_mock, with_9001=True)
-    await songs_mod._hourly_cn_poll()  # 9001 双源新增
+    _update_mock(cn_mock, with_new=True)
+    await songs_mod._hourly_cn_poll()  # ハム太郎 双源新增（真实宴轮换新曲）
     assert len(triggered) == 1
     added, removed, titles = triggered[0]
-    assert added == {9001}
+    assert added == {1301}
     assert removed == set()
-    assert titles[9001] == "Brand New Song"
+    assert titles[1301] == "華の集落、秋のお届け"
 
     # 下一轮不再重复触发（kv 已更新）
     await songs_mod._hourly_cn_poll()
@@ -120,7 +120,7 @@ async def test_poll_single_source_new_not_triggered(
     await songs_mod._hourly_cn_poll()
     # 仅落雪新增（水鱼无）
     cn_mock.get(f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}).mock(
-        return_value=httpx.Response(200, json=make_lxns(with_9001=True))
+        return_value=httpx.Response(200, json=make_lxns(with_new=True))
     )
     await songs_mod._hourly_cn_poll()
     assert triggered == []
@@ -182,12 +182,12 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
     monkeypatch.setattr(core_utils, "notify_superusers", fake_notify)
     monkeypatch.setattr(plugin_config, "awmc_update_notify", True)
 
-    await songs_mod._on_cn_update({9001}, set(), {9001: "Brand New Song"})
+    await songs_mod._on_cn_update({1301}, set(), {1301: "華の集落、秋のお届け"})
     assert calls["refresh_all"] == [{"include_cn": True, "include_jp": False}]
     assert calls["runtime"] == 1
     assert calls["templates"] == 1
     assert len(calls["notify"]) == 1
-    assert "Brand New Song" in calls["notify"][0]
+    assert "華の集落、秋のお届け" in calls["notify"][0]
 
     # 预渲染失败不阻断（通知仍发出，注明保留旧底图）
     calls["notify"].clear()
@@ -196,15 +196,15 @@ async def test_cn_update_actions_and_notify(db, monkeypatch):
         raise RuntimeError("render down")
 
     monkeypatch.setattr(songs_mod, "prerender_templates", boom)
-    await songs_mod._on_cn_update(set(), {9002}, {9002: "CN Only Song"})
+    await songs_mod._on_cn_update(set(), {9002}, {9002: "（构造）国服限定样例"})
     assert calls["runtime"] == 2
     assert len(calls["notify"]) == 1
-    assert "CN Only Song" in calls["notify"][0]
+    assert "（构造）国服限定样例" in calls["notify"][0]
 
     # 通知开关关闭
     monkeypatch.setattr(plugin_config, "awmc_update_notify", False)
     calls["notify"].clear()
-    await songs_mod._on_cn_update({9001}, set(), {9001: "Brand New Song"})
+    await songs_mod._on_cn_update({1301}, set(), {1301: "華の集落、秋のお届け"})
     assert calls["notify"] == []
 
 
@@ -283,7 +283,10 @@ async def test_daily_songdb_pipeline(db, monkeypatch):
 async def test_poll_utage_rotation_not_triggered(
     db, cn_mock, no_templates, monkeypatch
 ):
-    """宴轮换不构成更新事件：检测键排除宴（底图不含宴谱，轮换频繁）。"""
+    """宴轮换不构成更新事件：检测键排除宴（底图不含宴谱，轮换频繁）。
+
+    用真实双源宴轮换新曲 [回]ハム太郎とっとこうた（lxns 111113 / 水鱼同 id）。
+    """
     from nonebot_plugin_awmc_helper.core import songs as songs_mod
 
     triggered = []
@@ -295,49 +298,11 @@ async def test_poll_utage_rotation_not_triggered(
 
     await songs_mod._hourly_cn_poll()  # 基线
     # 双源同时新增一张宴谱（轮换上架）
-    updated = make_lxns()
-    updated["songs"].append(
-        {
-            "id": "110999",
-            "title": "[宴]Rotated In",
-            "artist": "A",
-            "genre": "宴会場",
-            "bpm": 150,
-            "difficulties": {
-                "standard": [],
-                "dx": [],
-                "utage": [
-                    {
-                        "level": "13",
-                        "level_value": 13.0,
-                        "difficulty": 0,
-                        "note_designer": "R",
-                        "version": 25000,
-                        "kanji": "宴",
-                        "description": "x",
-                        "is_buddy": False,
-                        "notes": {},
-                    }
-                ],
-            },
-        }
-    )
     cn_mock.get(f"{LXNS_BASE}/api/v0/maimai/song/list", params={"notes": "false"}).mock(
-        return_value=httpx.Response(200, json=updated)
+        return_value=httpx.Response(200, json=make_lxns(with_utage_new=True))
     )
-    df_updated = [
-        *make_divingfish(),
-        {
-            "id": "110999",
-            "title": "[宴]Rotated In",
-            "ds": [13.0],
-            "level": ["13"],
-            "basic_info": {
-                "title": "[宴]Rotated In",
-                "from": "maimai でらっくす PRiSM",
-            },
-        },
-    ]
-    cn_mock.get(DF_URL).mock(return_value=httpx.Response(200, json=df_updated))
+    cn_mock.get(DF_URL).mock(
+        return_value=httpx.Response(200, json=make_divingfish(with_utage_new=True))
+    )
     await songs_mod._hourly_cn_poll()
     assert triggered == []

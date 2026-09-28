@@ -100,15 +100,19 @@ _CN_ONLY_DF = {
 
 def make_lxns(
     with_new: bool = False,
+    with_utage_new: bool = False,
     drop_ids: set[int] | None = None,
     disable_ids: set[int] | None = None,
 ) -> dict:
-    """落雪 song/list（真实条目）；``with_new`` 追加双源在列的真实宴轮换新曲
-    [回]ハム太郎とっとこうた(111113)，``drop_ids``/``disable_ids`` 按**落雪
-    raw id**（宴为 11xxxx 命名空间）模拟整曲消失/打标留列表。"""
+    """落雪 song/list（真实条目）；``with_new`` 追加双源在列的真实非宴新曲
+    華の集落、秋のお届け(1301，CN 22005)，``with_utage_new`` 追加真实宴轮换
+    新曲 [回]ハム太郎とっとこうた(111113)，``drop_ids``/``disable_ids`` 按
+    **落雪 raw id**（宴为 11xxxx 命名空间）模拟整曲消失/打标留列表。"""
     songs = _fresh("lxns_songs.json")["songs"]
     if with_new:
         songs += _fresh("lxns_new_song.json")["songs"]
+    if with_utage_new:
+        songs += _fresh("lxns_utage_new.json")["songs"]
     songs.append(copy.deepcopy(_CN_ONLY_LXNS))
     if drop_ids:
         songs = [s for s in songs if s["id"] not in drop_ids]
@@ -119,13 +123,17 @@ def make_lxns(
 
 
 def make_divingfish(
-    with_new: bool = False, drop_ids: set[int] | None = None
+    with_new: bool = False,
+    with_utage_new: bool = False,
+    drop_ids: set[int] | None = None,
 ) -> list[dict]:
     """水鱼 music_data（真实条目，id 为日服命名空间字符串）；参数语义同
     :func:`make_lxns`。"""
     data = _fresh("divingfish_music.json")
     if with_new:
         data += _fresh("divingfish_new_song.json")
+    if with_utage_new:
+        data += _fresh("divingfish_utage_new.json")
     data.append(copy.deepcopy(_CN_ONLY_DF))
     if drop_ids:
         data = [d for d in data if int(d["id"]) not in drop_ids]
