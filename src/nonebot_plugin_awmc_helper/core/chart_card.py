@@ -25,17 +25,15 @@ async def chart_card_bytes(
     时指定卡片主类型；``jp=True``：日服视图渲染（日服 logo，不嵌国服 B50
     ——谱面与定数可能不同，混算无意义）。
     """
-    if nb_chart.is_banquet(song):
-        # 宴曲多为日服限定：封面按需在线拉取（已有本地封面时静默跳过）
+    is_banquet = nb_chart.is_banquet(song)
+    if is_banquet or jp:
+        # 宴曲多为日服限定 / 日服限定曲本地无素材：封面按需在线拉取
+        # （代理优先，落盘缓存；已有本地封面时静默跳过）
         from .render import jp_cover
 
         await jp_cover.ensure(song.id)
+    if is_banquet:
         return nb_chart.song_chart_banquet_info(song, jp=jp)
-    if jp:
-        # 日服限定曲本地无素材：按需在线拉取官方曲绘（代理优先，落盘缓存）
-        from .render import jp_cover
-
-        await jp_cover.ensure(song.id)
     calc, is_full, best_list = False, False, []
     theme = DEFAULT_THEME
     if binding is not None and not jp:
