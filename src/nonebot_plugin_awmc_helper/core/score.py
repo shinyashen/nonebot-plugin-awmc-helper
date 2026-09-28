@@ -174,6 +174,29 @@ class ScoreService:
         logger.warning(f"落雪续期后阶梯重试（0/5/10s）仍 401：{last!r}")
         raise UserScoreError("落雪查分器暂时无法访问，请一分钟后再试") from last
 
+    async def _run_with_public_fallback(
+        self, binding: UserBinding, make, notify_slow=None
+    ):
+        """凭据形态回退收口（get_scores_all/get_plates 逐行同构）。
+
+        先用完整标识（OAuth subject / Import-Token）执行 ``make(ident)``；
+        PlayerNotAuthorizedError（未覆盖补齐名单）回退公开键重试——developer
+        端点日落后的迁移语义，指引补录 Import-Token，比裸「未授权」更有行动
+        价值。单曲查询无公开键形态，不走此处（get_minfo 专项文案）。
+        """
+        try:
+            return await self._run(
+                binding,
+                make(binding_service.full_identifier(binding)),
+                notify_slow=notify_slow,
+            )
+        except PlayerNotAuthorizedError:
+            return await self._run(
+                binding,
+                make(binding_service.identifier(binding, with_oauth=False)),
+                notify_slow=notify_slow,
+            )
+
     async def get_player(self, binding: UserBinding, notify_slow=None):
         self._guard_cn(binding)
         await song_service.ensure_loaded()
@@ -237,26 +260,13 @@ class ScoreService:
         """
         self._guard_cn(binding)
         await song_service.ensure_loaded()
-        try:
-            return await self._run(
-                binding,
-                lambda: client.scores(
-                    binding_service.full_identifier(binding),
-                    provider=binding_service.provider(binding),
-                ),
-                notify_slow=notify_slow,
+
+        def make(ident):
+            return lambda: client.scores(
+                ident, provider=binding_service.provider(binding)
             )
-        except PlayerNotAuthorizedError:
-            # 未覆盖补齐名单：回退公开键（developer 端点日落 → 迁移文案），
-            # 指引补录 Import-Token，比裸「未授权」更有行动价值
-            return await self._run(
-                binding,
-                lambda: client.scores(
-                    binding_service.identifier(binding, with_oauth=False),
-                    provider=binding_service.provider(binding),
-                ),
-                notify_slow=notify_slow,
-            )
+
+        return await self._run_with_public_fallback(binding, make, notify_slow)
 
     async def get_b50_by_username(
         self, username: str
@@ -326,26 +336,13 @@ class ScoreService:
         """
         self._guard_cn(binding)
         await song_service.ensure_loaded()
-        try:
-            return await self._run(
-                binding,
-                lambda: client.plates(
-                    binding_service.full_identifier(binding),
-                    plate,
-                    provider=binding_service.provider(binding),
-                ),
-                notify_slow=notify_slow,
+
+        def make(ident):
+            return lambda: client.plates(
+                ident, plate, provider=binding_service.provider(binding)
             )
-        except PlayerNotAuthorizedError:
-            return await self._run(
-                binding,
-                lambda: client.plates(
-                    binding_service.identifier(binding, with_oauth=False),
-                    plate,
-                    provider=binding_service.provider(binding),
-                ),
-                notify_slow=notify_slow,
-            )
+
+        return await self._run_with_public_fallback(binding, make, notify_slow)
 
 
 score_service = ScoreService()
