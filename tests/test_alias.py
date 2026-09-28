@@ -310,6 +310,133 @@ async def test_alias_not_found(app: App, songs):
     )
 
 
+# ---------------------------------------------------------------------------
+# 日服兜底（Q32）：仅日服曲目的别名不在国服索引，回退日服视图与合并库
+# ---------------------------------------------------------------------------
+
+
+def _seed_jp_view(monkeypatch, songs_by_id: dict):
+    """用假日服视图替身替换 ``_jp_songs_map``（测试环境无规范表数据）。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    async def fake_jp_map():
+        return songs_by_id
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+
+
+@pytest.mark.asyncio
+async def test_alias_jp_fallback_by_name(app: App, songs, monkeypatch):
+    """仅日服曲目：国服别名未命中 → 日服视图兜底，ID 行带日服限定标注。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import alias
+
+    await store.save_song_aliases("munet", {2061: ["消毒水"]})
+    _seed_jp_view(
+        monkeypatch,
+        {2061: make_song(2061, "XODUS", diffs=[make_diff(type=SongType.DX)])},
+    )
+    await _assert_reply(
+        app,
+        alias.alias_song,
+        "消毒水有什么别名",
+        "该曲目有以下别名：\nID：12061（日服限定）\n消毒水",
+        with_session=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_alias_jp_fallback_by_id(app: App, songs, monkeypatch):
+    """仅日服曲目按 id 查别名：国服视图无此曲 → 日服视图兜底。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import alias
+
+    await store.save_song_aliases("munet", {2061: ["消毒水"]})
+    _seed_jp_view(
+        monkeypatch,
+        {2061: make_song(2061, "XODUS", diffs=[make_diff(type=SongType.DX)])},
+    )
+    await _assert_reply(
+        app,
+        alias.alias_song,
+        "2061有什么别名",
+        "该曲目有以下别名：\nID：12061（日服限定）\n消毒水",
+        with_session=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_alias_jp_fallback_multi(app: App, songs, monkeypatch):
+    """仅日服曲目多曲命中：合并转发逐曲展示，各 ID 行带日服限定标注。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from mocks import make_diff, make_song
+    from maimai_py import SongType
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import alias
+
+    await store.save_song_aliases("munet", {2061: ["消毒水"], 2062: ["消毒水"]})
+    _seed_jp_view(
+        monkeypatch,
+        {
+            2061: make_song(2061, "XODUS", diffs=[make_diff(type=SongType.DX)]),
+            2062: make_song(2062, "XODUS II", diffs=[make_diff(type=SongType.DX)]),
+        },
+    )
+
+    event = fake_group_message_event_v11(message="消毒水有什么别名", user_id=12345678)
+    forward = _forward_nodes(
+        [
+            "找到2个相同别名的曲目：",
+            "ID：12061（日服限定）\n消毒水",
+            "ID：12062（日服限定）\n消毒水",
+        ]
+    )
+    async with app.test_matcher(alias.alias_song) as ctx:
+        bot = ctx.create_bot(
+            base=Bot,
+            adapter=nonebot.get_adapter(OnebotV11Adapter),
+            self_id=_SELF_ID,
+        )
+        ctx.receive_event(bot, event)
+        # handler 注入 uninfo Session，会实时拉取群/成员信息
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "测试群",
+                "member_count": 10,
+                "max_member_count": 100,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "test",
+            },
+        )
+        ctx.should_call_api(
+            "send_group_forward_msg",
+            {"group_id": 87654321, "message": forward, "messages": forward},
+            result=None,
+        )
+        ctx.should_finished()
+
+
 @pytest.mark.asyncio
 async def test_local_alias_apply(app: App, songs, tmp_path):
     import respx

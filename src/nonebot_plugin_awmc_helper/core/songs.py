@@ -437,6 +437,17 @@ class SongService:
         """日服视图全量曲目（日服数据源 NET 记录映射用，随指纹缓存）。"""
         return list((await self._jp_songs_map()).values())
 
+    async def _merged_lib(self) -> dict[int, list[str]]:
+        """合并别名库：provider 最近一次合并视图；尚未拉取成功时回退库内快照。
+
+        快照源组合与合并视图一致（柚子+落雪+MuNET；本地别名不落 song_alias 表，
+        由调用方按需叠加）。
+        """
+        lib = getattr(self._alias_provider, "last_merged", None)
+        if not lib:
+            lib = await store.load_song_aliases(["yuzu", "lxns", "munet"])
+        return lib
+
     async def jp_by_title_fuzzy(self, title: str) -> list[Song]:
         """日服视图标题子串匹配（国服查歌 fallback）。"""
         return await self.by_title_fuzzy(title, "jp")
@@ -469,9 +480,7 @@ class SongService:
         jp = await self._jp_songs_map()
         if not jp:
             return [], None
-        lib = getattr(self._alias_provider, "last_merged", None)
-        if not lib:  # 尚未拉取成功：回退 song_alias 快照
-            lib = await store.load_song_aliases(["yuzu", "lxns"])
+        lib = await self._merged_lib()
         # 别名索引随合并库对象缓存（每次查询重建全量索引是 O(全库)）
         if self._jp_alias_cache is None or self._jp_alias_cache[0] is not lib:
             index: dict[str, set[int]] = {}
@@ -751,6 +760,37 @@ class SongService:
                 result[song_id] = None
                 continue
             aliases = list(song.aliases or [])
+            for alias in local_by_song.get(song_id, []):
+                if alias not in aliases:
+                    aliases.append(alias)
+            title_key = normalize_text(song.title)
+            result[song_id] = [a for a in aliases if normalize_text(a) != title_key]
+        return result
+
+    async def jp_aliases_of(self, song_id: int) -> list[str] | None:
+        """日服视图某曲目的全部别名；曲目不在日服视图返回 None。"""
+        return (await self.jp_aliases_of_many([song_id])).get(song_id)
+
+    async def jp_aliases_of_many(
+        self, song_ids: list[int]
+    ) -> dict[int, list[str] | None]:
+        """日服视图多曲别名批量查询（合并库 + 本地，标题去重口径与 CN 侧一致）。
+
+        JP 视图曲对象 ``aliases`` 恒为空（规范表物化不挂别名），别名从合并库
+        （含仅日服曲目条目）与本地别名表读取。
+        """
+        lib = await self._merged_lib()
+        local_by_song: dict[int, list[str]] = {}
+        for la in await store.get_local_aliases():
+            local_by_song.setdefault(la.song_id, []).append(la.alias)
+        jp = await self._jp_songs_map()
+        result: dict[int, list[str] | None] = {}
+        for song_id in song_ids:
+            song = jp.get(song_id)
+            if song is None:
+                result[song_id] = None
+                continue
+            aliases = list(lib.get(song_id) or [])
             for alias in local_by_song.get(song_id, []):
                 if alias not in aliases:
                     aliases.append(alias)
