@@ -252,6 +252,10 @@ class ScoreService:
         """日服 B50：窗口缓存优先（core.net_score），真实抓取按需触发。"""
         try:
             return await net_score_service.get_b50(binding)
+        except NetError as e:
+            # NET 抓取层错误（凭据错误/维护等）经映射表转专项文案；
+            # 只捕 NetScoreError 会让 handler 的通用兜底吃掉专项提示
+            raise UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e))) from e
         except NetScoreError as e:
             raise UserScoreError(str(e)) from e
 
@@ -301,6 +305,8 @@ class ScoreService:
         """
         try:
             hit = await net_score_service.get_minfo_scores(binding, song)
+        except NetError as e:
+            raise UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e))) from e
         except NetScoreError as e:
             raise UserScoreError(str(e)) from e
         if hit is None or not _has_scores(hit, song_type):

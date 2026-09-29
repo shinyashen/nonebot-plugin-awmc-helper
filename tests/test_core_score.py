@@ -330,3 +330,56 @@ async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
         await score_service._run(binding, factory)
     assert calls["n"] == 2
     assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_b50_net_error_mapped_to_user_message(db, songs, monkeypatch):
+    """NET 抓取层 NetError 经映射表转 UserScoreError 专项文案（L-1）。
+
+    net_score_service.get_scores 抓取失败原样透传 NetError；score 层若只捕
+    NetScoreError，专项文案（「SEGA ID 或密码错误」「定期维护中」等）永远
+    落不到用户面前。
+    """
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.binding import (
+        SERVICE_NET,
+        binding_service,
+    )
+    from nonebot_plugin_awmc_helper.core.ext.net import NET_ERROR_MESSAGES, NetError
+
+    binding = await binding_service.ensure("qq", "10002")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+    assert binding.service == SERVICE_NET
+
+    import nonebot_plugin_awmc_helper.core.score as score_mod
+
+    async def raise_invalid_credentials(_binding):
+        raise NetError("invalid_credentials")
+
+    monkeypatch.setattr(
+        score_mod.net_score_service, "get_b50", raise_invalid_credentials
+    )
+    with pytest.raises(UserScoreError, match="SEGA ID 或密码错误"):
+        await score_service.get_b50(binding)
+    # 文案与映射表一致（未知 code 回落 str(e)）
+    assert NET_ERROR_MESSAGES["invalid_credentials"] == "SEGA ID 或密码错误，请重新绑定"
+
+    async def raise_maintenance(_binding):
+        raise NetError("maintenance")
+
+    monkeypatch.setattr(score_mod.net_score_service, "get_b50", raise_maintenance)
+    with pytest.raises(UserScoreError, match="定期维护中"):
+        await score_service.get_b50(binding)
+
+    # minfo NET 路径同样映射
+    async def raise_minfo(_binding, _song, _type=None):
+        raise NetError("maintenance")
+
+    monkeypatch.setattr(score_mod.net_score_service, "get_minfo_scores", raise_minfo)
+    from mocks import make_diff, make_song
+
+    song = make_song(199, "测试曲", diffs=[make_diff(type=SongType.STANDARD)])
+    with pytest.raises(UserScoreError, match="定期维护中"):
+        await score_service.get_minfo_net(binding, song)
