@@ -111,7 +111,9 @@ async def test_facade_gates_unsupported(db, songs, monkeypatch):
     monkeypatch.setattr(net_score_service, "get_scores", fake_scores)
     ms = await score_service.get_scores_all(net_binding)
     assert ms.scores == []
-    assert ms.rating == 0 and ms.rating_b35 == 0 and ms.rating_b15 == 0
+    assert ms.rating == 0
+    assert ms.rating_b35 == 0
+    assert ms.rating_b15 == 0
 
     lx_binding = await binding_service.ensure("qq", "70002")
     await binding_service.bind_lxns(lx_binding, token="t", friend_code=123456)
