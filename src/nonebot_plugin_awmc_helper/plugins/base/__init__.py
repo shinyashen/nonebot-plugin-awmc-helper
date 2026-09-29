@@ -5,8 +5,9 @@
 复合触发词统一收敛，核心词由注册表按 指令 > 类别 > 指南 消歧）。
 
 发送链（拍板③）：多节点页合并转发 → 失败降级 ``text_image_bytes`` 整图；
-单节点纯文本页（指令详情/管理页）直接普通消息不发转发卡。旧 HELP_TEXT 静态
-总览已删除，内容迁入 ``core.help`` 注册表。
+单节点纯文本页（指令详情/管理页）直接普通消息不发转发卡。「管理」节点仅
+SUPERUSER **私聊**查询时附带（拍板④追加：群聊不留管理指令痕迹）。旧
+HELP_TEXT 静态总览已删除，内容迁入 ``core.help`` 注册表。
 """
 
 import re
@@ -16,6 +17,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot.matcher import Matcher
 from nonebot.adapters import Bot, Event
 from nonebot.permission import SUPERUSER
+from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.help import (
@@ -26,7 +28,7 @@ from ...core.help import (
     page_entries,
     help_registry,
 )
-from ...core.utils import handle_errors
+from ...core.utils import handle_errors, is_private_session
 from ...core.forward import try_send_forward
 from ...core.render.tools import text_image_bytes
 
@@ -69,12 +71,19 @@ async def _send_page(bot: Bot, event: Event, matcher: Matcher, page: Page) -> No
 
 @help_cmd.handle()
 @handle_errors()
-async def _(bot: Bot, event: Event, matcher: Matcher):
+async def _(
+    bot: Bot,
+    event: Event,
+    matcher: Matcher,
+    session: Session = UniSession(),
+):
     # matcher 已保证根词命中，此处对明文二次解析取二级参数（空格可省略）
     text = event.get_plaintext().strip()
     matched = re.match(ROOT_PATTERN, text)
     query = (matched.group(1) or "").strip() if matched else ""
-    page = help_registry.resolve(query, include_hidden=await _superuser(bot, event))
+    # 拍板④：管理面仅 SUPERUSER 且私聊时可见（群聊不留管理指令痕迹）
+    include_hidden = await _superuser(bot, event) and is_private_session(session)
+    page = help_registry.resolve(query, include_hidden=include_hidden)
     if isinstance(page, NotFoundPage):
         await UniMessage.text(
             f"没有找到「{page.query}」。\n"

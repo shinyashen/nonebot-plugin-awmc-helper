@@ -125,7 +125,10 @@ def _builtin_guide_score() -> Guide:
         ),
         steps=[
             GuideStep(
-                text="绑定水鱼（二选一，推荐 OAuth 授权）：",
+                text=(
+                    "绑定水鱼（OAuth 授权——导分/写成绩的唯一途径；"
+                    "Import-Token 仅补全量成绩读取）："
+                ),
                 commands=("绑定水鱼", "绑定水鱼token"),
             ),
             GuideStep(

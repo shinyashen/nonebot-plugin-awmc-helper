@@ -8,6 +8,25 @@ from nonebug import App
 SELF_ID = "1234567890"
 
 
+def _stub_session(ctx, user_id: int = 12345678) -> None:
+    """base handler 注入 uninfo Session 后会实时拉取群/成员信息（alias 同款桩）。"""
+    ctx.should_call_api(
+        "get_group_info",
+        {"group_id": 87654321},
+        result={
+            "group_id": 87654321,
+            "group_name": "测试群",
+            "member_count": 10,
+            "max_member_count": 100,
+        },
+    )
+    ctx.should_call_api(
+        "get_group_member_info",
+        {"group_id": 87654321, "user_id": user_id, "no_cache": True},
+        result={"user_id": user_id, "role": "member", "card": "", "nickname": "test"},
+    )
+
+
 def _forward_nodes(entries) -> list[dict]:
     """try_send_forward 预期发出的节点裸 dict（与 core.forward 构造同源）。"""
     from nonebot_plugin_awmc_helper.core.forward import NODE_NICKNAME
@@ -82,6 +101,7 @@ async def test_help_overview_forward(app: App):
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id=SELF_ID
         )
+        _stub_session(ctx)
         ctx.receive_event(bot, event)
         ctx.should_call_api(
             "send_group_forward_msg",
@@ -109,6 +129,7 @@ async def test_root_aliases(app: App, text: str):
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id=SELF_ID
         )
+        _stub_session(ctx)
         ctx.receive_event(bot, event)
         ctx.should_call_api(
             "send_group_forward_msg",
@@ -137,6 +158,7 @@ async def test_command_detail_plain_message(app: App):
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id=SELF_ID
         )
+        _stub_session(ctx)
         ctx.receive_event(bot, event)
         ctx.should_call_send(event, _text_reply(12345678, text), result=None, bot=bot)
         ctx.should_finished()
@@ -162,6 +184,7 @@ async def test_category_page_forward(app: App):
             bot = ctx.create_bot(
                 base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id=SELF_ID
             )
+            _stub_session(ctx)
             ctx.receive_event(bot, event)
             ctx.should_call_api(
                 "send_group_forward_msg",
@@ -191,6 +214,7 @@ async def test_guide_page_forward(app: App):
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id=SELF_ID
         )
+        _stub_session(ctx)
         ctx.receive_event(bot, event)
         ctx.should_call_api(
             "send_group_forward_msg",
@@ -225,6 +249,7 @@ async def test_forward_fallback_to_image(app: App):
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id=SELF_ID
         )
+        _stub_session(ctx)
         ctx.receive_event(bot, event)
         ctx.should_call_api(
             "send_group_forward_msg",
@@ -265,6 +290,7 @@ async def test_not_found_hint(app: App):
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id=SELF_ID
         )
+        _stub_session(ctx)
         ctx.receive_event(bot, event)
         ctx.should_call_send(event, _text_reply(12345678, hint), result=None, bot=bot)
         ctx.should_finished()

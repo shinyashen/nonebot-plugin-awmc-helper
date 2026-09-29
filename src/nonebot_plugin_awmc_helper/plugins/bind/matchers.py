@@ -484,8 +484,12 @@ help_registry.declare(
             matcher=df_token,
             name="绑定水鱼token",
             aliases=("dftoken",),
-            brief="绑定水鱼 Import-Token（全量成绩档，可写入成绩）",
-            detail="格式：绑定水鱼token <Import-Token>",
+            brief="Import-Token 全量读取档（牌子/表格）；写入成绩请用 绑定水鱼 授权",
+            detail=(
+                "格式：绑定水鱼token <Import-Token>\n"
+                "水鱼写入权限已收敛到 OAuth：导入 Token 仅保留全量成绩/牌子的读取，"
+                "导分/写成绩需发「绑定水鱼」完成授权。"
+            ),
         ),
         CommandSpec(
             matcher=lx_bind,
