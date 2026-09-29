@@ -172,8 +172,8 @@ async def test_recent_refresh_guard_no_regrant(db, monkeypatch):
 async def test_run_preflight_first_attempt_uses_new_token(db, monkeypatch):
     """_run 入口预检：闲置超期后的首查不再有 401 首跳。"""
     _oauth_configured(monkeypatch)
-    from nonebot_plugin_awmc_helper.core.ext import lxns as lxns_ext
     from nonebot_plugin_awmc_helper.core import sources
+    from nonebot_plugin_awmc_helper.core.ext import lxns as lxns_ext
 
     new_token = _jwt({"exp": time.time() + 600})
     binding = await _lxns_binding("50007", _jwt({"exp": time.time() - 10}))
@@ -194,8 +194,8 @@ async def test_run_preflight_first_attempt_uses_new_token(db, monkeypatch):
 async def test_run_fallback_retry_uses_refreshed_ident(db, monkeypatch):
     """scores/plates 回退链：401 续期后重试重新装配 ident（闭包修复回归）。"""
     _oauth_configured(monkeypatch)
-    from nonebot_plugin_awmc_helper.core.ext import lxns as lxns_ext
     from nonebot_plugin_awmc_helper.core import sources
+    from nonebot_plugin_awmc_helper.core.ext import lxns as lxns_ext
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     old_token = _jwt({"exp": time.time() - 10})
