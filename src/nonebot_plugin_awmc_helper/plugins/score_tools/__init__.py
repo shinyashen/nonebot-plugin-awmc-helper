@@ -106,19 +106,24 @@ async def _(
     target = int(target_raw) if target_raw else 1
     bests = await score_service.get_b50(binding, notify_slow=slow_notice())
 
-    # 候选：指定等级时按等级过滤，否则按 B50 末位 RA 推算定数区间。
+    # 候选池跟随数据源视图（NET 用户 = 日服曲库 + 日服定数口径，修复原
+    # 「国服候选池 × 日服成绩」的口径混用）。候选：指定等级时按等级过滤，
+    # 否则按 B50 末位 RA 推算定数区间。
     # 末位 RA 口径刻意与 random_song 随机推分不同：此处取 b35+b15 全体 min
     # （推荐列表按版本分侧排序，用全局入线基准），见 rise_candidates 注
+    pool = (
+        await song_service.jp_all()
+        if score_service.view_of(binding.service) == "jp"
+        else await song_service.get_all()
+    )
     lowest_ra = min(
         (s.dx_rating or 0 for s in bests.scores_b35 + bests.scores_b15), default=0
     )
     if level:
-        candidates = rise_candidates(await song_service.get_all(), level=level)
+        candidates = rise_candidates(pool, level=level)
     else:
         min_ds = math.ceil(min_ds_of_ra(lowest_ra + target) * 10) / 10
-        candidates = rise_candidates(
-            await song_service.get_all(), ds_range=(min_ds, min_ds + 1)
-        )
+        candidates = rise_candidates(pool, ds_range=(min_ds, min_ds + 1))
     rec = rise_recommend(bests.scores, candidates, level=level, target=target)
     if not rec:
         await UniMessage.text(" 没有找到可以提升 RA 的曲目，换一个目标试试吧").finish(

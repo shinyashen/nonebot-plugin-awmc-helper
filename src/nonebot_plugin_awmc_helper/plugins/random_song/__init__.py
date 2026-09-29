@@ -150,15 +150,14 @@ async def _(session: Session = UniSession(), binding: UserBinding = SessionBindi
     未绑定 / B50 拉取失败 / 无候选时退化为普通随机曲目（与原版行为一致）。
     """
     song = None
+    jp = score_service.view_of(binding.service) == "jp"
     try:
         bests = await score_service.get_b50(binding, notify_slow=slow_notice())
-        song = await _pick_rise_song(bests.scores)
+        song = await _pick_rise_song(bests.scores, jp)
     except UserScoreError:
         song = None
     if song is None:  # 未绑定或无候选 → 普通随机
-        got = await song_service.random(
-            exclude_utage=True, jp=score_service.view_of(binding.service) == "jp"
-        )
+        got = await song_service.random(exclude_utage=True, jp=jp)
         if got is None:
             await UniMessage.text(" 曲库为空，请稍后再试").finish(at_sender=True)
         song, _diff = got
@@ -167,8 +166,12 @@ async def _(session: Session = UniSession(), binding: UserBinding = SessionBindi
     await msg.image(raw=png).finish(at_sender=True)
 
 
-async def _pick_rise_song(scores: list[ScoreExtend]):
-    """NB get_mai_what：随机侧 → 末位 RA 反推定数 [ds, ds+1] → 排除 SSS+ → 随机单曲。"""
+async def _pick_rise_song(scores: list[ScoreExtend], jp: bool = False):
+    """NB get_mai_what：随机侧 → 末位 RA 反推定数 [ds, ds+1] → 排除 SSS+ → 随机单曲。
+
+    定数候选池跟随数据源视图（``jp``）：NET 成绩按日服定数反推区间，
+    对国服视图查池会口径错位（日服限定曲缺失、定数不同步）。
+    """
     is_dx = _random.randint(0, 1) == 1
     target_type = SongType.DX if is_dx else SongType.STANDARD
     side = [s for s in scores if s.type == target_type]
@@ -184,7 +187,7 @@ async def _pick_rise_song(scores: list[ScoreExtend]):
 
     ds = round(min_ds_of_ra(lowest_ra), 1)
     candidates = rise_candidates(
-        await song_service.by_level_value(ds, ds + 1),
+        await song_service.by_level_value(ds, ds + 1, scope="jp" if jp else "cn"),
         ds_range=(ds, ds + 1),
         song_type=target_type,
         scores=scores,
