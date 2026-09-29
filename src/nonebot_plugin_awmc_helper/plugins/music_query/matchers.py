@@ -8,11 +8,6 @@ from nonebot.params import RegexMatched
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from nonebot_plugin_awmc_helper.core.store import UserBinding
-from nonebot_plugin_awmc_helper.core.binding import (
-    SessionBinding,
-)
-
 from .render import (
     NOT_FOUND,
     JP_ONLY_NOTE,
@@ -29,9 +24,13 @@ from .resolve import (
 )
 from ...constants import UTAGE_ID_BASE, display_song_id
 from ...core.songs import cn_song_map, song_service, entries_list_text
+from ...core.store import UserBinding
 from ...core.types import SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
+from ...core.binding import (
+    SessionBinding,
+)
 from ...core.chart_card import chart_card_bytes
 
 search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
