@@ -941,3 +941,165 @@ async def test_search_pending_empty_falls_through(app: App, songs):
         )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
+
+
+# ---------------------------------------------------------------------------
+# NET 绑定用户的查歌路由（L-5 拍板）：一律走日服视图出卡
+# ---------------------------------------------------------------------------
+
+
+def _jp_view_song():
+    """与 CN 同根的日服视图对象（version 可辨：BUDDIES 24000）。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    return make_song(
+        199,
+        "チルノのパーフェクトさんすう教室",
+        version=24000,
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.4,
+                version=24000,
+            )
+        ],
+    )
+
+
+async def _seed_net_binding():
+    """预置 NET 绑定（SessionBinding ensure 命中既有行）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+    from nonebot_plugin_awmc_helper.core.binding import SERVICE_NET
+
+    await store.save_binding(
+        UserBinding(
+            platform="OneBot V11",
+            user_id="12345678",
+            service=SERVICE_NET,
+            net_sega_id="123456789001",
+        )
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_query_chart_net_routes_jp_view(app: App, songs, monkeypatch):
+    """NET 绑定 id 199（国服在架）：出日服视图卡，不弹「日服限定」提示。
+
+    标注与路由解耦：jp 视图路由本身不触发提示，提示只看国服缺席判定。
+    """
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    jp_song = _jp_view_song()
+
+    async def fake_jp_map():
+        return {199: jp_song}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    await _seed_net_binding()
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+
+    net_binding = UserBinding(
+        platform="OneBot V11",
+        user_id="12345678",
+        service="net",
+        net_sega_id="123456789001",
+    )
+    await _assert_image_reply(
+        app,
+        "query_chart",
+        "id 199",
+        lambda: chart_card_bytes(jp_song, net_binding, SongType.STANDARD, True),
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_query_chart_net_jp_only_keeps_note(app: App, songs, monkeypatch):
+    """NET 绑定查国服缺席曲：仍按日服限定补标注（cn 缺席判定，非路由触发）。"""
+    from mocks import make_diff, make_song, seed_service
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    jp_song = _jp_view_song()
+    await seed_service(
+        song_service,
+        [
+            make_song(
+                8,
+                "True Love Song",
+                diffs=[
+                    make_diff(
+                        type=SongType.STANDARD,
+                        level_index=LevelIndex.MASTER,
+                        level="11",
+                        level_value=11.5,
+                        version=10000,
+                    )
+                ],
+            )
+        ],
+    )  # CN 视图无 199
+
+    async def fake_jp_map():
+        return {199: jp_song}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    await _seed_net_binding()
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+
+    net_binding = UserBinding(
+        platform="OneBot V11",
+        user_id="12345678",
+        service="net",
+        net_sega_id="123456789001",
+    )
+    await _assert_image_reply(
+        app,
+        "query_chart",
+        "id 199",
+        lambda: chart_card_bytes(jp_song, net_binding, SongType.STANDARD, True),
+        suffix="\n此歌曲为日服限定",
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_alias_single_net_routes_jp_view(app: App, songs, monkeypatch):
+    """NET 绑定「dx琪露诺是什么歌」：别名单结果同样走日服视图卡。"""
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    jp_song = _jp_view_song()
+
+    async def fake_jp_map():
+        return {199: jp_song}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    await _seed_net_binding()
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+
+    net_binding = UserBinding(
+        platform="OneBot V11",
+        user_id="12345678",
+        service="net",
+        net_sega_id="123456789001",
+    )
+    await _assert_image_reply(
+        app,
+        "search_alias_song",
+        "dx琪露诺是什么歌",
+        lambda: chart_card_bytes(jp_song, net_binding, SongType.DX, True),
+        suffix="您要找的是不是这首？",
+    )

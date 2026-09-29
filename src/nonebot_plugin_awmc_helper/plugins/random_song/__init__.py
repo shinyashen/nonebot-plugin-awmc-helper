@@ -21,9 +21,9 @@ from ...core.calc import min_ds_of_ra, rise_candidates
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
-from ...core.types import Genre, SongType, ScoreExtend
+from ...core.types import Song, Genre, SongType, ScoreExtend
 from ...core.utils import slow_notice, handle_errors
-from ...core.binding import SessionBinding
+from ...core.binding import SERVICE_NET, SessionBinding
 from ...core.chart_card import chart_card_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -47,6 +47,26 @@ mai_what_rise = on_command(
     "mai什么加分", aliases={"mai什么推分", "mai什么上分"}, block=True
 )
 
+_JP_ONLY_NOTE = "此歌曲为日服限定"
+"""随机结果国服缺席时的标注（与 music_query 查歌卡同措辞；两子插件不互
+import，文案各持一份，改动需同步）。"""
+
+
+async def _card_bytes(song: Song, binding: UserBinding) -> tuple[bytes, str]:
+    """出卡路由（L-5 拍板）：NET 绑定用户曲对象取日服视图（缺失回退原
+    对象）+ jp 卡（日服口径渲染、不嵌国服 B50——NET 成绩 id 形状与 CN
+    视图 B50 消费侧失配）；其余绑定原样出卡。
+
+    日服限定标注与路由**解耦**：只按「该曲是否国服缺席」（cn_song_map
+    同口径的 by_id 判定）拼接，NET 用户随到国服在架曲不弹提示。
+    返回 ``(图, 日服限定提示)``。
+    """
+    if binding.service == SERVICE_NET:
+        song = (await song_service.jp_by_id(song.id)) or song
+        note = _JP_ONLY_NOTE if await song_service.by_id(song.id) is None else ""
+        return await chart_card_bytes(song, binding, jp=True), note
+    return await chart_card_bytes(song, binding), ""
+
 
 @random_chart.handle()
 @handle_errors("随机失败，请稍后再试")
@@ -63,7 +83,11 @@ async def _(
         )
     level_index = COLOR_TO_LEVEL_INDEX.get(color or "")
     got = await song_service.random(
-        song_type=song_type, level=level, level_index=level_index, exclude_utage=True
+        song_type=song_type,
+        level=level,
+        level_index=level_index,
+        exclude_utage=True,
+        jp=binding.service == SERVICE_NET,
     )
     if got is None:
         await UniMessage.text(" 没有符合条件的谱面，换一个试试吧").finish(
@@ -71,9 +95,9 @@ async def _(
         )
     song, _diff = got
     # Hoshino/NB 同设计：随机结果渲染通常的谱面卡（draw_chart_info 语义）
-    await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
-        at_sender=True
-    )
+    png, note = await _card_bytes(song, binding)
+    msg = UniMessage.text(f" {note}") if note else UniMessage()
+    await msg.image(raw=png).finish(at_sender=True)
 
 
 @genre_random.handle()
@@ -86,28 +110,34 @@ async def _(
     """按分类随机谱面（随个流行等）。宴会場分类允许宴谱入池——
     宴谱是該分类的全部内容，按其余分类的排除口径会必然落空。"""
     genre = ZH_TO_GENRE[groups[0]]
-    got = await song_service.random(genre=genre, exclude_utage=genre != Genre.宴会場)
+    got = await song_service.random(
+        genre=genre,
+        exclude_utage=genre != Genre.宴会場,
+        jp=binding.service == SERVICE_NET,
+    )
     if got is None:
         await UniMessage.text(" 没有符合条件的谱面，换一个试试吧").finish(
             at_sender=True
         )
     song, _diff = got
-    await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
-        at_sender=True
-    )
+    png, note = await _card_bytes(song, binding)
+    msg = UniMessage.text(f" {note}") if note else UniMessage()
+    await msg.image(raw=png).finish(at_sender=True)
 
 
 @mai_what.handle()
 @handle_errors("随机失败，请稍后再试")
 async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
-    got = await song_service.random(exclude_utage=True)
+    got = await song_service.random(
+        exclude_utage=True, jp=binding.service == SERVICE_NET
+    )
     if got is None:
         await UniMessage.text(" 曲库为空，请稍后再试").finish(at_sender=True)
     song, _diff = got
     # Hoshino/NB 同设计：mai什么 同样渲染通常的谱面卡
-    await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
-        at_sender=True
-    )
+    png, note = await _card_bytes(song, binding)
+    msg = UniMessage.text(f" {note}") if note else UniMessage()
+    await msg.image(raw=png).finish(at_sender=True)
 
 
 @mai_what_rise.handle()
@@ -124,13 +154,15 @@ async def _(session: Session = UniSession(), binding: UserBinding = SessionBindi
     except UserScoreError:
         song = None
     if song is None:  # 未绑定或无候选 → 普通随机
-        got = await song_service.random(exclude_utage=True)
+        got = await song_service.random(
+            exclude_utage=True, jp=binding.service == SERVICE_NET
+        )
         if got is None:
             await UniMessage.text(" 曲库为空，请稍后再试").finish(at_sender=True)
         song, _diff = got
-    await UniMessage.image(raw=await chart_card_bytes(song, binding)).finish(
-        at_sender=True
-    )
+    png, note = await _card_bytes(song, binding)
+    msg = UniMessage.text(f" {note}") if note else UniMessage()
+    await msg.image(raw=png).finish(at_sender=True)
 
 
 async def _pick_rise_song(scores: list[ScoreExtend]):

@@ -385,3 +385,191 @@ async def test_mai_what_rise_fallback(app: App, songs, monkeypatch):
         )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
+
+
+# ---------------------------------------------------------------------------
+# NET 绑定用户的随机路由（L-5 拍板）：随机池走 JP 视图，出卡 jp 卡
+# ---------------------------------------------------------------------------
+
+
+async def _seed_net_binding():
+    """预置 NET 绑定（SessionBinding ensure 命中既有行）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+    from nonebot_plugin_awmc_helper.core.binding import SERVICE_NET
+
+    await store.save_binding(
+        UserBinding(
+            platform="OneBot V11",
+            user_id="12345678",
+            service=SERVICE_NET,
+            net_sega_id="123456789001",
+        )
+    )
+
+
+def _net_binding():
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+
+    return UserBinding(
+        platform="OneBot V11",
+        user_id="12345678",
+        service="net",
+        net_sega_id="123456789001",
+    )
+
+
+async def _assert_random_reply(app, matcher_name, text, expect_png, *, prefix=""):
+    """随个/mai什么 的图片回复断言（可选前导文本段）。"""
+    import base64
+    import inspect
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import random_song
+
+    matcher = getattr(random_song, matcher_name)
+    result = expect_png()
+    if inspect.isawaitable(result):
+        result = await result
+    segments = [MessageSegment.at(12345678)]
+    if prefix:
+        segments.append(MessageSegment.text(f" {prefix}"))
+    segments.append(
+        MessageSegment.image(f"base64://{base64.b64encode(result).decode()}")
+    )
+    event = fake_group_message_event_v11(message=text)
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, Message(segments), result=None, bot=bot)
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+@requires_assets
+async def test_random_chart_net_jp_only_picked(app: App, songs, monkeypatch):
+    """NET 绑定随个：随机池走 JP 视图（JP-only 曲可被随出），出 jp 卡并补标注。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    jp_song = make_song(
+        1634,
+        "[協]青春コンプレックス",
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.2,
+            )
+        ],
+    )
+
+    async def fake_jp_map():
+        return {1634: jp_song}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    await _seed_net_binding()
+    await _assert_random_reply(
+        app,
+        "random_chart",
+        "随个dx13",
+        lambda: chart_card_bytes(jp_song, _net_binding(), jp=True),
+        prefix="此歌曲为日服限定",
+    )
+
+
+@pytest.mark.asyncio
+@requires_assets
+async def test_random_chart_net_cn_available_no_note(app: App, songs, monkeypatch):
+    """NET 绑定随到国服在架曲（JP 视图同根对象）：不弹「日服限定」提示。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    jp_song = make_song(
+        199,
+        "チルノのパーフェクトさんすう教室",
+        version=24000,
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.2,
+            )
+        ],
+    )
+
+    async def fake_jp_map():
+        return {199: jp_song}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    await _seed_net_binding()
+    await _assert_random_reply(
+        app,
+        "random_chart",
+        "随个dx13",
+        lambda: chart_card_bytes(jp_song, _net_binding(), jp=True),
+    )
+
+
+@pytest.mark.asyncio
+@requires_assets
+async def test_mai_what_net_jp_pool(app: App, songs, monkeypatch):
+    """NET 绑定 mai什么：单曲 JP 池下确定性随出 JP-only 曲并补标注。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
+
+    jp_song = make_song(
+        1634,
+        "[協]青春コンプレックス",
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.2,
+            )
+        ],
+    )
+
+    async def fake_jp_map():
+        return {1634: jp_song}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    await _seed_net_binding()
+    await _assert_random_reply(
+        app,
+        "mai_what",
+        "mai什么",
+        lambda: chart_card_bytes(jp_song, _net_binding(), jp=True),
+        prefix="此歌曲为日服限定",
+    )

@@ -25,17 +25,29 @@ from .resolve import (
 from ...constants import UTAGE_ID_BASE, display_song_id
 from ...core.songs import cn_song_map, song_service, entries_list_text
 from ...core.store import UserBinding
-from ...core.types import SongType
+from ...core.types import Song, SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
-from ...core.binding import (
-    SessionBinding,
-)
+from ...core.binding import SERVICE_NET, SessionBinding
 from ...core.chart_card import chart_card_bytes
 
 search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
 search_alias_song = on_regex(r"(.+)是(?:什么|啥)歌[？?]?([0-9]+)?$", block=True)
 query_chart = on_regex(r"(?i)^id\s?([0-9]+)$", block=True)
+
+
+async def _net_view_song(song: Song, binding: UserBinding | None) -> tuple[Song, bool]:
+    """NET 绑定用户的查歌路由（L-5 拍板）：曲对象取日服视图（缺失回退原
+    对象），出卡 jp=True（日服口径渲染、不嵌国服 B50——NET 成绩 id 形状
+    与 CN 视图 B50 消费侧失配）。非 NET 绑定原样返回 ``(song, False)``。
+
+    日服限定提示与该路由**解耦**：提示只看「该曲是否国服缺席」（各入口
+    既有的 flags/cn_song_map 或 resolve_raw_chart jp 判定），NET 用户查
+    国服在架曲不因本路由误弹提示。
+    """
+    if binding is None or binding.service != SERVICE_NET:
+        return song, False
+    return (await song_service.jp_by_id(song.id)) or song, True
 
 
 @search.handle()
@@ -166,7 +178,8 @@ async def _(
             png = await _banquet_card(song, utage_diff, jp)
         else:
             song = cn_song or song
-            png = await chart_card_bytes(song, binding, card_prefer, jp)
+            card_song, jp_card = await _net_view_song(song, binding)
+            png = await chart_card_bytes(card_song, binding, card_prefer, jp or jp_card)
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
         msg = _reply(JP_ONLY_NOTE) if jp else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
@@ -184,10 +197,11 @@ async def _(
         hit = await _resolve_raw_id(int(name))
         if hit is not None:
             song, prefer, jp, utage_diff = hit
+            card_song, jp_card = await _net_view_song(song, binding)
             png = (
-                await _banquet_card(song, utage_diff, jp)
+                await _banquet_card(card_song, utage_diff, jp)
                 if utage_diff is not None
-                else await chart_card_bytes(song, binding, prefer, jp)
+                else await chart_card_bytes(card_song, binding, prefer, jp or jp_card)
             )
             note = f"\n{JP_ONLY_NOTE}" if jp and utage_diff is None else ""
             await (
@@ -200,8 +214,9 @@ async def _(
         if hit is None:
             await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
         song, prefer, jp_only, _utage_diff = hit
+        card_song, jp_card = await _net_view_song(song, binding)
         # 此别名入口不渲染宴会卡（与「id xxx」指令的口径差异属既有行为）
-        png = await chart_card_bytes(song, binding, prefer, jp_only)
+        png = await chart_card_bytes(card_song, binding, prefer, jp_only or jp_card)
         msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
 
@@ -243,10 +258,11 @@ async def _(
     if hit is None:
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     song, card_prefer, jp, utage_diff = hit
+    card_song, jp_card = await _net_view_song(song, binding)
     png = (
-        await _banquet_card(song, utage_diff, jp)
+        await _banquet_card(card_song, utage_diff, jp)
         if utage_diff is not None
-        else await chart_card_bytes(song, binding, card_prefer, jp)
+        else await chart_card_bytes(card_song, binding, card_prefer, jp or jp_card)
     )
     reply = UniMessage.image(raw=png)
     if jp:
