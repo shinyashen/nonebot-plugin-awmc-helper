@@ -110,6 +110,62 @@ plugins/
 - 群级开关用 `store.get_switch(group_id, feature, default)`：
   默认值来自 `.env` 配置，群级覆盖存 `group_switch` 表。
 
+## 帮助注册（M10 帮助系统）
+
+指令帮助的唯一数据源是 `core/help.py` 的帮助注册表；「舞萌帮助」指令按
+**指令 > 类别 > 指南** 消歧展示。子插件在 `matchers.py` 末尾集中声明
+（matcher 对象直接作键，文案与定义永不漂移）：
+
+```python
+from ...core.help import CommandSpec, help_registry
+
+help_registry.declare(
+    plugin="awmc.<名>",          # 与 PluginMetadata.name 一致
+    title="展示名",              # 类别页里的【分组标题】
+    category="查歌",             # 内置类别 key 或标题；第三方未知 key 自动建类
+    commands=[
+        CommandSpec(
+            matcher=my_cmd,               # 必填：matcher 对象
+            name="我的指令",              # 主名（查找键）
+            aliases=("别名",),            # 查找别名（应为真实触发的子集）
+            brief="一句话简介",           # 类别页/总览用
+            detail="详细用法",            # 详情页正文
+            example="我的指令 参数",
+            scope="仅私聊",               # 适用场景标注（可空）
+            hidden=True,                  # 超管指令：不进普通列表，仅超管可见
+        ),
+    ],
+)
+```
+
+- **类别策略**：跨插件语义（绑定/查分等）就近入内置类别；自包含功能可
+  自成一类（同插件可多次 `declare` 入多个类别，同 `(plugin, category)`
+  整块替换）；超管/运维指令入 `manage` 类或对所在块标 `hidden`；
+- **指南（流程）**：跨插件的完整闭环（如「导分」「查分上手」）注册为指南，
+  步骤**按名引用**已注册指令、不复制文案；`intro`/`prerequisites` 与
+  `steps` 为必填（防空壳流程），渲染时引用缺失会标注「当前不可用」：
+
+```python
+from ...core.help import Guide, GuideStep
+
+help_registry.declare_guide(
+    Guide(
+        key="我的流程", title="我的流程", aliases=("流程别名",),
+        intro="这个流程能做什么；覆盖哪些指令。",
+        prerequisites="需要先完成什么。",
+        steps=[GuideStep(text="第一步做什么：", commands=("某指令",)),
+               GuideStep(text="看图", image=Path(...))],   # 附图为独立纯图节点
+        source="插件名",
+    )
+)
+```
+
+- 发送形态由 `plugins/base` 统一处理（合并转发 → 整图降级），声明方无需
+  关心；插件本地的旧帮助触发词可保留为薄 matcher，渲染注册表页面即可；
+- 守卫测试（`tests/test_core_help.py::test_no_orphan_matchers`）保证内置
+  子插件不存在未声明的用户向 matcher；内部拦截类 matcher（on_message 的
+  会话填充/答案判定）加进该测试白名单。
+
 ## 常用依赖注入
 
 ```python

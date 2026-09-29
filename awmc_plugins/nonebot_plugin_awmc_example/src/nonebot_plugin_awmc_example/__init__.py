@@ -9,7 +9,9 @@ core 公开接口（曲库/渲染/异常兜底），可作为第三方插件的�
 3. 【差异】PluginMetadata 用第三方自有命名（awmc. 前缀规则仅限主插件仓内）；
 4. 【差异】不声明 supported_adapters：经 awmc_plugins/ 加载时主插件元数据
    尚未就绪，inherit_supported_adapters 会 ValueError；确需声明可显式写
-   supported_adapters={"~onebot.v11"}。
+   supported_adapters={"~onebot.v11"}；
+5. 【差异】帮助注册：指令就近入主插件类别、第三方也能上「舞萌帮助」总览
+   （M10 帮助系统，见 docs/subplugin-dev-guide.md「帮助注册」）。
 
 一份代码支持三种加载方式：
 - 放入 bot 工作目录的 awmc_plugins/，主插件自动加载（主推，零配置）；
@@ -34,6 +36,7 @@ from nonebot.adapters import Message
 from nonebot_plugin_uninfo import Session, SceneType, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from nonebot_plugin_awmc_helper.core.help import CommandSpec, help_registry
 from nonebot_plugin_awmc_helper.core.songs import song_service
 from nonebot_plugin_awmc_helper.core.utils import handle_errors
 
@@ -86,3 +89,21 @@ async def _(
     await UniMessage.image(
         raw=text_image_bytes(format_result(kw, songs, limit))
     ).finish(at_sender=True)
+
+# ---------------------------------------------------------------- 帮助声明
+# 【差异 5】matcher 对象直接作声明键（防文案漂移）；未知 category 会自动建类，
+# 这里就近入内置「查歌」类。声明块惯例放 matcher 定义之后（文件末尾）。
+help_registry.declare(
+    plugin="awmc-example",
+    title="扩展点歌",
+    category="query",
+    description="第三方扩展示例",
+    commands=[
+        CommandSpec(
+            matcher=song_cmd,
+            name="ext点歌",
+            brief="按编号/别名/标题搜索曲目（结果渲染成图）",
+            detail="格式：ext点歌 <关键词|编号>；群聊列 5 首，私聊 10 首。",
+        ),
+    ],
+)

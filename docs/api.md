@@ -158,3 +158,21 @@ b50_render.best50_bytes / score_list_bytes
 pie_render.pie_bytes(title, data)
 table_render.completion_grid_bytes(title, items)
 ```
+
+## help
+
+```python
+help_registry: HelpRegistry              # 帮助注册表进程单例（M10 帮助系统）
+
+help_registry.declare(*, plugin, title, category, description, commands)
+#   子插件帮助块；同 (plugin, category) 整块替换，未知类别自动创建
+help_registry.declare_guide(guide: Guide)  # 流程指南（intro/prerequisites/steps 必填）
+help_registry.resolve(query, *, include_hidden=False) -> Page
+#   指令 > 类别 > 指南 消歧；hidden 指令对普通用户按未命中处理
+page_entries(help_registry, page) -> list[str | UniMessage]  # 页面 → 转发节点序列
+page_text(help_registry, page) -> str                        # 页面 → 纯文本（降级素材）
+
+@dataclass CommandSpec:  # matcher / name / aliases / brief / detail / example / scope / hidden
+@dataclass Guide:        # key / title / aliases / intro / prerequisites / steps / source
+@dataclass GuideStep:    # text / commands（按名引用）/ image（独立纯图节点）
+```
