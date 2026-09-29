@@ -23,6 +23,7 @@ import unicodedata
 from pathlib import Path
 from dataclasses import field, dataclass
 
+import httpx
 from bs4 import BeautifulSoup
 
 from . import get_client
@@ -116,14 +117,20 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
     import asyncio
 
     await asyncio.sleep(_FETCH_DELAY)
-    # 首请求可能被 202 反爬（无 Cookie），Cookie 入共享客户端 jar 后重试一次；
-    # 只重放 202/403（反爬信号），404/500 等真实失败不重放
+    # 首请求可能被 202 反爬（空页、无 Cookie），Cookie 入共享客户端 jar 后
+    # 重试；只重试 202/403（反爬信号），404/500 等真实失败不重试。
+    # 202 属 2xx、raise_for_status 不抛，重试耗尽仍 202 时必须显式失败——
+    # 反爬空页入库会把缺口曲标记为「已抓取」，TTL 内补充静默 no-op
     resp = await http.get(url, headers=_REQUEST_HEADERS)
     for _ in range(2):
-        if resp.status_code in (200, 202, 403):
+        if resp.status_code == 200 or resp.status_code not in (202, 403):
             break
         await asyncio.sleep(1.0)
         resp = await http.get(url, headers=_REQUEST_HEADERS)
+    if resp.status_code == 202:
+        raise httpx.HTTPStatusError(
+            "gamerch 反爬拦截（202 空页）", request=resp.request, response=resp
+        )
     resp.raise_for_status()
     text = resp.text
     if cache_gz is not None:

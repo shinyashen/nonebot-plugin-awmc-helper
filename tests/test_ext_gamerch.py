@@ -198,3 +198,42 @@ async def test_page_inventory_kv_cache(db, tmp_path, monkeypatch):
     assert inv2["ラグトレイン"] == 533989
     assert calls == first_calls
     _ = json  # 保持 json 导入（其他断言经由 kv 序列化覆盖）
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_text_retry_on_202(monkeypatch):
+    """202 反爬空页不得当成功（L-4）：202/403 重试（Cookie 入 jar 后可恢复），
+    重试耗尽仍 202 显式失败；404 等真实失败不重试。"""
+    import httpx
+    import respx
+
+    from nonebot_plugin_awmc_helper.core.ext import gamerch
+
+    monkeypatch.setattr(gamerch, "_FETCH_DELAY", 0)
+    url = f"{gamerch.WIKI_BASE}424242"
+
+    # 202 → 200：重试后成功
+    async with respx.mock(assert_all_called=True) as m:
+        route = m.get(url).mock(
+            side_effect=[httpx.Response(202), httpx.Response(200, text="页面内容")]
+        )
+        async with httpx.AsyncClient() as http:
+            text = await gamerch.fetch_page_text(http, url, max_age=0)
+        assert text == "页面内容"
+        assert route.call_count == 2
+
+    # 持续 202：显式失败（不得把反爬空页当成功入库）
+    async with respx.mock(assert_all_called=True) as m:
+        route = m.get(url).mock(return_value=httpx.Response(202))
+        async with httpx.AsyncClient() as http:
+            with pytest.raises(httpx.HTTPStatusError):
+                await gamerch.fetch_page_text(http, url, max_age=0)
+        assert route.call_count == 3  # 首次 + 2 次重试
+
+    # 404 真实失败：不重试，直接抛
+    async with respx.mock(assert_all_called=True) as m:
+        route = m.get(url).mock(return_value=httpx.Response(404))
+        async with httpx.AsyncClient() as http:
+            with pytest.raises(httpx.HTTPStatusError):
+                await gamerch.fetch_page_text(http, url, max_age=0)
+        assert route.call_count == 1
