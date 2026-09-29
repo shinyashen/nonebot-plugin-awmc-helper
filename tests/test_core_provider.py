@@ -125,3 +125,25 @@ async def test_local_alias_merged(db, provider, remote_mock, maimai_client):
     merged = await provider.get_aliases(maimai_client)
     assert "局部别名" in merged[199]
     assert merged[199].count("チルノ") == 1
+
+
+@pytest.mark.asyncio
+async def test_munet_snapshot_not_round_tripped(
+    db, provider, remote_mock, maimai_client, monkeypatch
+):
+    """munet 库内快照只参与合并不回写（L-25）：读库→原样整源回写是纯写放大
+    （每次曲库加载 DELETE+全量重插 1700+ 行）。"""
+    from nonebot_plugin_awmc_helper.core import store
+
+    await store.save_song_aliases("munet", {199: ["走查别名"]})
+    saved: list[str] = []
+    real_save = store.save_song_aliases
+
+    async def spy_save(source, items):
+        saved.append(source)
+        await real_save(source, items)
+
+    monkeypatch.setattr(store, "save_song_aliases", spy_save)
+    merged = await provider.get_aliases(maimai_client)
+    assert saved == ["yuzu", "lxns"]  # munet 不落库
+    assert sorted(merged[199]) == ["9", "チルノ", "走查别名"]  # 快照仍参与合并

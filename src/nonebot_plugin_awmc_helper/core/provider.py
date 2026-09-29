@@ -14,6 +14,7 @@ import json
 import time
 import asyncio
 import hashlib
+from typing import Any
 
 from nonebot import logger
 from maimai_py.models import Song
@@ -109,7 +110,9 @@ class AwmcAliasProvider(IAliasProvider):
                     target.append(text)
 
         # 远端源单源容错：拉取成功即整源写库（song_alias 表）；失败回退库内快照。
-        # 两源并发拉取，合并仍按 yuzu→lxns 顺序（保序去重口径不变）
+        # 两源并发拉取，合并仍按 yuzu→lxns 顺序（保序去重口径不变）；
+        # munet 源数据本就来自库内快照（走查离线写入），回写=每次曲库加载
+        # DELETE+全量重插 1700+ 行的纯写放大，标 persist=False 跳过落库
 
         async def _pull(name, fetch):
             started = time.monotonic()
@@ -128,17 +131,19 @@ class AwmcAliasProvider(IAliasProvider):
                 )
                 return None
 
-        sources = (
-            ("yuzu", self._fetch_yuzu),
-            ("lxns", self._fetch_lxns),
-            ("munet", self._fetch_munet),
+        sources: tuple[tuple[str, Any, bool], ...] = (
+            ("yuzu", self._fetch_yuzu, True),
+            ("lxns", self._fetch_lxns, True),
+            ("munet", self._fetch_munet, False),
         )
-        pulled = await asyncio.gather(*(_pull(name, fetch) for name, fetch in sources))
-        for (name, _fetch), pairs in zip(sources, pulled):
-            if pairs is not None:
-                await store.save_song_aliases(name, dict(pairs))
-            else:
-                pairs = list((await store.load_song_aliases([name])).items())
+        pulled = await asyncio.gather(
+            *(_pull(name, fetch) for name, fetch, _persist in sources)
+        )
+        for (_name, _fetch, persist), pairs in zip(sources, pulled):
+            if pairs is None:
+                pairs = list((await store.load_song_aliases([_name])).items())
+            elif persist:
+                await store.save_song_aliases(_name, dict(pairs))
             for sid, aliases in pairs:
                 _add(sid, aliases)
         for la in await store.get_local_aliases():
@@ -162,7 +167,8 @@ class AwmcAliasProvider(IAliasProvider):
 
     async def _fetch_munet(self, client) -> list[tuple[int, list[str]]]:
         """MuNET 别名快照（库内读，永不失败）：全量走查离线写入，见
-        :func:`core.ext.munet.refresh_aliases_full`。"""
+        :func:`core.ext.munet.refresh_aliases_full`。仅参与合并不回写库
+        （get_aliases 的 persist 位），避免每次曲库加载整源重写。"""
         return list((await store.load_song_aliases(["munet"])).items())
 
     def _hash(self) -> str:
