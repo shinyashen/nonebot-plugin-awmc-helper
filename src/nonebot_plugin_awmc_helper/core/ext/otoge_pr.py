@@ -109,19 +109,6 @@ def parse_music_ex(text: str) -> tuple[list[dict], str] | None:
     return None
 
 
-def extract_new_entries(entries: list[dict], known_titles: set[str]) -> list[dict]:
-    """按已知标题集过滤出条目（day-0 新曲）；身份键 title。"""
-    seen: set[str] = set()
-    out: list[dict] = []
-    for entry in entries:
-        title = entry.get("title")
-        if not title or title in known_titles or title in seen:
-            continue
-        seen.add(title)
-        out.append(entry)
-    return out
-
-
 async def list_open_song_prs() -> list[tuple[int, str, str]]:
     """open 且 head 分支为 ``maimai/update-*`` 的 PR：[(number, branch, title)]。
 

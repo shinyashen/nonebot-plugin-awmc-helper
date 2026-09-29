@@ -1,4 +1,4 @@
-"""core/ext/otoge_pr：自动化 PR 分支预读（分层修复 + main 外新条目提取）。"""
+"""core/ext/otoge_pr：自动化 PR 分支预读（分层修复；标题去重后交调用方过滤）。"""
 
 import json
 
@@ -73,12 +73,6 @@ def test_parse_unrecoverable_returns_none(otoge_pr):
     assert otoge_pr.parse_music_ex("not json at all {{{") is None
 
 
-def test_extract_new_entries_dedup(otoge_pr):
-    entries = [*MAIN, NEW_ENTRY, dict(NEW_ENTRY)]
-    new = otoge_pr.extract_new_entries(entries, {e["title"] for e in MAIN})
-    assert [e["title"] for e in new] == [NEW_ENTRY["title"]]
-
-
 @respx.mock
 async def test_load_open_pr_entries(otoge_pr):
     respx.get("https://api.github.com/repos/zvuc/otoge-db/pulls").mock(
@@ -95,6 +89,11 @@ async def test_load_open_pr_entries(otoge_pr):
                     "title": "CHUNITHM constants",
                     "head": {"ref": "chunithm/constants"},
                 },
+                {  # 重复标题（已在 main / 先前 PR）跨 PR 去重
+                    "number": 1209,
+                    "title": "[Automation] maimai: Add new songs (20260926)",
+                    "head": {"ref": "maimai/update-20260926"},
+                },
             ],
         )
     )
@@ -105,8 +104,17 @@ async def test_load_open_pr_entries(otoge_pr):
         "https://raw.githubusercontent.com/zvuc/otoge-db/"
         "maimai/update-20260925/maimai/data/music-ex.json"
     ).mock(return_value=httpx.Response(200, text=_branch_text_with_field_conflict()))
+    respx.get(
+        "https://raw.githubusercontent.com/zvuc/otoge-db/"
+        "maimai/update-20260926/maimai/data/music-ex.json"
+    ).mock(
+        return_value=httpx.Response(
+            200, text=json.dumps([MAIN[0], NEW_ENTRY], ensure_ascii=False)
+        )
+    )
     new = await otoge_pr.load_open_pr_entries()
-    # 不再在模块内做 main 过滤（由调用方按规范表过滤），返回分支全部条目
+    # 不再在模块内做 main 过滤（由调用方按规范表过滤），返回分支全部条目；
+    # 跨 PR 按标题去重（重复的 Old Song / The Happycore Idol 只保留首次出现）
     assert [e["title"] for e in new] == [e["title"] for e in [*MAIN, NEW_ENTRY]]
     happycore = next(e for e in new if e["title"] == NEW_ENTRY["title"])
     assert happycore["image_url"] == NEW_ENTRY["image_url"]
