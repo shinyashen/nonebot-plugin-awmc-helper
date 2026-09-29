@@ -469,6 +469,12 @@ class BindingService:
                 )
                 return "dead"
             except Exception:
+                # 暂时性失败按 skip 回原错误处理，但留 debug 痕迹供诊断
+                logger.debug(
+                    f"落雪 token 续期暂时性失败"
+                    f"（{binding.platform}:{binding.user_id}）",
+                    exc_info=True,
+                )
                 return "skip"
             binding.lxns_token = token.access_token
             if token.refresh_token:
