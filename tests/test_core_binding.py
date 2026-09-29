@@ -347,10 +347,10 @@ async def test_resolve_query_binding_gate(db, monkeypatch):
     session = SimpleNamespace(platform="telegram", user=SimpleNamespace(id="42"))
 
     with pytest.raises(FinishedException) as ei:
-        await resolve_query_binding(session, None)
+        await resolve_query_binding(session, None)  # pyright: ignore[reportArgumentType]
     assert "尚未绑定查分器，请先使用「绑定水鱼」" in str(ei.value)
 
     event = SimpleNamespace(message=Message([MessageSegment.at(777)]))
     with pytest.raises(FinishedException) as ei:
-        await resolve_query_binding(session, event)
+        await resolve_query_binding(session, event)  # pyright: ignore[reportArgumentType]
     assert "对方尚未绑定查分器，无法代查" in str(ei.value)

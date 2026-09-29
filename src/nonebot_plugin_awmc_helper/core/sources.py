@@ -22,12 +22,13 @@ core.binding。能力门禁、拦截文案、帮助标注、能力清单随之�
 """
 
 import asyncio
-from enum import StrEnum
-from typing import TYPE_CHECKING, ClassVar
+from enum import Enum
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 from maimai_py import (
     Song,
+    Player,
     SongType,
     PlayerSong,
     PlayerBests,
@@ -103,8 +104,14 @@ _DF_TOKEN_HINT = (
 绑定专属——两类失败凭路由天然可分，各自给最直接的行动指引。"""
 
 
-class Capability(StrEnum):
-    """查分能力域：一个成员 = 查分门面的一个操作，各数据源按域声明支持。"""
+class Capability(str, Enum):
+    """查分能力域：一个成员 = 查分门面的一个操作，各数据源按域声明支持。
+
+    ``str`` 混入（而非 3.11+ 的 StrEnum）：包声明 ``requires-python >=3.10``，
+    成员即其 value 字符串（``"b50" == Capability.B50``），字符串字面量可直接
+    参与比较/查表；注意 ``str(成员)`` 是「Capability.B50」形态，面向用户的
+    文案一律走 CAP_LABELS / 成员 .value。
+    """
 
     B50 = "b50"  # b50 大图 / 推分推荐 / mai什么加分
     MINFO = "minfo"  # 单曲成绩卡
@@ -358,7 +365,9 @@ class SourceBase:
     ) -> MaimaiPlates:
         raise self.unsupported(Capability.PLATES)
 
-    async def get_player(self, binding: UserBinding, notify_slow=None):
+    async def get_player(
+        self, binding: UserBinding, notify_slow=None
+    ) -> "Player | None":
         raise self.unsupported(Capability.PLAYER)
 
     async def get_my_ranking(
@@ -373,7 +382,7 @@ class SourceBase:
         """查询前是否需要真实抓取（handler 据此先发「正在抓取」提示）。"""
         return False
 
-    def player_profile(self, binding: UserBinding):
+    def player_profile(self, binding: UserBinding) -> Any:
         """卡面渲染用的数据源玩家身份（NET 官方资料等；默认无）。"""
         return None
 

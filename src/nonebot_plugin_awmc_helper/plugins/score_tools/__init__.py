@@ -53,9 +53,9 @@ async def _(message: Message = CommandArg()):
     args = message.extract_plain_text().strip()
     if args in ("帮助", ""):
         # 文案单源：渲染注册表里的「分数线」详情页（旧 SCORE_LINE_HELP 已迁入）
-        await UniMessage.text(
-            page_entries(help_registry, CommandPage(spec=_score_line_spec))[0]
-        ).finish(at_sender=True)
+        entry = page_entries(help_registry, CommandPage(spec=_score_line_spec))[0]
+        assert isinstance(entry, str)  # 指令详情页恒为纯文本节点
+        await UniMessage.text(entry).finish(at_sender=True)
     m = re.search(r"([绿黄红紫白])\s?([0-9]+)", args)
     if not m:
         await UniMessage.text(" 格式错误，输入「分数线 帮助」以查看帮助信息").finish(

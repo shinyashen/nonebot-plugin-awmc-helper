@@ -160,6 +160,7 @@ async def test_command_detail_plain_message(app: App):
         )
         _stub_session(ctx)
         ctx.receive_event(bot, event)
+        assert isinstance(text, str)  # 本页恒为纯文本节点
         ctx.should_call_send(event, _text_reply(12345678, text), result=None, bot=bot)
         ctx.should_finished()
 

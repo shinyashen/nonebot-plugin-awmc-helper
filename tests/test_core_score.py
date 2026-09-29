@@ -61,6 +61,7 @@ async def test_get_b50_divingfish(db, songs):
         player = await score_service.get_player(binding)
         bests = await score_service.get_b50(binding)
 
+    assert player is not None  # get_player 经数据源适配层，类型上可空
     assert player.name == "tester"
     assert bests.rating == 300
     assert len(bests.scores_b15) == 1  # 199 DX 谱版本 26000 ≥ 当前版本 25500 → b15

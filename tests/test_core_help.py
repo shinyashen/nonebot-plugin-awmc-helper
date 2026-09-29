@@ -4,6 +4,8 @@
 conftest 的 session fixture 才 init（与仓内其他测试口径一致）。
 """
 
+from pathlib import Path
+
 import pytest
 from nonebug import App
 
@@ -21,7 +23,7 @@ def _registry():
 def _spec(name: str, **kw):
     from nonebot_plugin_awmc_helper.core.help import CommandSpec
 
-    return CommandSpec(matcher=_FakeMatcher(), name=name, **kw)
+    return CommandSpec(matcher=_FakeMatcher(), name=name, **kw)  # pyright: ignore[reportArgumentType]
 
 
 def _guide(key: str, steps=None, **kw):
@@ -129,7 +131,11 @@ def test_unknown_category_autocreate():
     reg = _registry()
     reg.declare(plugin="t", title="T", category="自定义类", commands=[_spec("t1")])
     assert reg.categories["自定义类"].builtin is False
-    overview = "\n".join(page_entries(reg, OverviewPage(include_hidden=False)))
+    overview = "\n".join(
+        e
+        for e in page_entries(reg, OverviewPage(include_hidden=False))
+        if isinstance(e, str)
+    )
     assert "自定义类" in overview
 
 
@@ -154,7 +160,9 @@ def test_guide_backlink_on_command_page():
     reg = _registry()
     reg.declare(plugin="x", title="X", category="tools", commands=[_spec("步骤指令")])
     reg.declare_guide(_guide("g", steps=[GuideStep(text="s", commands=("步骤指令",))]))
-    page = page_entries(reg, CommandPage(spec=reg.lookup_command("步骤指令")))
+    spec = reg.lookup_command("步骤指令")
+    assert spec is not None
+    page = page_entries(reg, CommandPage(spec=spec))
     assert any("属于指南" in b and "第 1 步" in b for b in page)
 
 
@@ -166,7 +174,7 @@ def test_image_step_yields_unimessage_node():
 
     reg = _registry()
     reg.declare_guide(
-        _guide("g", steps=[GuideStep(text="看图"), GuideStep(image="x.jpg")])
+        _guide("g", steps=[GuideStep(text="看图"), GuideStep(image=Path("x.jpg"))])
     )
     entries = page_entries(reg, GuidePage(guide=reg.guides["g"]))
     assert isinstance(entries[0], str)

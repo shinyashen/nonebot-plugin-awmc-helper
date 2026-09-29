@@ -33,7 +33,8 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 class CommandSpec:
     """单条指令的帮助声明（声明处直接引用 matcher 对象作键）。"""
 
-    matcher: Matcher
+    # nonebot 工厂（on_command/on_regex 等）返回 type[Matcher]，声明处直接传入
+    matcher: "Matcher | type[Matcher]"
     name: str
     aliases: tuple[str, ...] = ()
     # 一句话简介：类别页/总览用；空则详情页也不展示该行
@@ -173,7 +174,7 @@ class HelpRegistry:
         self.blocks: list[PluginHelp] = []
         self._block_index: dict[tuple[str, str], PluginHelp] = {}
         self.guides: dict[str, Guide] = {}
-        self._commands: dict[str, CommandSpec] = {}  # matcher 对象 → 声明
+        self._commands: dict[int, CommandSpec] = {}  # id(matcher) → 声明
         self._name_index: dict[str, CommandSpec] = {}  # 名称/别名 → 声明
         self._guide_alias: dict[str, str] = {}  # 展示名/别名 → guide key
 
@@ -254,7 +255,7 @@ class HelpRegistry:
 
     # ---- 查询 API ----
 
-    def spec_of(self, matcher: Matcher) -> CommandSpec | None:
+    def spec_of(self, matcher: "Matcher | type[Matcher]") -> CommandSpec | None:
         return self._commands.get(id(matcher))
 
     def _plugin_of(self, spec: CommandSpec) -> str:
@@ -378,8 +379,12 @@ def _visible(spec: CommandSpec, include_hidden: bool) -> bool:
     return include_hidden or not spec.hidden
 
 
-def _overview_blocks(reg: HelpRegistry, include_hidden: bool) -> list[str]:
-    blocks = ["舞萌DX 插件指令总览\n发送「舞萌帮助 <条目>」查看类别/指令/指南详情"]
+def _overview_blocks(
+    reg: HelpRegistry, include_hidden: bool
+) -> "list[str | UniMessage]":
+    blocks: "list[str | UniMessage]" = [
+        "舞萌DX 插件指令总览\n发送「舞萌帮助 <条目>」查看类别/指令/指南详情"
+    ]
     for cat in sorted(reg.categories.values(), key=lambda c: c.order):
         if cat.key == "manage":
             continue
@@ -408,7 +413,7 @@ def _overview_blocks(reg: HelpRegistry, include_hidden: bool) -> list[str]:
 
 def _category_blocks(
     reg: HelpRegistry, cat: Category, include_hidden: bool
-) -> list[str]:
+) -> "list[str | UniMessage]":
     blocks: list[str] = []
     for block in reg.blocks:
         if block.category != cat.key:
@@ -427,7 +432,7 @@ def _category_blocks(
     return [header, *blocks]
 
 
-def _command_blocks(reg: HelpRegistry, spec: CommandSpec) -> list[str]:
+def _command_blocks(reg: HelpRegistry, spec: CommandSpec) -> "list[str | UniMessage]":
     lines = [_names(spec)]
     if tags := _scope_tags(spec):
         lines.append(f"适用：{tags}")
@@ -495,7 +500,10 @@ def page_entries(reg: HelpRegistry, page: Page) -> "list[str | UniMessage]":
         return _guide_entries(reg, page.guide)
     if isinstance(page, ManagePage):
         manage = _manage_blocks(reg)
-        return [manage] if manage else ["（无 hidden 指令）"]
+        entries: "list[str | UniMessage]" = (
+            [manage] if manage else ["（无 hidden 指令）"]
+        )
+        return entries
     raise ValueError(
         f"page_entries 不支持 {type(page).__name__}（NotFoundPage 由调用方处理）"
     )

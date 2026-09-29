@@ -113,9 +113,11 @@ async def test_score_line_help(app: App):
         help_registry,
     )
 
-    text = page_entries(help_registry, CommandPage(spec=score_tools._score_line_spec))[
+    entry = page_entries(help_registry, CommandPage(spec=score_tools._score_line_spec))[
         0
     ]
+    assert isinstance(entry, str)  # 指令详情页恒为纯文本节点
+    text = entry
     event = fake_group_message_event_v11(message="分数线 帮助")
     expected = Message(
         [

@@ -9,6 +9,8 @@
 子插件与第三方 b50 变体一律从本模块导入（:data:`__all__`）。
 """
 
+from typing import TYPE_CHECKING, cast
+
 from maimai_py import (
     Song,
     SongType,
@@ -21,7 +23,12 @@ from maimai_py import (
 from .calc import build_bests
 from .songdb import Scope
 from .binding import SERVICE_DIVINGFISH, UserBinding
-from .sources import Capability, UserScoreError, source_of
+from .sources import Capability, UserScoreError, DivingFishSource, source_of
+
+if TYPE_CHECKING:
+    from maimai_py import DivingFishPlayer
+
+    from .ext.divingfish import RankUser
 
 __all__ = ["UserScoreError", "build_bests", "score_service"]
 """模块公开面：第三方 b50 变体（pc50 等）从 core.score 一站式导入。"""
@@ -40,8 +47,11 @@ class ScoreService:
         """数据源对应的曲库视图：涉及曲库视图的功能统一经此取用。"""
         return source_of(service).view
 
-    def supports(self, service: str, cap: Capability) -> bool:
-        """数据源是否声明支持某能力域（软降级/文案判断用；硬门禁走方法调用）。"""
+    def supports(self, service: str, cap: "Capability | str") -> bool:
+        """数据源是否声明支持某能力域（软降级/文案判断用；硬门禁走方法调用）。
+
+        ``cap`` 接受能力域成员或其 value 字符串（str 混入枚举，二者等值）。
+        """
         return cap in source_of(service).capabilities
 
     def needs_fetch(self, binding: UserBinding) -> bool:
@@ -101,13 +111,16 @@ class ScoreService:
 
     async def get_my_ranking(
         self, binding: UserBinding, notify_slow=None
-    ) -> "tuple[object, int] | None":
+    ) -> "tuple[RankUser, int] | None":
         """RA 榜个人定位：返回 (榜内条目, 名次)；未上榜 None（仅水鱼支持）。"""
         return await self._src(binding).get_my_ranking(binding, notify_slow)
 
-    async def get_b50_by_username(self, username: str) -> "tuple[object, MaimaiScores]":
+    async def get_b50_by_username(
+        self, username: str
+    ) -> "tuple[DivingFishPlayer, MaimaiScores]":
         """水鱼公开代查：b50 <水鱼用户名>（无需绑定）。"""
-        return await source_of(SERVICE_DIVINGFISH).get_b50_public(username)
+        src = cast(DivingFishSource, source_of(SERVICE_DIVINGFISH))
+        return await src.get_b50_public(username)
 
 
 score_service = ScoreService()
