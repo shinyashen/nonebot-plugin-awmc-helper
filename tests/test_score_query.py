@@ -970,8 +970,12 @@ async def test_ginfo_utage_id_no_stats(app: App, db):
 
 @requires_assets
 @pytest.mark.asyncio
-async def test_ginfo_jp_only_numeric_fallback(app: App, db, monkeypatch):
-    """ginfo 数字入口接 core 解析：JP-only 曲不再「未找到」，出日服曲统计卡。"""
+async def test_ginfo_jp_only_numeric_fallback(app: App, db, songs, monkeypatch):
+    """ginfo 数字入口接 core 解析：JP-only 曲不再「未找到」，出日服曲统计卡。
+
+    ``songs`` 夹具必带：resolve_raw_chart 走 by_id 先查 CN 视图，
+    未种子化会卡死在 ensure_loaded 的 _ready Event 上。
+    """
     import base64
 
     from mocks import make_diff, make_song

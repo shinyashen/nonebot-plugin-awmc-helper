@@ -231,9 +231,7 @@ async def test_plate_traditional_alias_reachable(app: App, monkeypatch):
     monkeypatch.setattr(plugin, "_plate_progress_overview", fake_overview)
 
     event = fake_group_message_event_v11(message="暁将进度")
-    expected = Message(
-        [MessageSegment.at(12345678), MessageSegment.text(" 进度 OK")]
-    )
+    expected = Message([MessageSegment.at(12345678), MessageSegment.text(" 进度 OK")])
     async with app.test_matcher(plugin.plate_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)

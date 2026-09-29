@@ -680,9 +680,8 @@ async def test_vote_hint_in_music_query(app: App, songs):
 async def test_local_alias_jp_only_song(app: App, songs, monkeypatch):
     """日服限定曲可添加本地别名（L-28）：CN 未命中回退 jp_by_id 判存在。"""
     import respx
-    from maimai_py import LevelIndex, SongType
-
     from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
 
     from nonebot_plugin_awmc_helper.plugins import alias
 

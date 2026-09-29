@@ -42,8 +42,10 @@ async def test_fortune(app: App, songs):
     seed = int("12345678")
     fh = qqhash(seed)
     daily = _random_mod.Random(fh)
-    all_songs = await song_service.get_all()
-    song = daily.choice(all_songs)
+    # 与实现同口径：core random(rng=daily)（按谱面均匀、含宴谱），非整表 choice
+    hit = await song_service.random(exclude_utage=False, rng=daily)
+    assert hit is not None
+    song, _diff = hit
     ds = "/".join(f"{d.level_value:.1f}" for d in song.get_difficulties())
 
     rp = fh % 100

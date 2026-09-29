@@ -387,13 +387,16 @@ async def test_find_arcade_ambiguous_lists_candidates(app: App, arcade_enabled):
     from nonebot_plugin_awmc_helper.plugins.arcade import matchers as am
 
     await store.save_arcade(
-        store.Arcade(id=20001, name="游戏天堂", address="某路 3 号", machines=2, is_custom=True)
+        store.Arcade(
+            id=20001, name="游戏天堂", address="某路 3 号", machines=2, is_custom=True
+        )
     )
     await _run(
         app,
         am.arcade_alias_set,
         "添加机厅别名 游戏 别名x",
-        "找到 2 个与「游戏」相关的机厅，请使用 ID 指定：\nID 10000：游戏厅\nID 20001：游戏天堂",
+        "找到 2 个与「游戏」相关的机厅，请使用 ID 指定：\n"
+        "ID 10000：游戏厅\nID 20001：游戏天堂",
     )
     # 终止而非误操作：新别名未写入任何一店
     assert await store.get_arcade(10000) is not None
