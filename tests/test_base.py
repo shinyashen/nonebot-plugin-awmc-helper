@@ -60,3 +60,24 @@ async def test_help_image(app: App):
         ctx.receive_event(bot, event)
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
+
+
+def test_player_display_name_prefers_nickname():
+    """玩家显示名助手：nickname 优先、无则回退 name（score-updater 接线共用）。"""
+    from nonebot_plugin_awmc_helper.core.utils import player_display_name
+
+    class _P:
+        name = "账号名"
+        nickname = "昵称"
+
+    class _LxnsP:
+        name = "只有name"
+
+    assert player_display_name(_P()) == "昵称"
+    assert player_display_name(_LxnsP()) == "只有name"
+
+    class _EmptyNick:
+        name = "真名"
+        nickname = ""
+
+    assert player_display_name(_EmptyNick()) == "真名"  # 空昵称同样回退

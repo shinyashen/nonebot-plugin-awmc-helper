@@ -28,6 +28,15 @@ def user_id_of(session) -> str:
     return str(session.user.id)
 
 
+def player_display_name(player) -> str:
+    """玩家卡片显示名：水鱼 ``Player.name`` 是账号用户名，展示用昵称；
+    落雪 ``Player`` 无 nickname 字段，回退 name（原版 df_to_player 同款）。
+
+    供查询卡面与第三方传分插件（score-updater 仓）共用，勿在消费侧复刻。
+    """
+    return getattr(player, "nickname", None) or player.name
+
+
 def parse_page(args: str | None, default: int = 1) -> int:
     """指令参数 → 页码（缺省/非数字回默认值）。"""
     if args and str(args).isdigit():
