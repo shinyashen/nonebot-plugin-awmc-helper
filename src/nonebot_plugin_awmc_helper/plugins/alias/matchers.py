@@ -94,7 +94,7 @@ async def _finish_multi_forward(
 
 async def _parse_alias_args(message: Message, usage: str) -> tuple[int, str]:
     """申请类指令公共前置校验：参数拆分 → id 合法性 → 曲目存在性。"""
-    args = str(message).strip().split(maxsplit=1)
+    args = message.extract_plain_text().strip().split(maxsplit=1)
     if len(args) < 2:
         await UniMessage.text(f" 参数错误：{usage}").finish(at_sender=True)
     song_id_raw, alias_name = args[0], args[1].strip()
@@ -205,7 +205,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @alias_agree.handle()
 @handle_errors("投票失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    tag = str(message).strip().upper()
+    tag = message.extract_plain_text().strip().upper()
     if not tag:
         await UniMessage.text(" 参数错误：同意别名 <TAG>").finish(at_sender=True)
     try:
@@ -218,7 +218,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @alias_status.handle()
 @handle_errors("查询投票失败，请稍后再试")
 async def _(message: Message = CommandArg()):
-    args = str(message).strip()
+    args = message.extract_plain_text().strip()
     try:
         status = await yuzu_ext.yuzu_client.get_status()
     except yuzu_ext.ExtError as e:

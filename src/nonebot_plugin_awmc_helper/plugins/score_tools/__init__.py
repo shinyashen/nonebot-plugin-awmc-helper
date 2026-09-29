@@ -63,7 +63,7 @@ my_rating_ranking = on_command("我的排名", block=True)
 @score_line_cmd.handle()
 @handle_errors()
 async def _(message: Message = CommandArg()):
-    args = str(message).strip()
+    args = message.extract_plain_text().strip()
     if args in ("帮助", ""):
         png = text_image_bytes(SCORE_LINE_HELP)
         await UniMessage.image(raw=png).finish(at_sender=True)
@@ -148,7 +148,7 @@ async def _(
 @rating_ranking.handle()
 @handle_errors("查询失败，请稍后再试")
 async def _(message: Message = CommandArg()):
-    args = str(message).strip()
+    args = message.extract_plain_text().strip()
     users = await df_ext.rating_ranking()
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     # 精确用户名优先于页码（水鱼用户名可以是纯数字；榜单已在手，判定零开销）

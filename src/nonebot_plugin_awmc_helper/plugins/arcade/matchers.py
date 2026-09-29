@@ -181,7 +181,7 @@ async def _(
 @arcade_add.handle()
 @handle_errors("添加机厅失败")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    args = str(message).strip().split()
+    args = message.extract_plain_text().strip().split()
     if len(args) < 3:
         await UniMessage.text(
             "格式：添加机厅 <店名> <地址> <机台数量> [别称...]"
@@ -211,7 +211,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @arcade_del.handle()
 @handle_errors("删除机厅失败")
 async def _(message: Message = CommandArg()):
-    keyword = str(message).strip()
+    keyword = message.extract_plain_text().strip()
     arcade = await _find_arcade(keyword) if keyword else None
     if arcade is None:
         await UniMessage.text(" 没有这样的机厅哦").finish(at_sender=True)
@@ -222,7 +222,7 @@ async def _(message: Message = CommandArg()):
 @arcade_alias_set.handle()
 @handle_errors("操作失败")
 async def _(message: Message = CommandArg()):
-    text = str(message).strip()
+    text = message.extract_plain_text().strip()
     args = text.split(maxsplit=1)
     if len(args) < 2:
         await UniMessage.text(
@@ -247,7 +247,7 @@ async def _(message: Message = CommandArg()):
 @arcade_set.handle()
 @handle_errors("修改失败")
 async def _(message: Message = CommandArg()):
-    parts = str(message).strip().split()
+    parts = message.extract_plain_text().strip().split()
     if len(parts) != 3 or parts[1] != "数量":
         await UniMessage.text(" 格式：修改机厅 <店名|ID> 数量 <数量>").finish(
             at_sender=True
@@ -278,7 +278,7 @@ async def _(
     command: tuple = Command(),
 ):
     group_id = await ensure_group_admin(session, bot, event, feature="订阅")
-    keyword = str(message).strip()
+    keyword = message.extract_plain_text().strip()
     arcade = await _find_arcade(keyword) if keyword else None
     if arcade is None:
         await UniMessage.text(" 没有这样的机厅哦").finish(at_sender=True)
@@ -308,7 +308,7 @@ async def _(session: Session = UniSession()):
 @arcade_search.handle()
 @handle_errors("查询失败")
 async def _(message: Message = CommandArg()):
-    keyword = str(message).strip()
+    keyword = message.extract_plain_text().strip()
     if not keyword:
         await UniMessage.text(" 格式：查找机厅 <关键词>").finish(at_sender=True)
     found = await store.get_arcades_by_name(keyword)

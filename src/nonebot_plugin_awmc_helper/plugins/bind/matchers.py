@@ -137,7 +137,7 @@ async def _(bot: Bot, event: Event):
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     platform, user_id = session_keys(session)
-    code = df_ext.extract_confirmation_code(str(message))
+    code = df_ext.extract_confirmation_code(message.extract_plain_text())
     if code is None:
         await UniMessage.text(" " + DIVINGFISH_INVALID_CODE_MSG).finish(at_sender=True)
     await _complete_df(platform, user_id, code)
@@ -150,7 +150,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     Hoshino 上游与落雪同构 UX）；带确认码 → 回填收尾；其他参数一律软引导
     （用户名档走「绑定水鱼用户名」，拒绝输入不落行）。"""
     platform, user_id = session_keys(session)
-    arg = str(message).strip()
+    arg = message.extract_plain_text().strip()
     if arg:
         code = df_ext.extract_confirmation_code(arg)
         if code is not None:
@@ -227,7 +227,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     """「绑定水鱼用户名」：用户名公开查询档（玩家信息/b50/RA 排名）。"""
     platform, user_id = session_keys(session)
-    arg = str(message).strip()
+    arg = message.extract_plain_text().strip()
     if not arg:
         await UniMessage.text(
             " 用法：绑定水鱼用户名 <水鱼用户名>（水鱼个人页显示的用户名）"
@@ -273,7 +273,7 @@ async def _complete_df(platform: str, user_id: str, code: str) -> None:
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     platform, user_id = session_keys(session)
-    token = str(message).strip()
+    token = message.extract_plain_text().strip()
     if not token:
         await UniMessage.text(
             "用法：绑定水鱼token <Import-Token>\n"
@@ -290,7 +290,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     platform, user_id = session_keys(session)
-    arg = str(message).strip()
+    arg = message.extract_plain_text().strip()
     if not arg:
         if lxns_ext.oauth_configured():
             pending_bindings.start(platform, user_id, "lxns")
@@ -321,7 +321,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     platform, user_id = session_keys(session)
-    code = lxns_ext.extract_authorization_code(str(message))
+    code = lxns_ext.extract_authorization_code(message.extract_plain_text())
     if code is None:
         await UniMessage.text(" 授权码格式有误，请重新提交").finish(at_sender=True)
     await _complete_lxns(platform, user_id, code)
@@ -357,7 +357,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
             " 绑定日服需要提交 SEGA 账号密码，请私聊机器人操作"
         ).finish(at_sender=True)
     platform, user_id = session_keys(session)
-    arg = str(message).strip()
+    arg = message.extract_plain_text().strip()
     sega_id, sep, password = arg.partition(" ")
     if not arg or not sep or not password.strip():
         await UniMessage.text(
@@ -391,7 +391,7 @@ async def _(session: Session = UniSession()):
 @set_provider.handle()
 @handle_errors("设置失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    arg = str(message).strip()
+    arg = message.extract_plain_text().strip()
     service = {"0": SERVICE_DIVINGFISH, "1": SERVICE_LXNS, "2": SERVICE_NET}.get(arg)
     if service is None:
         await UniMessage.text(
@@ -411,7 +411,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @set_theme.handle()
 @handle_errors("设置失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    arg = str(message).strip()
+    arg = message.extract_plain_text().strip()
     if arg not in ("0", "1"):
         await UniMessage.text(" 用法：主题 <0|1>（0 = prism_plus，1 = circle）").finish(
             at_sender=True
