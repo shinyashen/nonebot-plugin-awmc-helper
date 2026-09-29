@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from maimai_py import PlayerIdentifier
 from nonebot.log import logger
+from sqlalchemy.exc import IntegrityError
 
 from . import store
 from .store import UserBinding
@@ -205,7 +206,12 @@ class BindingService:
         return await store.get_binding(platform, user_id)
 
     async def ensure(self, platform: str, user_id: str) -> UserBinding:
-        """取绑定；不存在则以部署默认查分器自动创建（对齐原版 auto_create）。"""
+        """取绑定；不存在则以部署默认查分器自动创建（对齐原版 auto_create）。
+
+        并发首绑定双 INSERT 竞态：两协程同时 miss 后各自 INSERT，后 commit 方
+        撞主键唯一约束——捕 IntegrityError 重读返回既有行（两方装配内容一致，
+        均为部署默认查分器）；重读仍无行则原样上抛（非竞态异常不吞）。
+        """
         binding = await store.get_binding(platform, user_id)
         if binding is None:
             binding = UserBinding(
@@ -213,7 +219,12 @@ class BindingService:
                 user_id=user_id,
                 service=plugin_config.awmc_default_provider,
             )
-            await store.save_binding(binding)
+            try:
+                await store.save_binding(binding)
+            except IntegrityError:
+                binding = await store.get_binding(platform, user_id)
+                if binding is None:
+                    raise
         return binding
 
     async def unbind(self, platform: str, user_id: str) -> bool:

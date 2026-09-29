@@ -130,6 +130,40 @@ async def test_pending_bindings():
 
 
 @pytest.mark.asyncio
+async def test_binding_ensure_concurrent_first_bind(db, monkeypatch):
+    """并发首绑定双 INSERT 竞态（L-14）：后 commit 方撞主键 → 捕
+    IntegrityError 重读返回既有行，两协程都拿到绑定而不抛。"""
+    import asyncio
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    real_get = store.get_binding
+    state = {"i": 0}
+    ready = (asyncio.Event(), asyncio.Event())
+
+    async def gated_get(platform, user_id):
+        """前两查模拟「双方都看到空表」：互等放行后再各自 INSERT。"""
+        i = state["i"]
+        state["i"] += 1
+        if i < 2:
+            ready[i].set()
+            await ready[1 - i].wait()
+            return None
+        return await real_get(platform, user_id)
+
+    monkeypatch.setattr(store, "get_binding", gated_get)
+    results = await asyncio.gather(
+        binding_service.ensure("OneBot V11", "77700001"),
+        binding_service.ensure("OneBot V11", "77700001"),
+    )
+    assert all(b.service == plugin_config.awmc_default_provider for b in results)
+    row = await real_get("OneBot V11", "77700001")
+    assert row is not None  # 库里恰好一行
+
+
+@pytest.mark.asyncio
 async def test_lxns_refresh_concurrent_single_call(db, songs, monkeypatch):
     """并发续期对拍：同用户两协程同时 401 → 落雪 refresh 只调一次，
     后到者经锁内重读采用新凭据直接返回（不重放旧 rt）。
