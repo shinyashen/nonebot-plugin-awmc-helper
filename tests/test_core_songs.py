@@ -157,6 +157,71 @@ async def test_random(songs):
 
 
 @pytest.mark.asyncio
+async def test_random_jp_pool_and_rng(songs, monkeypatch):
+    """random(jp=True) 从日服视图抽取（NET 绑定用户的随机池，L-5）；
+    rng 注入的随机源替代进程全局随机（fortune 同日同曲种子语义，P-3）。"""
+    from mocks import make_diff, make_song
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    # JP 视图独有曲（国服缺席）+ 与 CN 同根的日服对象（version 可辨）
+    jp_only = make_song(
+        1634,
+        "[協]青春コンプレックス",
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.2,
+            )
+        ],
+    )
+    jp_199 = make_song(
+        199,
+        "チルノのパーフェクトさんすう教室",
+        version=24000,
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.2,
+            )
+        ],
+    )
+
+    async def fake_jp_map():
+        return {199: jp_199, 1634: jp_only}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+
+    # jp 池抽尽：CN 池 DX13 仅 199，JP 池两曲都命中（含国服缺席曲）
+    picks = set()
+    for _ in range(50):
+        got = await song_service.random(song_type=SongType.DX, level="13", jp=True)
+        assert got is not None
+        picks.add(got[0].id)
+    assert picks == {199, 1634}
+    # 不带 jp 时 CN 池不变（JP-only 曲不可达）
+    got = await song_service.random(song_type=SongType.DX, level="13")
+    assert got is not None
+    assert got[0].id == 199
+    # rng 注入：种子随机可复现（同种子同结果，且与全局随机解耦）
+    import random
+
+    got_a = await song_service.random(
+        song_type=SongType.DX, level="13", jp=True, rng=random.Random(7)
+    )
+    got_b = await song_service.random(
+        song_type=SongType.DX, level="13", jp=True, rng=random.Random(7)
+    )
+    assert got_a is not None and got_b is not None
+    assert got_a[0].id == got_b[0].id
+
+
+@pytest.mark.asyncio
 async def test_snapshot_roundtrip(songs):
     """快照序列化 → 反序列化应无损还原查询所需字段。"""
     from nonebot_plugin_awmc_helper.core.songs import song_to_dict, song_from_dict
