@@ -674,3 +674,43 @@ async def test_vote_hint_in_music_query(app: App, songs):
             )
             ctx.should_call_send(event, expected, result=None, bot=bot)
             ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_local_alias_jp_only_song(app: App, songs, monkeypatch):
+    """日服限定曲可添加本地别名（L-28）：CN 未命中回退 jp_by_id 判存在。"""
+    import respx
+    from maimai_py import LevelIndex, SongType
+
+    from mocks import make_diff, make_song
+
+    from nonebot_plugin_awmc_helper.plugins import alias
+
+    jp_only = make_song(
+        1396,
+        "テリトリーバトル",
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.5,
+            )
+        ],
+    )
+    _seed_jp_view(monkeypatch, {1396: jp_only})
+
+    with respx.mock(assert_all_called=False) as m:
+        m.get(f"{BASE}/aliases/maimaidx/aliases").respond(json={"message": "未找到"})
+        await _assert_reply(
+            app,
+            alias.alias_local_apply,
+            "添加本地别名 1396 领土战争",
+            "已成功为ID「1396」添加别名「领土战争」到本地别名库",
+            with_session=True,
+        )
+    from nonebot_plugin_awmc_helper.core import store
+
+    # aliases_of 是 CN 视图域（JP-only 曲 None 属既有口径），持久化断言查表
+    local = [la for la in await store.get_local_aliases() if la.song_id == 1396]
+    assert [la.alias for la in local] == ["领土战争"]

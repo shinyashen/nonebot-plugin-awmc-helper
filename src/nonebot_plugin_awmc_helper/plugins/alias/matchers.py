@@ -101,7 +101,12 @@ async def _parse_alias_args(message: Message, usage: str) -> tuple[int, str]:
     if not song_id_raw.isdigit():
         await UniMessage.text(" 请输入正确的ID").finish(at_sender=True)
     song_id = int(song_id_raw)
-    if await song_service.by_id(song_id) is None:
+    # CN 未命中回退 JP 视图判存在：日服限定曲同样可申请/本地添加别名
+    # （别名库按曲目 id 全局存储，与视图无关；查询侧 jp 兜底见 by_alias_detail）
+    if (
+        await song_service.by_id(song_id) is None
+        and await song_service.jp_by_id(song_id) is None
+    ):
         await UniMessage.text(f" 未找到ID为「{song_id}」的曲目").finish(at_sender=True)
     return song_id, alias_name
 
@@ -259,8 +264,10 @@ async def _(
     enabled = action == "开启"
     await store.set_group_switch(group_id, PUSH_FEATURE, enabled)
     if enabled and not plugin_config.awmc_alias_push:
+        # 群级显式开启覆盖部署默认值（推送分发按 get_switch 群级优先），
+        # 部署关默认只影响「未显式设置」的群，勿再误导为收不到
         await UniMessage.text(
-            "已开启本群别名推送，但部署未启用推送（AWMC_ALIAS_PUSH=false），无法接收"
+            "已开启本群别名推送（部署默认未开启 AWMC_ALIAS_PUSH，本群按群级覆盖生效）"
         ).finish(at_sender=True)
     state = "开启" if enabled else "关闭"
     await UniMessage.text(f" 已{state}maimai别名推送").finish(at_sender=True)
