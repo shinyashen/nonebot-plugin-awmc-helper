@@ -73,6 +73,46 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, float] | None:
     }
 
 
+def sssp_ignore_ids(scores: list[ScoreExtend]) -> set[int]:
+    """成绩中已达到 SSS+ 的曲目 id 集（推分排除集，各消费方与
+    :func:`rise_recommend` 内部共用同一口径）。"""
+    return {s.id for s in scores if (s.achievements or 0) >= SSSP_ACHIEVEMENT}
+
+
+def rise_candidates(
+    songs: list[Song],
+    *,
+    ds_range: tuple[float, float] | None = None,
+    level: str | None = None,
+    song_type: SongType | None = None,
+    scores: list[ScoreExtend] | None = None,
+) -> list[Song]:
+    """推分候选集构建（随机推分 / 推分推荐两消费方共用，纯过滤不做 IO）。
+
+    - ``ds_range``：定数闭区间（按 B50 末位 RA 反推的 [ds, ds+1] 形态）；
+    - ``level``：指定标级时按标级过滤（「我要在<等级>上加N分」）；
+    - ``song_type``：谱面类型过滤（随机推分的 DX/SD 分侧）；
+    - ``scores``：给出时按 :func:`sssp_ignore_ids` 排除已 SSS+ 的曲目。
+
+    ⚠️ 两消费方的「B50 末位 RA」口径**刻意不同**（随机推分取该谱面类型一侧
+    的 b35/b15 末位，推分推荐取 b35+b15 全体 min，NB 两处原型即如此、各有
+    领域理由）——本函数只统一候选集构建，ds 区间由调用方各自计算传入。
+    """
+    ignore_ids = sssp_ignore_ids(scores) if scores else set()
+    candidates: list[Song] = []
+    for song in songs:
+        if song.id in ignore_ids:
+            continue
+        if any(
+            (song_type is None or d.type == song_type)
+            and (level is None or d.level == level)
+            and (ds_range is None or ds_range[0] <= d.level_value <= ds_range[1])
+            for d in song.get_difficulties()
+        ):
+            candidates.append(song)
+    return candidates
+
+
 def rise_recommend(
     scores: list[ScoreExtend],
     songs: list[Song],
@@ -106,7 +146,7 @@ def rise_recommend(
     by_key: dict[tuple, ScoreExtend] = {
         (s.id, s.type, s.level_index): s for s in scores
     }
-    ignored_ids = {s.id for s in scores if (s.achievements or 0) >= SSSP_ACHIEVEMENT}
+    ignored_ids = sssp_ignore_ids(scores)
 
     # 两侧入线基准 = 该侧 B50 末位（最低）RA：升序排列后取首位
     sides: dict[str, list[ScoreExtend]] = {

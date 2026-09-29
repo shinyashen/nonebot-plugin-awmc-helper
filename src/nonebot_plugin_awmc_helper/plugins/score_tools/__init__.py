@@ -19,7 +19,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.ext import divingfish as df_ext
 from ...constants import LEVEL_INDEX_ZH, COLOR_TO_LEVEL_INDEX
-from ...core.calc import score_line, min_ds_of_ra, rise_recommend
+from ...core.calc import score_line, min_ds_of_ra, rise_recommend, rise_candidates
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
@@ -117,23 +117,19 @@ async def _(
     target = int(target_raw) if target_raw else 1
     bests = await score_service.get_b50(binding, notify_slow=slow_notice())
 
-    # 候选：指定等级时按等级过滤，否则按 B50 末位 RA 推算定数区间
+    # 候选：指定等级时按等级过滤，否则按 B50 末位 RA 推算定数区间。
+    # 末位 RA 口径刻意与 random_song 随机推分不同：此处取 b35+b15 全体 min
+    # （推荐列表按版本分侧排序，用全局入线基准），见 rise_candidates 注
     lowest_ra = min(
         (s.dx_rating or 0 for s in bests.scores_b35 + bests.scores_b15), default=0
     )
     if level:
-        candidates = [
-            s
-            for s in await song_service.get_all()
-            if any(d.level == level for d in s.get_difficulties())
-        ]
+        candidates = rise_candidates(await song_service.get_all(), level=level)
     else:
         min_ds = math.ceil(min_ds_of_ra(lowest_ra + target) * 10) / 10
-        candidates = [
-            s
-            for s in await song_service.get_all()
-            if any(min_ds <= d.level_value <= min_ds + 1 for d in s.get_difficulties())
-        ]
+        candidates = rise_candidates(
+            await song_service.get_all(), ds_range=(min_ds, min_ds + 1)
+        )
     rec = rise_recommend(bests.scores, candidates, level=level, target=target)
     if not rec:
         await UniMessage.text(" 没有找到可以提升 RA 的曲目，换一个目标试试吧").finish(

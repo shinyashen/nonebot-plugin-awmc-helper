@@ -17,7 +17,7 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import ZH_TO_GENRE, COLOR_TO_LEVEL_INDEX
-from ...core.calc import SSSP_ACHIEVEMENT, min_ds_of_ra
+from ...core.calc import min_ds_of_ra, rise_candidates
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
@@ -144,19 +144,17 @@ async def _pick_rise_song(scores: list[ScoreExtend]):
         if not side:
             return None
     side.sort(key=lambda s: s.dx_rating or 0)  # 升序，取末位应为最低
+    # 末位 RA 口径刻意与 score_tools 推分推荐不同：此处取**同谱面类型一侧**
+    # 的 B50 末位（随机出的谱面与该侧同池，才有替换意义），见 rise_candidates 注
     lowest_ra = side[0].dx_rating or 0
-    ignore_ids = {s.id for s in scores if (s.achievements or 0) >= SSSP_ACHIEVEMENT}
 
     ds = round(min_ds_of_ra(lowest_ra), 1)
-    candidates = []
-    for song in await song_service.by_level_value(ds, ds + 1):
-        if song.id in ignore_ids:
-            continue
-        if any(
-            d.type == target_type and ds <= d.level_value <= ds + 1
-            for d in song.get_difficulties()
-        ):
-            candidates.append(song)
+    candidates = rise_candidates(
+        await song_service.by_level_value(ds, ds + 1),
+        ds_range=(ds, ds + 1),
+        song_type=target_type,
+        scores=scores,
+    )
     if not candidates:
         return None
     return _random.choice(candidates)

@@ -402,3 +402,53 @@ def test_rise_recommend_default_latest_follows_library():
     sig = inspect.signature(rise_recommend)
     assert sig.parameters["latest_version_value"].default is None
     assert current_version.value > 25000  # CiRCLE 时代：默认值不能停在 PRiSM
+
+
+def test_rise_candidates_and_sssp_ignore():
+    """推分候选集构建（P-2）：ds 区间/标级/类型过滤与 SSS+ 排除单一来源。"""
+    from mocks import make_diff, make_song
+
+    from nonebot_plugin_awmc_helper.core.calc import (
+        rise_candidates,
+        sssp_ignore_ids,
+    )
+
+    scores = [
+        dataclasses.replace(_score(199), achievements=100.5),
+        dataclasses.replace(_score(21), achievements=99.0),
+    ]
+    assert sssp_ignore_ids(scores) == {199}
+
+    songs = [
+        make_song(
+            199,
+            "A",
+            diffs=[
+                make_diff(type=SongType.STANDARD, level="13+", level_value=13.7),
+                make_diff(type=SongType.DX, level="13", level_value=13.0),
+            ],
+        ),
+        make_song(
+            21,
+            "B",
+            diffs=[make_diff(type=SongType.DX, level="14", level_value=14.0)],
+        ),
+        make_song(
+            835,
+            "C",
+            diffs=[make_diff(type=SongType.STANDARD, level="13", level_value=13.2)],
+        ),
+    ]
+
+    # ds 区间 + 类型：随机推分口径（199 已 SSS+ 排除）
+    got = rise_candidates(
+        songs, ds_range=(13.0, 14.0), song_type=SongType.DX, scores=scores
+    )
+    assert [s.id for s in got] == [21]
+    # 仅 ds 区间：推分推荐 ds 模式（无类型过滤、无排除；21 的 DX 14.0 也在
+    # 闭区间 [13, 14] 内）
+    got = rise_candidates(songs, ds_range=(13.0, 14.0))
+    assert [s.id for s in got] == [199, 21, 835]
+    # 标级模式：推分推荐 level 模式
+    got = rise_candidates(songs, level="13")
+    assert [s.id for s in got] == [199, 835]
