@@ -303,6 +303,7 @@ async def test_b50_footer_color_follows_theme(monkeypatch):
     from PIL import ImageDraw
 
     from nonebot_plugin_awmc_helper.core.render import best50
+    from nonebot_plugin_awmc_helper.core.render.tools import CIRCLE_PINK
 
     seen = []
     real_text = ImageDraw.ImageDraw.text
@@ -315,7 +316,7 @@ async def test_b50_footer_color_follows_theme(monkeypatch):
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy_text)
 
     await best50.draw_b50_nb("t", 15000, 7500, 7500, [], [], theme="circle")
-    assert seen == [best50.FOOTER_COLORS["circle"]]
+    assert seen == [CIRCLE_PINK]
 
 
 @requires_assets

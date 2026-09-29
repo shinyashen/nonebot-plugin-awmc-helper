@@ -36,12 +36,11 @@ from maimai_py import (
 
 from .fonts import FONT_HAN, FONT_NUM, font
 from .tools import (
-    TEXT_BLUE,
-    CIRCLE_PINK,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     credit_text,
     image_to_bytes,
+    theme_text_color,
     truncate_hoshino,
 )
 from .assets import assets, online_item_cache_dir
@@ -180,11 +179,6 @@ RA_STAR_THRESHOLDS = [
 RA_STAR_NUMS = [1, 2, 1, 2, 1, 2, 3, 4, 1, 2, 3, 4]
 
 DX_STAR_FILE = "UI_GAM_Gauge_DXScoreIcon_0{num}.png"
-
-FOOTER_COLORS = {
-    "prism_plus": TEXT_BLUE,
-    "circle": CIRCLE_PINK,
-}
 
 _ITEM_HOST = "https://www.yuzuchan.moe/assets/maimaidx"
 """收藏品（牌子/头像）在线素材站，与 Hoshino 版同源。"""
@@ -608,7 +602,7 @@ async def draw_b50_nb(
             draw_score_row(im, draw, x, y, score, theme, sub_of=sub_of)
 
     service_name = SERVICE_DISPLAY.get(service or "", "")
-    footer_color = FOOTER_COLORS[theme]
+    footer_color = theme_text_color(theme)
     draw.text(
         (700, 1570),
         credit_text(service_name or None),

@@ -14,10 +14,9 @@ from maimai_py import Song, Version, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_RODIN, font
 from .tools import (
-    TEXT_BLUE,
-    CIRCLE_PINK,
     credit_text,
     image_to_bytes,
+    theme_text_color,
     truncate_hoshino,
 )
 from .assets import assets
@@ -244,7 +243,7 @@ def song_chart_info(
     mr = ImageDraw.Draw(im)
     f_han = font(24, FONT_HAN)
     f_rodin = font(28, FONT_RODIN)
-    text_color = CIRCLE_PINK if theme == "circle" else TEXT_BLUE
+    text_color = theme_text_color(theme)
 
     im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (65, 25))
     prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)

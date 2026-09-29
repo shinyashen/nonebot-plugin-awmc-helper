@@ -18,6 +18,15 @@ TITLE_BLUE = (114, 188, 254, 255)
 # circle 主题主色（素材包 UI 取色）
 CIRCLE_PINK = (249, 62, 172, 255)
 
+
+def theme_text_color(theme: str) -> tuple[int, int, int, int]:
+    """主题正文色单源：circle 粉，其余（prism_plus）蓝。
+
+    nb_chart 查歌卡 / info 单曲卡 / best50 页脚共用，勿再手写三元式或配色表。
+    """
+    return CIRCLE_PINK if theme == "circle" else TEXT_BLUE
+
+
 # 行卡文字/曲目 id 按难度配色（Hoshino AssetsImage 同源，三处渲染共用）
 DIFF_TEXT_COLORS = [
     (255, 255, 255, 255),

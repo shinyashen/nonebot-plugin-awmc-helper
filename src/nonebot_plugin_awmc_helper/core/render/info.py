@@ -14,10 +14,9 @@ from maimai_py import Song, Genre, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
-    TEXT_BLUE,
-    CIRCLE_PINK,
     credit_text,
     image_to_bytes,
+    theme_text_color,
     truncate_hoshino,
 )
 from .assets import assets
@@ -41,9 +40,6 @@ _GENRE_FILE: dict[Genre, str] = {
     Genre.オンゲキCHUNITHM: "info_ongeki.png",
 }
 
-_TEXT_COLOR = TEXT_BLUE
-_CIRCLE_COLOR = CIRCLE_PINK
-
 
 def song_play_data(
     song: Song,
@@ -58,7 +54,7 @@ def song_play_data(
     ``play_result``：该曲成绩（maimai_py ``PlayerSong.scores``）；只取主类型
     谱面的成绩入槽，未游玩槽画灰行。``service``：数据源署名（未绑定省略）。
     """
-    color = _CIRCLE_COLOR if theme == "circle" else _TEXT_COLOR
+    color = theme_text_color(theme)
     im = assets.canvas("play_info.png", theme)
     dr = ImageDraw.Draw(im)
 
