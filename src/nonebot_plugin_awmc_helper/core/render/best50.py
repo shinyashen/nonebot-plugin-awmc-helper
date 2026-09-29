@@ -428,31 +428,30 @@ async def _draw_header(
         )
     im.alpha_composite(class_badge, (620, 60))
 
-    # 称号条：有称号用对应色底 + 称号名；NET 称号次之；无则彩虹底 + B35/B15 统计
+    # 称号条：先确定文本/字体与底色来源（落雪称号优先，NET 称号次之；
+    # color=None 表示无称号），再走同一段底图装配（无称号彩虹底 + B35/B15 统计）
     trophy = getattr(player, "trophy", None)
     shougou_dir = assets.static_path() / "mai" / "shougou"
     if trophy is not None:
-        color = trophy.color if trophy.color else "Normal"
-        if not (shougou_dir / f"UI_CMN_Shougou_{color}.png").exists():
-            color = "Normal"
-        shougou = assets.get(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
-            (270, 27)
-        )
+        color: str | None = trophy.color or "Normal"
         trophy_text, trophy_font = trophy.name, font(14, FONT_HAN)
     elif trophy_name:
         color = trophy_color or "Normal"
+        trophy_text, trophy_font = trophy_name, font(14, FONT_HAN)
+    else:
+        color = None
+        trophy_text = f"B35: {rating_b35} + B15: {rating_b15} = {rating}"
+        trophy_font = font(14, FONT_NUM)
+    if color is None:
+        shougou = assets.get(shougou_dir / "UI_CMN_Shougou_Rainbow.png").resize(
+            (270, 27)
+        )
+    else:
         if not (shougou_dir / f"UI_CMN_Shougou_{color}.png").exists():
             color = "Normal"
         shougou = assets.get(shougou_dir / f"UI_CMN_Shougou_{color}.png").resize(
             (270, 27)
         )
-        trophy_text, trophy_font = trophy_name, font(14, FONT_HAN)
-    else:
-        shougou = assets.get(shougou_dir / "UI_CMN_Shougou_Rainbow.png").resize(
-            (270, 27)
-        )
-        trophy_text = f"B35: {rating_b35} + B15: {rating_b15} = {rating}"
-        trophy_font = font(14, FONT_NUM)
     im.alpha_composite(shougou, (435, 160))
     draw.text((570, 172), trophy_text, font=trophy_font, fill="#000000", anchor="mm")
 
