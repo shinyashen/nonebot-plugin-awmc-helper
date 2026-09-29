@@ -64,20 +64,22 @@ def test_game_song_id_standard_unchanged():
 
 
 def test_truncate_title_ascii():
-    """截断规则与 Hoshino 一致：>18 列截到 17 列加省略号（与预期图逐字符一致）。"""
-    from nonebot_plugin_awmc_helper.core.render.best50 import truncate_title
+    """行卡标题截断（tools.truncate_hoshino）：>18 列截到 17 列加省略号。"""
+    from nonebot_plugin_awmc_helper.core.render.tools import truncate_hoshino
 
-    assert truncate_title("short") == "short"
-    assert truncate_title("BULK UP (GAME EXCLUSIVE ver.)") == "BULK UP (GAME EXC..."
-    assert truncate_title("Love's Theme of BADASS~") == "Love's Theme of B..."
+    assert truncate_hoshino("short", 18) == "short"
+    assert truncate_hoshino("BULK UP (GAME EXCLUSIVE ver.)", 18) == (
+        "BULK UP (GAME EXC..."
+    )
+    assert truncate_hoshino("Love's Theme of BADASS~", 18) == "Love's Theme of B..."
 
 
 def test_truncate_title_cjk():
     """全角按 2 列计：恰好 18 列不截断，超限按宽度保留。"""
-    from nonebot_plugin_awmc_helper.core.render.best50 import truncate_title
+    from nonebot_plugin_awmc_helper.core.render.tools import truncate_hoshino
 
-    assert truncate_title("一か罰一か罰一か罰") == "一か罰一か罰一か罰"
-    assert truncate_title("超最終鬼畜妹フランドール・") == "超最終鬼畜妹フラ..."
+    assert truncate_hoshino("一か罰一か罰一か罰", 18) == "一か罰一か罰一か罰"
+    assert truncate_hoshino("超最終鬼畜妹フランドール・", 18) == "超最終鬼畜妹フラ..."
 
 
 def test_dani_plate_num_skips_after_10():

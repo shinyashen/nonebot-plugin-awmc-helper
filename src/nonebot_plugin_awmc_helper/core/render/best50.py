@@ -208,11 +208,6 @@ def cover_song_id(score: ScoreExtend) -> int:
     return score.id % 10000
 
 
-def truncate_title(s: str, limit: int = 18) -> str:
-    """标题超宽截断（Hoshino 双参数规则：>limit 才截、截后 ≤limit-1 列）。"""
-    return truncate_hoshino(s, limit)
-
-
 def dani_plate_num(course_rank: int) -> str:
     """段位认定牌文件序号：>10 段文件号跳一位（Hoshino 同款）。"""
     return f"{course_rank if course_rank <= 10 else course_rank + 1:02d}"
@@ -514,7 +509,7 @@ def draw_score_row(
     )
     draw.text(
         (x + 93, y + 14),
-        truncate_title(score.title),
+        truncate_hoshino(score.title, 18),
         font=font(14, FONT_HAN),
         fill=DIFF_TEXT_COLORS[diff],
         anchor="lm",
