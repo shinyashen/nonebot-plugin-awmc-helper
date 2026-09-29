@@ -1940,7 +1940,12 @@ async def apply_external_sources(
     from ..config import plugin_config
 
     specs = plugin_config.awmc_extra_song_sources
-    summary: dict[str, Any] = {"sources": len(specs), "applied": 0, "changed": False}
+    summary: dict[str, Any] = {
+        "sources": len(specs),
+        "applied": 0,
+        "created": 0,
+        "changed": False,
+    }
     if not specs and preloaded is None:
         return summary
     docs = preloaded if preloaded is not None else await _load_extra_docs()
@@ -1954,6 +1959,7 @@ async def apply_external_sources(
     if docs and (force or digest != prev):
         applied, created, changed_fields = await _merge_extra_docs(docs)
         summary["applied"] = applied
+        summary["created"] = created
         summary["changed"] = bool(changed_fields or created)
         await store.kv_set("songdb_extra_hash", digest)
     return summary

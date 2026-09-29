@@ -427,7 +427,8 @@ async def _build_fill_doc() -> tuple[dict, int]:
 
 
 async def apply_fill() -> tuple[int, bool]:
-    """抓取缺口曲页面并按 fill 合并（复用 _merge_extra_docs 全部入库/留档机制）。
+    """抓取缺口曲页面并按 fill 合并（走 songdb 公有入口 ``apply_external_sources``，
+    与 munet 批次补充同通道，不再摸 ``_merge_extra_docs`` 私有面）。
 
     返回 (applied, changed)。
     """
@@ -437,11 +438,14 @@ async def apply_fill() -> tuple[int, bool]:
     if not doc:
         logger.info("songdb: gamerch 补充无缺口谱面，跳过")
         return 0, False
-    applied, created, changed = await songdb._merge_extra_docs(
-        [("gamerch", "fill", doc)]
+    # force=True：gamerch 文档不属 awmc_extra_song_sources 管辖，绕过内容
+    # 哈希门控（对齐旧直连合并的「总是合并」语义，munet 批次同款）
+    summary = await songdb.apply_external_sources(
+        preloaded=[("gamerch", "fill", doc)], force=True
     )
     logger.info(
-        f"songdb: gamerch 补充完成（抓取 {fetched} 曲、{applied} 处字段、"
-        f"新增 {created} 曲、{changed} 处真实值变化）"
+        f"songdb: gamerch 补充完成（抓取 {fetched} 曲、"
+        f"{summary.get('applied', 0)} 处字段、新增 {summary.get('created', 0)} 曲、"
+        f"{summary.get('changed', 0)}）"
     )
-    return applied, bool(changed or created)
+    return summary.get("applied", 0), bool(summary.get("changed"))
