@@ -37,7 +37,7 @@ def make_diff(
     level_index: LevelIndex = LevelIndex.MASTER,
     level: str = "13",
     level_value: float = 13.0,
-    note_designer: str = "まぐランド",
+    note_designer: str | None = "まぐランド",
     version: int = 26000,
     tap_num: int = 457,
     hold_num: int = 43,
@@ -52,7 +52,7 @@ def make_diff(
         level=level,
         level_value=level_value,
         level_index=level_index,
-        note_designer=note_designer,
+        note_designer=note_designer or "-",  # 上游模型非可选；None 归 "-"（宴谱同口径）
         version=version,
         tap_num=tap_num,
         hold_num=hold_num,

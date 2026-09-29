@@ -90,6 +90,8 @@ async def test_rebuild_full_union(db):
     # buddy 宴左右物量（[協]ラグトレイン，otoge/all_data/lxns 三源同值）
     buddy = state.charts[(1355, "utage", 1)]
     assert buddy.is_buddy
+    assert buddy.notes_left is not None
+    assert buddy.notes_right is not None
     assert json.loads(buddy.notes_left) == [183, 76, 53, 164, 173]
     assert json.loads(buddy.notes_right) == [172, 63, 53, 102, 216]
     # 主物量不变式：buddy 行主列 ≡ 左右之和（dx 星按主物量算 max DX）

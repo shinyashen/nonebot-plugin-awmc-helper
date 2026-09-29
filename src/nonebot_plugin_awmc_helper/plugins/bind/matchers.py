@@ -66,7 +66,7 @@ _CODE_SERVICES: tuple[tuple[str, Callable[[str], str | None]], ...] = (
 """回填会话覆盖的数据源 → 授权码提取函数（单一来源：_code_fill_state 与
 回填 handler 均由本表派生；两家授权码长相一样，靠会话 kind 区分归属）。"""
 
-_CODE_EXTRACTORS = dict(_CODE_SERVICES)
+_CODE_EXTRACTORS: dict[str, Callable[[str], str | None]] = dict(_CODE_SERVICES)
 
 
 async def _code_fill_state(

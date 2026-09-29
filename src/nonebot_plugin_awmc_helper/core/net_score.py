@@ -12,6 +12,7 @@ NET 记录页无谱面内部 id（曲名即唯一线索，dxrating 同样按标�
 """
 
 import time
+from typing import TypeVar
 from dataclasses import asdict, dataclass
 
 from nonebot import logger
@@ -37,10 +38,12 @@ from ..config import plugin_config
 from .ext.net import NetPlayer, NetRecord, NetCredentials, MaimaiNetClient
 from ..constants import LEVEL_INDEX_BY_EN, normalize_text
 
-
 # NET 记录的 fc/fs 字符串（fc/fcp/ap/app、sync/fs/fsp/fsd/fsdp）本就是
 # maimai_py 枚举名的小写形式，直接按名转枚举（与上游 providers/lxns.py 同口径）
-def _flag_of(enum_cls, value: str | None) -> FCType | FSType | None:
+_FlagT = TypeVar("_FlagT", FCType, FSType)
+
+
+def _flag_of(enum_cls: type[_FlagT], value: str | None) -> _FlagT | None:
     """记录 fc/fs 字符串 → 枚举；空值/未知名（官方新增徽章）返回 None。"""
     if not value:
         return None

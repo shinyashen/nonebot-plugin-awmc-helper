@@ -126,7 +126,7 @@ async def test_full_identifier_flag_routing(db, oauth):
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     binding = await binding_service.ensure("qq", "10001")
-    await binding_service.bind_divingfish_oauth(binding, sub=20560)
+    await binding_service.bind_divingfish_oauth(binding, sub="20560")
     await binding_service.bind_divingfish_token(binding, "dead-token")
     assert binding_service.full_identifier(binding).credentials == _subject("10001")
 
