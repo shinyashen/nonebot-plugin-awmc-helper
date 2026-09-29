@@ -39,20 +39,12 @@ from ..constants import LEVEL_INDEX_BY_EN, normalize_text
 
 # NET 记录的 fc/fs 字符串（fc/fcp/ap/app、sync/fs/fsp/fsd/fsdp）本就是
 # maimai_py 枚举名的小写形式，直接按名转枚举（与上游 providers/lxns.py 同口径）
-def _fc_of(record: NetRecord) -> FCType | None:
-    if not record.fc:
+def _flag_of(enum_cls, value: str | None) -> FCType | FSType | None:
+    """记录 fc/fs 字符串 → 枚举；空值/未知名（官方新增徽章）返回 None。"""
+    if not value:
         return None
     try:
-        return FCType[record.fc.upper()]
-    except KeyError:
-        return None
-
-
-def _fs_of(record: NetRecord) -> FSType | None:
-    if not record.fs:
-        return None
-    try:
-        return FSType[record.fs.upper()]
+        return enum_cls[value.upper()]
     except KeyError:
         return None
 
@@ -285,8 +277,8 @@ class NetScoreService:
             level=diff.level,
             level_index=LEVEL_INDEX_BY_EN[record.difficulty],
             achievements=record.achievement,
-            fc=_fc_of(record),
-            fs=_fs_of(record),
+            fc=_flag_of(FCType, record.fc),
+            fs=_flag_of(FSType, record.fs),
             dx_score=record.dx_score,
             dx_rating=ra,
             play_count=None,
