@@ -24,12 +24,13 @@ from .resolve import (
 )
 from ...constants import UTAGE_ID_BASE, display_song_id
 from ...core.help import CommandSpec, help_registry
+from ...core.score import score_service
 from ...core.songs import cn_song_map, song_service, entries_list_text
 from ...core.store import UserBinding
 from ...core.types import Song, SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
-from ...core.binding import SERVICE_NET, SessionBinding
+from ...core.binding import SessionBinding
 from ...core.chart_card import chart_card_bytes
 
 search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
@@ -38,15 +39,17 @@ query_chart = on_regex(r"(?i)^id\s?([0-9]+)$", block=True)
 
 
 async def _net_view_song(song: Song, binding: UserBinding | None) -> tuple[Song, bool]:
-    """NET 绑定用户的查歌路由（L-5 拍板）：曲对象取日服视图（缺失回退原
+    """NET 绑定用户的查歌路由（L-5 拍板）：曲对象取数据源对应视图（缺失回退原
     对象），出卡 jp=True（日服口径渲染、不嵌国服 B50——NET 成绩 id 形状
-    与 CN 视图 B50 消费侧失配）。非 NET 绑定原样返回 ``(song, False)``。
+    与 CN 视图 B50 消费侧失配）。其余绑定原样返回 ``(song, False)``。
+
+    视图判定走 score_service.view_of（数据源注册表单源），不写 service 硬编码。
 
     日服限定提示与该路由**解耦**：提示只看「该曲是否国服缺席」（各入口
     既有的 flags/cn_song_map 或 resolve_raw_chart jp 判定），NET 用户查
     国服在架曲不因本路由误弹提示。
     """
-    if binding is None or binding.service != SERVICE_NET:
+    if binding is None or score_service.view_of(binding.service) != "jp":
         return song, False
     return (await song_service.jp_by_id(song.id)) or song, True
 

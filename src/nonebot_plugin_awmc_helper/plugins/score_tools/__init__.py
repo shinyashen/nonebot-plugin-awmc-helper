@@ -26,7 +26,7 @@ from ...core.songs import song_service
 from ...core.store import UserBinding
 from ...core.types import SongType
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
-from ...core.binding import SessionBinding, binding_service, service_display
+from ...core.binding import SessionBinding, service_display
 from ...core.render.tools import text_image_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -174,25 +174,16 @@ async def _(message: Message = CommandArg()):
 @my_rating_ranking.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
-    from ...core.binding import SERVICE_DIVINGFISH
-
-    if binding.service != SERVICE_DIVINGFISH:
-        await UniMessage.text(" 水鱼排行榜仅支持水鱼数据源（数据源 0）查询").finish(
+    # 数据源适配：仅水鱼支持（其余数据源由适配器基类给统一「暂不支持」文案）
+    hit = await score_service.get_my_ranking(binding, notify_slow=slow_notice())
+    if hit is None:
+        await UniMessage.text(" 未在查分器排行榜中找到您的记录。").finish(
             at_sender=True
         )
-    ident = binding_service.identifier_or_none(binding)
-    if ident is None or (ident.username is None and ident.qq is None):
-        await UniMessage.text(" 请先绑定水鱼查分器后再查询排名").finish(at_sender=True)
-    # query/player 响应含 username（DivingFishPlayer.name），qq 查询同样可用
-    player = await score_service.get_player(binding, notify_slow=slow_notice())
-    username = player.name
-    users = await df_ext.rating_ranking()
-    for i, u in enumerate(users):
-        if u.username.lower() == username.lower():
-            await UniMessage.text(
-                f"您的 Rating 为「{u.ra}」，排名第「{i + 1}」名"
-            ).finish(at_sender=True)
-    await UniMessage.text(" 未在查分器排行榜中找到您的记录。").finish(at_sender=True)
+    entry, rank = hit
+    await UniMessage.text(
+        f"您的 Rating 为「{entry.ra}」，排名第「{rank}」名"
+    ).finish(at_sender=True)
 
 
 # ---------------------------------------------------------------- 帮助声明

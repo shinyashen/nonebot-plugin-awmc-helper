@@ -32,7 +32,6 @@ from ...core.binding import (
     binding_service,
     resolve_session_query,
 )
-from ...core.net_score import net_score_service
 
 AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
@@ -147,7 +146,7 @@ async def _minfo_net(key: str, binding) -> None:
     if len(song_ids) > 1:  # 关键词命中多曲：列 id 供用户指定（不查成绩）
         await _finish_entry_list(entries)
     prefer = entries[0][2] if len(entries) == 1 else None
-    if net_score_service.needs_fetch(binding):
+    if score_service.needs_fetch(binding):
         await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
             at_sender=True
         )
@@ -205,12 +204,12 @@ async def _(
         if binding.service == SERVICE_NET:
             # 日服 NET：窗口缓存优先（首次/过期时真实抓取，约 5-15 秒）；
             # 身份来自登录流顺带解析的首页（玩家名/称号/头像），缺失回退 SEGA ID
-            if net_score_service.needs_fetch(binding):
+            if score_service.needs_fetch(binding):
                 await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
                     at_sender=True
                 )
             bests = await score_service.get_b50(binding)
-            player = net_score_service.player_of(binding)
+            player = score_service.player_profile(binding)
             # 身份素材并发拉取（首查下载，之后落盘缓存秒回）
             icon_b, course_b, class_b, plate_b = await asyncio.gather(
                 _net_image_bytes(player.icon_url if player else None),
@@ -309,7 +308,8 @@ async def _(
     if not key:
         await UniMessage.text(" 用法：minfo <曲目ID|曲名|别名>").finish(at_sender=True)
     binding = await _get_binding_or_none(session, event)
-    if binding is not None and binding.service == SERVICE_NET:
+    if binding is not None and score_service.view_of(binding.service) == "jp":
+        # 数据源为日服视图（现即 NET）：曲走 JP 视图解析 + NET 成绩链路
         await _minfo_net(key, binding)
     entries = await _minfo_entries(key, "cn")
     if len({s.id for _, s, _ in entries}) > 1:  # 关键词命中多曲：列 id（不查成绩）
