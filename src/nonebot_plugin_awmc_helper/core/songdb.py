@@ -1121,6 +1121,7 @@ async def rebuild(
         "warnings": state.warnings,
         "cn_current_version": state.cn_current_version(),
     }
+    # 重建统计快照，供人工查库（kv_cache 表）核对历次重建规模，无程序内消费方
     await store.kv_set("songdb_stat", result)
     await _refresh_standard_json(state)
     return result
