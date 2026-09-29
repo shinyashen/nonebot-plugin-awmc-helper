@@ -3,13 +3,16 @@
 端点与字段对齐原版 maimaiDX 的 LXNS OAuth2 实现。
 """
 
-import json
-import base64
 from dataclasses import dataclass
 
 import httpx
 
-from . import ExtError, ExtNetworkError, get_client
+from . import (
+    ExtError,
+    ExtNetworkError,
+    get_client,
+    jwt_payload_unverified,
+)
 from ...config import plugin_config
 
 LXNS_BASE = "https://maimai.lxns.net"
@@ -134,18 +137,13 @@ def token_expiry(access_token: str) -> float | None:
     时返回 None，调用方回退 401 驱动的既有续期链路（落雪 OAuth 仍在 beta，
     不对令牌内部结构做硬依赖）。
     """
-    try:
-        payload = access_token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        data = json.loads(base64.urlsafe_b64decode(payload))
-    except (IndexError, ValueError):
+    payload = jwt_payload_unverified(access_token)
+    if payload is None:
         return None
-    if not isinstance(data, dict):
-        return None
-    exp = data.get("exp")
+    exp = payload.get("exp")
     if isinstance(exp, (int, float)):
         return float(exp)
-    iat = data.get("iat")
+    iat = payload.get("iat")
     if isinstance(iat, (int, float)):
         return float(iat) + 900
     return None

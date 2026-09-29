@@ -1,13 +1,17 @@
 """水鱼直连：RA 排行榜 + OAuth 设备码绑定（maimai-py 未覆盖的部分）。"""
 
 import re
-import json
-import base64
 from dataclasses import dataclass
 
 import httpx
 
-from . import ExtError, ExtNetworkError, fetch_json, get_client
+from . import (
+    ExtError,
+    ExtNetworkError,
+    fetch_json,
+    get_client,
+    jwt_payload_unverified,
+)
 from ...config import plugin_config
 
 RANKING_URL = "https://www.diving-fish.com/api/maimaidxprober/rating_ranking"
@@ -99,12 +103,8 @@ def token_subject(access_token: str) -> str | None:
     **只解不验**：令牌是 bot 刚从水鱼账号服务取回的，仅用于自洽性比对，
     真正的验签由资源服务器做。
     """
-    try:
-        payload = access_token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload)).get("sub")
-    except (IndexError, ValueError):
-        return None
+    payload = jwt_payload_unverified(access_token)
+    return payload.get("sub") if payload else None
 
 
 def oauth_ready() -> bool:

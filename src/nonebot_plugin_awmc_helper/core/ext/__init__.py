@@ -14,6 +14,8 @@
 每个模块独立客户端、独立 respx 测试；统一超时与异常语义。
 """
 
+import json
+import base64
 from typing import Any
 from collections.abc import Callable, Awaitable
 
@@ -29,6 +31,23 @@ class ExtError(Exception):
 
 class ExtNetworkError(ExtError):
     """外部接口网络错误。"""
+
+
+def jwt_payload_unverified(token: str) -> dict | None:
+    """JWT payload「只解不验」解码（生态内同构解码的单一来源）。
+
+    水鱼 ``token_subject`` / 落雪 ``token_expiry`` 等消费方拿到的令牌都是刚从
+    对应服务取回、仅做自洽性比对，验签由签发方资源服务器负责。非 JWT /
+    payload 非对象返回 None，调用方回退既有错误链路（不硬依赖令牌结构）。
+    """
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload))
+    except (IndexError, ValueError):
+        # binascii.Error / JSONDecodeError 均为 ValueError 子类
+        return None
+    return data if isinstance(data, dict) else None
 
 
 _client: httpx.AsyncClient | None = None
