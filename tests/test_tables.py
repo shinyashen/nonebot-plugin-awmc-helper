@@ -298,9 +298,7 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         return b"png"
 
     monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
-    monkeypatch.setattr(
-        table_template, "draw_rating_table_with_fallback", fake_draw
-    )
+    monkeypatch.setattr(table_template, "draw_rating_table_with_fallback", fake_draw)
 
     event = fake_group_message_event_v11(
         message=Message(
@@ -328,7 +326,9 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         )
         ctx.should_call_send(
             event,
-            Message([MessageSegment.at(12345678), MessageSegment.image("base64://cG5n")]),
+            Message(
+                [MessageSegment.at(12345678), MessageSegment.image("base64://cG5n")]
+            ),
             result=None,
             bot=bot,
         )

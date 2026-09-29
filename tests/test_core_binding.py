@@ -342,9 +342,7 @@ async def test_resolve_query_binding_gate(db, monkeypatch):
     async def fake_finish(self, *a, **kw):
         raise FinishedException(str(self))
 
-    monkeypatch.setattr(
-        "nonebot_plugin_alconna.uniseg.UniMessage.finish", fake_finish
-    )
+    monkeypatch.setattr("nonebot_plugin_alconna.uniseg.UniMessage.finish", fake_finish)
     # 非 QQ 平台（platform 无 QQ 语义、无适配器回退）
     session = SimpleNamespace(platform="telegram", user=SimpleNamespace(id="42"))
 

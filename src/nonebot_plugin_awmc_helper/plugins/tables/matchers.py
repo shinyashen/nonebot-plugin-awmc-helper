@@ -27,8 +27,8 @@ from ...core.plates import (
     plate_kinds_hint,
 )
 from ...core.binding import (
-    at_tolerant,
     SessionQueryBinding,
+    at_tolerant,
     service_display,
 )
 from ...core.sources import Capability
@@ -46,9 +46,7 @@ DS_RE = r"([0-9]+(?:\.[0-9]+)?\+?)"
 PLAN_RE = r"(sssp|sss|ssp|ss|sp|s|ap|fcp|fc|fsp|fs|fdx)"
 
 ds_table_cmd = on_regex(at_tolerant(rf"^{LEVEL_RE}定数表$"), block=True)
-score_table_cmd = on_regex(
-    at_tolerant(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$"), block=True
-)
+score_table_cmd = on_regex(at_tolerant(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$"), block=True)
 progress_cmd = on_regex(
     at_tolerant(
         rf"^{LEVEL_RE}{PLAN_RE}\+?(已完成|未完成|未开始|未游玩)?进度\s?([0-9]+)?$",
@@ -62,9 +60,7 @@ plate_cmd = on_regex(
     block=True,
 )
 plate_help = on_fullmatch("牌子条件", block=True)
-score_list_cmd = on_regex(
-    at_tolerant(rf"^{DS_RE}\s?分数列表\s?([0-9]+)?$"), block=True
-)
+score_list_cmd = on_regex(at_tolerant(rf"^{DS_RE}\s?分数列表\s?([0-9]+)?$"), block=True)
 update_rating = on_command("更新定数表", permission=SUPERUSER, block=True)
 update_plate = on_command("更新完成表", permission=SUPERUSER, block=True)
 
