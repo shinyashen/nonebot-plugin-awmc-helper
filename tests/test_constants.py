@@ -205,6 +205,31 @@ def test_plate_kinds_roster_and_validity():
     assert plate_kinds_hint("初") == "国服没有「初」代牌子"
 
 
+def test_plate_traditional_form_normalized():
+    """繁体/和制牌字先归一再查牌单（L-3）：maimai_py plate_aliases 认可的
+    写法（暁将/櫻極）不得被本地牌单先行拒绝；简体行为不变。"""
+    from nonebot_plugin_awmc_helper.core.plates import (
+        plate_kinds,
+        is_valid_plate,
+        plate_kinds_hint,
+    )
+
+    # 繁体版本字/牌字归一后与简体同判
+    assert is_valid_plate("暁", "将") is is_valid_plate("晓", "将")
+    assert is_valid_plate("櫻", "極") is is_valid_plate("樱", "极")
+    assert is_valid_plate("暁", "将")
+    assert is_valid_plate("櫻", "極")
+    assert is_valid_plate("櫻", "將")
+    # 归一不放宽牌单收紧：樱者 繁简写法均判否
+    assert not is_valid_plate("櫻", "者")
+    assert not is_valid_plate("樱", "者")
+    # 牌单读表同样归一
+    assert plate_kinds("暁") == plate_kinds("晓")
+    # 提示文案以归一后的简体牌字输出
+    assert plate_kinds_hint("暁") == plate_kinds_hint("晓")
+    assert "晓将" in plate_kinds_hint("暁")
+
+
 def test_plate_version_range_zhen_includes_first_gen():
     """真牌范围含初代：初代曲国服无自己的牌，只落在真牌范围内（下界前移）。
 

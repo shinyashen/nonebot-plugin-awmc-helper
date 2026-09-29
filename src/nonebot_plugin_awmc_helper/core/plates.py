@@ -5,9 +5,21 @@
 """
 
 from maimai_py import Song, Version, SongType, SongDifficulty, plate_to_version
+from maimai_py.enums import plate_aliases
 
 _LEGACY_PLATES = ("舞", "霸")
 """旧作全集牌：横跨全部旧框版本，主类型为 SD。"""
+
+
+def _norm_plate(text: str) -> str:
+    """繁体/和制牌字 → 简体牌单口径（单源 maimai_py ``plate_aliases``）。
+
+    本地牌单与 ``plate_to_version`` 键均为简体；maimai_py ``MaimaiPlates``
+    入口同样先归一再查表——本地先行校验若不归一，会把上游认可的繁体写法
+    （暁将/櫻極）判否。
+    """
+    return plate_aliases.get(text, text)
+
 
 _PLATE_KINDS_ROSTER: dict[str, tuple[str, ...]] = {
     "舞": ("将", "极", "神", "舞舞"),
@@ -41,7 +53,7 @@ PLATE_KINDS = tuple(
 
 def plate_kinds(version: str) -> tuple[str, ...]:
     """该版本**真实存在**的牌种（牌单例外表；未知版本按四牌齐全兜底）。"""
-    return _PLATE_KINDS_ROSTER.get(version, _DEFAULT_PLATE_KINDS)
+    return _PLATE_KINDS_ROSTER.get(_norm_plate(version), _DEFAULT_PLATE_KINDS)
 
 
 def plate_kinds_of(version: str) -> tuple[str, ...]:
@@ -59,6 +71,7 @@ def plate_kinds_of(version: str) -> tuple[str, ...]:
 
 def plate_kinds_hint(version: str) -> str:
     """牌名不存在时的牌单提示（读例外表；初代整代无牌另有文案）。"""
+    version = _norm_plate(version)
     kinds = plate_kinds(version)
     if not kinds:
         return f"国服没有「{version}」代牌子"
@@ -69,9 +82,10 @@ def is_valid_plate(version: str, kind: str) -> bool:
     """（版本字, 牌种）是否为真实存在的牌子（牌单例外表为准）。
 
     舞/霸/真 按真实牌表收紧（舞者/霸将/真将/樱者 等组合均不存在）；其余版本
-    四牌齐全，超出四牌的牌种（如 樱者）同样判否。
+    四牌齐全，超出四牌的牌种（如 樱者）同样判否。繁体/和制牌字先归一
+    （:func:`_norm_plate`）再查表。
     """
-    return kind in plate_kinds(version)
+    return _norm_plate(kind) in plate_kinds(version)
 
 
 def major_type_of_plate(version: str) -> SongType:
