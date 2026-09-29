@@ -756,10 +756,18 @@ class SongService:
         level: str | None = None,
         level_index: LevelIndex | None = None,
         exclude_utage: bool = True,
+        jp: bool = False,
+        rng: "_random.Random | None" = None,
     ) -> tuple[Song, SongDifficulty] | None:
-        """随机谱面：按类型/分类/等级过滤后随机选择（maimai-py 无随机接口）。"""
+        """随机谱面：按类型/分类/等级过滤后随机选择（maimai-py 无随机接口）。
+
+        ``jp=True``：从日服视图（:meth:`jp_all`）抽取，其余过滤语义与 CN 侧
+        一致——NET 绑定用户的随机走 JP 池（L-5 拍板：NET 成绩口径与 CN 视图
+        B50 消费侧失配，出卡走日服视图）。``rng``：可注入的随机源（fortune
+        「同人同日结果稳定」的种子随机），缺省用进程全局随机。
+        """
         candidates: list[tuple[Song, SongDifficulty]] = []
-        for song in await self.get_all():
+        for song in await (self.jp_all() if jp else self.get_all()):
             if genre is not None and song.genre != genre:
                 continue
             for diff in song.get_difficulties():
@@ -773,7 +781,7 @@ class SongService:
                 if level_index is not None and diff.level_index != level_index:
                     continue
                 candidates.append((song, diff))
-        return _random.choice(candidates) if candidates else None
+        return (rng or _random).choice(candidates) if candidates else None
 
     @staticmethod
     def available_ids(song: Song) -> list[int]:
