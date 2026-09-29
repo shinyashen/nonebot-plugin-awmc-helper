@@ -230,8 +230,8 @@ async def test_b50_username_lookup(app: App, db, songs):
 
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.utils import player_display_name
     from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
-    from nonebot_plugin_awmc_helper.plugins.score_query.matchers import _display_name
 
     payload = {
         "username": "someone",
@@ -261,7 +261,7 @@ async def test_b50_username_lookup(app: App, db, songs):
         # 与 handler 相同的调用路径 → 相同数据 → 相同渲染
         player, bests = await score_service.get_b50_by_username("someone")
         expected_png = await best50_bytes(
-            _display_name(player),
+            player_display_name(player),
             bests.rating,
             bests.rating_b35,
             bests.rating_b15,
@@ -717,8 +717,8 @@ async def test_b50_at_unbound_target_qq_fallback(app: App, db, songs):
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.utils import player_display_name
     from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
-    from nonebot_plugin_awmc_helper.plugins.score_query.matchers import _display_name
 
     with respx.mock(assert_all_called=False) as m:
         route = m.post(f"{BASE_DF}/query/player").respond(json=_B50_PAYLOAD)
@@ -733,7 +733,7 @@ async def test_b50_at_unbound_target_qq_fallback(app: App, db, songs):
             score_service.get_player(transient), score_service.get_b50(transient)
         )
         expected_png = await best50_bytes(
-            _display_name(player),
+            player_display_name(player),
             bests.rating,
             bests.rating_b35,
             bests.rating_b15,
@@ -806,9 +806,9 @@ async def test_b50_at_bound_username_target(app: App, db, songs):
 
     from nonebot_plugin_awmc_helper.plugins import score_query
     from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.utils import player_display_name
     from nonebot_plugin_awmc_helper.core.binding import binding_service
     from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
-    from nonebot_plugin_awmc_helper.plugins.score_query.matchers import _display_name
 
     binding = await binding_service.ensure("OneBot V11", "99999999")
     await binding_service.bind_divingfish_username(binding, "fishuser")
@@ -819,7 +819,7 @@ async def test_b50_at_bound_username_target(app: App, db, songs):
             score_service.get_player(binding), score_service.get_b50(binding)
         )
         expected_png = await best50_bytes(
-            _display_name(player),
+            player_display_name(player),
             bests.rating,
             bests.rating_b35,
             bests.rating_b15,
@@ -941,3 +941,92 @@ async def test_minfo_at_target_uses_target_binding(app: App, db, songs, monkeypa
         ctx.should_finished()
     assert captured["platform"] == "OneBot V11"
     assert captured["user_id"] == "99999999"  # 代查目标而非发送者
+
+
+# ---------------------------------------------------------------------------
+# ginfo 数字入口（L-7）：6 位宴谱 diff_id 不再渲染宿主曲统计卡；
+# 数字入口接 core 解析获得日服兜底
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ginfo_utage_id_no_stats(app: App, db):
+    """ginfo 6 位宴谱 diff_id → 「宴谱没有游玩统计」而非宿主曲统计卡。
+
+    修复前 by_id 对 6 位 id 取模命中同号普通曲，渲染出与提示语矛盾的
+    宿主曲统计卡（L-7）。
+    """
+    from mocks import make_song, make_utage, seed_service
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    host = make_song(199, "チルノのパーフェクトさんすう教室", utage=[make_utage()])
+    await seed_service(song_service, [host])
+    await _assert_reply(
+        app, score_query.ginfo, "ginfo 100199", "宴谱没有游玩统计", with_session=False
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_ginfo_jp_only_numeric_fallback(app: App, db, monkeypatch):
+    """ginfo 数字入口接 core 解析：JP-only 曲不再「未找到」，出日服曲统计卡。"""
+    import base64
+
+    from mocks import make_diff, make_song
+    from maimai_py import FCType, RateType, SongType, LevelIndex
+    from maimai_py.models import CurveObject
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+    from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.core.render import stats as stats_render
+    from nonebot_plugin_awmc_helper.core.render import nb_chart
+    from nonebot_plugin_awmc_helper.plugins.score_query.render import _ginfo_image
+
+    curve = CurveObject(
+        sample_size=12345,
+        fit_level_value=13.8,
+        avg_achievements=98.76,
+        stdev_achievements=2.34,
+        avg_dx_score=2555.0,
+        rate_sample_size={RateType.SSS: 100, RateType.SSP: 50},
+        fc_sample_size={FCType.FC: 80, FCType.AP: 20},
+    )
+    jp_song = make_song(
+        1634,
+        "[協]青春コンプレックス",
+        version=24000,
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="13",
+                level_value=13.2,
+                curve=curve,
+            )
+        ],
+    )
+
+    async def fake_jp_map():
+        return {1634: jp_song}
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+
+    diff = jp_song.get_difficulty(SongType.DX, LevelIndex.MASTER)
+    assert diff is not None
+    assert diff.curve is not None
+    card = nb_chart.song_chart_info(jp_song, False, False, [], DEFAULT_THEME, None)
+    expected_png = _ginfo_image(card, stats_render.song_global_data(jp_song, diff))
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(expected_png).decode()}"),
+        ]
+    )
+    await _send_image_reply(
+        app, score_query.ginfo, "ginfo 1634", expected, with_session=False
+    )

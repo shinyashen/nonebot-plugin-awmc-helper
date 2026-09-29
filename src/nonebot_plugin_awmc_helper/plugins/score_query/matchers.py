@@ -19,7 +19,7 @@ from ...core.songs import (
     prefer_type_from_raw_id,
 )
 from ...core.types import FCType, SongType, LevelIndex
-from ...core.utils import slow_notice, handle_errors
+from ...core.utils import slow_notice, handle_errors, player_display_name
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
 from ...core.render import best50 as b50_render
@@ -70,9 +70,19 @@ async def _resolve_song(key: str):
     """按 ID/别名/标题 解析曲目（ginfo 用；同一曲的多条谱面按所选难度定类型）。"""
     key = key.strip()
     if key.isdigit():
-        song = await song_service.by_id(int(key))
-        if song is None:
+        # 数字 id 单源解析（与查歌同口径）：6 位宴谱 diff_id 命中即文本终止
+        # ——宴谱没有游玩统计，且 by_id 对 6 位 id 取模会错配同号普通曲
+        # （L-7：提示语引导输入 6 位 id，却渲染宿主曲统计卡的矛盾收口）；
+        # 其余获得日服兜底（JP-only 曲不再直接「未找到」）
+        hit = await song_service.resolve_raw_chart(int(key))
+        if hit is None:
             await UniMessage.text(f" 未找到ID为「{key}」的乐曲").finish(at_sender=True)
+        song, _prefer, jp, utage_diff = hit
+        if utage_diff is not None:
+            await UniMessage.text(" 宴谱没有游玩统计").finish(at_sender=True)
+        if jp:
+            # JP-only 曲封面不在本地素材包：与查歌卡同口径在线兜底落盘
+            await jp_cover.ensure(song.id)
         return song
     songs = await song_service.by_alias(key)
     if len(songs) == 1:
@@ -157,12 +167,6 @@ async def _minfo_net(key: str, binding) -> None:
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
-def _display_name(player) -> str:
-    """卡片显示名：水鱼 Player.name 是账号用户名，展示用昵称（原版 df_to_player
-    同款）；落雪 Player 无 nickname 字段，回退 name。"""
-    return getattr(player, "nickname", None) or player.name
-
-
 async def _net_image_bytes(url: str | None) -> bytes | None:
     """NET 官方资料图 URL → bytes（落盘缓存；无 URL/下载失败均 None）。
 
@@ -186,7 +190,7 @@ async def _(
         # 纯 at 触发下方绑定链；对齐 Hoshino 的参数取法）
         player, bests = await score_service.get_b50_by_username(username)
         png = await b50_render.best50_bytes(
-            player_name=_display_name(player),
+            player_name=player_display_name(player),
             rating=bests.rating,
             rating_b35=bests.rating_b35,
             rating_b15=bests.rating_b15,
@@ -238,7 +242,7 @@ async def _(
             player = await score_service.get_player(binding, notify_slow=notify_slow)
             bests = await score_service.get_b50(binding, notify_slow=notify_slow)
             png = await b50_render.best50_bytes(
-                player_name=_display_name(player),
+                player_name=player_display_name(player),
                 rating=bests.rating,
                 rating_b35=bests.rating_b35,
                 rating_b15=bests.rating_b15,
@@ -278,7 +282,7 @@ async def _(
     bests = build_bests(ap_scores, key=lambda s: s.dx_rating or 0)
     player = await score_service.get_player(binding, notify_slow=notify_slow)
     png = await b50_render.best50_bytes(
-        _display_name(player),
+        player_display_name(player),
         bests.rating,
         bests.rating_b35,
         bests.rating_b15,
