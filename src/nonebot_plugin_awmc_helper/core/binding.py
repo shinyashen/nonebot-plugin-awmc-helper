@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from maimai_py import PlayerIdentifier
 from nonebot.log import logger
 from sqlalchemy.exc import IntegrityError
+from nonebot.adapters import Event
 
 from . import store
 from .store import UserBinding
@@ -23,7 +24,6 @@ from ..constants import THEMES, SERVICE_DISPLAY
 from .session_store import TtlSession, TtlSessionStore
 
 if TYPE_CHECKING:
-    from nonebot.adapters import Event
     from nonebot_plugin_uninfo import Session
 
 SERVICE_DIVINGFISH = "divingfish"
@@ -82,6 +82,89 @@ async def resolve_session_query(
         session_keys(session)[0], str(session.user.id), at_target
     )
     return binding, at_target
+
+
+_UNBOUND_SELF_HINT = (
+    " 尚未绑定查分器，请先使用「绑定水鱼」「绑定落雪」或「绑定日服」进行绑定"
+)
+"""查询入口自身未绑定的统一引导文案（resolve_query_binding 单源）。"""
+
+
+async def resolve_query_binding(
+    session: "Session",
+    event: "Event | None",
+    *,
+    unbound_hint: str | None = None,
+) -> "tuple[UserBinding, str | None]":
+    """查询目标解析 + 凭据门禁：返回 (绑定, at 目标)。
+
+    「查询他人成绩」功能点的单源（2026-09-30 定案）：:func:`resolve_session_query`
+    之上加凭据门禁——目标（代查或自身）无可用凭据时按分支给引导文案并终止：
+    代查（有 at）用 ``unbound_hint``（缺省「对方尚未绑定查分器，无法代查」，
+    b50 附公开代查指引），自身统一 :data:`_UNBOUND_SELF_HINT`。
+    at 未绑定 QQ 用户回退的临时水鱼绑定凭 QQ 可查（``has_usable_credentials``
+    为真），不在此拦截，由各查询路径的凭据语义自然收口。
+
+    调用方需要 at 目标 id（如 pc 数据按人取）时用本函数；只要绑定时用
+    :func:`query_binding` / :class:`SessionQueryBinding`。
+    """
+    binding, at_target = await resolve_session_query(session, event)
+    if binding is not None and binding_service.has_usable_credentials(binding):
+        return binding, at_target
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    if at_target is not None:
+        await UniMessage.text(
+            f" {unbound_hint or '对方尚未绑定查分器，无法代查'}"
+        ).finish(at_sender=True)
+    await UniMessage.text(_UNBOUND_SELF_HINT).finish(at_sender=True)
+
+
+async def query_binding(
+    session: "Session", event: "Event | None", *, unbound_hint: str | None = None
+) -> UserBinding:
+    """:func:`resolve_query_binding` 的只要绑定形态（handler 体内按需调用，
+    供 b50 这类「带参数时跳过绑定解析」的指令避免无谓建行）。"""
+    binding, _ = await resolve_query_binding(session, event, unbound_hint=unbound_hint)
+    return binding
+
+
+def SessionQueryBinding(unbound_hint: str | None = None):
+    """handler DI 依赖工厂：会话查询绑定（支持 @ 代查）。
+
+    用法 ``binding: UserBinding = SessionQueryBinding()``；= :func:`query_binding`
+    的 Depends 形态（:func:`resolve_session_query` + 凭据门禁），与
+    :func:`SessionBinding`（仅发送者、恒建行）并列——查询他人成绩类指令
+    （完成表/进度/牌子/分数列表等）用它，「我要上N分」等第一人称指令与
+    个人设置类维持 :func:`SessionBinding`。
+    """
+
+    from nonebot.params import Depends
+    from nonebot_plugin_uninfo import UniSession
+
+    async def _get(session=UniSession(), event: "Event | None" = None):
+        return await query_binding(session, event, unbound_hint=unbound_hint)
+
+    return Depends(_get)
+
+
+_AT_SEGMENT = r"(?:\s*\[CQ:at,[^\]]*\])*"
+
+
+def at_tolerant(pattern: str) -> str:
+    """on_regex 指令的 @ 代查容忍包装：允许消息串中夹带 at 段。
+
+    nonebot 的 regex 规则匹配**含 CQ 码的完整消息串**（``str(msg)``），
+    ``^$`` 锚定指令会被前后缀 at 段卡死（「13fc完成表 @某人」完全不触发）。
+    本包装把 at 段容忍**拼接进锚点内侧**（``^``/``$`` 由调用方模式自带），
+    捕获组不受影响（容忍组非捕获）；at 段形状按 OneBot v11（与
+    :func:`extract_at_target` 同口径）。仅用于已接入 @ 代查的 on_regex 指令。
+    """
+    if pattern.startswith("^"):
+        pattern = "^" + _AT_SEGMENT + pattern[1:]
+    if pattern.endswith("$"):
+        pattern = pattern[:-1] + _AT_SEGMENT + "$"
+    return pattern
 
 
 def SessionBinding():

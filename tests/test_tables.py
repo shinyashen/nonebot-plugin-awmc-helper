@@ -267,3 +267,126 @@ def test_plan_spp_removed():
 
     assert "spp" not in tm.PLAN_RE
     assert "spp" not in PLANS
+
+
+@pytest.mark.asyncio
+async def test_score_table_at_target(app: App, db, songs, monkeypatch):
+    """完成表 @代查（2026-09-30 扩展）：成绩按 at 目标绑定行拉取
+    （resolve_query_binding 单源，目标只读不建行）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    target = await binding_service.ensure("OneBot V11", "99999999")
+    await binding_service.bind_divingfish_username(target, "fishuser")
+
+    captured = {}
+
+    async def fake_scores_all(binding, notify_slow=None):
+        captured["user_id"] = binding.user_id
+        return SimpleNamespace(scores=[])
+
+    async def fake_draw(level, plan, scores, entries, theme=None, song_service=None):
+        captured["level"] = level
+        return b"png"
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+    monkeypatch.setattr(
+        table_template, "draw_rating_table_with_fallback", fake_draw
+    )
+
+    event = fake_group_message_event_v11(
+        message=Message(
+            [MessageSegment.text("13fc完成表"), MessageSegment.at(99999999)]
+        ),
+        user_id=12345678,
+    )
+    async with app.test_matcher(plugin.score_table_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.at(12345678), MessageSegment.image("base64://cG5n")]),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    assert captured["user_id"] == "99999999"
+    assert captured["level"] == "13"
+
+
+@pytest.mark.asyncio
+async def test_plate_at_net_target_unsupported(app: App, db, songs):
+    """牌子 @日服 NET 目标：随目标绑定路由到适配器门禁（牌单/素材未定，
+    NET 不开放牌子；全量成绩已开放会真实抓取，不在本用例范围）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    target = await binding_service.ensure("OneBot V11", "99999999")
+    await binding_service.bind_net(target, sega_id="sid", password="pw")
+
+    event = fake_group_message_event_v11(
+        message=Message(
+            [MessageSegment.text("晓将完成表"), MessageSegment.at(99999999)]
+        ),
+        user_id=12345678,
+    )
+    async with app.test_matcher(plugin.plate_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(12345678),
+                    MessageSegment.text(
+                        " 日服数据源（NET）暂不支持牌子进度，敬请期待后续版本"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()

@@ -3,7 +3,6 @@
 from nonebot import on_regex, on_command, on_fullmatch
 from nonebot.params import RegexGroup
 from nonebot.permission import SUPERUSER
-from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .sheet import (
@@ -28,7 +27,8 @@ from ...core.plates import (
     plate_kinds_hint,
 )
 from ...core.binding import (
-    SessionBinding,
+    at_tolerant,
+    SessionQueryBinding,
     service_display,
 )
 from ...core.sources import Capability
@@ -45,18 +45,26 @@ LEVEL_RE = r"([0-9]+\+?)"
 DS_RE = r"([0-9]+(?:\.[0-9]+)?\+?)"
 PLAN_RE = r"(sssp|sss|ssp|ss|sp|s|ap|fcp|fc|fsp|fs|fdx)"
 
-ds_table_cmd = on_regex(rf"^{LEVEL_RE}定数表$", block=True)
-score_table_cmd = on_regex(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$", block=True)
+ds_table_cmd = on_regex(at_tolerant(rf"^{LEVEL_RE}定数表$"), block=True)
+score_table_cmd = on_regex(
+    at_tolerant(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$"), block=True
+)
 progress_cmd = on_regex(
-    rf"^{LEVEL_RE}{PLAN_RE}\+?(已完成|未完成|未开始|未游玩)?进度\s?([0-9]+)?$",
+    at_tolerant(
+        rf"^{LEVEL_RE}{PLAN_RE}\+?(已完成|未完成|未开始|未游玩)?进度\s?([0-9]+)?$",
+    ),
     block=True,
 )
 plate_cmd = on_regex(
-    rf"^([{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}])({PLATE_KIND_ALT})(完成表|进度)\s?([0-9]+)?$",
+    at_tolerant(
+        rf"^([{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}])({PLATE_KIND_ALT})(完成表|进度)\s?([0-9]+)?$"
+    ),
     block=True,
 )
 plate_help = on_fullmatch("牌子条件", block=True)
-score_list_cmd = on_regex(rf"^{DS_RE}\s?分数列表\s?([0-9]+)?$", block=True)
+score_list_cmd = on_regex(
+    at_tolerant(rf"^{DS_RE}\s?分数列表\s?([0-9]+)?$"), block=True
+)
 update_rating = on_command("更新定数表", permission=SUPERUSER, block=True)
 update_plate = on_command("更新完成表", permission=SUPERUSER, block=True)
 
@@ -82,8 +90,7 @@ async def _(
 @score_table_cmd.handle()
 @handle_errors("生成完成表失败", except_with_message=(UserScoreError,))
 async def _(
-    session: Session = UniSession(),
-    binding: UserBinding = SessionBinding(),
+    binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
     """等级完成表（NB DrawRatingTable 移植）：模板 + 统计头 + 逐谱面盖章。
@@ -114,8 +121,7 @@ async def _(
 @progress_cmd.handle()
 @handle_errors("生成进度失败", except_with_message=(UserScoreError,))
 async def _(
-    session: Session = UniSession(),
-    binding: UserBinding = SessionBinding(),
+    binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
     """等级进度（R4，NB DrawScore.draw_plan/draw_category 版式）。
@@ -203,8 +209,7 @@ async def _(
 @plate_cmd.handle()
 @handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
 async def _(
-    session: Session = UniSession(),
-    binding: UserBinding = SessionBinding(),
+    binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
     version, kind, mode, page_raw = groups
@@ -241,8 +246,7 @@ async def _():
 @score_list_cmd.handle()
 @handle_errors("查询失败", except_with_message=(UserScoreError,))
 async def _(
-    session: Session = UniSession(),
-    binding: UserBinding = SessionBinding(),
+    binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
     """分数列表（R5，NB DrawScore.draw_score_list 行卡版式，80/页）。"""
@@ -316,21 +320,21 @@ help_registry.declare(
             matcher=score_table_cmd,
             name="<等级><评价>完成表",
             capability=Capability.SCORES_ALL,
-            brief="达成度盖章完成表",
+            brief="达成度盖章完成表（@某人=代查）",
             detail="评价支持 s/fc/fs/ap 族（如 13fc完成表）。",
         ),
         CommandSpec(
             matcher=progress_cmd,
             name="<等级><评价>进度",
             capability=Capability.SCORES_ALL,
-            brief="完成度进度（总览/已完成/未完成/未游玩）",
+            brief="完成度进度（总览/已完成/未完成/未游玩；@某人=代查）",
             detail="格式：<等级><评价>进度 [页]（如 13fc进度 2）。",
         ),
         CommandSpec(
             matcher=plate_cmd,
             name="<版本><牌种>完成表|进度",
             capability=Capability.PLATES,
-            brief="牌子完成表与进度总览",
+            brief="牌子完成表与进度总览（@某人=代查）",
             detail="如 真将完成表、舞神进度；达成条件见「牌子条件」。",
         ),
         CommandSpec(
@@ -342,7 +346,7 @@ help_registry.declare(
             matcher=score_list_cmd,
             name="<等级|定数>分数列表",
             capability=Capability.SCORES_ALL,
-            brief="按等级或定数过滤成绩列表（80/页）",
+            brief="按等级或定数过滤成绩列表（80/页；@某人=代查）",
             detail="整数=标级（13、13+），小数=定数（13.0）。",
         ),
         CommandSpec(

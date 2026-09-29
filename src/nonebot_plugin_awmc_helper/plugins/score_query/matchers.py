@@ -27,6 +27,8 @@ from ...core.render import jp_cover, nb_chart
 from ...core.songdb import Scope
 from ...core.binding import (
     UserBinding,
+    SessionQueryBinding,
+    query_binding,
     binding_service,
     resolve_session_query,
 )
@@ -40,29 +42,6 @@ minfo = on_command(
     "minfo", aliases={"Minfo", "MINFO", "info", "Info", "INFO"}, block=True
 )
 ginfo = on_regex(r"^[gG]info\s?(?:([绿黄红紫白])(?=\s|\d))?(.+)$", block=True)
-
-
-async def _get_binding(session: Session, event: Event | None) -> UserBinding:
-    """b50/ap50 入口：无可用凭据则按「代查 / 自身」分别提示并终止。"""
-    binding, at_target = await resolve_session_query(session, event)
-    if binding is None or not binding_service.has_usable_credentials(binding):
-        if at_target is not None and binding is None:
-            await UniMessage.text(
-                " 对方尚未绑定查分器，无法代查"
-                "（水鱼可使用「b50 <水鱼用户名>」公开代查）"
-            ).finish(at_sender=True)
-        await UniMessage.text(
-            " 尚未绑定查分器，请先使用「绑定水鱼」「绑定落雪」或「绑定日服」进行绑定"
-        ).finish(at_sender=True)
-    return binding
-
-
-async def _get_binding_or_none(
-    session: Session, event: Event | None
-) -> UserBinding | None:
-    """minfo 入口：不强制已绑定（未绑定降级纯谱面卡）。"""
-    binding, _ = await resolve_session_query(session, event)
-    return binding
 
 
 async def _resolve_song(key: str):
@@ -188,7 +167,13 @@ async def _(
             service="divingfish",
         )
     else:
-        binding = await _get_binding(session, event)
+        binding = await query_binding(
+            session,
+            event,
+            unbound_hint=(
+                "对方尚未绑定查分器，无法代查（水鱼可使用「b50 <水鱼用户名>」公开代查）"
+            ),
+        )
         if score_service.view_of(binding.service) == "jp":
             # 日服 NET：窗口缓存优先（首次/过期时真实抓取，约 5-15 秒）；
             # 身份卡（玩家名/称号/头像/徽章）经 core 共用链路装配
@@ -220,15 +205,18 @@ async def _(
 @ap50.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
-    session: Session = UniSession(),
-    event: Event | None = None,
+    binding: UserBinding = SessionQueryBinding(
+        unbound_hint=(
+            "对方尚未绑定查分器，无法代查（水鱼可使用「b50 <水鱼用户名>」公开代查）"
+        )
+    ),
 ):
     """AP50（用户口径）：b50 的升级版——只统计 AP/APP 的 best50，渲染 B50 大图。
 
     maimai_py 无 AP50 端点：全量成绩本地过滤 fc∈{AP,APP} 后经公共
     build_bests 组装（Hoshino 落雪 ap50 端点 → Best50 → draw_best50 同构）。
     """
-    binding = await _get_binding(session, event)
+
     notify_slow = slow_notice()
     jp = score_service.view_of(binding.service) == "jp"
     if jp:
@@ -285,7 +273,7 @@ async def _(
     key = message.extract_plain_text().strip()
     if not key:
         await UniMessage.text(" 用法：minfo <曲目ID|曲名|别名>").finish(at_sender=True)
-    binding = await _get_binding_or_none(session, event)
+    binding, _ = await resolve_session_query(session, event)
     if binding is not None and score_service.view_of(binding.service) == "jp":
         # 数据源为日服视图（现即 NET）：曲走 JP 视图解析 + NET 成绩链路
         await _minfo_net(key, binding)

@@ -325,3 +325,34 @@ async def test_resolve_query_at_chain(db):
 
     # at 无行（非 QQ 平台）：None → 由调用方给出「无法代查」降级
     assert await binding_service.resolve_query("telegram", "u1", "u2") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_query_binding_gate(db, monkeypatch):
+    """resolve_query_binding 门禁（非 QQ 平台可达分支）：at 目标未绑定 →
+    「对方」提示；自身未绑定 → 绑定引导。QQ 平台自身未绑定凭 QQ 可查
+    （ensure 默认水鱼行，Hoshino 对齐语义），不经本门禁。"""
+    from types import SimpleNamespace
+
+    from nonebot.exception import FinishedException
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+    from nonebot_plugin_awmc_helper.core.binding import resolve_query_binding
+
+    async def fake_finish(self, *a, **kw):
+        raise FinishedException(str(self))
+
+    monkeypatch.setattr(
+        "nonebot_plugin_alconna.uniseg.UniMessage.finish", fake_finish
+    )
+    # 非 QQ 平台（platform 无 QQ 语义、无适配器回退）
+    session = SimpleNamespace(platform="telegram", user=SimpleNamespace(id="42"))
+
+    with pytest.raises(FinishedException) as ei:
+        await resolve_query_binding(session, None)
+    assert "尚未绑定查分器，请先使用「绑定水鱼」" in str(ei.value)
+
+    event = SimpleNamespace(message=Message([MessageSegment.at(777)]))
+    with pytest.raises(FinishedException) as ei:
+        await resolve_query_binding(session, event)
+    assert "对方尚未绑定查分器，无法代查" in str(ei.value)
