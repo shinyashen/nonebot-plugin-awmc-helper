@@ -132,6 +132,10 @@ help_registry.declare(
             detail="详细用法",            # 详情页正文
             example="我的指令 参数",
             scope="仅私聊",               # 适用场景标注（可空）
+            capability="scores_all",      # 查分能力域（core.sources.Capability
+                                          # 值，可空）：查分类指令标注后，适用性
+                                          # 标注（如「日服 NET 暂不支持」）由数据源
+                                          # 注册表自动派生，勿手写副本
             hidden=True,                  # 超管指令：不进普通列表；仅 SUPERUSER
                                           # 私聊查询时随总览附「管理」节点
         ),
