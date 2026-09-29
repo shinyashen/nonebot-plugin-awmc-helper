@@ -7,6 +7,7 @@ from nonebot import logger
 
 from ...core import store
 from ...core.ext import wahlap as wahlap_ext
+from ...core.utils import notify_superusers
 
 
 async def sync_and_reset() -> int:
@@ -14,7 +15,9 @@ async def sync_and_reset() -> int:
     try:
         official = await wahlap_ext.fetch_locations()
     except wahlap_ext.ExtError as e:
+        # 连日失败=机厅数据过期+排卡人数不清零，部署者需有感知
         logger.warning(f"华立机厅同步失败：{e}")
+        await notify_superusers(f"maimaiDX排卡每日同步失败：{e}")
         return 0
     # 单事务批量 upsert（原先每机厅独立 session 串行两次事务）
     await store.upsert_arcades(

@@ -134,7 +134,11 @@ arcade_switch = on_regex(r"^(开启|关闭)排卡$", block=True)
 
 
 async def _find_arcade(keyword: str) -> store.Arcade | None:
-    """按 ID / 全名 / 别名 精确定位机厅。"""
+    """按 ID / 全名 / 别名 精确定位机厅。
+
+    ID 与全名精确命中直接返回；别名/部分名匹配命中多店时列候选并终止
+    （对齐 Hoshino 原版「请使用店铺ID」语义，不静默取第一个）。
+    """
     keyword = keyword.strip()
     if keyword.isdigit():
         by_id = await store.get_arcade(int(keyword))
@@ -144,6 +148,12 @@ async def _find_arcade(keyword: str) -> store.Arcade | None:
     for a in found:
         if a.name == keyword:
             return a
+    if len(found) > 1:
+        listing = "\n".join(f"ID {a.id}：{a.name}" for a in found[:10])
+        await UniMessage.text(
+            f" 找到 {len(found)} 个与「{keyword}」相关的机厅，请使用 ID 指定：\n"
+            f"{listing}"
+        ).finish(at_sender=True)
     return found[0] if found else None
 
 
