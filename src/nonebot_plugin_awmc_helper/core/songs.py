@@ -420,7 +420,7 @@ class SongService:
         )
 
     async def by_alias(self, alias: str) -> list[Song]:
-        """按别名查曲（柚子 + 落雪 + 本地合并视图）。"""
+        """按别名查曲（柚子 + 落雪 + MuNET + 本地合并视图）。"""
         songs, _ = await self.by_alias_detail(alias)
         return songs
 

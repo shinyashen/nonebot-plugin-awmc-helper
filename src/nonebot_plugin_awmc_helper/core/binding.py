@@ -294,8 +294,11 @@ class BindingService:
         OAuth 已配置时把 subject 放进 credentials（``with_oauth=False`` 可取
         纯公开键，供 scores/plates 的未授权回退使用）：minfo 单曲只有 Bearer
         形态（无公开/Import-Token 形态），靠它走 OAuth；b50/players 走公开
-        路径、忽略 credentials。注意「用户名 + credentials」组合**不能**进入
-        maimai_py 的全量查询（会被视为密码登录），全量请用 :meth:`full_identifier`。
+        路径、忽略 credentials。「用户名 + credentials（ref: subject）」组合
+        上游 1.6.0 起可安全使用：带 subject 前缀的 credentials 字符串被
+        ``DivingFishProvider._oauth_subject`` 原样透传为 OAuth subject；无
+        前缀的 credentials（如 Import-Token）则按服务端密码/令牌登录语义
+        处理，全量成绩一律走 :meth:`full_identifier`（Q50 确定性路由）。
         Import-Token 不是公开查询键，全量成绩请用 :meth:`full_identifier`。
 
         NET 数据源不走 maimai-py（官方站直连），到此即说明上游未拦截，

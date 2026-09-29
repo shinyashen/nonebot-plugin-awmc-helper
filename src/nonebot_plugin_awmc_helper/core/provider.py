@@ -6,8 +6,9 @@
 - ``_hash()`` 返回规范表内容指纹（``songdb.CURRENT_FINGERPRINT``，rebuild 末尾刷新），
   数据变更后哈希自动变化，``client.songs()`` 自行重建缓存，**无需手动删键**；
 - ``get_songs()`` 按 scope（cn/jp）从规范表物化 ``Song`` 列表（§5.5 转化层）；
-- CN 运行时视图暂仍由落雪构造（§5.1「行为与现状零漂移」，切换时机待作者定，
-  见 QUESTIONS Q23），本 provider 现阶段服务 JP 视图与数据入口统一（§5.4）。
+- CN 运行时视图已由本 provider 按规范表构造（``scope="cn"``，core.songs 加载
+  即走它）；``scope="jp"`` 仅测试使用——日服视图由 core.songs 直接读规范表
+  （``_jp_songs_map``），不经 maimai_py 运行时缓存。
 """
 
 import json
