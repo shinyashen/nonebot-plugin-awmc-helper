@@ -106,6 +106,17 @@ def is_new_chart(version: int) -> bool:
     return version >= current_version.value
 
 
+def _major_type_diffs(song: Song, prefer_sd: bool) -> list:
+    """卡片主类型谱面组（chart_version_of / _display_card_id 共用选取段）。
+
+    偏好 SD 且有标准谱用标准组，否则 DX 组；组空回落「标准 or DX」曲级兜底。
+    """
+    diffs = song.difficulties.standard if prefer_sd else song.difficulties.dx
+    if not diffs:
+        diffs = song.difficulties.standard or song.difficulties.dx
+    return diffs
+
+
 def chart_version_of(song: Song, prefer_sd: bool) -> int:
     """卡片主类型谱面组的登场版本（组内谱面版本一致，取首谱面，§2.3）。
 
@@ -113,9 +124,7 @@ def chart_version_of(song: Song, prefer_sd: bool) -> int:
     而非曲级最小值——对齐 maimaiDX 基准的 per-type 条目语义
     （``song.version_int = base.version``）；无谱面或版本缺失回落曲级 version。
     """
-    diffs = song.difficulties.standard if prefer_sd else song.difficulties.dx
-    if not diffs:
-        diffs = song.difficulties.standard or song.difficulties.dx
+    diffs = _major_type_diffs(song, prefer_sd)
     return diffs[0].version if diffs and diffs[0].version else song.version
 
 
@@ -125,9 +134,7 @@ def _display_card_id(song: Song, prefer_sd: bool) -> int:
     老曲补 DX（如 835/10835）：DX 卡显示查分器 id = 根 id + 10000，SD 卡显示
     根 id；无谱面回落曲级 :func:`display_song_id`。
     """
-    diffs = song.difficulties.standard if prefer_sd else song.difficulties.dx
-    if not diffs:
-        diffs = song.difficulties.standard or song.difficulties.dx
+    diffs = _major_type_diffs(song, prefer_sd)
     return chart_display_id(song, diffs[0]) if diffs else display_song_id(song)
 
 

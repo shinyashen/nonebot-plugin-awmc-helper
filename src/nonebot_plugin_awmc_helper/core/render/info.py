@@ -21,7 +21,7 @@ from .tools import (
     truncate_hoshino,
 )
 from .assets import assets
-from .nb_chart import LOGO_SIZE, major_diffs, paste_version_logo
+from .nb_chart import LOGO_SIZE, major_diffs, chart_version_of, paste_version_logo
 from ...constants import (
     RATE_FILE,
     SYNC_FILE,
@@ -70,17 +70,16 @@ def song_play_data(
     genre_file = _GENRE_FILE.get(song.genre)
     if genre_file and (genre_img := assets.pic_optional(genre_file)):
         im.alpha_composite(genre_img, (100, 260))
-    # 版本 logo（等比适配槽位，项目内既定做法）
-    diffs = major_diffs(song, prefer_type)
-    chart_version = diffs[0].version if diffs and diffs[0].version else song.version
-    paste_version_logo(im, chart_version, (295, 205, 183, 90))
-    # 类型徽章（跟随卡片主类型）
+    # 类型徽章与版本 logo 均跟随卡片主类型
     prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
     major_type = (
         SongType.STANDARD
         if prefer_sd
         else (SongType.DX if song.difficulties.dx else SongType.STANDARD)
     )
+    # 版本 logo（等比适配槽位，项目内既定做法）：版本口径与查歌卡同源——
+    # 主类型谱面组首谱面版本，组空/缺版本回落曲级（nb_chart.chart_version_of）
+    paste_version_logo(im, chart_version_of(song, prefer_sd), (295, 205, 183, 90))
     if badge := assets.type_badge(
         "SD" if major_type == SongType.STANDARD else "DX", (55, 20)
     ):
@@ -101,6 +100,8 @@ def song_play_data(
         fill=color,
         anchor="mm",
     )
+    # 主类型谱面组：展示 id 与难度行共用
+    diffs = major_diffs(song, prefer_type)
     card_id = chart_display_id(song, diffs[0]) if diffs else song.id
     dr.text(
         (160, 720), str(card_id), font=font(22, FONT_RODIN), fill=color, anchor="mm"
