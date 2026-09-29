@@ -32,6 +32,7 @@ from ...core.binding import (
     binding_service,
     resolve_session_query,
 )
+from ...core.sources import Capability
 
 AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
@@ -376,18 +377,21 @@ help_registry.declare(
             matcher=b50,
             name="b50",
             aliases=("B50",),
+            capability=Capability.B50,
             brief="B50 成绩大图（带参数=水鱼用户名代查，@某人=代查）",
         ),
         CommandSpec(
             matcher=ap50,
             name="ap50",
             aliases=("AP50",),
+            capability=Capability.SCORES_ALL,
             brief="AP-only best50（全 AP 成绩组装出图）",
         ),
         CommandSpec(
             matcher=minfo,
             name="minfo",
             aliases=("Minfo", "MINFO", "info", "Info", "INFO"),
+            capability=Capability.MINFO,
             brief="单曲成绩卡（ID/曲名/别名定位，@某人代查）",
             detail="格式：minfo <曲目ID|曲名|别名>；未绑定时降级纯谱面卡。",
         ),

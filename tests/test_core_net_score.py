@@ -570,7 +570,7 @@ async def test_net_bind_command(app: App, db, net_service):
             bind.net_bind,
             "绑定日服 sega_user password123",
             "已绑定日服 NET（SEGA ID：sega_user），"
-            "当前数据源已切换为日服。支持指令：b50",
+            "当前数据源已切换为日服。支持指令：b50、minfo",
         )
     binding = await binding_service.get("OneBot V11", "12345678")
     assert binding is not None

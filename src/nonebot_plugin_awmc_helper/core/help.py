@@ -43,6 +43,10 @@ class CommandSpec:
     example: str = ""
     # 适用场景标注（如「仅私聊」「群管」）；空 = 无限制
     scope: str = ""
+    # 查分能力域（core.sources.Capability 的值，如 "scores_all"）；空 = 与
+    # 查分数据源无关。渲染时经数据源注册表自动派生适用性标注（如
+    # 「仅水鱼数据源」「日服 NET 暂不支持」），不手写副本
+    capability: str = ""
     # True = 不进普通帮助列表（超管/内部指令）；SUPERUSER 查询时经「管理」
     # 节点可见，按名查询仍可命中
     hidden: bool = False
@@ -120,7 +124,8 @@ def _builtin_guide_score() -> Guide:
             "按顺序完成前三步即可使用 b50、minfo 等全部查分指令。"
         ),
         prerequisites=(
-            "需要一个水鱼或落雪账号（至少其一）。"
+            "需要一个水鱼或落雪账号（至少其一）；如需查询日服成绩，可另绑日服 NET"
+            "（SEGA 账号，当前支持 b50 与单曲成绩）。"
             "全程发给 bot 即可，绑定类指令大多仅限私聊。"
         ),
         steps=[
@@ -134,6 +139,13 @@ def _builtin_guide_score() -> Guide:
             GuideStep(
                 text="绑定落雪（可选，推荐两个都绑以互通数据）：",
                 commands=("绑定落雪",),
+            ),
+            GuideStep(
+                text=(
+                    "可选：绑定日服 NET（SEGA ID+密码，仅限私聊；"
+                    "绑定后数据源切为日服）："
+                ),
+                commands=("绑定日服",),
             ),
             GuideStep(
                 text="确认绑定状态、选定默认数据源后即可查分：",
@@ -334,9 +346,27 @@ def _names(spec: CommandSpec) -> str:
     return "/".join((spec.name, *spec.aliases))
 
 
+def _source_tag(spec: CommandSpec) -> str:
+    """数据源适用性标注：capability 经注册表派生（未知值静默忽略）。"""
+    if not spec.capability:
+        return ""
+    from .sources import Capability, support_note
+
+    try:
+        note = support_note(Capability(spec.capability))
+    except ValueError:
+        return ""
+    return note or ""
+
+
+def _scope_tags(spec: CommandSpec) -> str:
+    """适用场景（scope）与数据源适用性标注合并；空串 = 无限制。"""
+    return "；".join(p for p in (spec.scope, _source_tag(spec)) if p)
+
+
 def _command_line(spec: CommandSpec) -> str:
-    tags = f"（{spec.scope}）" if spec.scope else ""
-    body = f"{_names(spec)}{tags}"
+    tags = _scope_tags(spec)
+    body = f"{_names(spec)}（{tags}）" if tags else _names(spec)
     return (
         f"{_LINE_PREFIX} {body} —— {spec.brief}"
         if spec.brief
@@ -399,8 +429,8 @@ def _category_blocks(
 
 def _command_blocks(reg: HelpRegistry, spec: CommandSpec) -> list[str]:
     lines = [_names(spec)]
-    if spec.scope:
-        lines.append(f"适用：{spec.scope}")
+    if tags := _scope_tags(spec):
+        lines.append(f"适用：{tags}")
     if spec.detail:
         lines.append(spec.detail)
     if spec.example:
@@ -429,12 +459,10 @@ def _guide_entries(reg: HelpRegistry, guide: Guide) -> "list[str | UniMessage]":
                 if spec is None:
                     lines.append(f"{_LINE_PREFIX} {name}（当前不可用：未启用或未声明）")
                 else:
-                    tags = f"（{spec.scope}）" if spec.scope else ""
-                    body = (
-                        f"{_names(spec)}{tags} —— {spec.brief}"
-                        if spec.brief
-                        else f"{_names(spec)}{tags}"
-                    )
+                    tags = _scope_tags(spec)
+                    body = f"{_names(spec)}（{tags}）" if tags else _names(spec)
+                    if spec.brief:
+                        body = f"{body} —— {spec.brief}"
                     lines.append(f"{_LINE_PREFIX} {body}")
             entries.append("\n".join(lines))
         if step.image is not None:  # 纯图节点（可与文案同步骤，core.forward 惯例）

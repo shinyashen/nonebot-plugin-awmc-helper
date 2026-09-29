@@ -28,6 +28,7 @@ from ...core.binding import (
     binding_service,
     pending_bindings,
 )
+from ...core.sources import command_hints
 
 # 水鱼 OAuth 设备码绑定文案（对齐 Hoshino oauth_message.py 措辞）
 DIVINGFISH_NO_SESSION_MSG = "请先发送「绑定水鱼」获取授权链接，完成授权后再发送确认码。"
@@ -375,9 +376,10 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     if not ok:
         await UniMessage.text(net.INVALID_CREDENTIALS).finish(at_sender=True)
     await binding_service.bind_net(binding, sega_id=sega_id, password=password)
+    # 支持指令清单从数据源注册表派生（能力扩充后自动跟进，不手写）
     await UniMessage.text(
         f" 已绑定日服 NET（SEGA ID：{sega_id}），当前数据源已切换为日服。"
-        "支持指令：b50" + verify_note
+        f"支持指令：{command_hints(SERVICE_NET)}" + verify_note
     ).finish(at_sender=True)
 
 

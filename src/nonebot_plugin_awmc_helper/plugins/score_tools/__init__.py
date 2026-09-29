@@ -27,6 +27,7 @@ from ...core.store import UserBinding
 from ...core.types import SongType
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
 from ...core.binding import SessionBinding, service_display
+from ...core.sources import Capability
 from ...core.render.tools import text_image_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -181,9 +182,9 @@ async def _(session: Session = UniSession(), binding: UserBinding = SessionBindi
             at_sender=True
         )
     entry, rank = hit
-    await UniMessage.text(
-        f"您的 Rating 为「{entry.ra}」，排名第「{rank}」名"
-    ).finish(at_sender=True)
+    await UniMessage.text(f"您的 Rating 为「{entry.ra}」，排名第「{rank}」名").finish(
+        at_sender=True
+    )
 
 
 # ---------------------------------------------------------------- 帮助声明
@@ -219,6 +220,7 @@ help_registry.declare(
             matcher=rise_score,
             name="我要上N分",
             aliases=("我要在<等级>上加N分",),
+            capability=Capability.B50,
             brief="基于全体最低 RA 反推定数区间的推分推荐",
             detail="格式：我要上N分 / 我要在<等级>上加N分（如 我要在13+上5分）。",
         ),
@@ -231,7 +233,8 @@ help_registry.declare(
         CommandSpec(
             matcher=my_rating_ranking,
             name="我的排名",
-            scope="仅水鱼数据源",
+            # 适用性标注（仅水鱼数据源）由 capability 经注册表自动派生
+            capability=Capability.MY_RANKING,
             brief="在 RA 榜单中定位自己的名次",
         ),
     ],

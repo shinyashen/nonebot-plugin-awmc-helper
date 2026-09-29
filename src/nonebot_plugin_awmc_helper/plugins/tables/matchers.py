@@ -31,6 +31,7 @@ from ...core.binding import (
     SessionBinding,
     service_display,
 )
+from ...core.sources import Capability
 from ...core.render.score import DrawScore, score_list_height
 from ...core.render.tools import text_image_bytes
 
@@ -314,18 +315,21 @@ help_registry.declare(
         CommandSpec(
             matcher=score_table_cmd,
             name="<等级><评价>完成表",
+            capability=Capability.SCORES_ALL,
             brief="达成度盖章完成表",
             detail="评价支持 s/fc/fs/ap 族（如 13fc完成表）。",
         ),
         CommandSpec(
             matcher=progress_cmd,
             name="<等级><评价>进度",
+            capability=Capability.SCORES_ALL,
             brief="完成度进度（总览/已完成/未完成/未游玩）",
             detail="格式：<等级><评价>进度 [页]（如 13fc进度 2）。",
         ),
         CommandSpec(
             matcher=plate_cmd,
             name="<版本><牌种>完成表|进度",
+            capability=Capability.PLATES,
             brief="牌子完成表与进度总览",
             detail="如 真将完成表、舞神进度；达成条件见「牌子条件」。",
         ),
@@ -337,6 +341,7 @@ help_registry.declare(
         CommandSpec(
             matcher=score_list_cmd,
             name="<等级|定数>分数列表",
+            capability=Capability.SCORES_ALL,
             brief="按等级或定数过滤成绩列表（80/页）",
             detail="整数=标级（13、13+），小数=定数（13.0）。",
         ),
