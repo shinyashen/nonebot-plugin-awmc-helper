@@ -23,7 +23,8 @@ _S2T_KIND = str.maketrans({"极": "極"})
 
 
 def jp_cache_dir() -> Path:
-    """日服在线封面缓存目录（localstore 缓存区；static 素材目录永不写入）。"""
+    """日服在线封面缓存目录（localstore **数据区**，随部署 XDG 变量钉死；
+    static 素材目录永不写入）。"""
     return get_data_dir("nonebot_plugin_awmc_helper") / "jp_covers"
 
 
