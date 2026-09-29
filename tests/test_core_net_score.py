@@ -646,7 +646,7 @@ async def test_b50_net_unsupported_commands(app: App, db, net_service, jp_view):
         app,
         score_query.ap50,
         "ap50",
-        "日服数据源（NET）暂不支持该指令，敬请期待后续版本",
+        "日服数据源（NET）暂不支持全量成绩，敬请期待后续版本",
     )
 
 

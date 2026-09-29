@@ -229,8 +229,8 @@ async def test_lxns_refresh_dead_oauth_error_body(db, songs, monkeypatch):
 async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
     """续期成功后的阶梯重试（Q43）：立即 → 5s → 20s 三级；仅 401 合流异常
     继续阶梯，其余异常立即映射；skip 按原错误处理；全败给非技术兜底文案。"""
-    from nonebot_plugin_awmc_helper.core import score as score_module
-    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core import sources as sources_module
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
     binding = await binding_service.ensure("OneBot V11", "30009")
@@ -240,7 +240,8 @@ async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    monkeypatch.setattr(score_module.asyncio, "sleep", fake_sleep)
+    # 阶梯重试的 sleep 在 core.sources（管线随适配层下沉）
+    monkeypatch.setattr(sources_module.asyncio, "sleep", fake_sleep)
 
     async def make(status: str, n_fail: int):
         sleeps.clear()
@@ -280,13 +281,13 @@ async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
 
     # 立即重试成功（窗口 ≈ 0 的常态）
     factory, calls = await make("refreshed", 1)
-    assert await score_service._run(binding, factory) == "ok"
+    assert await sources_module._run(binding, factory) == "ok"
     assert calls["n"] == 2
     assert sleeps == []
 
     # 5s 后成功
     factory, calls = await make("refreshed", 2)
-    assert await score_service._run(binding, factory) == "ok"
+    assert await sources_module._run(binding, factory) == "ok"
     assert calls["n"] == 3
     assert sleeps == [5]
 
@@ -297,7 +298,7 @@ async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
         notices.append(1)
 
     factory, calls = await make("refreshed", 3)
-    assert await score_service._run(binding, factory, notify_slow) == "ok"
+    assert await sources_module._run(binding, factory, notify_slow) == "ok"
     assert calls["n"] == 4
     assert sleeps == [5, 10]
     assert len(notices) == 1
@@ -305,7 +306,7 @@ async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
     # 全败：非技术兜底文案（不暴露令牌/续期细节）
     factory, calls = await make("refreshed", 99)
     with pytest.raises(UserScoreError, match="暂时无法访问"):
-        await score_service._run(binding, factory, notify_slow)
+        await sources_module._run(binding, factory, notify_slow)
     assert calls["n"] == 4
     assert sleeps == [5, 10]
     assert len(notices) == 2
@@ -313,21 +314,21 @@ async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
     # dead：重绑文案
     factory, calls = await make("dead", 99)
     with pytest.raises(UserScoreError, match="重新「绑定落雪」"):
-        await score_service._run(binding, factory)
+        await sources_module._run(binding, factory)
     assert calls["n"] == 1
     assert sleeps == []
 
     # skip（无凭据/网络）：按原错误映射
     factory, calls = await make("skip", 99)
     with pytest.raises(UserScoreError, match="没有找到这个玩家"):
-        await score_service._run(binding, factory)
+        await sources_module._run(binding, factory)
     assert calls["n"] == 1
     assert sleeps == []
 
     # 续期后遇到非 401 异常：立即映射，不进阶梯
     factory, calls = await make_other_error(1)
     with pytest.raises(UserScoreError, match="未授权第三方查询"):
-        await score_service._run(binding, factory)
+        await sources_module._run(binding, factory)
     assert calls["n"] == 2
     assert sleeps == []
 
@@ -348,19 +349,17 @@ async def test_b50_net_error_mapped_to_user_message(db, songs, monkeypatch):
         binding_service,
     )
     from nonebot_plugin_awmc_helper.core.ext.net import NET_ERROR_MESSAGES, NetError
+    from nonebot_plugin_awmc_helper.core.net_score import net_score_service
 
     binding = await binding_service.ensure("qq", "10002")
     await binding_service.bind_net(binding, sega_id="sid", password="pw")
     assert binding.service == SERVICE_NET
 
-    import nonebot_plugin_awmc_helper.core.score as score_mod
-
+    # NET 适配器委托 net_score_service 单例：patch 单例方法即全链路生效
     async def raise_invalid_credentials(_binding):
         raise NetError("invalid_credentials")
 
-    monkeypatch.setattr(
-        score_mod.net_score_service, "get_b50", raise_invalid_credentials
-    )
+    monkeypatch.setattr(net_score_service, "get_b50", raise_invalid_credentials)
     with pytest.raises(UserScoreError, match="SEGA ID 或密码错误"):
         await score_service.get_b50(binding)
     # 文案与映射表一致（未知 code 回落 str(e)）
@@ -369,17 +368,17 @@ async def test_b50_net_error_mapped_to_user_message(db, songs, monkeypatch):
     async def raise_maintenance(_binding):
         raise NetError("maintenance")
 
-    monkeypatch.setattr(score_mod.net_score_service, "get_b50", raise_maintenance)
+    monkeypatch.setattr(net_score_service, "get_b50", raise_maintenance)
     with pytest.raises(UserScoreError, match="定期维护中"):
         await score_service.get_b50(binding)
 
-    # minfo NET 路径同样映射
-    async def raise_minfo(_binding, _song, _type=None):
+    # minfo NET 路径同样映射（门面 get_minfo 按 service 路由到 NET 适配器）
+    async def raise_minfo(_binding, _song):
         raise NetError("maintenance")
 
-    monkeypatch.setattr(score_mod.net_score_service, "get_minfo_scores", raise_minfo)
+    monkeypatch.setattr(net_score_service, "get_minfo_scores", raise_minfo)
     from mocks import make_diff, make_song
 
     song = make_song(199, "测试曲", diffs=[make_diff(type=SongType.STANDARD)])
     with pytest.raises(UserScoreError, match="定期维护中"):
-        await score_service.get_minfo_net(binding, song)
+        await score_service.get_minfo(song, binding)
