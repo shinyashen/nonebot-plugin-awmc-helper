@@ -661,3 +661,35 @@ async def best50_bytes(
             sub_of=sub_of,
         )
     )
+
+
+async def net_best50_card(bests, binding, *, sub_of=None) -> bytes:
+    """NET B50 系卡面（主插件 b50/ap50、导分插件 pc50 共用）。
+
+    ``bests`` 为组装好的 b35/b15 结构（PlayerBests 或 MaimaiScores 同构字段）；
+    身份取 NET 窗口缓存的玩家资料（缺失回退 SEGA ID），头像/段位认定/
+    でらっクラス/名牌素材并发落盘注入。调用方负责抓取提示（needs_fetch）
+    与成绩拉取——本函数只做身份装配 + 渲染。
+    """
+    from . import jp_cover
+    from ..binding import binding_service
+    from ..net_score import net_score_service
+
+    player = net_score_service.player_of(binding)
+    identity = await jp_cover.net_player_assets(player)
+    return await best50_bytes(
+        (player.name if player else None) or binding.net_sega_id or "maimai NET",
+        bests.rating,
+        bests.rating_b35,
+        bests.rating_b15,
+        bests.scores_b35,
+        bests.scores_b15,
+        player=None,
+        qqid=binding_service.qq_of(binding),
+        service=binding.service,
+        theme=binding.theme or DEFAULT_THEME,
+        trophy_name=player.trophy_name if player else None,
+        trophy_color=player.trophy_color if player else None,
+        sub_of=sub_of,
+        **identity,
+    )

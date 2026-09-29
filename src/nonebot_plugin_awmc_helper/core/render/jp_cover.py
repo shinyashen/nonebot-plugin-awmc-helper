@@ -9,6 +9,7 @@
 - 拉取失败静默返回 False，渲染维持 0.png 占位行为；并发请求同曲合并为单次下载。
 """
 
+import asyncio
 from pathlib import Path
 
 from .. import store
@@ -99,3 +100,35 @@ async def ensure_asset(url: str, cache_dir: Path | None = None) -> Path | None:
         ),
     )
     return path if ok else None
+
+
+async def asset_bytes(url: str | None, cache_dir: Path | None = None) -> bytes | None:
+    """NET 官方资料图 URL → bytes（落盘缓存；无 URL/下载失败均 None）。"""
+    if not url:
+        return None
+    path = await ensure_asset(url, cache_dir)
+    return path.read_bytes() if path is not None else None
+
+
+async def net_player_assets(player) -> dict:
+    """NET 玩家身份素材并发落盘 → B50 系卡面（b50/ap50/pc50）的显式注入参数。
+
+    ``player`` 为窗口缓存里的 :class:`NetPlayer`（缺失/页面改版兜底为 None
+    时全 None，卡面走缺省渲染）。返回键与 ``best50_bytes`` 的身份参数一致：
+    ``icon_image/course_image/class_image/nameplate_image``。
+    """
+    keys = ("icon_image", "course_image", "class_image", "nameplate_image")
+    if player is None:
+        return dict.fromkeys(keys)
+    icon, course, klass, plate = await asyncio.gather(
+        asset_bytes(player.icon_url),
+        asset_bytes(player.course_url),
+        asset_bytes(player.class_url),
+        asset_bytes(player.nameplate_url),
+    )
+    return {
+        "icon_image": icon,
+        "course_image": course,
+        "class_image": klass,
+        "nameplate_image": plate,
+    }

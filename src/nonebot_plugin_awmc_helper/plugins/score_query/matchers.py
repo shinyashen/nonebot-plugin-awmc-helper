@@ -1,8 +1,7 @@
 """查分指令入口：b50 / ap50 / minfo / ginfo。"""
 
-import asyncio
-
 from nonebot import on_regex, on_command
+from maimai_py import current_version_jp
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.adapters import Event, Message
 from nonebot_plugin_uninfo import Session, UniSession
@@ -27,7 +26,6 @@ from ...core.render import best50 as b50_render
 from ...core.render import jp_cover, nb_chart
 from ...core.songdb import Scope
 from ...core.binding import (
-    SERVICE_NET,
     UserBinding,
     binding_service,
     resolve_session_query,
@@ -168,17 +166,6 @@ async def _minfo_net(key: str, binding) -> None:
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
-async def _net_image_bytes(url: str | None) -> bytes | None:
-    """NET 官方资料图 URL → bytes（落盘缓存；无 URL/下载失败均 None）。
-
-    头像（img/Icon）与段位认定/でらっクラス徽章（img/course、img/class）同构。
-    """
-    if not url:
-        return None
-    path = await jp_cover.ensure_asset(url)
-    return path.read_bytes() if path is not None else None
-
-
 @b50.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
@@ -202,42 +189,15 @@ async def _(
         )
     else:
         binding = await _get_binding(session, event)
-        if binding.service == SERVICE_NET:
+        if score_service.view_of(binding.service) == "jp":
             # 日服 NET：窗口缓存优先（首次/过期时真实抓取，约 5-15 秒）；
-            # 身份来自登录流顺带解析的首页（玩家名/称号/头像），缺失回退 SEGA ID
+            # 身份卡（玩家名/称号/头像/徽章）经 core 共用链路装配
             if score_service.needs_fetch(binding):
                 await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
                     at_sender=True
                 )
             bests = await score_service.get_b50(binding)
-            player = score_service.player_profile(binding)
-            # 身份素材并发拉取（首查下载，之后落盘缓存秒回）
-            icon_b, course_b, class_b, plate_b = await asyncio.gather(
-                _net_image_bytes(player.icon_url if player else None),
-                _net_image_bytes(player.course_url if player else None),
-                _net_image_bytes(player.class_url if player else None),
-                _net_image_bytes(player.nameplate_url if player else None),
-            )
-            png = await b50_render.best50_bytes(
-                player_name=(player.name if player else None)
-                or binding.net_sega_id
-                or "maimai NET",
-                rating=bests.rating,
-                rating_b35=bests.rating_b35,
-                rating_b15=bests.rating_b15,
-                scores_b35=bests.scores_b35,
-                scores_b15=bests.scores_b15,
-                player=None,
-                qqid=binding_service.qq_of(binding),
-                service=binding.service,
-                theme=binding.theme or DEFAULT_THEME,
-                icon_image=icon_b,
-                trophy_name=player.trophy_name if player else None,
-                trophy_color=player.trophy_color if player else None,
-                course_image=course_b,
-                class_image=class_b,
-                nameplate_image=plate_b,
-            )
+            png = await b50_render.net_best50_card(bests, binding)
         else:
             notify_slow = slow_notice()
             player = await score_service.get_player(binding, notify_slow=notify_slow)
@@ -270,7 +230,16 @@ async def _(
     """
     binding = await _get_binding(session, event)
     notify_slow = slow_notice()
-    scores = await score_service.get_scores_all(binding, notify_slow=notify_slow)
+    jp = score_service.view_of(binding.service) == "jp"
+    if jp:
+        # NET：全量成绩来自窗口缓存（抓取提示先行，b50/minfo 同款交互）
+        if score_service.needs_fetch(binding):
+            await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
+                at_sender=True
+            )
+        scores = await score_service.get_scores_all(binding)
+    else:
+        scores = await score_service.get_scores_all(binding, notify_slow=notify_slow)
     ap_scores = [
         s
         for s in scores.scores
@@ -280,20 +249,28 @@ async def _(
     ]
     if not ap_scores:
         await UniMessage.text(" 没有查到 AP/APP 成绩").finish(at_sender=True)
-    bests = build_bests(ap_scores, key=lambda s: s.dx_rating or 0)
-    player = await score_service.get_player(binding, notify_slow=notify_slow)
-    png = await b50_render.best50_bytes(
-        player_display_name(player),
-        bests.rating,
-        bests.rating_b35,
-        bests.rating_b15,
-        bests.scores_b35,
-        bests.scores_b15,
-        player=player,
-        qqid=binding_service.qq_of(binding),
-        service=binding.service,
-        theme=binding.theme or DEFAULT_THEME,
+    # NET 的旧/新版本分侧用日服现行版本（与 net_score 组装同口径）
+    bests = build_bests(
+        ap_scores,
+        key=lambda s: s.dx_rating or 0,
+        latest_version_value=current_version_jp.value if jp else None,
     )
+    if jp:  # NET 身份卡与 b50 共用 core 链路（CN 路径走查分器玩家资料）
+        png = await b50_render.net_best50_card(bests, binding)
+    else:
+        player = await score_service.get_player(binding, notify_slow=notify_slow)
+        png = await b50_render.best50_bytes(
+            player_display_name(player),
+            bests.rating,
+            bests.rating_b35,
+            bests.rating_b15,
+            bests.scores_b35,
+            bests.scores_b15,
+            player=player,
+            qqid=binding_service.qq_of(binding),
+            service=binding.service,
+            theme=binding.theme or DEFAULT_THEME,
+        )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

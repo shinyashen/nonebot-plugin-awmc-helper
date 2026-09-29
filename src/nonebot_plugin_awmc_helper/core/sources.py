@@ -127,6 +127,7 @@ CAP_LABELS: dict[Capability, str] = {
 CAP_COMMAND_HINTS: dict[Capability, str] = {
     Capability.B50: "b50",
     Capability.MINFO: "minfo",
+    Capability.SCORES_ALL: "ap50",
 }
 """能力域 → 代表指令名（绑定成功提示「支持指令：…」的拼装源）。
 
@@ -291,6 +292,20 @@ async def _run_full(binding: UserBinding, make, notify_slow=None):
         # 路由到 token 的绑定 401 合流＝token 已在水鱼侧重置（授权缺失走
         # PlayerNotAuthorizedError 分支，两类失败凭路由天然可分）
         raise UserScoreError(_DF_TOKEN_HINT) from e
+
+
+async def _net_call(coro):
+    """NET 抓取层调用 → 统一映射 NetError/NetScoreError 为用户文案。
+
+    NetError 是凭据错误/维护等抓取层语义（映射表转专项文案）；只捕
+    NetScoreError 会让 handler 的通用兜底吃掉专项提示（L-1）。
+    """
+    try:
+        return await coro
+    except NetError as e:
+        raise UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e))) from e
+    except NetScoreError as e:
+        raise UserScoreError(str(e)) from e
 
 
 # ---------------------------------------------------------------- 适配器
@@ -549,29 +564,28 @@ class LxnsSource(ProberSource):
 class NetSource(SourceBase):
     """日服 NET 适配器：官方站直连（core.ext.net 抓取 + core.net_score 组装）。
 
-    一次抓取的全量成绩在冷却窗口内被 b50/minfo 共享（0 请求秒回）；
+    一次抓取的全量成绩在冷却窗口内被 b50/minfo/全量共享（0 请求秒回）；
     b35/b15 划分用日服现行版本（``current_version_jp``），成绩与曲库口径
-    均为日服，故 ``view = "jp"``。全量成绩模型（SCORES_ALL/PLATES）待
-    「按 service 选视图」的渲染层改造后另行立项（DEVELOPMENT_PLAN §8.1）。
+    均为日服，故 ``view = "jp"``。
+
+    全量成绩（SCORES_ALL）已接入（2026-09-30）：ap50 / 完成表 / 进度 /
+    分数列表等曲库消费方维持**国服视图网格**——日服限定曲不在国服网格、
+    自然缺席，共享曲定数显示国服口径（插件「国服为主、日服补充」既定口径；
+    日服专属底图未立项）。牌子（PLATES）与玩家信息（PLAYER）保持门禁：
+    前者牌单/素材未定（用户 2026-09-30 拍板暂不接入），后者无 maimai_py
+    Player 形态、卡面身份走 needs_fetch/player_profile 注入链路。
     """
 
     key = SERVICE_NET
     zh_name = "日服数据源（NET）"
     short_zh = "日服 NET"
     view = "jp"
-    capabilities = frozenset({Capability.B50, Capability.MINFO})
+    capabilities = frozenset({Capability.B50, Capability.MINFO, Capability.SCORES_ALL})
 
     async def get_b50(
         self, binding: UserBinding, notify_slow=None
     ) -> "MaimaiScores | PlayerBests":
-        try:
-            return await net_score_service.get_b50(binding)
-        except NetError as e:
-            # NET 抓取层错误（凭据错误/维护等）经映射表转专项文案；
-            # 只捕 NetScoreError 会让 handler 的通用兜底吃掉专项提示
-            raise UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e))) from e
-        except NetScoreError as e:
-            raise UserScoreError(str(e)) from e
+        return await _net_call(net_score_service.get_b50(binding))
 
     async def get_minfo(
         self,
@@ -585,15 +599,31 @@ class NetSource(SourceBase):
         ``binding`` 恒非 None（门面把无绑定请求路由到水鱼公开路径）；
         ``song_type`` 见 :class:`ProberSource.get_minfo`。
         """
-        try:
-            hit = await net_score_service.get_minfo_scores(binding, song)
-        except NetError as e:
-            raise UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e))) from e
-        except NetScoreError as e:
-            raise UserScoreError(str(e)) from e
+        hit = await _net_call(net_score_service.get_minfo_scores(binding, song))
         if hit is None or not _has_scores(hit, song_type):
             return None
         return PlayerSong(song=song, scores=hit)
+
+    async def get_scores_all(
+        self, binding: UserBinding, notify_slow=None
+    ) -> MaimaiScores:
+        """日服全量成绩：窗口缓存组装成绩 → MaimaiScores 同构包装。
+
+        字段手工装配镜像 maimai_py ``MaimaiScores.configure`` 的字段契约——
+        不走 configure 本体：其 b35/b15 划分按国服版本缓存（CN 视图），
+        NET 侧拆分已在 :meth:`net_score.NetScoreService.bests_of` 用日服
+        现行版本完成。
+        """
+        scores, _ = await _net_call(net_score_service.get_scores(binding))
+        bests = net_score_service.bests_of(scores)
+        ms = MaimaiScores(client)
+        ms.scores = scores
+        ms.scores_b35 = bests.scores_b35
+        ms.scores_b15 = bests.scores_b15
+        ms.rating = bests.rating
+        ms.rating_b35 = bests.rating_b35
+        ms.rating_b15 = bests.rating_b15
+        return ms
 
     def needs_fetch(self, binding: UserBinding) -> bool:
         return net_score_service.needs_fetch(binding)

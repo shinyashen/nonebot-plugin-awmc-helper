@@ -570,7 +570,7 @@ async def test_net_bind_command(app: App, db, net_service):
             bind.net_bind,
             "绑定日服 sega_user password123",
             "已绑定日服 NET（SEGA ID：sega_user），"
-            "当前数据源已切换为日服。支持指令：b50、minfo",
+            "当前数据源已切换为日服。支持指令：b50、minfo、ap50",
         )
     binding = await binding_service.get("OneBot V11", "12345678")
     assert binding is not None
@@ -634,20 +634,92 @@ async def test_set_provider_net(app: App, db, net_service):
     assert fresh.service == SERVICE_NET
 
 
+@requires_assets
 @pytest.mark.asyncio
-async def test_b50_net_unsupported_commands(app: App, db, net_service, jp_view):
-    """net 数据源下 ap50 等指令给出能力边界提示（score 层统一拦截）。"""
+async def test_ap50_net_command(app: App, db, net_service, jp_view, monkeypatch):
+    """ap50 全链路（私聊，NET）：窗口缓存全量 → AP 过滤 → 日服版本分侧 →
+    NET 身份卡（与 b50 共用 core 渲染链路）。牌子（get_plates）仍被能力
+    门禁拦截（牌单/素材未定，见 test_core_sources）。"""
+    import base64
+
+    from fake import fake_private_message_event_v11
+    from maimai_py import current_version_jp
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+
     from nonebot_plugin_awmc_helper.plugins import score_query
+    from nonebot_plugin_awmc_helper.core.calc import build_bests
+    from nonebot_plugin_awmc_helper.core.types import FCType
     from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.net import NetPlayer
+    from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
 
     binding = await binding_service.ensure("OneBot V11", "12345678")
     await binding_service.bind_net(binding, sega_id="sid", password="pw")
-    await _assert_reply(
-        app,
-        score_query.ap50,
-        "ap50",
-        "日服数据源（NET）暂不支持全量成绩，敬请期待后续版本",
+
+    net_player = NetPlayer(
+        name="Ｔｅｆｇ",
+        rating=10516,
+        icon_url=None,
+        trophy_name="アウラ、フルコンしろ。",
+        trophy_color="Normal",
     )
+
+    async def fake_fetch(b):
+        return _records(), net_player
+
+    monkeypatch.setattr(net_service, "fetch_records", fake_fetch)
+
+    scores = await net_service.assemble(_records())
+    ap_scores = [
+        s
+        for s in scores
+        if s.fc is not None
+        and s.fc.value in (FCType.AP.value, FCType.APP.value)
+        and s.achievements is not None
+    ]
+    bests = build_bests(
+        ap_scores,
+        key=lambda s: s.dx_rating or 0,
+        latest_version_value=current_version_jp.value,
+    )
+    expected_png = await best50_bytes(
+        net_player.name,
+        bests.rating,
+        bests.rating_b35,
+        bests.rating_b15,
+        bests.scores_b35,
+        bests.scores_b15,
+        player=None,
+        qqid=12345678,
+        service="net",
+        theme="prism_plus",
+        trophy_name=net_player.trophy_name,
+        trophy_color=net_player.trophy_color,
+    )
+    event = fake_private_message_event_v11(message="ap50", user_id=12345678)
+    async with app.test_matcher(score_query.ap50) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot_get_adapter())
+        ctx.receive_event(bot, event)
+        # 首查先发抓取提示，再发 AP50 图
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.text("正在登录日服 NET 抓取成绩，请稍候…")]),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.image(
+                        f"base64://{base64.b64encode(expected_png).decode()}"
+                    )
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
 
 
 @requires_assets

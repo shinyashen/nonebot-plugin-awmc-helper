@@ -204,7 +204,7 @@ class NetScoreService:
     async def get_b50(self, binding) -> PlayerBests:
         """日服 B50（b35 + b15 与总 rating）。"""
         scores, _ = await self.get_scores(binding)
-        return self._bests_of(scores)
+        return self.bests_of(scores)
 
     async def get_minfo_scores(self, binding, song: Song) -> list[ScoreExtend] | None:
         """该曲全部谱面成绩（未游玩返回 None）；随窗口缓存复用。"""
@@ -219,7 +219,7 @@ class NetScoreService:
         非指令链路 API：生产路径走 :meth:`get_b50`（窗口缓存 + 抓取）；
         现供测试直灌记录用，预留为外部复用入口（如第三方传分插件）。
         """
-        return self._bests_of(await self.assemble(records))
+        return self.bests_of(await self.assemble(records))
 
     # -- 内部 ---------------------------------------------------------------
 
@@ -311,7 +311,7 @@ class NetScoreService:
         return MaimaiScores._calcuate_dx_star(dx_score, level_dx_score)
 
     @staticmethod
-    def _bests_of(scores: list[ScoreExtend]) -> PlayerBests:
+    def bests_of(scores: list[ScoreExtend]) -> PlayerBests:
         """按 maimai_py MaimaiScores.configure 同口径组装 b35/b15 与总 rating。
 
         宴谱先滤（本模块抓取不含宴谱页，保险再滤一次），排序/拆分/求和

@@ -81,7 +81,11 @@ def test_capability_matrix():
         source_of,
     )
 
-    assert source_of("net").capabilities == {Capability.B50, Capability.MINFO}
+    assert source_of("net").capabilities == {
+        Capability.B50,
+        Capability.MINFO,
+        Capability.SCORES_ALL,
+    }
     assert Capability.MY_RANKING not in source_of("lxns").capabilities
     assert source_of("divingfish").capabilities == set(Capability)
 
@@ -89,17 +93,25 @@ def test_capability_matrix():
 # ---------------------------------------------------------------- 门禁与派生文案
 
 
-async def test_facade_gates_unsupported(db, songs):
-    """门面路由到基类默认实现：NET 全量/牌子、落雪我的排名 → 统一暂不支持。"""
+async def test_facade_gates_unsupported(db, songs, monkeypatch):
+    """门面路由：NET 牌子（牌单/素材未定）与落雪我的排名 → 统一暂不支持。"""
     from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.net_score import net_score_service
 
     net_binding = await binding_service.ensure("qq", "70001")
     await binding_service.bind_net(net_binding, sega_id="sid", password="pw")
-    with pytest.raises(UserScoreError, match="日服数据源（NET）暂不支持全量成绩"):
-        await score_service.get_scores_all(net_binding)
     with pytest.raises(UserScoreError, match="日服数据源（NET）暂不支持牌子进度"):
         await score_service.get_plates(net_binding, "真将")
+
+    # NET 全量成绩已接入：窗口缓存组装 → MaimaiScores 同构（b35/b15 为空库）
+    async def fake_scores(_b):
+        return [], True
+
+    monkeypatch.setattr(net_score_service, "get_scores", fake_scores)
+    ms = await score_service.get_scores_all(net_binding)
+    assert ms.scores == []
+    assert ms.rating == 0 and ms.rating_b35 == 0 and ms.rating_b15 == 0
 
     lx_binding = await binding_service.ensure("qq", "70002")
     await binding_service.bind_lxns(lx_binding, token="t", friend_code=123456)
@@ -156,12 +168,12 @@ def test_derived_texts():
     )
 
     assert support_note(Capability.B50) is None  # 全源支持 → 无标注
-    assert support_note(Capability.SCORES_ALL) == "日服 NET 暂不支持"
+    assert support_note(Capability.SCORES_ALL) is None  # 2026-09-30 起 NET 接入
     assert support_note(Capability.MY_RANKING) == "仅水鱼数据源"
-    assert command_hints("net") == "b50、minfo"
-    # 拦截文案 = 全名 + 能力标签
-    assert str(source_of("net").unsupported(Capability.SCORES_ALL)) == (
-        "日服数据源（NET）暂不支持全量成绩，敬请期待后续版本"
+    assert command_hints("net") == "b50、minfo、ap50"
+    # 拦截文案 = 全名 + 能力标签（牌子为 NET 当前唯一保持门禁的查询能力）
+    assert str(source_of("net").unsupported(Capability.PLATES)) == (
+        "日服数据源（NET）暂不支持牌子进度，敬请期待后续版本"
     )
 
 
@@ -185,4 +197,5 @@ async def test_net_hooks_route_via_facade(db, songs):
     assert score_service.view_of(net_binding.service) == "jp"
     assert score_service.view_of(df_binding.service) == "cn"
     assert score_service.supports(net_binding.service, "b50") is True
-    assert score_service.supports(net_binding.service, "scores_all") is False
+    assert score_service.supports(net_binding.service, "scores_all") is True
+    assert score_service.supports(net_binding.service, "plates") is False
