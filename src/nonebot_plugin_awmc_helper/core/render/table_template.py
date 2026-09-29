@@ -312,9 +312,13 @@ async def generate_rating_template(level: str, song_service) -> int:
     entries = filter_level(await song_service.get_all(), level)
     if not entries:
         return 0
-    img = _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
     out = rating_table_dir() / f"{level}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # 绘制段 CPU 密集（数百张封面加载/缩放），整体让出事件循环（L-6）；
+    # 闭包只引用本协程局部变量，无跨线程共享可变状态
+    img = await asyncio.to_thread(
+        lambda: _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
+    )
     await asyncio.to_thread(img.save, out)
     return len(entries)
 
@@ -359,11 +363,17 @@ async def generate_plate_template(version: str, kind: str, song_service) -> int:
             if not any(group.values()):
                 continue
             flat = [pair for charts in group.values() for pair in charts]
-            img = _plate_grid(flat, remaster_entries=remaster, pages=pages)
+            # 绘制段让出事件循环（L-6）：lambda 在本次迭代内即被 await，
+            # 捕获的 flat/pages 不会跨迭代失效
+            img = await asyncio.to_thread(
+                lambda flat=flat, pages=pages: _plate_grid(
+                    flat, remaster_entries=remaster, pages=pages
+                )
+            )
             await asyncio.to_thread(img.save, out_dir / f"{version}-{pages + 1}.png")
             total += sum(len(v) for v in group.values())
         return total
-    img = _plate_grid(entries)
+    img = await asyncio.to_thread(_plate_grid, entries)
     await asyncio.to_thread(img.save, out_dir / f"{version}{kind}.png")
     return len(entries)
 
@@ -492,19 +502,23 @@ def draw_level_header(dr: ImageDraw.ImageDraw, level: str, y: int) -> None:
     )
 
 
-def rating_table_text_bytes(
+async def rating_table_text_bytes(
     level: str, entries: Sequence[tuple[Song, SongDifficulty]]
 ) -> bytes:
     """`<等级>定数表`（NB DrawRatingTable(level_text=True) 版式）。
 
     底图存在时直接叠「Level. {level}」大字；缺失时按 NB 布局现算（不落盘）；
     最终按 NB 同款 0.8 缩放输出。坐标对 NB 1400 宽底图原生适配。
+
+    现算分支 CPU 密集，整体在工作线程执行（L-6），故本函数为协程。
     """
     path = rating_table_dir() / f"{level}.png"
     if path.exists():
         im = Image.open(path).convert("RGBA")
     else:
-        im = _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
+        im = await asyncio.to_thread(
+            lambda: _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
+        )
     dr = ImageDraw.Draw(im)
     draw_level_header(dr, level, 220)
     return image_to_bytes(scale_output(im))

@@ -118,3 +118,51 @@ async def test_rating_grid_per_type_id(songs, monkeypatch):
     table_template._rating_grid_15([(song, lv15)])
     assert "10199" in drawn
     assert "199" not in drawn
+
+
+@pytest.mark.asyncio
+async def test_rating_template_draw_offloads_loop(songs, monkeypatch, tmp_path):
+    """定数表底图绘制段让出事件循环（L-6）：绘制跑在工作线程，
+    绘制进行中事件循环仍可调度其它协程（同步实现会卡死循环调度）。"""
+    import time
+    import asyncio
+    import threading
+
+    from PIL import Image as PILImage
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+
+    loop_thread = threading.get_ident()
+    draw_threads: list[int] = []
+    draw_done = threading.Event()
+
+    def fake_grid(entries):
+        draw_threads.append(threading.get_ident())
+        time.sleep(0.05)  # 模拟数百张封面加载/缩放的绘制耗时
+        draw_done.set()
+        return PILImage.new("RGBA", (10, 10))
+
+    monkeypatch.setattr(table_template, "_rating_grid", fake_grid)
+    monkeypatch.setattr(
+        table_template, "rating_table_dir", lambda: tmp_path / "rating_table"
+    )
+
+    ticks_during_draw = 0
+
+    async def ticker():
+        nonlocal ticks_during_draw
+        while not draw_threads:  # noqa: ASYNC110 — 等绘制开始，让出即测试目的
+            await asyncio.sleep(0)
+        while not draw_done.is_set():  # 绘制进行中，循环应能继续调度本协程
+            ticks_during_draw += 1
+            await asyncio.sleep(0)
+
+    await asyncio.gather(
+        table_template.generate_rating_template("13", song_service),
+        ticker(),
+    )
+
+    assert draw_threads, "绘制入口未被调用"
+    assert all(t != loop_thread for t in draw_threads), "绘制跑在事件循环线程内"
+    assert ticks_during_draw > 0, "绘制期间事件循环未调度其它协程"

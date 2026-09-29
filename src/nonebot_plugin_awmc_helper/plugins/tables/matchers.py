@@ -64,7 +64,7 @@ async def _(
         await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
             at_sender=True
         )
-    png = table_template.rating_table_text_bytes(level, entries)
+    png = await table_template.rating_table_text_bytes(level, entries)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 

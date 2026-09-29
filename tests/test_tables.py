@@ -145,7 +145,7 @@ async def test_ds_table_command(app: App, songs):
         for d in song.get_difficulties():
             if d.type != SongType.UTAGE and d.level == "13":
                 entries.append((song, d))
-    png = table_template.rating_table_text_bytes("13", entries)
+    png = await table_template.rating_table_text_bytes("13", entries)
 
     import nonebot
     from fake import fake_group_message_event_v11
