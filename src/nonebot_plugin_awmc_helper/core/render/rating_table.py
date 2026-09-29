@@ -152,7 +152,8 @@ def draw_rating_table(
         if n < 6:
             x, y = 534 + (n % 6) * 102, 238
         else:
-            x, y = 292 + ((n - 6) % 9) * 102, 323
+            # n ∈ [6, 14] → n-6 ∈ [0, 8]，恰为 Sync/FC 行 9 列（原 % 9 恒无效）
+            x, y = 292 + (n - 6) * 102, 323
         dr.text(
             (x, y),
             str(stats.data[key]),

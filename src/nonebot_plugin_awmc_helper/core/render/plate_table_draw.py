@@ -186,7 +186,8 @@ def draw_plate_table(
     if bg is not None:
         im.alpha_composite(bg.resize((1000, 161)), (200, 45))
 
-    finished_marks = [assets.pic(f"t_{i}.png") for i in range(5)]
+    # 完成小标按槽位数取（非舞四槽牌种用不到 t_4，不白载一张素材）
+    finished_marks = [assets.pic(f"t_{i}.png") for i in range(slot_num)]
 
     current_y = START_Y
     for level, songs_slots in played.items():
