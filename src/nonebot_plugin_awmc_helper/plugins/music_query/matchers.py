@@ -23,6 +23,7 @@ from .resolve import (
     parse_range_args,
 )
 from ...constants import UTAGE_ID_BASE, display_song_id
+from ...core.help import CommandSpec, help_registry
 from ...core.songs import cn_song_map, song_service, entries_list_text
 from ...core.store import UserBinding
 from ...core.types import Song, SongType
@@ -268,3 +269,36 @@ async def _(
     if jp:
         reply = reply.text(f"\n{JP_ONLY_NOTE}")
     await reply.finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.music_query",
+    title="查歌",
+    category="query",
+    description="按标题/定数/BPM/曲师/谱师/别名/ID 查歌",
+    commands=[
+        CommandSpec(
+            matcher=search,
+            name="查歌",
+            aliases=("定数查歌", "bpm查歌", "曲师查歌", "谱师查歌"),
+            brief="按标题/定数/BPM/曲师/谱师查歌（列表 25/页）",
+            detail=(
+                "格式：查歌 <标题> [页]｜定数查歌 <定数> [页]\n"
+                "bpm查歌｜曲师查歌｜谱师查歌"
+            ),
+        ),
+        CommandSpec(
+            matcher=search_alias_song,
+            name="<名称>是什么歌",
+            brief="别名/标题/ID 反查曲目（别名优先，出谱面卡）",
+            detail="格式：<名称>是什么歌；支持别名、宴谱、纯数字 id 等形态。",
+        ),
+        CommandSpec(
+            matcher=query_chart,
+            name="id <数字>",
+            brief="按 ID 出谱面卡（DX 展示 id / 宴谱 diff_id）",
+        ),
+    ],
+)

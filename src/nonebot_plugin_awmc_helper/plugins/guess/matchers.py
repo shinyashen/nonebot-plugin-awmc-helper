@@ -9,6 +9,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .game import GUESS_FEATURE, _games, _reveal, _game_of, _start_game, _handle_answer
 from ...core import store
+from ...core.help import CommandSpec, help_registry
 from ...core.utils import group_id_of, handle_errors, ensure_group_admin
 
 guess = on_command("猜歌", block=True)
@@ -86,3 +87,36 @@ async def _(
             await _reveal(game, "猜歌已关闭。")
     state = "开启" if enabled else "关闭"
     await UniMessage.text(f" 已{state}本群猜歌").finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.guess",
+    title="猜歌",
+    category="fun",
+    description="群内猜歌游戏（按群开关）",
+    commands=[
+        CommandSpec(
+            matcher=guess,
+            name="猜歌",
+            brief="开启猜歌对局（特征提示逐轮递进，超时揭晓）",
+        ),
+        CommandSpec(
+            matcher=guess_pic,
+            name="猜曲绘",
+            brief="开启猜曲绘对局（直接发裁剪曲绘）",
+        ),
+        CommandSpec(
+            matcher=guess_reset,
+            name="重置猜歌",
+            brief="强制结束当前对局并揭晓答案",
+        ),
+        CommandSpec(
+            matcher=guess_switch,
+            name="开启/关闭mai猜歌",
+            scope="群管",
+            brief="本群猜歌开关（关闭时终止进行中对局）",
+        ),
+    ],
+)

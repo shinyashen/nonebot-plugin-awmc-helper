@@ -14,6 +14,7 @@ from .sheet import (
     _plate_progress_overview,
 )
 from ...constants import PLATE_CHARS, DEFAULT_THEME, chart_display_id
+from ...core.help import CommandSpec, help_registry
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
@@ -295,3 +296,63 @@ async def _():
     await UniMessage.text(f" 完成表底图生成完成（{total} 谱面次）{extra}。").finish(
         at_sender=True
     )
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.tables",
+    title="表格",
+    category="table",
+    description="定数表/完成表/牌子/进度/分数列表",
+    commands=[
+        CommandSpec(
+            matcher=ds_table_cmd,
+            name="<等级>定数表",
+            brief="定数网格表（如 13+定数表）",
+        ),
+        CommandSpec(
+            matcher=score_table_cmd,
+            name="<等级><评价>完成表",
+            brief="达成度盖章完成表",
+            detail="评价支持 s/fc/fs/ap 族（如 13fc完成表）。",
+        ),
+        CommandSpec(
+            matcher=progress_cmd,
+            name="<等级><评价>进度",
+            brief="完成度进度（总览/已完成/未完成/未游玩）",
+            detail="格式：<等级><评价>进度 [页]（如 13fc进度 2）。",
+        ),
+        CommandSpec(
+            matcher=plate_cmd,
+            name="<版本><牌种>完成表|进度",
+            brief="牌子完成表与进度总览",
+            detail="如 真将完成表、舞神进度；达成条件见「牌子条件」。",
+        ),
+        CommandSpec(
+            matcher=plate_help,
+            name="牌子条件",
+            brief="各代牌子达成条件说明",
+        ),
+        CommandSpec(
+            matcher=score_list_cmd,
+            name="<等级|定数>分数列表",
+            brief="按等级或定数过滤成绩列表（80/页）",
+            detail="整数=标级（13、13+），小数=定数（13.0）。",
+        ),
+        CommandSpec(
+            matcher=update_rating,
+            name="更新定数表",
+            scope="SUPERUSER",
+            hidden=True,
+            brief="预渲染全部定数表底图",
+        ),
+        CommandSpec(
+            matcher=update_plate,
+            name="更新完成表",
+            scope="SUPERUSER",
+            hidden=True,
+            brief="预渲染全部完成表底图",
+        ),
+    ],
+)

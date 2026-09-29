@@ -2,7 +2,7 @@
 
 指令（对齐原版 maimaiDX排卡）：
 - `开启排卡 / 关闭排卡`（群管；排卡默认关，对齐原版 Service enable_on_default=False）
-- `帮助maimaiDX排卡`（不设门禁，便于发现开启入口）
+- `舞萌帮助 排卡`（帮助入口，经主插件帮助系统，不设门禁）
 - `添加机厅 <店名> <地址> <机台数> [别称...]`（SUPERUSER，自定义 ID≥10000）
 - `删除机厅 <店名>`（SUPERUSER）
 - `添加机厅别名 <店名|ID> <别名>` / `删除机厅别名 <别名>`
@@ -31,7 +31,7 @@ __plugin_meta__ = PluginMetadata(
     description="舞萌DX 机厅排卡",
     usage=(
         "开启/关闭排卡（群管）｜添加机厅 <店名> <地址> <机台数> [别称...]｜"
-        "订阅机厅 <店名>｜查找机厅 <关键词>｜XX店+2人｜机厅几人｜帮助maimaiDX排卡"
+        "订阅机厅 <店名>｜查找机厅 <关键词>｜XX店+2人｜机厅几人（帮助见 舞萌帮助 排卡）"
     ),
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
@@ -43,7 +43,6 @@ from .matchers import (  # noqa: F401
     arcade_del,
     arcade_set,
     arcade_sub,
-    arcade_help,
     arcade_search,
     arcade_switch,
     arcade_show_sub,

@@ -23,7 +23,7 @@ from .plugin_loader import load_extra_plugins
 __plugin_meta__ = PluginMetadata(
     name="awmc-helper",
     description="NoneBot2 舞萌DX 辅助插件（数据层基于 maimai-py）",
-    usage="发送 帮助maimaiDX 查看指令总览；配置见 README。",
+    usage="发送 舞萌帮助（wmhelp）查看指令总览；配置见 README。",
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
     config=plugin_config,  # type: ignore[arg-type]

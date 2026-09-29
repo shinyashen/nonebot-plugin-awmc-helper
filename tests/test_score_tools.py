@@ -100,25 +100,27 @@ async def test_score_line_command(app: App, songs):
 
 @pytest.mark.asyncio
 async def test_score_line_help(app: App):
-    import base64
-
-    from nonebot_plugin_awmc_helper.plugins import score_tools
-    from nonebot_plugin_awmc_helper.core.render.tools import (
-        text_to_image,
-        image_to_bytes,
-    )
-
-    png = image_to_bytes(text_to_image(score_tools.SCORE_LINE_HELP))
+    """「分数线 帮助」：渲染注册表里的分数线详情页（文案单源）。"""
     import nonebot
     from fake import fake_group_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.core.help import (
+        CommandPage,
+        page_entries,
+        help_registry,
+    )
+
+    text = page_entries(help_registry, CommandPage(spec=score_tools._score_line_spec))[
+        0
+    ]
     event = fake_group_message_event_v11(message="分数线 帮助")
     expected = Message(
         [
             MessageSegment.at(12345678),
-            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+            MessageSegment.text(" " + text),
         ]
     )
     async with app.test_matcher(score_tools.score_line_cmd) as ctx:

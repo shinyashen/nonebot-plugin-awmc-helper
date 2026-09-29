@@ -17,6 +17,7 @@ from . import net
 from ...core.ext import lxns as lxns_ext
 from ...core.ext import divingfish as df_ext
 from ...constants import SERVICE_ZH
+from ...core.help import CommandSpec, help_registry
 from ...core.utils import handle_errors, is_private_session
 from ...core.binding import (
     SERVICE_NET,
@@ -451,3 +452,88 @@ async def _(session: Session = UniSession()):
         )
     lines.append(f"主题：{'prism_plus' if binding.theme == 'prism_plus' else 'circle'}")
     await UniMessage.text("\n".join(lines)).finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.bind",
+    title="绑定与设置",
+    category="bind",
+    description="查分器绑定与个人设置（绑定类指令建议私聊操作）",
+    commands=[
+        CommandSpec(
+            matcher=df_bind,
+            name="绑定水鱼",
+            aliases=("绑定df", "dfbind"),
+            scope="QQ 平台",
+            brief="水鱼 OAuth 设备码授权（成绩写入/导分必需）",
+            detail=(
+                "发送「绑定水鱼」获取授权链接与确认码，\n"
+                "完成后用「水鱼授权码 <确认码>」回填。"
+            ),
+        ),
+        CommandSpec(
+            matcher=df_user,
+            name="绑定水鱼用户名",
+            aliases=("dfuser", "绑定df用户名"),
+            brief="绑定水鱼用户名（公开查询档，不能写入成绩）",
+            detail="格式：绑定水鱼用户名 <用户名>",
+        ),
+        CommandSpec(
+            matcher=df_token,
+            name="绑定水鱼token",
+            aliases=("dftoken",),
+            brief="绑定水鱼 Import-Token（全量成绩档，可写入成绩）",
+            detail="格式：绑定水鱼token <Import-Token>",
+        ),
+        CommandSpec(
+            matcher=lx_bind,
+            name="绑定落雪",
+            aliases=("绑定lx", "lxbind"),
+            brief="落雪 OAuth 授权或好友码/Token 直绑",
+            detail=(
+                "无参发起落雪授权，授权码 90 秒内直接回复给 bot 即可；\n"
+                "带参直绑好友码（9-12 位数字）或个人 Token。"
+            ),
+        ),
+        CommandSpec(
+            matcher=lx_code,
+            name="落雪授权码",
+            aliases=("lxcode",),
+            brief="回填落雪 OAuth 授权码完成绑定",
+        ),
+        CommandSpec(
+            matcher=df_code,
+            name="水鱼授权码",
+            aliases=("dfcode",),
+            brief="回填水鱼 OAuth 确认码完成绑定",
+        ),
+        CommandSpec(
+            matcher=net_bind,
+            name="绑定日服",
+            aliases=("绑定net", "netbind"),
+            scope="仅私聊",
+            brief="绑定日服 NET（SEGA ID+密码，绑定即验证登录）",
+            detail="格式：绑定日服 <SEGA ID> <密码>；完成后自动切换数据源为日服。",
+        ),
+        CommandSpec(matcher=unbind, name="解绑", brief="解除当前用户全部绑定"),
+        CommandSpec(
+            matcher=set_provider,
+            name="数据源",
+            brief="切换默认查分数据源",
+            detail="格式：数据源 <0|1|2>（水鱼/落雪/日服）；目标源未绑定会被拒绝。",
+        ),
+        CommandSpec(
+            matcher=set_theme,
+            name="主题",
+            brief="切换成绩卡主题",
+            detail="格式：主题 <0|1>（prism_plus/circle）。",
+        ),
+        CommandSpec(
+            matcher=my_bind,
+            name="我的绑定",
+            brief="查看当前绑定详情（敏感信息打码）",
+        ),
+    ],
+)

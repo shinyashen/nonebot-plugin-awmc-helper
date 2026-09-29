@@ -10,6 +10,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .render import _ginfo_image
 from ...constants import DEFAULT_THEME, COLOR_TO_LEVEL_INDEX
+from ...core.help import CommandSpec, help_registry
 from ...core.score import UserScoreError, build_bests, score_service
 from ...core.songs import (
     ChartEntry,
@@ -361,3 +362,40 @@ async def _(groups: tuple = RegexGroup()):
     stats_png = stats_render.song_global_data(song, diff)
     png = _ginfo_image(card, stats_png)
     await UniMessage.image(raw=png).finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.score_query",
+    title="查分",
+    category="score",
+    description="b50 / ap50 / 单曲成绩 / 谱面统计",
+    commands=[
+        CommandSpec(
+            matcher=b50,
+            name="b50",
+            aliases=("B50",),
+            brief="B50 成绩大图（带参数=水鱼用户名代查，@某人=代查）",
+        ),
+        CommandSpec(
+            matcher=ap50,
+            name="ap50",
+            aliases=("AP50",),
+            brief="AP-only best50（全 AP 成绩组装出图）",
+        ),
+        CommandSpec(
+            matcher=minfo,
+            name="minfo",
+            aliases=("Minfo", "MINFO", "info", "Info", "INFO"),
+            brief="单曲成绩卡（ID/曲名/别名定位，@某人代查）",
+            detail="格式：minfo <曲目ID|曲名|别名>；未绑定时降级纯谱面卡。",
+        ),
+        CommandSpec(
+            matcher=ginfo,
+            name="ginfo",
+            brief="谱面游玩统计（样本/拟合/评级分布）",
+            detail="格式：ginfo <[难度色]曲目>。",
+        ),
+    ],
+)

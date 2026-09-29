@@ -20,6 +20,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core.ext import divingfish as df_ext
 from ...constants import LEVEL_INDEX_ZH, COLOR_TO_LEVEL_INDEX
 from ...core.calc import score_line, min_ds_of_ra, rise_recommend, rise_candidates
+from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
@@ -39,21 +40,6 @@ __plugin_meta__ = PluginMetadata(
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
 )
 
-SCORE_LINE_HELP = (
-    "此功能为查找某首歌分数线设计。\n"
-    "命令格式：分数线「难度+歌曲id」「分数线」\n"
-    "例如：分数线 紫799 100\n"
-    "命令将返回分数线允许的「TAP」「GREAT」容错，\n"
-    "以及「BREAK」50落等价的「TAP」「GREAT」数。\n"
-    "以下为「TAP」「GREAT」的对应表：\n"
-    "        GREAT / GOOD / MISS\n"
-    "TAP         1 / 2.5  / 5\n"
-    "HOLD        2 / 5    / 10\n"
-    "SLIDE       3 / 7.5  / 15\n"
-    "TOUCH       1 / 2.5  / 5\n"
-    "BREAK       5 / 12.5 / 25 (外加200落)"
-)
-
 score_line_cmd = on_command("分数线", block=True)
 rise_score = on_regex(r"^我要在?([0-9]+\+?)?[上加\+]([0-9]+)?分$", block=True)
 rating_ranking = on_command("查看排名", aliases={"查看排行"}, block=True)
@@ -65,8 +51,10 @@ my_rating_ranking = on_command("我的排名", block=True)
 async def _(message: Message = CommandArg()):
     args = message.extract_plain_text().strip()
     if args in ("帮助", ""):
-        png = text_image_bytes(SCORE_LINE_HELP)
-        await UniMessage.image(raw=png).finish(at_sender=True)
+        # 文案单源：渲染注册表里的「分数线」详情页（旧 SCORE_LINE_HELP 已迁入）
+        await UniMessage.text(
+            page_entries(help_registry, CommandPage(spec=_score_line_spec))[0]
+        ).finish(at_sender=True)
     m = re.search(r"([绿黄红紫白])\s?([0-9]+)", args)
     if not m:
         await UniMessage.text(" 格式错误，输入「分数线 帮助」以查看帮助信息").finish(
@@ -205,3 +193,55 @@ async def _(session: Session = UniSession(), binding: UserBinding = SessionBindi
                 f"您的 Rating 为「{u.ra}」，排名第「{i + 1}」名"
             ).finish(at_sender=True)
     await UniMessage.text(" 未在查分器排行榜中找到您的记录。").finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+_score_line_spec = CommandSpec(
+    matcher=score_line_cmd,
+    name="分数线",
+    brief="查询指定谱面达标分数线允许的容错",
+    detail=(
+        "此功能为查找某首歌分数线设计。\n"
+        "命令格式：分数线「难度+歌曲id」「分数线」\n"
+        "命令将返回分数线允许的「TAP」「GREAT」容错，\n"
+        "以及「BREAK」50落等价的「TAP」「GREAT」数。\n"
+        "以下为「TAP」「GREAT」的对应表：\n"
+        "        GREAT / GOOD / MISS\n"
+        "TAP         1 / 2.5  / 5\n"
+        "HOLD        2 / 5    / 10\n"
+        "SLIDE       3 / 7.5  / 15\n"
+        "TOUCH       1 / 2.5  / 5\n"
+        "BREAK       5 / 12.5 / 25 (外加200落)"
+    ),
+    example="分数线 紫799 100",
+)
+
+help_registry.declare(
+    plugin="awmc.score_tools",
+    title="工具",
+    category="tools",
+    description="分数线/推分推荐/水鱼 RA 排名",
+    commands=[
+        _score_line_spec,
+        CommandSpec(
+            matcher=rise_score,
+            name="我要上N分",
+            aliases=("我要在<等级>上加N分",),
+            brief="基于全体最低 RA 反推定数区间的推分推荐",
+            detail="格式：我要上N分 / 我要在<等级>上加N分（如 我要在13+上5分）。",
+        ),
+        CommandSpec(
+            matcher=rating_ranking,
+            name="查看排名",
+            aliases=("查看排行",),
+            brief="水鱼 RA 排行榜（50/页；参数为用户名时精确报名次）",
+        ),
+        CommandSpec(
+            matcher=my_rating_ranking,
+            name="我的排名",
+            scope="仅水鱼数据源",
+            brief="在 RA 榜单中定位自己的名次",
+        ),
+    ],
+)

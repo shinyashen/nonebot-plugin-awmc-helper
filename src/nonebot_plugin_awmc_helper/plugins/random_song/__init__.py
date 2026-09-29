@@ -18,6 +18,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import ZH_TO_GENRE, COLOR_TO_LEVEL_INDEX
 from ...core.calc import min_ds_of_ra, rise_candidates
+from ...core.help import CommandSpec, help_registry
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
@@ -190,3 +191,38 @@ async def _pick_rise_song(scores: list[ScoreExtend]):
     if not candidates:
         return None
     return _random.choice(candidates)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.random_song",
+    title="随机谱面",
+    category="fun",
+    commands=[
+        CommandSpec(
+            matcher=random_chart,
+            name="来个/随个/给个 <谱面>",
+            brief="按类型/颜色/等级随机谱面（排除宴谱）",
+            detail="格式：来个 [dx|sd|标准][色]<等级>，如 随个紫13+、来个dx14。",
+        ),
+        CommandSpec(
+            matcher=genre_random,
+            name="来个/随个/给个 <分类>",
+            brief="按分类随机（流行/东方/宴会場等）",
+            detail="如 随个流行；宴会場分类含宴谱。",
+        ),
+        CommandSpec(
+            matcher=mai_what,
+            name="mai什么",
+            brief="全库随机一首（排除宴谱）",
+        ),
+        CommandSpec(
+            matcher=mai_what_rise,
+            name="mai什么加分",
+            aliases=("mai什么推分", "mai什么上分"),
+            brief="基于个人 B50 末位的推分单曲推荐",
+            detail="未绑定或拉取失败时退化为普通随机。",
+        ),
+    ],
+)

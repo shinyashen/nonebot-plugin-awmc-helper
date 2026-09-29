@@ -11,6 +11,7 @@ from .push import PUSH_FEATURE
 from ...core import store
 from ...config import plugin_config
 from ...core.ext import yuzu as yuzu_ext
+from ...core.help import CommandSpec, help_registry
 from ...core.songs import song_service
 from ...core.utils import (
     paginate,
@@ -302,3 +303,67 @@ async def _():
         logger.info("手动更新别名库成功")
         await UniMessage.text(" 手动更新别名库成功").finish(at_sender=True)
     await UniMessage.text(" 手动更新别名库失败，请检查网络").finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.alias",
+    title="别名",
+    category="alias",
+    description="柚子/落雪/MuNET/本地合并视图的曲目别名查询与协作",
+    commands=[
+        CommandSpec(
+            matcher=alias_song,
+            name="<名称|id>有什么别名",
+            brief="查询某曲全部别名（多曲命中走合并转发）",
+        ),
+        CommandSpec(
+            matcher=alias_local_apply,
+            name="添加本地别名",
+            aliases=("添加本地别称",),
+            brief="写入本地别名库，立即热更新生效",
+            detail="格式：添加本地别名 <id> <别名>",
+        ),
+        CommandSpec(
+            matcher=alias_apply,
+            name="添加别名",
+            aliases=("增加别名", "增添别名", "添加别称"),
+            brief="向柚子提交公开别名申请（进入投票流程）",
+            detail="格式：添加别名 <id> <别名>",
+        ),
+        CommandSpec(
+            matcher=alias_agree,
+            name="同意别名",
+            aliases=("同意别称",),
+            brief="为进行中的别名投票赞成",
+            detail="格式：同意别名 <TAG>",
+        ),
+        CommandSpec(
+            matcher=alias_status,
+            name="当前投票",
+            aliases=("当前别名投票", "当前别称投票"),
+            brief="查看进行中的别名投票（25 条/页）",
+        ),
+        CommandSpec(
+            matcher=alias_switch,
+            name="开启/关闭别名推送",
+            scope="群管",
+            brief="本群别名申请推送开关（部署默认关）",
+        ),
+        CommandSpec(
+            matcher=alias_global_switch,
+            name="全局开启/关闭别名推送",
+            scope="SUPERUSER",
+            hidden=True,
+            brief="批量设置所有群的别名推送开关",
+        ),
+        CommandSpec(
+            matcher=update_alias,
+            name="更新别名库",
+            scope="SUPERUSER",
+            hidden=True,
+            brief="手动重拉曲库与别名数据",
+        ),
+    ],
+)

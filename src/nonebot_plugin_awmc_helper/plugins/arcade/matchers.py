@@ -12,24 +12,9 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import store
 from ...config import plugin_config
+from ...core.help import CommandSpec, help_registry
 from ...core.utils import user_id_of, group_id_of, handle_errors, ensure_group_admin
 from ...core.render.tools import text_image_bytes
-
-ARCADE_HELP = (
-    "排卡指令如下：\n"
-    "开启排卡/关闭排卡 群管开关本群排卡（部署默认关）\n"
-    "添加机厅 <店名> <地址> <机台数量> 添加机厅信息\n"
-    "删除机厅 <店名> 删除机厅信息\n"
-    "修改机厅 <店名> 数量 <数量> 修改机厅信息\n"
-    "添加机厅别名 <店名> <别名>\n"
-    "订阅机厅 <店名> 订阅机厅，简化后续指令\n"
-    "查看订阅 查看群组订阅机厅的信息\n"
-    "取消订阅机厅 <店名> 取消群组机厅订阅\n"
-    "查找机厅 <关键词> 查询对应机厅信息\n"
-    "<店名/别名>人数设置,=,增加,+,减少,-<人数> 操作排卡人数\n"
-    "<店名/别名>有多少人,几人,几卡 查看排卡人数\n"
-    "机厅几人 查看已订阅机厅排卡人数"
-)
 
 SEARCH_PREFIXES = (
     "查找机厅",
@@ -89,8 +74,6 @@ async def _arcade_enabled(session: Session = UniSession()) -> bool:
 # 此处构建的 Session 与 handler 的 UniSession 共享，无额外 API 开销
 arcade_gate = Rule(_arcade_enabled)
 
-# 帮助不设门禁：精确全文匹配无误触风险，未开通群可经此发现「开启排卡」入口
-arcade_help = on_fullmatch(("帮助maimaiDX排卡", "帮助maimaidx排卡"), block=True)
 arcade_add = on_command(
     "添加机厅",
     aliases={"新增机厅"},
@@ -165,12 +148,6 @@ def _arcade_msg(a: store.Arcade) -> str:
         f"    - 机台：{a.machines}\n"
         f"    - 排卡：{a.person} 人"
     )
-
-
-@arcade_help.handle()
-@handle_errors()
-async def _():
-    await UniMessage.image(raw=text_image_bytes(ARCADE_HELP)).finish(at_sender=True)
 
 
 @arcade_switch.handle()
@@ -443,3 +420,94 @@ async def _(groups: tuple = RegexGroup()):
     await UniMessage.text(
         "\n".join(f"「{a.name}」排卡 {a.person} 人" for a in found)
     ).finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.arcade",
+    title="排卡",
+    category="arcade",
+    description="机厅排卡人数协同（按群开通，部署默认关）",
+    commands=[
+        CommandSpec(
+            matcher=arcade_switch,
+            name="开启/关闭排卡",
+            scope="群管",
+            brief="本群排卡开关（部署默认关，关闭群内排卡指令静默不响应）",
+        ),
+        CommandSpec(
+            matcher=arcade_add,
+            name="添加机厅",
+            aliases=("新增机厅",),
+            scope="SUPERUSER",
+            hidden=True,
+            brief="添加机厅信息（自定义 id 自 10000 起自增）",
+            detail="格式：添加机厅 <店名> <地址> <机台数量> [别称...]",
+        ),
+        CommandSpec(
+            matcher=arcade_del,
+            name="删除机厅",
+            aliases=("移除机厅",),
+            scope="SUPERUSER",
+            hidden=True,
+            brief="删除机厅信息",
+            detail="格式：删除机厅 <店名|ID>",
+        ),
+        CommandSpec(
+            matcher=arcade_alias_set,
+            name="添加机厅别名",
+            aliases=("删除机厅别名",),
+            brief="机厅别称维护",
+            detail="格式：添加机厅别名 <店名|ID> <别名> / 删除机厅别名 <别名>",
+        ),
+        CommandSpec(
+            matcher=arcade_set,
+            name="修改机厅",
+            aliases=("编辑机厅",),
+            brief="修改机厅机台数",
+            detail="格式：修改机厅 <店名|ID> 数量 <数量>",
+        ),
+        CommandSpec(
+            matcher=arcade_sub,
+            name="订阅机厅",
+            aliases=("取消订阅机厅", "取消订阅"),
+            scope="群管",
+            brief="订阅/取消订阅机厅（简化后续人数指令）",
+            detail="格式：订阅机厅 <店名|ID>",
+        ),
+        CommandSpec(
+            matcher=arcade_show_sub,
+            name="查看订阅",
+            aliases=("查看订阅机厅",),
+            brief="查看本群订阅的机厅与排卡人数",
+        ),
+        CommandSpec(
+            matcher=arcade_search,
+            name="查找机厅",
+            aliases=("查询机厅", "机厅查找", "机厅查询", "搜索机厅", "机厅搜索"),
+            brief="按关键词模糊查询机厅信息",
+            detail="格式：查找机厅 <关键词>",
+        ),
+        CommandSpec(
+            matcher=arcade_add_person,
+            name="<店名>±N人",
+            brief="操作本群订阅机厅的排卡人数（+N卡 改机台数）",
+            detail=(
+                "格式：<店名/别名> <设置|增加|减少|+|-> <数量>；\n"
+                "省略店名（如「+1」）静默忽略；相对增量写入，多人同时操作不丢更新"
+            ),
+        ),
+        CommandSpec(
+            matcher=arcade_person_num,
+            name="机厅几人",
+            aliases=("jtj",),
+            brief="查看本群全部订阅机厅排卡人数",
+        ),
+        CommandSpec(
+            matcher=arcade_person_num_2,
+            name="<店名>有多少人",
+            brief="查询指定机厅排卡人数（后缀：有多少人/几人/几卡等）",
+        ),
+    ],
+)

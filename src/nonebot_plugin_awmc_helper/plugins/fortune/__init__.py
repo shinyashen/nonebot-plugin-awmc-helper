@@ -13,6 +13,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from ...core.help import CommandSpec, help_registry
 from ...core.songs import song_service
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
@@ -87,3 +88,20 @@ async def _(session: Session = UniSession()):
             .finish(at_sender=True)
         )
     await UniMessage.text("\n".join(lines)).finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.fortune",
+    title="今日运势",
+    category="fun",
+    commands=[
+        CommandSpec(
+            matcher=today_fortune,
+            name="今日mai",
+            aliases=("今日舞萌", "今日运势"),
+            brief="今日人品值+宜/忌+随机推荐曲（同人同日结果稳定）",
+        ),
+    ],
+)

@@ -14,6 +14,7 @@ from nonebot.permission import SUPERUSER
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import songs, songdb
+from ...core.help import CommandSpec, help_registry
 from ...core.utils import handle_errors
 
 __plugin_meta__ = PluginMetadata(
@@ -106,3 +107,28 @@ async def _():
         f"{result['charts']} 谱面，删除 {result.get('removed', 0)} 曲，"
         f"国服当前版本 {result.get('cn_current_version', '?')}{warn_msg}{mu_msg}"
     ).finish(at_sender=True)
+
+
+# ---------------------------------------------------------------- 帮助声明
+
+help_registry.declare(
+    plugin="awmc.songdb",
+    title="曲库运维",
+    category="manage",
+    commands=[
+        CommandSpec(
+            matcher=reload_extra,
+            name="重载补充数据",
+            scope="SUPERUSER",
+            hidden=True,
+            brief="重读全部外部补充源并合并（MuNET 走查后台启动）",
+        ),
+        CommandSpec(
+            matcher=refresh_songs,
+            name="刷新歌曲库",
+            scope="SUPERUSER",
+            hidden=True,
+            brief="手动执行曲库全量重建管线",
+        ),
+    ],
+)
