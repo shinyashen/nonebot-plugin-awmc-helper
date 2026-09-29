@@ -73,9 +73,11 @@ async def _(session: Session = UniSession()):
         elif wm == 0:
             lines.append(f"忌 {FORTUNE[i]}")
 
-    songs = await song_service.get_all()
-    if songs:
-        song = daily_random.choice(songs)
+    # 推荐曲与运势同源种子：同人同日稳定；random() 收口选曲（含宴谱，保持
+    # 原语义——按谱面均匀而非按曲均匀，接受该差异换取 core 单源）
+    hit = await song_service.random(exclude_utage=False, rng=daily_random)
+    if hit is not None:
+        song, _diff = hit
         ds = "/".join(f"{d.level_value:.1f}" for d in song.get_difficulties())
         lines.append("打机时不要大力拍打或滑动哦")
         lines.append(f"今日推荐歌曲：ID.{song.id} - {song.title}（定数 {ds}）")

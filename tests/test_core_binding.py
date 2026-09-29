@@ -136,7 +136,10 @@ def test_any_active_short_circuit_semantics():
     is_active/take）——拦截规则借此免走每条消息的 Session 构造。
     """
     from nonebot_plugin_awmc_helper.core.binding import pending_bindings
-    from nonebot_plugin_awmc_helper.core.session_store import TtlSession, TtlSessionStore
+    from nonebot_plugin_awmc_helper.core.session_store import (
+        TtlSession,
+        TtlSessionStore,
+    )
 
     store: TtlSessionStore[str, TtlSession] = TtlSessionStore()
     assert store.any_active() is False  # 空表短路

@@ -217,7 +217,8 @@ async def test_random_jp_pool_and_rng(songs, monkeypatch):
     got_b = await song_service.random(
         song_type=SongType.DX, level="13", jp=True, rng=random.Random(7)
     )
-    assert got_a is not None and got_b is not None
+    assert got_a is not None
+    assert got_b is not None
     assert got_a[0].id == got_b[0].id
 
 

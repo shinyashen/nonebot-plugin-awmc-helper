@@ -38,7 +38,7 @@ from nonebot_plugin_awmc_helper.core.songs import song_service
 from nonebot_plugin_awmc_helper.core.utils import handle_errors
 
 # 【差异 2】绝对路径导入 core 公开接口；接口清单见主插件 docs/api.md
-from nonebot_plugin_awmc_helper.core.render.tools import text_to_image, image_to_bytes
+from nonebot_plugin_awmc_helper.core.render.tools import text_image_bytes
 
 # 【差异 3】第三方自有命名；supported_adapters 策略见模块 docstring【差异 4】
 __plugin_meta__ = PluginMetadata(
@@ -84,5 +84,5 @@ async def _(
     # 群聊结果列表收敛到 5 首，私聊等场景放宽到 10 首
     limit = 5 if session.scene.type == SceneType.GROUP else 10
     await UniMessage.image(
-        raw=image_to_bytes(text_to_image(format_result(kw, songs, limit)))
+        raw=text_image_bytes(format_result(kw, songs, limit))
     ).finish(at_sender=True)
