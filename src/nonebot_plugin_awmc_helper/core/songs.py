@@ -534,6 +534,46 @@ class SongService:
         """pending 曲定数查歌（闭区间，新曲在定数揭晓后即可被查到）。"""
         return await songdb.pending_search(ds_range=(min_ds, max_ds))
 
+    async def _utage_jp_only(self, song_id: int, diff_id: int) -> bool:
+        """该张宴谱是否日服限定：国服视图无宿主曲，或宿主曲无此 diff_id。
+
+        宿主曲在国服有普通谱不代表宴谱也在国服（悪戯センセーション DX 国服
+        21004、宴[奏] 仅日服 26509）——按 diff_id 逐张判定，宿主曲级判定会
+        误出日服宴谱的国服卡。
+        """
+        cn_song = await self.by_id(song_id)
+        return cn_song is None or not any(
+            getattr(d, "diff_id", None) == diff_id
+            for d in cn_song.get_difficulties(SongType.UTAGE)
+        )
+
+    async def resolve_raw_chart(
+        self, raw_id: int
+    ) -> "tuple[Song, SongType | None, bool, SongDifficultyUtage | None] | None":
+        """数字 id → (曲, 卡片主类型偏好, 仅日服, 宴谱或 None)；未命中 None。
+
+        查分器 id 形状解析的**单源**（music_query 查歌 / 查分 minfo 数字入口
+        共用，子插件不互 import 故下沉 core）：6 位宴谱机台 id 按 diff_id 定位
+        **该张**宴谱（``by_id`` 取模会错配同号普通曲），渲染走宴会卡；其余按
+        查分器 id 形状推断偏好（:func:`prefer_type_from_raw_id`），5 位 DX
+        展示 id 回查国服对象定日服标注——CN 视图无此曲（日服限定）时
+        ``jp=True`` 且返回日服曲对象。
+        """
+        if raw_id >= UTAGE_ID_BASE:
+            utage_hit = await self.by_utage_id(raw_id)
+            if utage_hit is None:
+                return None
+            ut_host, ut_diff = utage_hit
+            # 宴谱可能日服限定（国服宿主曲无此 diff_id）：日服卡渲染口径
+            jp = await self._utage_jp_only(ut_host.id, ut_diff.diff_id)
+            return ut_host, None, jp, ut_diff
+        song = await self.by_id(raw_id) or await self.jp_by_id(raw_id)
+        if song is None:
+            return None
+        # raw_id 可能是 DX 展示 id：按解析出的根 id 回查国服视图定标注
+        cn_song = await self.by_id(song.id)
+        return cn_song or song, prefer_type_from_raw_id(raw_id), cn_song is None, None
+
     async def by_utage_id(
         self, diff_id: int
     ) -> "tuple[Song, SongDifficultyUtage] | None":
