@@ -36,6 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from ..constants import DX_ID_OFFSET
+
 # ---------------------------------------------------------------------------
 # 表定义
 # ---------------------------------------------------------------------------
@@ -572,7 +574,7 @@ async def list_alias_walk_targets() -> list[int]:
             continue  # 无组歌曲不在 MuNET 上
         targets.add(row.id)  # SD 组 / 仅 DX 组 / 仅宴组都用曲 id
         if "sd" in song_kinds and "dx" in song_kinds:
-            targets.add(row.id + 10000)  # 双组曲的 DX 组
+            targets.add(row.id + DX_ID_OFFSET)  # 双组曲的 DX 组
     return sorted(targets)
 
 
