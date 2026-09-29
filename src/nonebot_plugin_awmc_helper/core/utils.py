@@ -23,6 +23,18 @@ def group_id_of(session) -> str | None:
     return None
 
 
+def is_private_session(session) -> bool:
+    """会话是否私聊（显式要求 PRIVATE，各子插件共用）。
+
+    「敏感凭据仅私聊提交」类指令（如绑定日服的 SEGA 密码）一律用本谓词：
+    GUILD 等非私聊场景同样会把消息留在聊天记录，必须拒绝，不得写成
+    「仅拦 GROUP」。
+    """
+    from nonebot_plugin_uninfo import SceneType
+
+    return bool(session.scene and session.scene.type == SceneType.PRIVATE)
+
+
 def user_id_of(session) -> str:
     """会话的用户 id（字符串口径，各子插件共用）。"""
     return str(session.user.id)

@@ -536,6 +536,27 @@ async def test_net_bind_group_rejected(app: App, db):
     )
 
 
+def test_is_private_session_predicate():
+    """私聊判定显式要求 PRIVATE：GUILD 等非私聊场景一律拒绝（审查 L-33 收紧）。
+
+    uninfo 的 ob11 适配器不会产出 GUILD 场景，nonebug 驱动不了该分支，
+    谓词以鸭子类型桩直接单测。
+    """
+    from types import SimpleNamespace
+
+    from nonebot_plugin_uninfo import SceneType
+
+    from nonebot_plugin_awmc_helper.core.utils import is_private_session
+
+    def scene(t):
+        return SimpleNamespace(scene=SimpleNamespace(type=t))
+
+    assert is_private_session(scene(SceneType.PRIVATE))
+    assert not is_private_session(scene(SceneType.GROUP))
+    assert not is_private_session(scene(SceneType.GUILD))
+    assert not is_private_session(SimpleNamespace(scene=None))
+
+
 @pytest.mark.asyncio
 async def test_net_bind_command(app: App, db, net_service):
     """私聊绑定日服：respx 登录成功 → 凭据落库 + service=net。"""

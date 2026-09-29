@@ -10,14 +10,14 @@ from nonebot import on_command, on_message
 from nonebot.rule import Rule
 from nonebot.params import CommandArg
 from nonebot.adapters import Bot, Event, Message
-from nonebot_plugin_uninfo import Session, SceneType, UniSession
+from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from . import net
 from ...core.ext import lxns as lxns_ext
 from ...core.ext import divingfish as df_ext
 from ...constants import SERVICE_ZH
-from ...core.utils import handle_errors
+from ...core.utils import handle_errors, is_private_session
 from ...core.binding import (
     SERVICE_NET,
     QQ_PLATFORMS,
@@ -349,10 +349,11 @@ async def _complete_lxns(platform: str, user_id: str, code: str) -> None:
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     """绑定日服 NET：`绑定日服 <SEGA ID> <密码>`（一次完成，绑定即验证登录）。
 
-    仅限私聊：SEGA 账号密码敏感级别高于查分器 token，群内提交会把密码
-    留在聊天记录（协议端也有留存），凭据本体不回显、不在完成消息中出现。
+    仅限私聊：SEGA 账号密码敏感级别高于查分器 token，非私聊场景（群聊/
+    GUILD 频道）提交都会把密码留在聊天记录（协议端也有留存），凭据本体
+    不回显、不在完成消息中出现。
     """
-    if session.scene and session.scene.type == SceneType.GROUP:
+    if not is_private_session(session):
         await UniMessage.text(
             " 绑定日服需要提交 SEGA 账号密码，请私聊机器人操作"
         ).finish(at_sender=True)
