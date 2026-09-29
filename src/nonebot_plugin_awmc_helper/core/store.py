@@ -267,6 +267,9 @@ class SongPending(SQLModel, table=True):
     first_seen: NaiveDatetime = Field(default_factory=datetime.now)
     last_seen: NaiveDatetime = Field(default_factory=datetime.now)
     attempts: int = 0
+    """归并重试计数（``flush_pending`` 每轮未归并 +1、``upsert_pending`` +1）：
+    消费方为 MuNET 批次补充（``munet._PENDING_MAX_ATTEMPTS`` 阈值跳过超限
+    候选，防每晚空转）；用户可见的 pending 查歌路径不受该计数限制。"""
 
 
 # ---------------------------------------------------------------------------

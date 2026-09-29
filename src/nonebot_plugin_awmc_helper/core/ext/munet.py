@@ -41,6 +41,11 @@ _WALK_BUDGET_SECONDS = 3600.0
 """单次走查时间预算（60 分钟；规范表实测 1763 请求 ≈ 30 分钟，预算留足余量
 保证单晚走完），超时记游标跨日续走。"""
 
+_PENDING_MAX_ATTEMPTS = 10
+"""批次候选的 pending 重试阈值：``SongPending.attempts``（每轮归并失败/upsert
+自增）达到该值的标题不再作为批次候选——连续多轮都未能在 MuNET 归并的条目
+暂缓重试，防每晚空转；用户可见的 pending 查歌路径不受影响。"""
+
 # genre 数字 → 规范表流派名（落雪/国服值域）。2026-09-28 与规范表全量分组对账
 # 推导（抽样 46 曲六档全一致），非官方映射表；107=宴会場 为推断（未实测到条目）。
 _GENRE_NAMES = {
@@ -336,17 +341,26 @@ async def _walk_targets(budget_seconds: float) -> dict:
 
 
 async def _pending_titles() -> list[str]:
-    """song_pending 暂存条目的标题（无 id 曲目，同样走 MuNET 解析 id）。"""
+    """song_pending 暂存条目的标题（无 id 曲目，同样走 MuNET 解析 id）。
+
+    attempts 达 :data:`_PENDING_MAX_ATTEMPTS` 的条目跳过（降频，见常量注）。
+    """
     titles: list[str] = []
+    skipped = 0
     async with store.session() as db:
         pending_rows = (await db.exec(select(store.SongPending))).all()
     for row in pending_rows:
+        if row.attempts >= _PENDING_MAX_ATTEMPTS:
+            skipped += 1
+            continue
         try:
             payload = json.loads(row.payload)
         except ValueError:
             continue
         if isinstance(payload, dict) and payload.get("title"):
             titles.append(payload["title"])
+    if skipped:
+        logger.info(f"MuNET 批次：{skipped} 条 pending 超重试阈值，本轮跳过")
     return titles
 
 

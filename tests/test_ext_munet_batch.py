@@ -5,6 +5,7 @@
 """
 
 import pytest
+from sqlmodel import select
 from songdb_fixtures import (
     make_lxns,
     make_all_data,
@@ -143,3 +144,32 @@ async def test_batch_disabled(db, monkeypatched_munet, monkeypatch):
 
     monkeypatch.setattr(plugin_config, "awmc_munet_batch", False)
     assert (await munet.run_batch_supplement())["status"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_pending_titles_skip_over_attempts_threshold(db, monkeypatched_munet):
+    """pending 候选降频（X-3）：attempts 达阈值的标题不再进批次候选，
+    未达阈值的照常参与；字段计数语义见 store.SongPending.attempts。"""
+    from nonebot_plugin_awmc_helper.core import store, songdb
+    from nonebot_plugin_awmc_helper.core.ext import munet
+
+    await songdb.upsert_pending(
+        "otoge-db", "title:超限曲", "missing_id", {"title": "超限曲"}
+    )
+    await songdb.upsert_pending(
+        "otoge-db", "title:新鲜曲", "missing_id", {"title": "新鲜曲"}
+    )
+    # 人为把「超限曲」计数抬到阈值
+    async with store.session() as session_:
+        row = (
+            await session_.exec(
+                select(store.SongPending).where(store.SongPending.key == "title:超限曲")
+            )
+        ).one()
+        row.attempts = munet._PENDING_MAX_ATTEMPTS
+        session_.add(row)
+        await session_.commit()
+
+    titles = await munet._pending_titles()
+    assert "新鲜曲" in titles
+    assert "超限曲" not in titles
