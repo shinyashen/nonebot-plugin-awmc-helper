@@ -18,7 +18,14 @@ from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
 from ...core.utils import parse_page, slow_notice, handle_errors
-from ...core.plates import PLATE_KINDS, is_valid_plate, plate_kinds_hint
+from ...core.plates import (
+    PLATE_KINDS,
+    PLATE_KIND_ALIAS_CHARS,
+    PLATE_VERSION_ALIAS_CHARS,
+    norm_plate,
+    is_valid_plate,
+    plate_kinds_hint,
+)
 from ...core.binding import (
     SessionBinding,
     service_display,
@@ -27,12 +34,14 @@ from ...core.render.score import DrawScore, score_list_height
 from ...core.render.tools import text_image_bytes
 
 # 牌种正则（牌种并集取自 core.plates 单源；正则交替最长优先，
-# 防将来新增牌种被单字牌种遮蔽）
-PLATE_KIND_ALT = "|".join(sorted(PLATE_KINDS, key=len, reverse=True))
+# 防将来新增牌种被单字牌种遮蔽；繁体/和制牌种字一并入交替）
+PLATE_KIND_ALT = "|".join(
+    sorted((*PLATE_KINDS, *PLATE_KIND_ALIAS_CHARS), key=len, reverse=True)
+)
 
 LEVEL_RE = r"([0-9]+\+?)"
 DS_RE = r"([0-9]+(?:\.[0-9]+)?\+?)"
-PLAN_RE = r"(sssp|sss|ssp|ss|spp|sp|s|ap|fcp|fc|fsp|fs|fdx)"
+PLAN_RE = r"(sssp|sss|ssp|ss|sp|s|ap|fcp|fc|fsp|fs|fdx)"
 
 ds_table_cmd = on_regex(rf"^{LEVEL_RE}定数表$", block=True)
 score_table_cmd = on_regex(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$", block=True)
@@ -41,7 +50,7 @@ progress_cmd = on_regex(
     block=True,
 )
 plate_cmd = on_regex(
-    rf"^([{PLATE_CHARS}])({PLATE_KIND_ALT})(完成表|进度)\s?([0-9]+)?$",
+    rf"^([{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}])({PLATE_KIND_ALT})(完成表|进度)\s?([0-9]+)?$",
     block=True,
 )
 plate_help = on_fullmatch("牌子条件", block=True)
@@ -197,6 +206,8 @@ async def _(
     groups: tuple = RegexGroup(),
 ):
     version, kind, mode, page_raw = groups
+    # 繁体/和制牌字先归一（正则层只负责识别）：校验/查库/渲染全按简体口径
+    version, kind = norm_plate(version), norm_plate(kind)
     # 牌单按真实牌表收紧（素材包 mai/plate_version 全量实证）：舞代四牌、
     # 霸仅者、真无将、初整代无牌
     if not is_valid_plate(version, kind):

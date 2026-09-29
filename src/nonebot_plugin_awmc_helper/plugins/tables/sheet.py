@@ -22,7 +22,6 @@ PLANS: dict[str, str] = {
     "ss": "rate:99",
     "sp": "rate:98",
     "s": "rate:97",
-    "spp": "rate:97",
     "ap": "fc:ap",
     "fc": "fc:fc",
     "fs": "fs:fs",

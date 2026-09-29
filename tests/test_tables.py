@@ -199,3 +199,73 @@ async def test_plate_help(app: App):
         ctx.receive_event(bot, event)
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_plate_traditional_alias_reachable(app: App, monkeypatch):
+    """繁体/和制牌写法可达且入口归一（L-3）：暁将 → 晓将 正常走查库渲染。
+
+    正则层扩 core.plates 别名字符识别，handler 归一后校验/查库/渲染全按
+    简体口径（PLATE_CHARS 预渲染迭代不受扩容影响）。
+    """
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import (
+        Adapter as OnebotV11Adapter,
+    )
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    async def fake_get_plates(binding, plate, notify_slow=None):
+        assert plate == "晓将"
+        return ("sentinel",)
+
+    async def fake_overview(binding, plates, version, kind, page):
+        assert plates == ("sentinel",)
+        assert (version, kind) == ("晓", "将")
+        await UniMessage.text("进度 OK").finish(at_sender=True)
+
+    monkeypatch.setattr(plugin.score_service, "get_plates", fake_get_plates)
+    monkeypatch.setattr(plugin, "_plate_progress_overview", fake_overview)
+
+    event = fake_group_message_event_v11(message="暁将进度")
+    expected = Message(
+        [MessageSegment.at(12345678), MessageSegment.text(" 进度 OK")]
+    )
+    async with app.test_matcher(plugin.plate_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        # UniSession 依赖注入触发群信息/成员信息拉取
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+def test_plan_spp_removed():
+    """「spp」计划档删除（L-32）：游戏无 S++ 档，原实现与 s 同阈值静默等同。"""
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as tm
+    from nonebot_plugin_awmc_helper.plugins.tables.sheet import PLANS
+
+    assert "spp" not in tm.PLAN_RE
+    assert "spp" not in PLANS
