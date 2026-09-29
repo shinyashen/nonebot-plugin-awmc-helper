@@ -141,6 +141,9 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
     lines = -(-len(page_data) // 2)  # 两列行数（Hoshino sum(divmod(n,2)) 同值）
     height = 200 + lines * 145 + 200
 
+    # 以下 PRiSM 装饰底为 Hoshino song_list 版式的 1000 宽变体：各素材的缩放
+    # 与摆放同 tools.generate_prism_bg 的 1400 宽版式**刻意不同源**（几何全异），
+    # 勿合并，否则列表页视觉回归
     im = tricolor_gradient_prism_plus(1000, height)
     im.alpha_composite(assets.pic("aurora.png").resize((1000, 174)))
     im.alpha_composite(assets.pic("bg_shines.png").resize((1000, 442)))
