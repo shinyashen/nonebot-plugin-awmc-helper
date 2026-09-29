@@ -4,6 +4,8 @@ NET 绑定验证域的业务逻辑在 :mod:`.net`（无注册副作用）；本�
 参数解析、门禁与文案组装。
 """
 
+from collections.abc import Callable
+
 from nonebot import on_command, on_message
 from nonebot.rule import Rule
 from nonebot.params import CommandArg
@@ -57,8 +59,14 @@ set_theme = on_command("主题", block=True)
 my_bind = on_command("我的绑定", block=True)
 
 
-_CODE_SERVICES = ("lxns", "divingfish")
-"""回填会话覆盖的数据源（两家授权码长相一样，靠会话 kind 区分归属）。"""
+_CODE_SERVICES: tuple[tuple[str, Callable[[str], str | None]], ...] = (
+    ("lxns", lxns_ext.extract_authorization_code),
+    ("divingfish", df_ext.extract_confirmation_code),
+)
+"""回填会话覆盖的数据源 → 授权码提取函数（单一来源：_code_fill_state 与
+回填 handler 均由本表派生；两家授权码长相一样，靠会话 kind 区分归属）。"""
+
+_CODE_EXTRACTORS = dict(_CODE_SERVICES)
 
 
 async def _code_fill_state(
@@ -74,10 +82,7 @@ async def _code_fill_state(
     if keys is None:
         return None
     event_text = event.get_plaintext()
-    for service, extract in (
-        ("lxns", lxns_ext.extract_authorization_code),
-        ("divingfish", df_ext.extract_confirmation_code),
-    ):
+    for service, extract in _CODE_SERVICES:
         if extract(event_text) is None:
             continue
         if pending_bindings.is_active(*keys, service):
@@ -89,6 +94,9 @@ async def _code_fill_state(
 
 async def _is_code_fill(bot: Bot, event: Event) -> bool:
     """回填 matcher 的 rule（checker 须返回 bool；具体状态 handler 再判定）。"""
+    # 空会话表先短路：免每条消息白构造 uninfo Session（L-29）
+    if not pending_bindings.any_active():
+        return False
     return await _code_fill_state(bot, event) is not None
 
 
@@ -111,19 +119,17 @@ async def _(bot: Bot, event: Event):
     assert state is not None
     keys, service, phase = state
     if phase == "expired":
-        zh = "落雪" if service == "lxns" else "水鱼"
+        zh = SERVICE_ZH[service]
         cmd = "「绑定落雪」" if service == "lxns" else "「绑定水鱼」"
         await UniMessage.text(
             f" {zh}授权已超时，请重新发送{cmd}获取新的授权链接"
         ).finish(at_sender=True)
     text = event.get_plaintext()
+    code = _CODE_EXTRACTORS[service](text)
+    assert code is not None
     if service == "lxns":
-        code = lxns_ext.extract_authorization_code(text)
-        assert code is not None
         await _complete_lxns(*keys, code)
     else:
-        code = df_ext.extract_confirmation_code(text)
-        assert code is not None
         await _complete_df(*keys, code)
 
 
