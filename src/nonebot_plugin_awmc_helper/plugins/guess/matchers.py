@@ -7,7 +7,7 @@ from nonebot.adapters import Bot, Event
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from .game import GUESS_FEATURE, _reveal, _game_of, _start_game, _handle_answer
+from .game import GUESS_FEATURE, _games, _reveal, _game_of, _start_game, _handle_answer
 from ...core import store
 from ...core.utils import group_id_of, handle_errors, ensure_group_admin
 
@@ -21,6 +21,9 @@ async def _is_guess_answer(bot: Bot, event: Event) -> bool:
     """priority=0 答案拦截规则：群内存在对局且消息为非空文本。"""
     from nonebot_plugin_uninfo import get_session
 
+    # 空对局先短路：免每条消息白构造 uninfo Session（L-29）
+    if not _games:
+        return False
     session = await get_session(bot, event)
     if session is None:
         return False

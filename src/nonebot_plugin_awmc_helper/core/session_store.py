@@ -53,6 +53,16 @@ class TtlSessionStore(Generic[K, S]):
             return None
         return session
 
+    def any_active(self) -> bool:
+        """是否可能存在活跃会话（O(1) 空表短路；**不清扫、不物化**）。
+
+        供 priority=0 拦截规则先行短路：空表直接 False，免走每条消息的
+        uninfo Session 构造链（L-29）。非空表含过期残留时返回 True（过期
+        惰性清除语义）——本方法只回答「有无候选会话」，精确的活跃判定
+        仍由调用方走 :meth:`get`/:meth:`take`。
+        """
+        return bool(self._sessions)
+
     def active(self, key: K) -> S | None:
         """探测会话是否存在且未过期，**不过期不清除**（无副作用探测）。
 

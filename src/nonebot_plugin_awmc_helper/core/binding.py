@@ -143,6 +143,14 @@ class PendingBindingStore:
         )
         self._expired.pop((platform, user_id), None)
 
+    def any_active(self) -> bool:
+        """是否可能存在待回填会话（O(1) 空表短路，透传内表判定）。
+
+        供回填拦截 rule 先行短路：无任何会话时免走 uninfo Session 构造
+        （L-29）；非空表含过期残留时 True，精确判定走 :meth:`is_active`。
+        """
+        return self._sessions.any_active()
+
     def is_active(self, platform: str, user_id: str, kind: str | None = None) -> bool:
         sess, expired = self._sessions.take((platform, user_id))
         if sess is None:

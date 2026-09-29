@@ -129,6 +129,26 @@ async def test_pending_bindings():
     assert not pending_bindings.is_active("qq", "1")
 
 
+def test_any_active_short_circuit_semantics():
+    """any_active 空表短路 O(1)（L-29）：只回答「有无候选会话」。
+
+    非空表含过期残留时也 True（过期惰性清除语义，精确判定仍走
+    is_active/take）——拦截规则借此免走每条消息的 Session 构造。
+    """
+    from nonebot_plugin_awmc_helper.core.binding import pending_bindings
+    from nonebot_plugin_awmc_helper.core.session_store import TtlSession, TtlSessionStore
+
+    store: TtlSessionStore[str, TtlSession] = TtlSessionStore()
+    assert store.any_active() is False  # 空表短路
+    store.start("k", TtlSession(expire_at=-1.0))  # 已过期的残留
+    assert store.any_active() is True
+
+    pending_bindings.start("qq", "1", "lxns", ttl=60)
+    assert pending_bindings.any_active() is True
+    pending_bindings.discard("qq", "1")
+    assert pending_bindings.any_active() is False
+
+
 @pytest.mark.asyncio
 async def test_binding_ensure_concurrent_first_bind(db, monkeypatch):
     """并发首绑定双 INSERT 竞态（L-14）：后 commit 方撞主键 → 捕
