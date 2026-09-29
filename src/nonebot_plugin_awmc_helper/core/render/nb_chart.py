@@ -32,7 +32,7 @@ from ...constants import (
 )
 
 
-def get_best_rating(level_value: float) -> list[int]:
+def _get_best_rating(level_value: float) -> list[int]:
     """高达成率段的 7 档 RA（NB get_best_rating：最后 6 档 + SSS+ 再 +1，降序）。"""
     from maimai_py.utils import ScoreCoefficient
 
@@ -360,7 +360,7 @@ def song_chart_info(
             )
 
         if index > 1:
-            ra_list = get_best_rating(diff.level_value)
+            ra_list = _get_best_rating(diff.level_value)
             for n, value in enumerate(ra_list):
                 size = 22
                 if not calc:

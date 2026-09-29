@@ -236,7 +236,7 @@ def ra_star_num(rating: int) -> str:
     return f"0{RA_STAR_NUMS[idx]}"
 
 
-async def fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
+async def _fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
     """收藏品原图（kind: plate/icon）：本地缓存 → yuzuchan 在线（可关）。
 
     失败返回 None，由调用方走回退链；下载按目标路径去重。
@@ -354,7 +354,7 @@ async def _draw_header(
         if candidate.exists():
             plate_img = assets.get(candidate)
     elif plate_item is not None:
-        plate_img = await fetch_item_image("plate", plate_item.id)
+        plate_img = await _fetch_item_image("plate", plate_item.id)
     if plate_img is None and nameplate_image:
         plate_img = _fit_into(
             Image.open(BytesIO(nameplate_image)).convert("RGBA"),
@@ -369,7 +369,7 @@ async def _draw_header(
     icon_img = None
     icon_item = getattr(player, "icon", None)
     if icon_item is not None:
-        icon_img = await fetch_item_image("icon", icon_item.id)
+        icon_img = await _fetch_item_image("icon", icon_item.id)
     if icon_img is None and icon_image:
         icon_img = Image.open(BytesIO(icon_image)).convert("RGBA")
     if icon_img is None and qqid is not None:

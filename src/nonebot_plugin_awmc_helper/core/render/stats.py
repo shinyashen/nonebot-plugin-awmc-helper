@@ -104,7 +104,7 @@ def song_global_data(song: Song, diff: SongDifficulty) -> bytes:
     ]
     # 外环：达成率分布（RateType 值升序 = 评级从高到低）
     rate_data = [
-        (rate_name(rate.name), int(cnt), _RATE_COLORS.get(rate.name, "#cccccc"))
+        (_rate_name(rate.name), int(cnt), _RATE_COLORS.get(rate.name, "#cccccc"))
         for rate, cnt in sorted(
             curve.rate_sample_size.items(), key=lambda kv: kv[0].value
         )
@@ -153,6 +153,6 @@ def song_global_data(song: Song, diff: SongDifficulty) -> bytes:
     return image_to_bytes(im)
 
 
-def rate_name(enum_name: str) -> str:
+def _rate_name(enum_name: str) -> str:
     """RateType 枚举名 → 显示名（SSSP → SSS+，单源 constants.RATE_TO_ZH）。"""
     return RATE_TO_ZH.get(RateType[enum_name], enum_name)

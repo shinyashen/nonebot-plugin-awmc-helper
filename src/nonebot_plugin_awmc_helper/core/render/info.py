@@ -168,8 +168,8 @@ def song_play_data(
                 ).resize((65, 65)),
                 (1025, 261 + y),
             )
-        rate_name = RATE_FILE.get(score.rate.name, "D") if score.rate else "D"
-        if rank_img := assets.pic_optional(f"UI_TTR_Rank_{rate_name}.png", theme):
+        rank_file = RATE_FILE.get(score.rate.name, "D") if score.rate else "D"
+        if rank_img := assets.pic_optional(f"UI_TTR_Rank_{rank_file}.png", theme):
             im.alpha_composite(rank_img.resize((100, 45)), (737, 272 + y))
         dr.text(
             (500, 295 + y),
