@@ -47,6 +47,7 @@ from .tools import (
 from .assets import assets, online_item_cache_dir
 from ...config import plugin_config
 from .download import DownloadGate, download_to_file
+from .nb_chart import LOGO_SIZE
 from ...constants import (
     RATE_FILE,
     SYNC_FILE,
@@ -348,7 +349,7 @@ async def _draw_header(
     生效。边框 NET 收藏品页有但本卡版式不渲染，不采集。
     """
     pic = assets.static_path() / "mai" / "pic"
-    im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (14, 60))
+    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (14, 60))
 
     # 名牌：水鱼版本牌字符串 → plate_version；落雪收藏牌 → 在线素材；
     # NET 装备中姓名框 → 官方原图放大适配；缺省 550101

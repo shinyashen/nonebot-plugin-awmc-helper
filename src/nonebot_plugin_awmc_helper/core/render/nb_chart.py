@@ -182,6 +182,32 @@ def fit_version_logo(img: Image.Image, box: tuple[int, int] = (182, 90)) -> Imag
     )
 
 
+LOGO_SIZE = (249, 120)
+"""maimai 主 logo（logo.png）在头部名片的统一贴图尺寸。"""
+
+
+def paste_version_logo(
+    im: Image.Image,
+    version: int,
+    box: tuple[int, int, int, int],
+    *,
+    jp: bool = False,
+) -> None:
+    """「取版本图 → fit_version_logo 等比适配 → 框内居中贴」四连收敛。
+
+    ``box`` 为贴图框 ``(left, top, width, height)``；版本图缺失
+    （:func:`version_image` 返回 None）时整体跳过，不画任何东西。
+    """
+    version_img = version_image(version, jp)
+    if version_img is None:
+        return
+    left, top, width, height = box
+    logo = fit_version_logo(version_img, (width, height))
+    im.alpha_composite(
+        logo, (left + (width - logo.width) // 2, top + (height - logo.height) // 2)
+    )
+
+
 def song_chart_info(
     song: Song,
     calc: bool,
@@ -213,7 +239,7 @@ def song_chart_info(
     f_rodin = font(28, FONT_RODIN)
     text_color = CIRCLE_PINK if theme == "circle" else TEXT_BLUE
 
-    im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (65, 25))
+    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (65, 25))
     prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
     type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
     chart_version = chart_version_of(song, prefer_sd)
@@ -228,12 +254,7 @@ def song_chart_info(
     else:
         cover = assets.cover(song.id)
     im.alpha_composite(cover.resize((242, 242)), (133, 197))
-    version_img = version_image(chart_version, jp)
-    if version_img is not None:
-        logo = fit_version_logo(version_img)
-        im.alpha_composite(
-            logo, (800 + (182 - logo.width) // 2, 370 + (90 - logo.height) // 2)
-        )
+    paste_version_logo(im, chart_version, (800, 370, 182, 90), jp=jp)
     if badge := assets.type_badge(type_abbr, (80, 30)):
         im.alpha_composite(badge, (295, 410))
 
@@ -419,9 +440,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     im.alpha_composite(assets.pic(player_file), (98, p_y))
 
     # logo / 新曲标
-    im.alpha_composite(
-        assets.pic("logo.png", "prism_plus").resize((249, 120)), (10, 35)
-    )
+    im.alpha_composite(assets.pic("logo.png", "prism_plus").resize(LOGO_SIZE), (10, 35))
     # 版本/新曲标口径 = 宴谱组自己的登场版本：宿主曲整曲最小版本常由普通谱
     # 决定（悪戯センセーション DX 21000 / 宴[奏] 26509），按整曲取会画错世代；
     # 宴谱组无版本时回落整曲版本。日服限定卡（jp）用日服世代图（pic/jp/）
@@ -435,12 +454,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
 
     # 曲绘 / 版本
     im.alpha_composite(assets.cover(song.id).resize((242, 242)), (133, 246))
-    version_img = version_image(chart_version, jp=jp)
-    if version_img is not None:
-        logo = fit_version_logo(version_img)
-        im.alpha_composite(
-            logo, (800 + (182 - logo.width) // 2, 415 + (90 - logo.height) // 2)
-        )
+    paste_version_logo(im, chart_version, (800, 415, 182, 90), jp=jp)
 
     def t(pos, text, size, *, anchor="mm", sw=0, fill=white, han=False):
         # 描边色对齐 Hoshino/NB 现行源码（紫 210,57,174,255）：曾按 NB 旧版

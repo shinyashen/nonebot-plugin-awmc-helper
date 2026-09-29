@@ -24,7 +24,7 @@ from .tools import (
 )
 from ..utils import paginate
 from .assets import assets
-from .nb_chart import version_image, fit_version_logo
+from .nb_chart import paste_version_logo
 from ...constants import GENRE_TO_ZH, version_zh, display_song_id
 
 LEVEL_COLORS = {
@@ -171,16 +171,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
 
         im.alpha_composite(assets.pic("song_card.png"), (x, y))
         im.alpha_composite(assets.cover(song.id).resize((80, 80)), (x + 10, y + 10))
-        version_img = version_image(song.version)
-        if version_img is not None:
-            logo = fit_version_logo(version_img, (104, 50))
-            im.alpha_composite(
-                logo,
-                (
-                    x + 315 + (104 - logo.width) // 2,
-                    y - 30 + (50 - logo.height) // 2,
-                ),
-            )
+        paste_version_logo(im, song.version, (x + 315, y - 30, 104, 50))
         utage = song.get_difficulties(SongType.UTAGE)
         is_utage = bool(utage) and not (
             song.difficulties.standard or song.difficulties.dx

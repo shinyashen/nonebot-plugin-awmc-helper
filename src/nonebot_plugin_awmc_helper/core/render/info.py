@@ -21,7 +21,7 @@ from .tools import (
     truncate_hoshino,
 )
 from .assets import assets
-from .nb_chart import major_diffs, version_image, fit_version_logo
+from .nb_chart import LOGO_SIZE, major_diffs, paste_version_logo
 from ...constants import (
     RATE_FILE,
     SYNC_FILE,
@@ -63,7 +63,7 @@ def song_play_data(
     dr = ImageDraw.Draw(im)
 
     # logo
-    im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (42, 34))
+    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (42, 34))
     # 曲绘（assets.cover 自带回退链）
     im.alpha_composite(assets.cover(song.id).resize((300, 300)), (100, 260))
     # 分类徽章（素材缺失时跳过，如宴会場）
@@ -73,12 +73,7 @@ def song_play_data(
     # 版本 logo（等比适配槽位，项目内既定做法）
     diffs = major_diffs(song, prefer_type)
     chart_version = diffs[0].version if diffs and diffs[0].version else song.version
-    version_img = version_image(chart_version)
-    if version_img is not None:
-        logo = fit_version_logo(version_img, (183, 90))
-        im.alpha_composite(
-            logo, (295 + (183 - logo.width) // 2, 205 + (90 - logo.height) // 2)
-        )
+    paste_version_logo(im, chart_version, (295, 205, 183, 90))
     # 类型徽章（跟随卡片主类型）
     prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
     major_type = (
