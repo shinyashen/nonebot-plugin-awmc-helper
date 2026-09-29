@@ -54,7 +54,12 @@ class TtlSessionStore(Generic[K, S]):
         return session
 
     def active(self, key: K) -> S | None:
-        """探测会话是否存在且未过期，**不过期不清除**（拦截规则判定用）。"""
+        """探测会话是否存在且未过期，**不过期不清除**（无副作用探测）。
+
+        当前零调用，预留：与 :meth:`get`/:meth:`take` 的「命中过期即删」不同，
+        探测不得改变会话状态——拦截规则若需要「看一眼但不影响过期语义」
+        （如 O(1) any_active 短路）应使用本方法而非 get/take。
+        """
         session = self._sessions.get(key)
         if session is None:
             return None
