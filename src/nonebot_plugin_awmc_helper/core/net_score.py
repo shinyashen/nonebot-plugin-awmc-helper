@@ -37,8 +37,6 @@ from .songs import song_service
 from .ext.net import NetPlayer, NetRecord, NetCredentials, MaimaiNetClient
 from ..constants import normalize_text
 
-DX_ID_OFFSET = 10000  # Score.id 的 DX 谱面偏移（maimai_py 约定，与水鱼/落雪返回一致）
-
 _DIFFICULTY_TO_LEVEL_INDEX: dict[str, LevelIndex] = {
     "basic": LevelIndex.BASIC,
     "advanced": LevelIndex.ADVANCED,
@@ -226,8 +224,9 @@ class NetScoreService:
     async def get_minfo_scores(self, binding, song: Song) -> list[ScoreExtend] | None:
         """该曲全部谱面成绩（未游玩返回 None）；随窗口缓存复用。"""
         scores, _ = await self.get_scores(binding)
-        hit = [s for s in scores if s.id % DX_ID_OFFSET == song.id]
-        return hit or None
+        # Score.id 为根 id（见 _to_score_extend）：直接比较，宴谱 6 位 id 也
+        # 不会误配同号普通曲（% 10000 会）
+        return ([s for s in scores if s.id == song.id]) or None
 
     async def build_b50(self, records: list[NetRecord]) -> PlayerBests:
         """NET 记录 → 日服 B50（纯组装，不触发抓取）。
@@ -287,10 +286,11 @@ class NetScoreService:
             + diff.break_num
             + diff.touch_num
         ) * 3
-        # Score.id：SD = 曲 id；DX = 曲 id + 10000（水鱼/落雪返回口径，
-        # 渲染层按 id % 10000 取封面、DX 补偏移外链）
+        # Score.id 一律为根 id（SD/DX 同根，类型由 Score.type 区分），对齐
+        # maimai_py 各源成绩的归一根 id 约定（水鱼 _deser_score % 10000、落雪
+        # API 本就根 id；宴谱 id > 100000 原样保留，本模块抓取不含宴谱）
         score = Score(
-            id=song.id + (DX_ID_OFFSET if score_type == SongType.DX else 0),
+            id=song.id,
             level=diff.level,
             level_index=_DIFFICULTY_TO_LEVEL_INDEX[record.difficulty],
             achievements=record.achievement,

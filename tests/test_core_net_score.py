@@ -184,7 +184,8 @@ async def test_build_b50_mapping_and_split(net_service, jp_view):
     assert len(all_scores) == 4  # 未匹配曲被跳过
 
     old = next(s for s in all_scores if s.title == "コネクト")
-    assert old.id == 21 + 10000  # DX 谱 id = 根 id + 10000
+    assert old.id == 21  # Score.id 为根 id（SD/DX 同根，类型由 Score.type 区分）
+    assert old.type == SongType.DX
     assert old.dx_rating == int(
         22.4 * 12.8 * 1.005
     )  # ra = int(c * ds * min(100.5, a)/100)
