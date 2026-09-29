@@ -148,6 +148,7 @@ def test_level_index_tables_share_axis():
     from nonebot_plugin_awmc_helper.constants import (
         LEVEL_INDEX_EN,
         LEVEL_INDEX_ZH,
+        LEVEL_INDEX_BY_EN,
         DIFF_DISPLAY_NAMES,
         COLOR_TO_LEVEL_INDEX,
     )
@@ -161,6 +162,13 @@ def test_level_index_tables_share_axis():
         "白": LevelIndex.ReMASTER,
     }
     assert LEVEL_INDEX_EN == ("basic", "advanced", "expert", "master", "remaster")
+    assert LEVEL_INDEX_BY_EN == {
+        "basic": LevelIndex.BASIC,
+        "advanced": LevelIndex.ADVANCED,
+        "expert": LevelIndex.EXPERT,
+        "master": LevelIndex.MASTER,
+        "remaster": LevelIndex.ReMASTER,
+    }
     assert DIFF_DISPLAY_NAMES == ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 

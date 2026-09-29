@@ -68,6 +68,10 @@ COLOR_TO_LEVEL_INDEX: dict[str, LevelIndex] = {
 }
 # 英文小写名 = 素材名后缀（border_*/b50_score_*/rise_score_* 等），渲染模块共用
 LEVEL_INDEX_EN: tuple[str, ...] = tuple(v[2] for v in _LEVEL_INDEX_META.values())
+# 英文小写名 → 枚举（NET 记录 difficulty 字段映射等用）
+LEVEL_INDEX_BY_EN: dict[str, LevelIndex] = {
+    v[2]: k for k, v in _LEVEL_INDEX_META.items()
+}
 # 显示名 = 统计卡/进度总览表头
 DIFF_DISPLAY_NAMES: tuple[str, ...] = tuple(v[3] for v in _LEVEL_INDEX_META.values())
 

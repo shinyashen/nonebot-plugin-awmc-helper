@@ -22,7 +22,6 @@ from maimai_py import (
     FSType,
     RateType,
     SongType,
-    LevelIndex,
     PlayerBests,
     ScoreExtend,
     SongDifficulty,
@@ -35,15 +34,7 @@ from . import store
 from .calc import build_bests
 from .songs import song_service
 from .ext.net import NetPlayer, NetRecord, NetCredentials, MaimaiNetClient
-from ..constants import normalize_text
-
-_DIFFICULTY_TO_LEVEL_INDEX: dict[str, LevelIndex] = {
-    "basic": LevelIndex.BASIC,
-    "advanced": LevelIndex.ADVANCED,
-    "expert": LevelIndex.EXPERT,
-    "master": LevelIndex.MASTER,
-    "remaster": LevelIndex.ReMASTER,
-}
+from ..constants import LEVEL_INDEX_BY_EN, normalize_text
 
 
 # NET 记录的 fc/fs 字符串（fc/fcp/ap/app、sync/fs/fsp/fsd/fsdp）本就是
@@ -263,7 +254,7 @@ class NetScoreService:
     ) -> _Chart | None:
         """NET 记录 → 日服谱面；同名曲先按谱面类型过滤，唯一命中才有效。"""
         song_type = SongType.DX if record.type == "dx" else SongType.STANDARD
-        level_index = _DIFFICULTY_TO_LEVEL_INDEX.get(record.difficulty)
+        level_index = LEVEL_INDEX_BY_EN.get(record.difficulty)
         if level_index is None:
             return None
         hits = []
@@ -292,7 +283,7 @@ class NetScoreService:
         score = Score(
             id=song.id,
             level=diff.level,
-            level_index=_DIFFICULTY_TO_LEVEL_INDEX[record.difficulty],
+            level_index=LEVEL_INDEX_BY_EN[record.difficulty],
             achievements=record.achievement,
             fc=_fc_of(record),
             fs=_fs_of(record),
