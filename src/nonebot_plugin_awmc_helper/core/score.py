@@ -92,10 +92,7 @@ def _map_error(e: Exception) -> UserScoreError:
     if isinstance(e, PlayerNotAuthorizedError):
         # 水鱼 OAuth 未授权（consent_required 与「用户不存在」服务端有意不可区分）；
         # scores/plates 层有单条文案收口，b50 有公开键回退，此处是漏网兜底
-        return UserScoreError(
-            "该水鱼账号未授权本 bot 查询成绩：\n"
-            "请发送「绑定水鱼」完成授权（推荐，约 1 分钟）"
-        )
+        return UserScoreError(_DF_OAUTH_HINT)
     if isinstance(e, RateLimitError):
         return UserScoreError("水鱼今日查询配额已用完（按 UTC 日重置），请明天再试")
     if isinstance(e, InvalidPlayerIdentifierError):
@@ -404,9 +401,9 @@ class ScoreService:
             result = await self._run(binding, factory, notify_slow=notify_slow)
         except PlayerNotAuthorizedError as e:
             # 单曲只有 OAuth Bearer 形态，无回退路径：未覆盖用户给专项文案
+            # （minfo 变体 = 收口常量把「查询成绩」替换为「查询单曲成绩」）
             raise UserScoreError(
-                "该水鱼账号未授权本 bot 查询单曲成绩。\n"
-                "请发送「绑定水鱼」完成一次授权（约 1 分钟）"
+                _DF_OAUTH_HINT.replace("查询成绩", "查询单曲成绩")
             ) from e
         if not has_ident or result is None:
             return result

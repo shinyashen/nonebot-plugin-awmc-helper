@@ -286,5 +286,5 @@ async def test_minfo_uncovered_copy(db, songs, oauth):
             status_code=400,
             json={"error": "consent_required", "error_description": "not consented"},
         )
-        with pytest.raises(UserScoreError, match="「绑定水鱼」完成一次授权"):
+        with pytest.raises(UserScoreError, match="未授权本 bot 查询单曲成绩"):
             await score_service.get_minfo(song, binding)
