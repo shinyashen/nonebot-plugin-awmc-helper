@@ -21,7 +21,6 @@ from functools import lru_cache
 from collections import Counter
 from collections.abc import Callable
 
-import httpx
 from PIL import Image, ImageDraw
 from nonebot import logger
 from maimai_py import (
@@ -34,6 +33,7 @@ from maimai_py import (
     ScoreExtend,
 )
 
+from ..http import create_smart_client
 from .fonts import FONT_HAN, FONT_NUM, font
 from .tools import (
     ID_TEXT_COLORS,
@@ -118,9 +118,11 @@ def _utage_score_bg() -> Image.Image:
     # 源主色取高饱和像素的众数（避开白色留白与抗锯齿边缘）
     # HSV 像素实为 (h, s, v) 三元组；stub 联合含 float 分支，显式收窄
     pixels = cast("tuple[tuple[int, int, int], ...]", hsv.get_flattened_data())
-    dominant = Counter(
-        px for px in pixels if px[1] >= 128 and px[2] >= 128
-    ).most_common(1)[0][0]
+    counter = Counter(px for px in pixels if px[1] >= 128 and px[2] >= 128)
+    if not counter:
+        # 素材无高亮像素（异常/纯灰白图）：源主色无从取，回退原图不动色相
+        return src
+    dominant = counter.most_common(1)[0][0]
     th, ts, tv = colorsys.rgb_to_hsv(
         UTAGE_BAND_COLOR[0] / 255, UTAGE_BAND_COLOR[1] / 255, UTAGE_BAND_COLOR[2] / 255
     )
@@ -227,7 +229,12 @@ def ra_badge_num(rating: int, theme: str = DEFAULT_THEME) -> str:
 
 
 def ra_star_num(rating: int) -> str:
-    idx = bisect_right(RA_STAR_THRESHOLDS, rating) - 1
+    """circle 高 rating 星级文件号（rating ≥ 14000 前置由调用方保证）。
+
+    函数内仍钳住下标防负：rating < 14000 时 ``bisect_right - 1`` 为 -1，
+    裸取会错拿末档星级。
+    """
+    idx = max(0, bisect_right(RA_STAR_THRESHOLDS, rating) - 1)
     return f"0{RA_STAR_NUMS[idx]}"
 
 
@@ -250,9 +257,13 @@ async def _fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
 
 
 async def _qq_avatar(qqid: int) -> Image.Image | None:
-    """QQ 头像（无落雪头像时的回退）。"""
+    """QQ 头像（无落雪头像时的回退）。
+
+    经 :func:`core.http.create_smart_client` 走统一智能代理分流（裸
+    ``httpx.AsyncClient`` 会把 q1.qlogo.cn 送进全局代理，CN 站反而变慢/失败）。
+    """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with create_smart_client(timeout=10) as client:
             resp = await client.get(
                 "https://q1.qlogo.cn/g",
                 params={"b": "qq", "nk": str(qqid), "s": 100},

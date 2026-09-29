@@ -115,6 +115,87 @@ def test_ra_star_num_matches_hoshino():
     assert ra_star_num(16750) == "04"
 
 
+def test_ra_star_num_low_rating_clamped():
+    """rating<14000（调用方守卫失效时）不取负下标：钳到 0 号档（1 星）。"""
+    from nonebot_plugin_awmc_helper.core.render.best50 import ra_star_num
+
+    assert ra_star_num(0) == "01"
+    assert ra_star_num(13999) == "01"
+
+
+@requires_assets
+def test_utage_bg_no_highlight_pixels_falls_back(monkeypatch, tmp_path):
+    """底图素材无高饱和像素（纯灰白图）时不 IndexError：回退原图不动色相。"""
+    from PIL import Image as PILImage
+
+    from nonebot_plugin_awmc_helper.core.render import best50
+    from nonebot_plugin_awmc_helper.core.render.assets import Assets
+
+    pic_dir = tmp_path / "mai" / "pic"
+    pic_dir.mkdir(parents=True)
+    # 全图低饱和（S<128）→ 高亮像素 Counter 为空（修复前 most_common(1)[0] 越界）
+    PILImage.new("RGBA", (64, 64), (200, 200, 200, 255)).save(
+        pic_dir / "b50_score_basic.png"
+    )
+
+    best50._utage_score_bg.cache_clear()
+    monkeypatch.setattr(Assets, "static_path", staticmethod(lambda: tmp_path))
+    try:
+        bg = best50._utage_score_bg()
+        assert bg.size == (64, 64)
+        assert bg.convert("RGB").getpixel((0, 0)) == (200, 200, 200)
+    finally:
+        # 防污染后续用例：真实素材路径下的缓存必须重算
+        best50._utage_score_bg.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_qq_avatar_uses_smart_client(monkeypatch):
+    """QQ 头像走 create_smart_client（统一国内外分流），不再裸 httpx.AsyncClient。"""
+    import io
+
+    from PIL import Image as PILImage
+
+    from nonebot_plugin_awmc_helper.core.render import best50
+
+    seen = {}
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, params=None):
+            seen["url"] = url
+            seen["params"] = params
+
+            class _Resp:
+                def raise_for_status(self):
+                    return None
+
+                @property
+                def content(self):
+                    buf = io.BytesIO()
+                    PILImage.new("RGBA", (4, 4), (255, 0, 0, 255)).save(buf, "PNG")
+                    return buf.getvalue()
+
+            return _Resp()
+
+    def fake_smart_client(**kwargs):
+        # 真工厂是同步函数，返回支持异步上下文的 client
+        seen["kwargs"] = kwargs
+        return _FakeClient()
+
+    monkeypatch.setattr(best50, "create_smart_client", fake_smart_client)
+    img = await best50._qq_avatar(123456)
+    assert img is not None
+    assert img.size == (4, 4)
+    assert seen["kwargs"] == {"timeout": 10}
+    assert seen["url"] == "https://q1.qlogo.cn/g"
+
+
 def test_combo_sync_icon_files_cover_all_enum_members():
     """FC/FS 全枚举有素材映射，含落雪 sync → Sync。"""
     from maimai_py import FCType, FSType
