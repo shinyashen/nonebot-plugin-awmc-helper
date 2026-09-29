@@ -33,6 +33,7 @@ from maimai_py.maimai import MaimaiScores
 from . import store
 from .calc import build_bests
 from .songs import song_service
+from ..config import plugin_config
 from .ext.net import NetPlayer, NetRecord, NetCredentials, MaimaiNetClient
 from ..constants import LEVEL_INDEX_BY_EN, normalize_text
 
@@ -85,8 +86,6 @@ class NetScoreService:
         # 标题索引随曲库指纹缓存：(fingerprint, {归一化标题: [Song]})
 
     def _window(self) -> int:
-        from ..config import plugin_config
-
         return max(0, plugin_config.awmc_net_cooldown_minutes) * 60
 
     @staticmethod

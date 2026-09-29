@@ -49,6 +49,7 @@ from ..constants import (
     DX_VERSION_CODES,
     UTAGE_LEVEL_STRIDE,
     SOURCE_NAME_TO_VERSION,
+    normalize_text,
     level_from_value,
 )
 
@@ -1858,8 +1859,6 @@ async def pending_search(
     ``title``：归一化子串匹配；``ds_range``：任一谱面定数落在闭区间。
     均不传则返回全部可查 pending 曲。按版本降序（新曲在前）。
     """
-    from ..constants import normalize_text
-
     keyword = normalize_text(title) if title else None
     async with store.session() as session:
         rows = (
