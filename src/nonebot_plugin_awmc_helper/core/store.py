@@ -557,6 +557,23 @@ async def upsert_song_aliases(source: str, items: dict[int, list[str]]) -> int:
     return added
 
 
+async def prune_song_aliases(source: str, keep_song_ids: set[int]) -> int:
+    """删除某源中 song_id 不在 keep 集内的别名行，返回删除行数。
+
+    断点续走的走查不能整源替换（会裁剪此前各晚增量），改「增量 upsert +
+    目标集外清理」达到与远端对齐的等价语义；keep 集 = 本轮走查覆盖的根 id。
+    """
+    async with session() as db:
+        result = await db.exec(
+            delete(SongAlias).where(
+                col(SongAlias.source) == source,
+                col(SongAlias.song_id).not_in(keep_song_ids),
+            )
+        )
+        await db.commit()
+    return int(result.rowcount or 0)
+
+
 async def list_alias_walk_targets() -> list[int]:
     """MuNET 别名全量走查的组级 id 集（升序）。
 

@@ -273,9 +273,9 @@ async def refresh_aliases_full(
 ) -> dict:
     """别名全量走查（断点续走）：规范表派生组级 id 集 → 逐条 GetById 收割。
 
-    - 完成后整源替换 ``song_alias``（source=munet，原始形态，归一化在 provider
-      合并层）；中断记 kv 游标，下次任务从断点继续（单条失败游标照常前进，
-      下个刷新周期自然重试）；
+    - 落库走增量 upsert + 目标集外清理（source=munet，原始形态，归一化在
+      provider 合并层）；中断记 kv 游标、本轮成果先行落库，下次任务从断点
+      继续（单条失败游标照常前进，下个刷新周期自然重试）；
     - ``awmc_munet_alias_days`` 控制整轮间隔（0=禁用）；时间预算默认 60 分钟，
       单晚走完（实测 1763 请求 ≈ 30 分钟）；
     - ``force=True``（手动触发，重载补充数据）：跳过间隔/禁用检查，仍受互斥锁
@@ -314,8 +314,13 @@ async def _walk_targets(budget_seconds: float) -> dict:
     hits = misses = 0
     while index < len(targets):
         if time.monotonic() - started > budget_seconds:
+            # 预算耗尽：本轮成果增量落库后再断点（整源替换会裁剪此前各晚数据）
+            await store.upsert_song_aliases("munet", collected)
             await store.kv_set(_WALK_KV, {**state, "cursor": index})
-            logger.info(f"MuNET 别名走查：预算耗尽，断点 {index}/{len(targets)}")
+            logger.info(
+                f"MuNET 别名走查：预算耗尽，断点 {index}/{len(targets)}"
+                f"（本轮增量 {sum(len(v) for v in collected.values())} 条已落库）"
+            )
             return {"status": "partial", "cursor": index, "total": len(targets)}
         entry = None
         try:
@@ -331,12 +336,21 @@ async def _walk_targets(budget_seconds: float) -> dict:
         index += 1
         if index % 50 == 0:
             await store.kv_set(_WALK_KV, {**state, "cursor": index})
-    await store.save_song_aliases("munet", collected)
+    # 完成：增量 upsert + 目标集外陈旧行清理（= 整源替换的对齐语义，且不裁剪
+    # 断点续走时此前各晚已落库的成果；新增/删除别名以 MuNET 现态为准的强同步
+    # 仅在单晚走完全程时成立，多晚拼接对存活曲只增不删——别名列表近似只增）
+    await store.upsert_song_aliases("munet", collected)
+    pruned = await store.prune_song_aliases(
+        "munet", {t % DX_ID_OFFSET for t in targets}
+    )
     await store.kv_set(
         _WALK_KV, {"cursor": None, "finished_at": time.time(), "count": len(collected)}
     )
     total = sum(len(v) for v in collected.values())
-    logger.info(f"MuNET 别名走查完成：命中 {hits} / 空 {misses}，别名 {total} 条")
+    logger.info(
+        f"MuNET 别名走查完成：命中 {hits} / 空 {misses}，本轮别名 {total} 条，"
+        f"清理陈旧 {pruned} 行"
+    )
     return {"status": "done", "hits": hits, "misses": misses, "aliases": total}
 
 

@@ -156,3 +156,70 @@ async def test_provider_merges_munet_snapshot(db):
     assert merged[100] == ["TYW"]
     assert merged[1449] == ["拼图丝带"]
     assert provider._hash() != "empty"  # 内容驱动哈希
+
+
+class _FakeClock:
+    """受控时钟：monotonic/time 同源，随抓取推进（模拟预算耗尽）。"""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def time(self) -> float:
+        return self.now
+
+
+@pytest.mark.asyncio
+async def test_walk_multi_night_preserves_earlier_nights(db, monkeypatch):
+    """多晚走查：预算耗尽时本轮成果先增量落库（L-15），断点续走完成后
+    不裁剪此前各晚成果；目标集外陈旧行仍在完成时清理。"""
+    from nonebot_plugin_awmc_helper.config import plugin_config
+
+    monkeypatch.setattr(plugin_config, "awmc_munet_alias_days", 7)
+    await _seed(db)
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.ext import munet
+
+    payloads = {
+        60: _entry(60, "宴のみ", ["Party Time"]),
+        100: _entry(100, "Tell Your World", ["TYW"]),
+        1449: _entry(1449, "パズルリボン", ["拼图丝带"]),
+        10100: _entry(10100, "Tell Your World", ["TYW DX"]),
+    }
+    clock = _FakeClock()
+
+    async def fake_fetch(music_id):
+        clock.now += 10.0  # 每条消耗 10s 预算
+        return payloads.get(music_id)
+
+    monkeypatch.setattr(munet, "_MIN_INTERVAL", 0)
+    monkeypatch.setattr(munet, "time", clock)
+    monkeypatch.setattr(munet, "fetch_music_by_id", fake_fetch)
+
+    # 第一晚：预算 15s → 走完 60、100 两条即断，成果已落库
+    partial = await munet.refresh_aliases_full(budget_seconds=15)
+    assert partial["status"] == "partial"
+    assert partial["cursor"] == 2
+    snap = await store.load_song_aliases(["munet"])
+    assert snap[60] == ["Party Time"]
+    assert snap[100] == ["TYW"]
+
+    # 第二晚：从断点走完（force 跳过间隔检查）
+    done = await munet.refresh_aliases_full(budget_seconds=3600, force=True)
+    assert done["status"] == "done"
+    snap2 = await store.load_song_aliases(["munet"])
+    # 前晚成果不被完成路径裁剪；DX 组（10100）折叠根 id 100
+    assert snap2[60] == ["Party Time"]
+    assert snap2[100] == ["TYW", "TYW DX"]
+    assert snap2[1449] == ["拼图丝带"]
+
+    # 目标集外陈旧行清理：手工种一行不在本轮目标根集的别名
+    async with store.session() as s:
+        s.add(store.SongAlias(source="munet", song_id=999999, alias="已消失曲别名"))
+        await s.commit()
+    await munet.refresh_aliases_full(budget_seconds=3600, force=True)
+    snap3 = await store.load_song_aliases(["munet"])
+    assert 999999 not in snap3
+    assert snap3[100] == ["TYW", "TYW DX"]  # 目标集内数据不受清理影响
