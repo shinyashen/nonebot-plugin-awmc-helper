@@ -173,14 +173,14 @@ def draw_rating_table(
         name = f"UI_TTR_Rank_{rate}.png"
         if lv15:
             # Hoshino lv15 大格分支：不画完成/未完成底，评级章原尺寸置中
-            if (assets.static_path() / "mai" / "pic" / theme / name).exists():
-                im.alpha_composite(assets.pic(name, theme), (x + 55, y + 115))
+            if rank := assets.pic_optional(name, theme):
+                im.alpha_composite(rank, (x + 55, y + 115))
             return
         im.alpha_composite(
             assets.pic(_COMPLETED_BG if ach >= 100 else _UNFINISHED_BG), (x + 1, y + 1)
         )
-        if (assets.static_path() / "mai" / "pic" / theme / name).exists():
-            im.alpha_composite(assets.pic(name, theme).resize((78, 35)), (x, y + 20))
+        if rank := assets.pic_optional(name, theme):
+            im.alpha_composite(rank.resize((78, 35)), (x, y + 20))
 
     def stamp_combo(x: int, y: int, score, *, lv15: bool = False) -> None:
         if not score.fc:
@@ -189,12 +189,8 @@ def draw_rating_table(
         if lv15:
             # Hoshino lv15 计划分支：PlayBonus 大章 200×200，不画完成底
             name = COMBO_FILE[score.fc.name.lower()]
-            p = assets.static_path() / "mai" / "pic" / f"UI_CHR_PlayBonus_{name}.png"
-            if p.exists():
-                im.alpha_composite(
-                    assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((200, 200)),
-                    (x + 75, y + 80),
-                )
+            if bonus := assets.pic_optional(f"UI_CHR_PlayBonus_{name}.png"):
+                im.alpha_composite(bonus.resize((200, 200)), (x + 75, y + 80))
             return
         im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
         im.alpha_composite(
