@@ -194,6 +194,31 @@ async def test_local_alias_hot_reload(songs):
 
 
 @pytest.mark.asyncio
+async def test_local_alias_hot_reload_normalized(songs):
+    """热更路径键归一必须与全量重建一致（normalize_text，L-2）。
+
+    含全角/繁体/和制汉字的本地别名若热更用 ``.lower()``，查询键（归一化）
+    命不中，直到下次全量重建才恢复。
+    """
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    # 全角字母 + 繁体字：查询侧（by_alias 归一化）与热更键必须同形
+    await store.add_local_alias(902, "Ｂａｋａ東方曲", "u1")
+    await song_service.reload_alias_index()
+    got = await song_service.by_alias("baka东方曲")
+    assert got is not None
+    assert got[0].id == 902
+
+    # 和制汉字（zhconv 未覆盖，constants 补充映射）
+    await store.add_local_alias(902, "蔵発両覚", "u1")
+    await song_service.reload_alias_index()
+    got2 = await song_service.by_alias("藏发两觉")
+    assert got2 is not None
+    assert got2[0].id == 902
+
+
+@pytest.mark.asyncio
 async def test_jp_title_fallback(songs, tmp_path):
     """国服标题未命中 → 日服视图标题子串匹配（Q32）。"""
     from nonebot_plugin_awmc_helper.core import store

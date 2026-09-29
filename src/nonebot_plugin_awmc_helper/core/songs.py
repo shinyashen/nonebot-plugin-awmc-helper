@@ -307,9 +307,16 @@ class SongService:
         return await self.load()
 
     async def reload_alias_index(self) -> None:
-        """本地别名变更后热更新（只重读本地部分，避免重拉曲库）。"""
+        """本地别名变更后热更新（只重读本地部分，避免重拉曲库）。
+
+        键归一必须与全量重建（``_apply_to_cache``）及查询键一致用
+        ``normalize_text``：``.lower()`` 不做 NFKC/简繁转换，含全角/繁体/
+        和制汉字的本地别名热更后必 miss，直到下次全量重建才恢复。
+        """
         for la in await store.get_local_aliases():
-            self._alias_index.setdefault(la.alias.lower(), set()).add(la.song_id)
+            self._alias_index.setdefault(normalize_text(la.alias), set()).add(
+                la.song_id
+            )
 
     async def inject(self, songs: list[Song]) -> None:
         """直接注入曲目数据并置就绪（测试注入；不触发网络）。
