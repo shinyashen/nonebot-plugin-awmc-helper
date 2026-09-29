@@ -50,7 +50,7 @@ class CommandSpec:
 
 @dataclass
 class GuideStep:
-    """指南步骤。三形态：纯文案 / 附图（独立纯图节点）/ 按名引用指令。"""
+    """指南步骤：文案 + 按名引用指令；附图为独立纯图节点（可与文案同步骤）。"""
 
     text: str = ""
     commands: tuple[str, ...] = ()
@@ -153,7 +153,10 @@ class HelpRegistry:
 
     def __init__(self) -> None:
         self.categories: dict[str, Category] = {c.key: c for c in BUILTIN_CATEGORIES}
-        self.plugins: dict[str, PluginHelp] = {}
+        # 声明块按 (plugin, category) 存：同一插件可就近入多个类别
+        # （拍板⑦ 规则化双支持），每块独立整替
+        self.blocks: list[PluginHelp] = []
+        self._block_index: dict[tuple[str, str], PluginHelp] = {}
         self.guides: dict[str, Guide] = {}
         self._commands: dict[str, CommandSpec] = {}  # matcher 对象 → 声明
         self._name_index: dict[str, CommandSpec] = {}  # 名称/别名 → 声明
@@ -170,7 +173,11 @@ class HelpRegistry:
         description: str = "",
         commands: list[CommandSpec] | tuple[CommandSpec, ...] = (),
     ) -> None:
-        """注册一个子插件的帮助块；重复声明（测试重载）按插件名整块替换。"""
+        """注册一个子插件的帮助块。
+
+        同一插件可多次调用（不同 category 各成一块，就近入多类）；同
+        ``(plugin, category)`` 重复声明（插件重载/测试）整块替换。
+        """
         if category not in self.categories:
             order = 100 + len(self.categories)
             self.categories[category] = Category(
@@ -184,7 +191,13 @@ class HelpRegistry:
             description=description,
             commands=list(commands),
         )
-        self.plugins[plugin] = block
+        key = (plugin, category)
+        if key in self._block_index:
+            idx = self.blocks.index(self._block_index[key])
+            self.blocks[idx] = block
+        else:
+            self.blocks.append(block)
+        self._block_index[key] = block
         for spec in block.commands:
             self._commands[id(spec.matcher)] = spec
             for key in (spec.name, *spec.aliases):
@@ -230,7 +243,7 @@ class HelpRegistry:
         return self._commands.get(id(matcher))
 
     def _plugin_of(self, spec: CommandSpec) -> str:
-        for block in self.plugins.values():
+        for block in self.blocks:
             if any(s is spec for s in block.commands):
                 return block.plugin
         return "?"
@@ -338,7 +351,7 @@ def _overview_blocks(reg: HelpRegistry, include_hidden: bool) -> list[str]:
         if cat.key == "manage":
             continue
         lines: list[str] = []
-        for block in reg.plugins.values():
+        for block in reg.blocks:
             if block.category != cat.key:
                 continue
             visible = [s for s in block.commands if _visible(s, include_hidden)]
@@ -364,7 +377,7 @@ def _category_blocks(
     reg: HelpRegistry, cat: Category, include_hidden: bool
 ) -> list[str]:
     blocks: list[str] = []
-    for block in reg.plugins.values():
+    for block in reg.blocks:
         if block.category != cat.key:
             continue
         visible = [s for s in block.commands if _visible(s, include_hidden)]
@@ -406,29 +419,29 @@ def _guide_entries(reg: HelpRegistry, guide: Guide) -> "list[str | UniMessage]":
         header += f"\n（来自 {guide.source}）"
     entries: "list[str | UniMessage]" = [header]
     for idx, step in enumerate(guide.steps, start=1):
-        if step.image is not None:
+        if step.text or step.commands:
+            lines = [f"第 {idx} 步：{step.text}".rstrip()]
+            for name in step.commands:
+                spec = reg.lookup_command(name)
+                if spec is None:
+                    lines.append(f"{_LINE_PREFIX} {name}（当前不可用：未启用或未声明）")
+                else:
+                    tags = f"（{spec.scope}）" if spec.scope else ""
+                    body = (
+                        f"{_names(spec)}{tags} —— {spec.brief}"
+                        if spec.brief
+                        else f"{_names(spec)}{tags}"
+                    )
+                    lines.append(f"{_LINE_PREFIX} {body}")
+            entries.append("\n".join(lines))
+        if step.image is not None:  # 纯图节点（可与文案同步骤，core.forward 惯例）
             entries.append(UniMessage.image(path=step.image))
-            continue
-        lines = [f"第 {idx} 步：{step.text}".rstrip()]
-        for name in step.commands:
-            spec = reg.lookup_command(name)
-            if spec is None:
-                lines.append(f"{_LINE_PREFIX} {name}（当前不可用：未启用或未声明）")
-            else:
-                tags = f"（{spec.scope}）" if spec.scope else ""
-                body = (
-                    f"{_names(spec)}{tags} —— {spec.brief}"
-                    if spec.brief
-                    else f"{_names(spec)}{tags}"
-                )
-                lines.append(f"{_LINE_PREFIX} {body}")
-        entries.append("\n".join(lines))
     return entries
 
 
 def _manage_blocks(reg: HelpRegistry) -> "str | None":
     lines: list[str] = []
-    for block in reg.plugins.values():
+    for block in reg.blocks:
         hidden = [s for s in block.commands if s.hidden]
         if hidden:
             lines.append(f"【{block.title}】")

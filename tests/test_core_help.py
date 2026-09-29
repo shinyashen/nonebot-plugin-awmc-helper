@@ -199,11 +199,7 @@ def test_builtin_categories_cover_blocks():
     """内置类别表完整：所有内置子插件声明的类别都在表内（无意外自动建类）。"""
     from nonebot_plugin_awmc_helper.core.help import help_registry
 
-    live = {
-        b.category
-        for b in help_registry.plugins.values()
-        if b.plugin.startswith("awmc.")
-    }
+    live = {b.category for b in help_registry.blocks if b.plugin.startswith("awmc.")}
     for key in live:
         cat = help_registry.categories.get(key)
         assert cat is not None, f"内置子插件使用了未知类别：{key}"

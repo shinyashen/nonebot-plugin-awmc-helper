@@ -90,6 +90,7 @@ async def _(
         raw=text_image_bytes(format_result(kw, songs, limit))
     ).finish(at_sender=True)
 
+
 # ---------------------------------------------------------------- 帮助声明
 # 【差异 5】matcher 对象直接作声明键（防文案漂移）；未知 category 会自动建类，
 # 这里就近入内置「查歌」类。声明块惯例放 matcher 定义之后（文件末尾）。
