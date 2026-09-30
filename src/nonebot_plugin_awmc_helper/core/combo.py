@@ -329,6 +329,7 @@ _GENRE_SUB_WORDS: "tuple[tuple[str, str], ...]" = (
     ("音击", "ongeki"),
 )
 _GENRE_SUB_PAIRS = sorted(_GENRE_SUB_WORDS, key=lambda p: len(p[0]), reverse=True)
+_GENRE_SUB_OF: "dict[str, str]" = dict(_GENRE_SUB_PAIRS)
 
 # S-14 评级档位词（≥ 语义）：alternation 长度降序防前缀吞噬（sss+ 先于 sss
 # 先于 ss 先于 s）；大小写不敏感（load 侧 lower 归一）。大将/鸟加 ≥SSS+、
@@ -495,7 +496,7 @@ _RULES: "tuple[_Rule, ...]" = (
         2,
         re.compile("|".join(w for w, _ in _GENRE_SUB_PAIRS), re.IGNORECASE),
         "genre_sub",
-        lambda m: dict(_GENRE_SUB_PAIRS)[m.group().lower()],
+        lambda m: _GENRE_SUB_OF[m.group().lower()],
     ),
     _Rule(2, re.compile(r"大将|鸟加"), "rate", _const("大将")),
     _Rule(2, re.compile(r"纯|仅"), "rate_mod", _const(None)),
@@ -1115,14 +1116,14 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                 )
             )
         elif t.kind == "genre_sub":
-            which: str = t.value
+            sub: str = t.value
             conds.append(
                 Cond(
                     CondType.GENRE_SUB,
-                    key=f"genre_sub:{which}",
-                    label="音击" if which == "ongeki" else "中二",
-                    chart=lambda s, d, _cur, _w=which: _genre_sub_match(s, _w),
-                    value=which,
+                    key=f"genre_sub:{sub}",
+                    label="音击" if sub == "ongeki" else "中二",
+                    chart=lambda s, d, _cur, _w=sub: _genre_sub_match(s, _w),
+                    value=sub,
                 )
             )
         elif t.kind == "era_year":
@@ -1328,6 +1329,9 @@ def _chart_key(song: Song, diff: SongDifficulty) -> "tuple[int, SongType, LevelI
     （水鱼 _deser_score 对 >100000 的 song_id 原样保留、本模块 NET 抓取不含
     宴谱），与完成表 ``chart_display_id`` 同语义。"""
     if diff.type == SongType.UTAGE:
+        from maimai_py.models import SongDifficultyUtage
+
+        assert isinstance(diff, SongDifficultyUtage)
         return (diff.diff_id, diff.type, diff.level_index)
     return (song.id, diff.type, diff.level_index)
 
@@ -1366,6 +1370,7 @@ async def _build_chart_hit(conds: "list[Cond]", cur: int):
         return None
     has_utage = any(c.ctype is CondType.UTAGE for c in conds)
     era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
+    boundary = era.value if era is not None else None
     hist_state = (
         await State.load() if era is not None and CondType.DS in groups else None
     )
@@ -1383,13 +1388,13 @@ async def _build_chart_hit(conds: "list[Cond]", cur: int):
                     else "dx"
                 )
                 hist = hist_state.resolve_chart_level(
-                    song.id, kind, diff.level_index.value, era.value
+                    song.id, kind, diff.level_index.value, boundary
                 )
                 if hist is None or not any(
                     round(hist * 10) == round(c.value * 10) for c in group
                 ):
                     return False
-            elif not any(c.chart(song, diff, cur) for c in group):
+            elif not any(c.chart(song, diff, cur) for c in group if c.chart):
                 return False
         return True
 
@@ -1507,7 +1512,10 @@ async def combo_filtered_scores(
     return [
         s
         for s in scores
-        if all(any(c.record(s) for c in group) for group in record_groups.values())
+        if all(
+            any(c.record(s) for c in group if c.record)
+            for group in record_groups.values()
+        )
     ]
 
 

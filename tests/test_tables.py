@@ -554,6 +554,7 @@ def _combo_progress_expected(cond_text: str, completed: list) -> "tuple[int, int
 
 
 @pytest.mark.asyncio
+@requires_assets
 async def test_combo_progress_renders(app: App, db, songs, monkeypatch):
     """东方进度：条件化三段总览（评级章默认判型，199 SD 紫 100.5% 已完成）。"""
     import base64 as _b64
