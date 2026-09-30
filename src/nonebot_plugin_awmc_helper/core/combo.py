@@ -48,6 +48,7 @@ from .calc import build_bests, compute_rating, build_flat_bests
 from .score import score_service
 from .songs import song_service
 from .plates import norm_plate
+from ..constants import normalize_text
 
 # ---------------------------------------------------------------- 模型
 
@@ -64,6 +65,7 @@ class CondType(Enum):
     DIFF = "diff"  # S-7 难度色（chart+record 双谓词）
     LEVEL = "level"  # S-8 等级精确匹配
     DS = "ds"  # S-9 定数精确匹配
+    DESIGNER = "designer"  # S-10 谱师（实名动态注册，归一包含式）
     UTAGE = "utage"  # S-19 仅宴谱（默认排除的反向条件）
     # 成绩类（质量过滤；n15 → 拆分）
     COMBO = "combo"  # S-12 FC 族 / AP 族 / 理论值
@@ -74,6 +76,8 @@ class CondType(Enum):
     CUN = "cun"  # S-17 寸（距里程碑不足，排序覆盖）
     KILL = "kill"  # S-18 名刀（刚过里程碑，排序覆盖）
     IDEAL = "ideal"  # S-25 理想（升一档 modifier）
+    # 修改类（不过滤；n15 不参与判定）
+    FIT = "fit"  # S-24 拟合定数（重算 RA 副本，排序随默认 RA 降序）
 
 
 CHART_COND_TYPES = frozenset(
@@ -86,6 +90,7 @@ CHART_COND_TYPES = frozenset(
         CondType.DIFF,
         CondType.LEVEL,
         CondType.DS,
+        CondType.DESIGNER,
         CondType.UTAGE,
     }
 )
@@ -322,6 +327,13 @@ _RULES: "tuple[_Rule, ...]" = (
     _Rule(2, re.compile(r"旧版本"), "newness", _const("old")),
     _Rule(2, re.compile(r"新版本|新歌"), "newness", _const("new")),
     _Rule(2, re.compile(r"理想"), "ideal", _const(None)),
+    _Rule(
+        2,
+        # S-24：KarenBot 同款别名（nh）；「拟合定数」长词先命中
+        re.compile(r"拟合定数|拟合|nh", re.IGNORECASE),
+        "fit",
+        _const(None),
+    ),
     _Rule(2, re.compile(_LEVEL_NUM), "level", lambda m: m.group(1)),
     _Rule(
         2,
@@ -359,6 +371,63 @@ _RULES: "tuple[_Rule, ...]" = (
     _Rule(3, re.compile(r"将|极|神|者|極|將"), "kind", lambda m: norm_plate(m.group())),
 )
 
+_EXTRA_RULES: "tuple[_Rule, ...]" = ()
+"""动态注册的额外词法规则（谱师实名，层 1；由 :func:`ensure_designer_rules`
+装配，进程级状态）。规则表其余部分为模块常量，谱师词表随曲库动态生成。"""
+
+
+def set_designer_rules(rules: "tuple[_Rule, ...]") -> None:
+    """整体替换谱师词法规则（测试注入与 :func:`ensure_designer_rules` 共用）。"""
+    global _EXTRA_RULES
+    _EXTRA_RULES = rules
+
+
+def _designer_rules_of(designers: "set[str]") -> "tuple[_Rule, ...]":
+    """谱师实名集 → 层 1 动态规则（归一去重、长度降序 alternation）。
+
+    注册口径：合作谱串（「A×B」形态）按合作符拆分出原子实名一并注册——
+    输入「A」或「B」经归一包含式命中整串（包含式同时覆盖「A×B」内的
+    任意相邻实名）；归一后 ≥2 字符（单字实名不注册——与难度色/条件原子
+    碰撞且误触发面大）。⚠️ 只拆明确的合作符 ×/✕，不拆 ASCII 字母
+    （防「box」类英文名误拆）。
+    """
+    names: "set[str]" = set()
+    for designer in designers:
+        normalized = normalize_text(designer)
+        names.add(normalized)
+        for part in re.split(r"[×✕]", normalized):
+            if len(part) >= 2:
+                names.add(part.strip())
+    ordered = sorted((n for n in names if len(n) >= 2), key=len, reverse=True)
+    if not ordered:
+        return ()
+    return (
+        _Rule(
+            1,
+            re.compile("|".join(re.escape(n) for n in ordered)),
+            "designer",
+            lambda m: m.group(),
+        ),
+    )
+
+
+async def ensure_designer_rules() -> None:
+    """把曲库谱师实名注册为词法规则（幂等）。
+
+    曲库未就绪时跳过（非阻塞窥探）——冷启动窗口谱师词暂不生效，任一查询
+    加载曲库后的下一条消息起生效；不在闲聊路径上触发曲库加载。实名取
+    CN/JP 视图并集（两视图谱师名差异极小，并集一次覆盖）。
+    """
+    if not song_service.is_loaded():
+        return
+    designers: "set[str]" = set()
+    for songs in (await song_service.get_all(), await song_service.jp_all()):
+        for song in songs:
+            for diff in song.get_difficulties():
+                if diff.note_designer:
+                    designers.add(diff.note_designer)
+    set_designer_rules(_designer_rules_of(designers))
+
 
 def tokenize(text: str) -> "list[Token]":
     """分层 FMM 扫描：层号小者优先、同层命中长者赢，未匹配字符跳过。"""
@@ -366,7 +435,7 @@ def tokenize(text: str) -> "list[Token]":
     i = 0
     while i < len(text):
         best: "tuple[int, int, re.Match[str], _Rule] | None" = None
-        for rule in _RULES:
+        for rule in (*_RULES, *_EXTRA_RULES):
             m = rule.pattern.match(text, i)
             if m is None:
                 continue
@@ -575,6 +644,54 @@ def _ideal_cond() -> Cond:
     return Cond(CondType.IDEAL, key="ideal", label="理想", modifier=_ideal_of)
 
 
+def _fit_cond() -> Cond:
+    """拟合定数（S-24）：modifier 类条件，不过滤、只重算。
+
+    谓词/修改器不在本 Cond 上挂——拟合定数来自曲库 ``curve``，执行器按成绩
+    键查 :func:`_build_fit_map` 映射后重算（无 curve 的谱面 fallback 实际
+    定数 = 成绩原值不动）。n15 不参与判定（纯拟合 → 拆分，随谱面类条件
+    在场时平铺）。
+    """
+    return Cond(CondType.FIT, key="fit", label="拟合")
+
+
+def _build_fit_map(
+    songs: "list[Song]",
+) -> "dict[tuple[int, SongType, LevelIndex], float]":
+    """拟合定数映射：谱面键 → 1 位舍入的 ``fit_level_value``（KarenBot 同款
+    ``roundDecimalPlaces(1)``，对齐实际定数口径；显示与 RA 计算均用舍入值）。
+
+    无 curve / 拟合值为 0 的谱面不入表——成绩侧查不到即 fallback 实际定数
+    （= 原值不动）。JP 视图 curve 缺失时自然恒 fallback。
+    """
+    fit_map: "dict[tuple[int, SongType, LevelIndex], float]" = {}
+    for song in songs:
+        for diff in song.get_difficulties():
+            if diff.type == SongType.UTAGE:
+                continue  # 宴谱成绩本就不入成绩流（默认排除口径）
+            curve = diff.curve
+            if curve is not None and curve.fit_level_value:
+                fit_map[(song.id, diff.type, diff.level_index)] = (
+                    round(curve.fit_level_value * 10) / 10
+                )
+    return fit_map
+
+
+def _fit_modifier_of(fit_map: "dict[tuple[int, SongType, LevelIndex], float]"):
+    """拟合重算器：成绩副本替换 level_value 并按拟合定数重算 RA。
+
+    副行「定数 -> 单曲Ra」随 level_value 替换自动显示拟合值，无需 sub_of。
+    """
+
+    def fit_mod(s: ScoreExtend) -> ScoreExtend:
+        ds = fit_map.get((s.id, s.type, s.level_index))
+        if ds is None or s.achievements is None:
+            return s
+        return replace(s, level_value=ds, dx_rating=compute_rating(ds, s.achievements))
+
+    return fit_mod
+
+
 _RATE_FLOOR: "dict[RateType, float]" = {
     RateType.SSSP: 100.5,
     RateType.SSS: 100.0,
@@ -663,6 +780,24 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
             conds.append(_kill_cond())
         elif t.kind == "ideal":
             conds.append(_ideal_cond())
+        elif t.kind == "fit":
+            conds.append(_fit_cond())
+        elif t.kind == "designer":
+            # S-10 谱师：命中归一名按「包含式」匹配谱面 note_designer
+            # （覆盖合作谱「A×B」形态；短名已在注册侧过滤）
+            name: str = t.value
+            conds.append(
+                Cond(
+                    CondType.DESIGNER,
+                    key=f"designer:{name}",
+                    label=t.text,
+                    chart=lambda s, d, _cur, _n=name: (
+                        _n in normalize_text(d.note_designer or "")
+                    ),
+                    value=name,
+                    single_chart=True,
+                )
+            )
         elif t.kind == "diff":
             li: LevelIndex = t.value
             conds.append(
@@ -807,6 +942,15 @@ def _empty_message(conds: "list[Cond]", cur: int) -> str:
     return "没有符合条件的谱面"
 
 
+def _apply_modifiers(
+    s: ScoreExtend, mods: "list[Callable[[ScoreExtend], ScoreExtend]]"
+) -> ScoreExtend:
+    """按声明序链式应用成绩变换（全部经 ``replace`` 副本，缓存防污染）。"""
+    for mod in mods:
+        s = mod(s)
+    return s
+
+
 def _chart_key(song: Song, diff: SongDifficulty) -> "tuple[int, SongType, LevelIndex]":
     """谱面键（与成绩 id 口径对齐）：SD/DX = 归一根 id；宴谱 = diff_id
     （水鱼 _deser_score 对 >100000 的 song_id 原样保留、本模块 NET 抓取不含
@@ -857,14 +1001,18 @@ async def run_combo(
     scores = [s for s in scores if (s.type == SongType.UTAGE) == has_utage]
     scores = [s for s in scores if all(c.record(s) for c in record_conds)]
 
-    # 排序覆盖 / modifier：取最后声明者（§9.0）
+    # 排序覆盖：取最后声明者（§9.0）；modifier：声明序链式应用（理想升档
+    # 与拟合重算叠加时按声明序变换），拟合重算器恒居链尾——RA 只取决于
+    # 最终 (达成率, 定数)，升档在拟合前的语义对任意声明序成立
     sort_key = next(
         (c.sort_key for c in reversed(conds) if c.sort_key is not None),
         lambda s: s.dx_rating or 0,
     )
-    modifier = next((c.modifier for c in reversed(conds) if c.modifier), None)
-    if modifier is not None:
-        scores = [modifier(s) for s in scores]
+    modifiers = [c.modifier for c in conds if c.modifier is not None]
+    if any(c.ctype is CondType.FIT for c in conds):
+        modifiers.append(_fit_modifier_of(_build_fit_map(songs)))
+    if modifiers:
+        scores = [_apply_modifiers(s, modifiers) for s in scores]
 
     # n15 判定（§8）：条件集构成派生——含谱面类 → 平铺，纯成绩类 → 拆分
     flat = any(c.ctype in CHART_COND_TYPES for c in conds)

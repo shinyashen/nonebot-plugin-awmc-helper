@@ -254,6 +254,10 @@ class SongService:
 
     # -- 生命周期 ----------------------------------------------------------
 
+    def is_loaded(self) -> bool:
+        """曲库是否已就绪（非阻塞窥探；谱师词注册等「已加载才做」的旁路用）。"""
+        return self._ready.is_set()
+
     async def ensure_loaded(self) -> MaimaiSongs:
         """等待曲库就绪并返回 MaimaiSongs 包装（查询均先调用本方法）。"""
         await self._ready.wait()

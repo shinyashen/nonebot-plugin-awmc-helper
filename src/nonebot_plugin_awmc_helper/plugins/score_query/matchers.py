@@ -17,6 +17,7 @@ from ...core.combo import (
     run_combo,
     parse_combo,
     inapplicable,
+    ensure_designer_rules,
 )
 from ...core.score import UserScoreError, build_bests, score_service
 from ...core.songs import (
@@ -326,6 +327,9 @@ async def _(
     出图 / 歧义提示（裸紫白）/ 谱面集空文案 / 静默（零条件——``^(.+?)50$``
     松匹配下以 50 结尾的闲聊不是查询，绝不回话防刷屏）。
     """
+    # 谱师实名词随曲库动态注册（幂等；曲库未就绪时跳过——冷启动窗口暂不
+    # 生效，任一查询加载曲库后下一条起生效，不在闲聊路径上触发加载）
+    await ensure_designer_rules()
     parsed = parse_combo(groups[0])
     if parsed is None:
         return
@@ -449,11 +453,12 @@ help_registry.declare(
                 "末尾以 50 结尾即触发。条件词：\n"
                 "谱面：版本字（辉/雪辉/真超檄…可多代连写）、dx/旧框、标准/dx谱、"
                 "新版本/旧版本、分类（东方/音击中二/流行动漫/其他游戏/maimai）、"
-                "紫谱/白谱/绿/黄/红、13级、14.5定数、宴谱\n"
+                "紫谱/白谱/绿/黄/红、13级、14.5定数、谱师名、宴谱\n"
                 "成绩：fc/全连/极、ap/神、理论/ap+、舞舞/fdx、将/鸟/sss、"
                 "大将/鸟加/sss+、纯<档>/仅<档>、牛逼、越级、一星~五星、寸、"
-                "锁/名刀、理想\n"
-                "例：东方50、雪辉dx50、紫谱将50、祝将50、辉50"
+                "锁/名刀\n"
+                "修改：理想（升一档重算）、拟合（拟合定数重算）\n"
+                "例：东方50、雪辉dx50、紫谱将50、祝将50、辉50、拟合理想50"
             ),
         ),
         CommandSpec(

@@ -490,3 +490,197 @@ async def test_run_combo_plate_binding(db, songs, monkeypatch):
     assert result.flat is True  # 牌绑定含版本条件 → 平铺
     assert [s.id for s in result.scores] == [624]
     assert result.title == "堇·将"
+
+
+# ---------------------------------------------------------------- P2-a：拟合 / 谱师
+
+
+def _curve(fit: float):
+    from maimai_py import CurveObject
+
+    return CurveObject(
+        sample_size=100,
+        fit_level_value=fit,
+        avg_achievements=99.0,
+        stdev_achievements=1.0,
+        avg_dx_score=2000.0,
+        rate_sample_size={},
+        fc_sample_size={},
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "kinds"),
+    [
+        ("拟合", ["fit"]),
+        ("nh", ["fit"]),
+        ("拟合定数", ["fit"]),
+        ("拟合理想", ["fit", "ideal"]),
+    ],
+)
+def test_tokenizer_fit(text: str, kinds: list[str]):
+    from nonebot_plugin_awmc_helper.core.combo import tokenize
+
+    assert [t.kind for t in tokenize(text)] == kinds
+
+
+@pytest.mark.asyncio
+async def test_run_combo_fit_recalc(db, songs, monkeypatch):
+    """拟合50：带 curve 的谱面按 1 位舍入拟合定数重算 RA 与副行定数；无
+    curve 的谱面 fallback 实际定数（原值不动）。纯修改类 → 拆分。"""
+    from mocks import make_diff, make_song
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboResult, parse_combo
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    fitted = make_song(
+        199,
+        "チルノのパーフェクトさんすう教室",
+        version=12000,
+        diffs=[make_diff(curve=_curve(13.5), version=12000)],
+    )
+    plain = make_song(
+        8,
+        "True Love Song",
+        genre=__import__("maimai_py", fromlist=["Genre"]).Genre.maimai,
+        version=10000,
+        diffs=[
+            make_diff(
+                type=__import__("maimai_py", fromlist=["SongType"]).SongType.STANDARD,
+                level_index=__import__(
+                    "maimai_py", fromlist=["LevelIndex"]
+                ).LevelIndex.MASTER,
+                level="12",
+                level_value=12.4,
+                version=10000,
+            )
+        ],
+    )
+    await seed_service(song_service, [fitted, plain])
+    from maimai_py import SongType as _ST
+
+    scores = [
+        _score(199, type_=_ST.DX, version=12000, achievements=99.0, level_value=13.0),
+        _score(
+            8, type_=_ST.STANDARD, version=10000, achievements=99.0, level_value=12.4
+        ),
+    ]
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService(scores))
+    result = await combo_mod.run_combo(parse_combo("拟合"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.flat is False  # 纯修改类 → 拆分
+    by_id = {s.id: s for s in result.scores}
+    # 有 curve：level_value=13.5、RA 按 13.5 重算
+    assert by_id[199].level_value == 13.5
+    assert (
+        by_id[199].dx_rating
+        > _score(199, achievements=99.0, level_value=13.0).dx_rating
+    )
+    # 无 curve：fallback 实际定数，原值不动
+    assert by_id[8].level_value == 12.4
+
+
+@pytest.mark.asyncio
+async def test_run_combo_fit_ideal_chain(db, songs, monkeypatch):
+    """拟合理想50：声明序链式——理想升档后按拟合定数重算 RA（副本）。"""
+    from mocks import make_diff, make_song
+    from maimai_py import RateType
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await seed_service(
+        song_service,
+        [
+            make_song(
+                199,
+                "チルノのパーフェクトさんすう教室",
+                version=12000,
+                diffs=[make_diff(curve=_curve(13.5), version=12000)],
+            )
+        ],
+    )
+    from maimai_py import SongType as _ST
+
+    s = _score(199, type_=_ST.DX, version=12000, achievements=99.0, level_value=13.0)
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([s]))
+    result = await combo_mod.run_combo(parse_combo("拟合理想"), _binding())
+    (ideal,) = result.scores
+    assert ideal is not s
+    assert ideal.rate == RateType.SSP  # 理想升档（SS → SSP）
+    assert ideal.achievements == 99.5
+    assert ideal.level_value == 13.5  # 拟合定数替换
+    assert ideal.dx_rating == __import__(
+        "nonebot_plugin_awmc_helper.core.calc", fromlist=["compute_rating"]
+    ).compute_rating(13.5, 99.5)
+    assert s.rate == RateType.SS  # 原对象分毫未动
+    assert s.level_value == 13.0
+
+
+@pytest.mark.asyncio
+async def test_run_combo_designer(db, songs, monkeypatch):
+    """谱师50：实名词动态注册（归一包含式），谱面类 → 平铺。"""
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import (
+        ComboResult,
+        parse_combo,
+        ensure_designer_rules,
+    )
+
+    await ensure_designer_rules()  # songs fixture 曲库已加载 → 实名注册
+    score = _score(199, type_=SongType.DX, level_index=LevelIndex.MASTER, version=26000)
+    other = _score(199, level_index=LevelIndex.EXPERT, version=12000)  # SD 红谱面
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([score, other]))
+    result = await combo_mod.run_combo(parse_combo("まぐランド"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.flat is True
+    # 199 DX MASTER 谱面 note_designer=まぐランド；SD 红谱（サファ太）不命中
+    assert [(s.id, s.type, s.level_index) for s in result.scores] == [
+        (199, SongType.DX, LevelIndex.MASTER)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_designer_normalized_hit(db, songs, monkeypatch):
+    """谱师归一口径：ASCII 大小写归一命中；合作谱形态包含式命中。"""
+    from mocks import make_diff, make_song
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import (
+        parse_combo,
+        ensure_designer_rules,
+    )
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    collab = make_song(
+        624,
+        "KISS CANDY FLAVOR",
+        version=18500,
+        diffs=[
+            make_diff(note_designer="Moon Strix×ニャイン", version=18500),
+        ],
+    )
+    await seed_service(song_service, [collab])
+    await ensure_designer_rules()
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([]))
+    # 「moon strix」归一小写包含命中合作谱；单字谱师不注册
+    conds = parse_combo("moon strix")
+    assert conds is not None
+    assert conds[0].ctype.name == "DESIGNER"
+    assert not parse_combo("A")  # 单字符实名不注册（静默）
+
+
+@pytest.mark.asyncio
+async def test_designer_rules_skipped_when_cold(monkeypatch):
+    """曲库未就绪时 ensure 跳过注册（不在闲聊路径触发加载），谱师词不生效。"""
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    song_service._ready.clear()
+    await combo_mod.ensure_designer_rules()
+    assert combo_mod.parse_combo("まぐランド") is None
+    combo_mod.set_designer_rules(())  # 清理，防污染后续用例
