@@ -34,7 +34,7 @@ from .table_layout import (
     RATING_START_Y,
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
-    group_by_level,
+    group_by_ds,
 )
 
 # NB constants 同源：统计键序与阈值表
@@ -321,8 +321,8 @@ def _draw_rating_core(
             else:
                 stamp_sync(x, y, score, lv15=True)
     else:
-        # 同序契约：与 table_template._rating_grid 底图同走 group_by_level
-        groups = group_by_level(entries)
+        # 同序契约：与 table_template._rating_grid 底图同走 group_by_ds
+        groups = group_by_ds(entries)
         current_y = RATING_START_Y
         for ds in groups:
             charts = groups[ds]

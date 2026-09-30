@@ -44,25 +44,6 @@ def group_by_ds(
     return {k: grouped[k] for k in sorted(grouped, key=float, reverse=True)}
 
 
-def group_by_level(
-    entries: Sequence[tuple[Song, SongDifficulty]],
-) -> dict[str, list[tuple[Song, SongDifficulty]]]:
-    """按标级串分组（"14+"/"14"，牌子完成表同款分组观感），节序
-    ``level_page_key`` 降序（高等级在前）、组内定数降序。
-
-    完成表/定数表底图（``table_template._rating_grid``）与盖章
-    （``rating_table``）必须同用本函数——同序契约与 ``group_by_ds`` 相同。
-    """
-    grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
-    for song, diff in entries:
-        if diff.level_value < 7:
-            continue
-        grouped.setdefault(diff.level, []).append((song, diff))
-    for group in grouped.values():
-        group.sort(key=lambda pair: pair[1].level_value, reverse=True)
-    return {k: grouped[k] for k in sorted(grouped, key=level_page_key, reverse=True)}
-
-
 def slot_rep(
     master: SongDifficulty,
     remaster: SongDifficulty | None,

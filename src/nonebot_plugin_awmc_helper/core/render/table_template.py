@@ -53,8 +53,8 @@ from .table_layout import (
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
     slot_rep,
+    group_by_ds,
     slot_level_of,
-    group_by_level,
     level_page_key,
 )
 
@@ -82,12 +82,14 @@ def _credit(im: Image.Image, height: int) -> None:
 def _rating_grid(
     entries: Sequence[tuple[Song, SongDifficulty]],
 ) -> Image.Image:
-    """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 标级节封面网格。
+    """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 定数节封面网格。
 
-    分组与盖章（``rating_table``）同走 ``group_by_level``（同序契约）；节
-    标签 = 标级串（"14+"/"14"，牌子完成表同款观感，2026-09-30 QoL 拍板）。
+    分组与盖章（``rating_table``）同走 ``group_by_ds``（同序契约）；节标签
+    = **完整定数**（"14.8" 而非 ".8"，2026-10-01 QoL 修订）：单等级条件与
+    旧版式信息等价（13.9~13.0），跨等级条件沿定数轴自然合并且节标签自带
+    等级（定数一位小数与标级一一对应，同节必同标级）。
     """
-    groups = group_by_level(entries)
+    groups = group_by_ds(entries)
 
     current_y = RATING_START_Y
     for charts in groups.values():
@@ -103,12 +105,13 @@ def _rating_grid(
     _credit(im, height)
 
     start_y = RATING_START_Y
-    for level, charts in groups.items():
-        # 节标签 = 标级串（如 "14+"；对齐牌子完成表标签画法）
+    for ds, charts in groups.items():
+        # 节标签 = 完整定数（如 "14.8"；旧版为小数节 ".8"，跨等级条件合并
+        # 后需自带等级），字号缩小适配 4 字符宽度
         dr.text(
             (70, start_y + 35),
-            level,
-            font=font(40, FONT_RODIN),
+            ds,
+            font=font(30, FONT_RODIN),
             fill=FONT_BLUE,
             anchor="lm",
             stroke_width=4,
