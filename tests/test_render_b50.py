@@ -442,3 +442,48 @@ async def test_b50_render_smoke():
         "13", [sc], 1, 1
     )
     assert listing.startswith(b"\x89PNG")
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_flat_layout_bytes():
+    """flat 版式（条件50）：10 行等距铺满原跨度、不裁高、尺寸与标准卡一致。"""
+    from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import (
+        _flat_row_y,
+        best50_flat_bytes,
+    )
+
+    # 几何定稿（karenbot-combo-notes §8.4）：首行 y=235、末行 y=1313
+    # （行卡底 1313+109=1422，与标准卡最后一行对齐）
+    assert _flat_row_y(0) == 235
+    assert _flat_row_y(9) == 1313
+
+    base = Score(
+        id=1,
+        level="13",
+        level_index=LevelIndex.MASTER,
+        achievements=99.5,
+        fc=None,
+        fs=None,
+        dx_score=2000,
+        dx_rating=250,
+        play_count=None,
+        play_time=None,
+        rate=RateType.SSP,
+        type=SongType.DX,
+    )
+    sc = ScoreExtend(
+        **dataclasses.asdict(base),
+        title="RenderSong",
+        level_value=13.0,
+        level_dx_score=2400,
+        dx_star=4,
+        version=25000,
+    )
+    png = await best50_flat_bytes(
+        "tester", 250, [sc], label="辉50 · 1 条 · 合计 RA 250"
+    )
+    assert png.startswith(b"\x89PNG")
+    assert len(png) > 1000

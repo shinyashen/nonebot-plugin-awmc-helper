@@ -226,6 +226,29 @@ def rise_recommend(
     )
 
 
+def build_flat_bests(
+    scores: list[ScoreExtend],
+    *,
+    key: Callable[[ScoreExtend], Any],
+    n: int = 50,
+) -> PlayerBests:
+    """flat 组装（条件50 平铺形态，karenbot-combo-notes §8）：整体按 ``key``
+    降序取前 ``n`` 条，全部置于 b35 侧、b15 侧置空（渲染层 flat 版式消费）。
+
+    rating 三字段 = 所列成绩 RA 之和（与 :func:`build_bests` 同口径，不是
+    玩家 rating）；不拆新旧、不足 ``n`` 条照实返回（留白不回退）。
+    """
+    ordered = sorted(scores, key=key, reverse=True)[:n]
+    total = int(sum(s.dx_rating or 0 for s in ordered))
+    return PlayerBests(
+        rating=total,
+        rating_b35=total,
+        rating_b15=0,
+        scores_b35=ordered,
+        scores_b15=[],
+    )
+
+
 def build_bests(
     scores: list[ScoreExtend],
     *,

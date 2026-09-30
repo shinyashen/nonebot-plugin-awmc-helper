@@ -620,6 +620,84 @@ async def draw_b50_nb(
     return im
 
 
+FLAT_ROW_SPAN = 1078
+"""flat 版式行距跨度：10 行等距铺满原 b35+b15 总跨度（首行 y=235、
+末行卡底 1422，行距 ≈119.8；几何定稿见 karenbot-combo-notes §8.4）。"""
+
+
+def _flat_row_y(row: int) -> int:
+    """flat 版式第 ``row`` 行（0-9）的 y 坐标：235 + round(row × 1078/9)。"""
+    return 235 + round(row * FLAT_ROW_SPAN / 9)
+
+
+async def draw_b50_flat(
+    player_name: str,
+    rating_total: int,
+    scores: list[ScoreExtend],
+    *,
+    label: str,
+    player: Player | None = None,
+    qqid: int | None = None,
+    service: str | None = None,
+    theme: str = DEFAULT_THEME,
+    icon_image: bytes | None = None,
+    trophy_name: str | None = None,
+    trophy_color: str | None = None,
+    course_image: bytes | None = None,
+    class_image: bytes | None = None,
+    nameplate_image: bytes | None = None,
+    sub_of: Callable[[ScoreExtend], str | None] | None = None,
+) -> Image.Image:
+    """条件50 flat 版式（karenbot-combo-notes §8.4，原型已验证）。
+
+    取消 35/15 分区，10 行等距 × 5 列满卡布；底部装饰带与页脚位置和标准卡
+    完全一致、**不裁高**；不足 50 条空槽留底图。头部 rating 位=``rating_total``
+    （合计 RA），称号条=``label``（「条件 · 条数 · 合计RA」口径防误读；
+    称号条文字区约 260px / 14pt ≈ 36 显示列，超宽按 Hoshino 规则截断）。
+    """
+    im = assets.canvas("b50.png", theme)
+    draw = ImageDraw.Draw(im)
+    await _draw_header(
+        im,
+        draw,
+        player_name=player_name,
+        player=player,
+        qqid=qqid,
+        rating=rating_total,
+        rating_b35=0,
+        rating_b15=0,
+        theme=theme,
+        icon_image=icon_image,
+        trophy_name=truncate_hoshino(label, 36),
+        trophy_color=trophy_color,
+        course_image=course_image,
+        class_image=class_image,
+        nameplate_image=nameplate_image,
+    )
+    for num, score in enumerate(scores):
+        row, col = divmod(num, SCORE_ROW_COLS)
+        draw_score_row(
+            im,
+            draw,
+            SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP,
+            _flat_row_y(row),
+            score,
+            theme,
+            sub_of=sub_of,
+        )
+    service_name = SERVICE_DISPLAY.get(service or "", "")
+    draw.text(
+        (700, 1570),
+        credit_text(service_name or None),
+        font=font(22, FONT_HAN),
+        fill=theme_text_color(theme),
+        anchor="mm",
+        stroke_width=5,
+        stroke_fill=(255, 255, 255, 255),
+    )
+    return im
+
+
 async def best50_bytes(
     player_name: str,
     rating: int,
@@ -663,13 +741,56 @@ async def best50_bytes(
     )
 
 
-async def net_best50_card(bests, binding, *, sub_of=None) -> bytes:
-    """NET B50 系卡面（主插件 b50/ap50、导分插件 pc50 共用）。
+async def best50_flat_bytes(
+    player_name: str,
+    rating_total: int,
+    scores: list[ScoreExtend],
+    *,
+    label: str,
+    player: Player | None = None,
+    qqid: int | None = None,
+    service: str | None = None,
+    theme: str = DEFAULT_THEME,
+    icon_image: bytes | None = None,
+    trophy_name: str | None = None,
+    trophy_color: str | None = None,
+    course_image: bytes | None = None,
+    class_image: bytes | None = None,
+    nameplate_image: bytes | None = None,
+    sub_of: Callable[[ScoreExtend], str | None] | None = None,
+) -> bytes:
+    """:func:`draw_b50_flat` 的 bytes 出口（条件50 flat 版式）。"""
+    return image_to_bytes(
+        await draw_b50_flat(
+            player_name,
+            rating_total,
+            scores,
+            label=label,
+            player=player,
+            qqid=qqid,
+            service=service,
+            theme=theme,
+            icon_image=icon_image,
+            trophy_name=trophy_name,
+            trophy_color=trophy_color,
+            course_image=course_image,
+            class_image=class_image,
+            nameplate_image=nameplate_image,
+            sub_of=sub_of,
+        )
+    )
+
+
+async def net_best50_card(
+    bests, binding, *, sub_of=None, flat: bool = False, label: str = ""
+) -> bytes:
+    """NET B50 系卡面（主插件 b50/ap50/条件50、导分插件 pc50 共用）。
 
     ``bests`` 为组装好的 b35/b15 结构（PlayerBests 或 MaimaiScores 同构字段）；
     身份取 NET 窗口缓存的玩家资料（缺失回退 SEGA ID），头像/段位认定/
     でらっクラス/名牌素材并发落盘注入。调用方负责抓取提示（needs_fetch）
-    与成绩拉取——本函数只做身份装配 + 渲染。
+    与成绩拉取——本函数只做身份装配 + 渲染。``flat=True`` 走条件50 flat 版式；
+    ``label`` 为条件50 的称号条口径文案（玩家自带称号在场时优先称号）。
     """
     from . import jp_cover
     from ..binding import binding_service
@@ -677,6 +798,22 @@ async def net_best50_card(bests, binding, *, sub_of=None) -> bytes:
 
     player = net_score_service.player_of(binding)
     identity = await jp_cover.net_player_assets(player)
+    trophy = (player.trophy_name if player else None) or label or None
+    if flat:
+        return await best50_flat_bytes(
+            (player.name if player else None) or binding.net_sega_id or "maimai NET",
+            bests.rating,
+            bests.scores_b35,
+            label=label,
+            player=None,
+            qqid=binding_service.qq_of(binding),
+            service=binding.service,
+            theme=binding.theme or DEFAULT_THEME,
+            trophy_name=trophy,
+            trophy_color=player.trophy_color if player else None,
+            sub_of=sub_of,
+            **identity,
+        )
     return await best50_bytes(
         (player.name if player else None) or binding.net_sega_id or "maimai NET",
         bests.rating,
@@ -688,7 +825,7 @@ async def net_best50_card(bests, binding, *, sub_of=None) -> bytes:
         qqid=binding_service.qq_of(binding),
         service=binding.service,
         theme=binding.theme or DEFAULT_THEME,
-        trophy_name=player.trophy_name if player else None,
+        trophy_name=trophy,
         trophy_color=player.trophy_color if player else None,
         sub_of=sub_of,
         **identity,

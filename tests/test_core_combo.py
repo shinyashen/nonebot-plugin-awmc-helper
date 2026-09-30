@@ -1,0 +1,492 @@
+"""core/combo 条件组合查询测试：tokenizer 表驱动、assembler 四态邻接、执行器集成。
+
+样例曲库经 ``mocks.seed_service``（真实快照锚：199 チルノ SD[超/12000]+DX[丸
+回/26000]+蛸宴 100199、8 True Love Song[初/maimai]、624 KISS CANDY FLAVOR
+[堇/18500 其他游戏]）；成绩数值按「真实曲目 + 合理值」构造。
+导入放函数内：顶层 import 会在 nonebug 初始化前触发插件包加载（见 conftest）。
+"""
+
+from types import SimpleNamespace
+
+import pytest
+from mocks import seed_service
+
+
+def _score(
+    song_id: int,
+    *,
+    title: str = "t",
+    level_index=None,
+    type_=None,
+    achievements: float = 100.0,
+    fc=None,
+    fs=None,
+    dx_star: int | None = None,
+    version: int = 26000,
+    dx_rating: int | None = None,
+    level_value: float = 13.0,
+):
+    """构造 ScoreExtend（RA 缺省按定数 13.0 现算；rate 由达成率派生）。"""
+    from maimai_py import RateType, SongType, LevelIndex, ScoreExtend
+    from maimai_py.utils import ScoreCoefficient
+
+    return ScoreExtend(
+        id=song_id,
+        level="13",
+        level_index=level_index or LevelIndex.MASTER,
+        achievements=achievements,
+        fc=fc,
+        fs=fs,
+        dx_score=2000,
+        dx_rating=dx_rating
+        if dx_rating is not None
+        else int(ScoreCoefficient(achievements).ra(level_value)),
+        play_count=None,
+        play_time=None,
+        rate=RateType._from_achievement(achievements),
+        type=type_ or SongType.STANDARD,
+        title=title,
+        level_value=level_value,
+        level_dx_score=3000,
+        dx_star=dx_star,
+        version=version,
+    )
+
+
+class _FakeScoreService:
+    """run_combo 成绩侧替身：视图固定 CN，全量成绩静态给定。"""
+
+    def __init__(self, scores):
+        self.scores = scores
+
+    def view_of(self, service):
+        return "cn"
+
+    async def get_scores_all(self, binding, notify_slow=None):
+        return SimpleNamespace(scores=self.scores)
+
+
+def _binding():
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+
+    return UserBinding(platform="qq", user_id="10001", service="divingfish")
+
+
+@pytest.fixture
+async def db(tmp_path):
+    from nonebot_plugin_awmc_helper.core import store
+
+    store.set_db_file(tmp_path / "awmc.db")
+    await store.init_db()
+    yield
+    store.set_db_file(None)
+
+
+@pytest.fixture
+async def songs(db):
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await seed_service(song_service)
+    yield
+    song_service._ready.clear()
+
+
+# ---------------------------------------------------------------- tokenizer
+
+
+@pytest.mark.parametrize(
+    ("text", "kinds"),
+    [
+        # 层 1 复合/消歧词
+        ("紫谱", ["diff"]),
+        ("白谱", ["diff"]),
+        ("紫代", ["version"]),
+        ("白代", ["version"]),
+        ("舞舞", ["sync"]),
+        ("fdx", ["sync"]),
+        ("fsd", ["sync"]),
+        ("fdx+", ["sync"]),
+        ("fsdp", ["sync"]),
+        # 层 2 多字词
+        ("东方", ["genre"]),
+        ("音击中二", ["genre"]),
+        ("maimai", ["genre"]),
+        ("v家", ["genre"]),
+        ("大将", ["rate"]),
+        ("鸟加", ["rate"]),
+        ("纯", ["rate_mod"]),
+        ("仅", ["rate_mod"]),
+        ("牛逼", ["badge"]),
+        ("NB", ["badge"]),
+        ("越级", ["badge"]),
+        ("丢人", ["badge"]),
+        ("三星", ["star"]),
+        ("4星", ["star"]),
+        ("寸", ["cun"]),
+        ("名刀", ["kill"]),
+        ("锁血", ["kill"]),
+        ("锁", ["kill"]),
+        ("宴谱", ["utage"]),
+        ("宴会场", ["utage"]),
+        ("旧框", ["era"]),
+        ("DX", ["era"]),
+        ("dx谱", ["chart_type"]),
+        ("标准", ["chart_type"]),
+        ("新版本", ["newness"]),
+        ("新歌", ["newness"]),
+        ("旧版本", ["newness"]),
+        ("理想", ["ideal"]),
+        ("13级", ["level"]),
+        ("14+级", ["level"]),
+        ("14.5定数", ["ds"]),
+        ("SSS+", ["rate"]),
+        ("sss", ["rate"]),
+        ("ssp", ["rate"]),
+        ("aa", []),
+        ("s", ["rate"]),
+        ("霸", ["rate"]),
+        ("clear", ["rate"]),
+        ("全连", ["combo"]),
+        ("FC", ["combo"]),
+        ("ap", ["combo"]),
+        ("ap+", ["combo"]),
+        ("理论", ["combo"]),
+        # 层 3 原子
+        ("辉", ["version"]),
+        ("辉代", ["version"]),
+        ("真超檄", ["version"]),
+        ("雪辉", ["version"]),
+        ("暁", ["version"]),  # 繁体/和制牌字归一
+        ("绿", ["diff"]),
+        ("黄", ["diff"]),
+        ("红", ["diff"]),
+        ("将", ["kind"]),
+        ("極", ["kind"]),  # 牌种字归一
+        ("神", ["kind"]),
+        ("者", ["kind"]),
+        # FMM 邻接口径：版本段连续成段、层 1 先于层 3
+        ("祝将", ["version", "kind"]),
+        ("紫将", ["version", "kind"]),
+        ("雪辉dx", ["version", "era"]),
+        ("紫谱将", ["diff", "kind"]),
+    ],
+)
+def test_tokenizer_rules(text: str, kinds: list[str]):
+    """规则表逐条正例：kind 序列即词法形态（同层最长、层小优先）。"""
+    from nonebot_plugin_awmc_helper.core.combo import tokenize
+
+    assert [t.kind for t in tokenize(text)] == kinds
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1350",  # 纯数字串：无任何 token（级/定数必带）
+        "13.50",
+        "650",
+        "干饭去不吃",  # 零条件闲聊
+        "abc",
+    ],
+)
+def test_tokenizer_no_hits(text: str):
+    from nonebot_plugin_awmc_helper.core.combo import tokenize
+
+    assert tokenize(text) == []
+
+
+# ---------------------------------------------------------------- assembler 四态
+
+
+def test_parse_silent():
+    """零条件/纯数字串 → None（静默不回话，防闲聊误触发）。"""
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    assert parse_combo("1350") is None
+    assert parse_combo("13.50") is None
+    assert parse_combo("干饭去不吃") is None
+    assert parse_combo("") is None
+
+
+def test_parse_ambiguity():
+    """裸紫/白 → 歧义中止；紫代/白谱/紫将（牌绑定）豁免。"""
+    from nonebot_plugin_awmc_helper.core.combo import ComboAmbiguity, parse_combo
+
+    assert isinstance(parse_combo("紫"), ComboAmbiguity)
+    assert isinstance(parse_combo("白"), ComboAmbiguity)
+    assert not isinstance(parse_combo("紫代"), ComboAmbiguity)
+    assert not isinstance(parse_combo("白谱"), ComboAmbiguity)
+    assert not isinstance(parse_combo("紫将"), ComboAmbiguity)
+
+
+def test_parse_version_segment():
+    """版本字连续段：段内多版本 OR 成一个 Cond；真=初+真两码。"""
+    from maimai_py import Version
+
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    conds = parse_combo("雪辉")
+    assert len(conds) == 1
+    codes = conds[0].value
+    assert codes == {Version.MAIMAI_MILK_PLUS.value, Version.MAIMAI_FINALE.value}
+    assert Version.MAIMAI.value in parse_combo("真")[0].value
+    assert Version.MAIMAI_PLUS.value in parse_combo("真")[0].value
+
+
+def test_parse_three_types_and():
+    """S-1/S-3/S-5 三个不同 CondType：雪辉dx50 是 AND（版本 ∩ 世代）。"""
+    from nonebot_plugin_awmc_helper.core.combo import CondType, parse_combo
+
+    conds = parse_combo("雪辉dx")
+    assert [c.ctype for c in conds] == [CondType.VERSION, CondType.ERA]
+
+
+def test_parse_plate_binding():
+    """牌字+牌种 = 版本 + 判型分解（S-11 方案 B）；「者」落单丢弃。"""
+    from nonebot_plugin_awmc_helper.core.combo import CondType, parse_combo
+
+    assert [c.ctype for c in parse_combo("祝将")] == [
+        CondType.VERSION,
+        CondType.RATE,
+    ]
+    assert [c.ctype for c in parse_combo("紫极")] == [
+        CondType.VERSION,
+        CondType.COMBO,
+    ]
+    # 「者」不构成独立条件词：霸者50 退化为 ≥A 档
+    assert [c.ctype for c in parse_combo("霸者")] == [CondType.RATE]
+
+
+def test_parse_rate_exact():
+    """纯/仅 + 档位词 → 精确档；落单 rate_mod 残片忽略。"""
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    conds = parse_combo("纯sss")
+    assert len(conds) == 1
+    assert conds[0].value[1] is True  # (档位, exact)
+    assert parse_combo("纯") is None
+
+
+def test_parse_dedup():
+    """同型同键去重：神+ap 同为 AP 族（key=ap_all）只保留先声明者。"""
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    conds = parse_combo("神ap")
+    assert len(conds) == 1
+    assert conds[0].label == "神"
+
+
+def test_combo_family_inclusive():
+    """包含式语义（§9）：FC 族含 AP/APP；AP 族不含 FC；FSD 族含 FSDP。"""
+    from maimai_py import FCType, FSType
+
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    fc = parse_combo("fc")[0]
+    assert fc.record(_score(1, fc=FCType.FC))
+    assert fc.record(_score(1, fc=FCType.AP))  # AP 必然也是全连
+    ap = parse_combo("ap")[0]
+    assert ap.record(_score(1, fc=FCType.APP))
+    assert not ap.record(_score(1, fc=FCType.FC))
+    fsd = parse_combo("舞舞")[0]
+    assert fsd.record(_score(1, fs=FSType.FSDP))
+    assert not fsd.record(_score(1, fs=FSType.FS))
+
+
+def test_applicability_all_b50():
+    """P1 单输出：全部条件默认适用 b50（§9.7 机制先建、暂不触发）。"""
+    from nonebot_plugin_awmc_helper.core.combo import (
+        OutputKind,
+        parse_combo,
+        inapplicable,
+    )
+
+    assert inapplicable(parse_combo("雪辉dx神寸理想"), OutputKind.B50) == []
+
+
+# ---------------------------------------------------------------- 执行器
+
+
+@pytest.mark.asyncio
+async def test_run_combo_version_slice_flat(db, songs, monkeypatch):
+    """版本条件 → 库切片（平铺）：超(GREEN) 命中 199 的 SD 四谱键集。"""
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboResult, parse_combo
+
+    scores = [
+        _score(199, level_index=LevelIndex.EXPERT, version=12000, achievements=99.5),
+        _score(199, version=12000, achievements=98.0),
+    ]
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService(scores))
+    result = await combo_mod.run_combo(parse_combo("超"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.flat is True  # 谱面类条件在场 → 平铺
+    assert {(s.id, s.type, s.level_index) for s in result.scores} == {
+        (199, SongType.STANDARD, LevelIndex.EXPERT),
+        (199, SongType.STANDARD, LevelIndex.MASTER),
+    }
+    assert result.total_ra == sum(s.dx_rating or 0 for s in result.scores)
+    assert result.bests.scores_b15 == []
+
+
+@pytest.mark.asyncio
+async def test_run_combo_empty_charts_hint(db, songs, monkeypatch):
+    """雪辉dx：旧作版本 ∩ DX 世代 = ∅ → ComboEmpty 附点破提示。"""
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboEmpty, parse_combo
+
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([]))
+    result = await combo_mod.run_combo(parse_combo("雪辉dx"), _binding())
+    assert isinstance(result, ComboEmpty)
+    assert "无交集" in result.message
+
+
+@pytest.mark.asyncio
+async def test_run_combo_record_only_split(db, songs, monkeypatch):
+    """神50：纯成绩类 → 拆分（35/15），只保留 AP 族成绩。"""
+    from maimai_py import FCType, SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboResult, parse_combo
+
+    ap_new = _score(
+        199, type_=SongType.DX, fc=FCType.AP, version=25500, achievements=100.0
+    )
+    ap_old = _score(624, fc=FCType.APP, version=18500, achievements=100.5)
+    fc_only = _score(199, level_index=LevelIndex.EXPERT, fc=FCType.FC, version=12000)
+    monkeypatch.setattr(
+        combo_mod, "score_service", _FakeScoreService([ap_new, ap_old, fc_only])
+    )
+    result = await combo_mod.run_combo(parse_combo("神"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.flat is False  # 纯成绩类 → 拆分
+    assert {(s.id, s.level_index) for s in result.scores} == {
+        (199, LevelIndex.MASTER),
+        (624, LevelIndex.MASTER),
+    }
+    # 拆分：25500=CN 现行 → b15 侧；18500 → b35 侧
+    assert [s.id for s in result.bests.scores_b15] == [199]
+    assert [s.id for s in result.bests.scores_b35] == [624]
+
+
+@pytest.mark.asyncio
+async def test_run_combo_utage_only(db, songs, monkeypatch):
+    """宴谱50：仅宴谱（默认排除的反向条件），键=（diff_id, UTAGE, BASIC）。"""
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboResult, parse_combo
+
+    utage = _score(
+        100199,
+        type_=SongType.UTAGE,
+        level_index=LevelIndex.BASIC,
+        version=24000,
+        achievements=99.9,
+    )
+    normal = _score(199, achievements=100.5)
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([utage, normal]))
+    result = await combo_mod.run_combo(parse_combo("宴谱"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.flat is True
+    assert [s.id for s in result.scores] == [100199]
+
+
+@pytest.mark.asyncio
+async def test_run_combo_achievement_set_empty_renders(db, songs, monkeypatch):
+    """成绩集空（有谱面、无成绩）→ 照常返回空组装（渲染全空槽卡）。"""
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboResult, parse_combo
+
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([]))
+    result = await combo_mod.run_combo(parse_combo("超"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.scores == []
+    assert result.total_ra == 0
+
+
+@pytest.mark.asyncio
+async def test_run_combo_cun_sort_override(db, songs, monkeypatch):
+    """寸50：区间过滤 + 距目标线升序（排序覆盖默认 RA 降序）。"""
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    near_1005 = _score(1, achievements=100.47, version=12000)  # 距 100.5 = 0.03
+    near_1000 = _score(2, achievements=99.95, version=12000)  # 距 100.0 = 0.05
+    outside = _score(3, achievements=100.44, version=12000)  # 寸区间外
+    milestone = _score(4, achievements=100.0, version=12000)  # 归锁不归寸
+    monkeypatch.setattr(
+        combo_mod,
+        "score_service",
+        _FakeScoreService([near_1000, outside, near_1005, milestone]),
+    )
+    result = await combo_mod.run_combo(parse_combo("寸"), _binding())
+    assert [s.id for s in result.scores] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_run_combo_ideal_modifier_copy(db, songs, monkeypatch):
+    """理想50：副本升一档重算 RA；原成绩对象不被修改（NET 窗口缓存防污染）。"""
+    from maimai_py import RateType
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    s = _score(199, achievements=99.0, version=12000)  # SS → 升 SSP(99.5)
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([s]))
+    result = await combo_mod.run_combo(parse_combo("理想"), _binding())
+    (ideal,) = result.scores
+    assert ideal is not s
+    assert ideal.rate == RateType.SSP
+    assert ideal.achievements == 99.5
+    assert ideal.dx_rating > s.dx_rating
+    # 原对象分毫未动
+    assert s.rate == RateType.SS
+    assert s.achievements == 99.0
+
+
+@pytest.mark.asyncio
+async def test_run_combo_genre_slice(db, songs, monkeypatch):
+    """东方50：分类切片（谱面类 → 平铺）；非东方曲成绩不入选。"""
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboResult, parse_combo
+
+    chirno = _score(199, achievements=99.0, version=12000)
+    other = _score(624, achievements=100.5, version=18500)  # 其他游戏分类
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService([chirno, other]))
+    result = await combo_mod.run_combo(parse_combo("东方"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.flat is True
+    assert [s.id for s in result.scores] == [199]
+
+
+@pytest.mark.asyncio
+async def test_run_combo_plate_binding(db, songs, monkeypatch):
+    """堇将50：牌绑定 = 堇(MURASAKi PLUS) 版本切片 ∩ ≥SSS 成绩判型。"""
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import ComboResult, parse_combo
+
+    hit = _score(
+        624,
+        level_index=LevelIndex.MASTER,
+        version=18500,
+        achievements=100.5,  # SSS+ ≥ SSS 命中
+    )
+    miss = _score(
+        624,
+        level_index=LevelIndex.BASIC,
+        version=18500,
+        achievements=96.0,  # S 档不达 SSS
+    )
+    other = _score(199, version=12000, achievements=100.5)  # 非堇代谱面
+    monkeypatch.setattr(
+        combo_mod, "score_service", _FakeScoreService([hit, miss, other])
+    )
+    result = await combo_mod.run_combo(parse_combo("堇将"), _binding())
+    assert isinstance(result, ComboResult)
+    assert result.flat is True  # 牌绑定含版本条件 → 平铺
+    assert [s.id for s in result.scores] == [624]
+    assert result.title == "堇·将"

@@ -10,6 +10,14 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from .render import _ginfo_image
 from ...constants import DEFAULT_THEME, COLOR_TO_LEVEL_INDEX
 from ...core.help import CommandSpec, help_registry
+from ...core.combo import (
+    ComboEmpty,
+    OutputKind,
+    ComboAmbiguity,
+    run_combo,
+    parse_combo,
+    inapplicable,
+)
 from ...core.score import UserScoreError, build_bests, score_service
 from ...core.songs import (
     ChartEntry,
@@ -28,6 +36,7 @@ from ...core.songdb import Scope
 from ...core.binding import (
     UserBinding,
     SessionQueryBinding,
+    at_tolerant,
     query_binding,
     binding_service,
     resolve_session_query,
@@ -38,6 +47,9 @@ AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
 b50 = on_command("b50", aliases={"B50"}, block=True)
 ap50 = on_command("ap50", aliases={"AP50"}, block=True)
+# 条件组合查询（辉50/紫谱50/神50 类）：`^(.+?)(50)$` 松匹配，priority 必须
+# 低于全部既有指令（b50/13fc完成表 等先命中即 block，杜绝被本 matcher 吞掉）
+combo50 = on_regex(at_tolerant(r"^(.+?)(50)$"), block=True, priority=5)
 minfo = on_command(
     "minfo", aliases={"Minfo", "MINFO", "info", "Info", "INFO"}, block=True
 )
@@ -262,6 +274,81 @@ async def _(
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
+async def _render_combo(result, binding) -> bytes:
+    """条件50 结果渲染：flat（条件50）走 flat 版式，拆分沿用标准 35/15 版式。
+
+    头部 rating 位两种模式均为所列成绩 RA 合计（不是玩家 rating），称号条
+    以「条件 · 条数 · 合计RA」口径标注防误读（落雪称号在场时优先显示称号，
+    仅无称号回退口径条）；NET 源身份卡与 b50 共用 core 链路。
+    """
+    label = f"{result.title} · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
+    if score_service.view_of(binding.service) == "jp":
+        return await b50_render.net_best50_card(
+            result.bests, binding, flat=result.flat, label=label
+        )
+    player = await score_service.get_player(binding)
+    if result.flat:
+        return await b50_render.best50_flat_bytes(
+            player_display_name(player),
+            result.total_ra,
+            result.bests.scores_b35,
+            label=label,
+            player=player,
+            qqid=binding_service.qq_of(binding),
+            service=binding.service,
+            theme=binding.theme or DEFAULT_THEME,
+        )
+    return await b50_render.best50_bytes(
+        player_display_name(player),
+        result.bests.rating,
+        result.bests.rating_b35,
+        result.bests.rating_b15,
+        result.bests.scores_b35,
+        result.bests.scores_b15,
+        player=player,
+        qqid=binding_service.qq_of(binding),
+        service=binding.service,
+        theme=binding.theme or DEFAULT_THEME,
+        trophy_name=label,
+    )
+
+
+@combo50.handle()
+@handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
+async def _(
+    groups: tuple = RegexGroup(),
+    binding: UserBinding = SessionQueryBinding(
+        unbound_hint="对方尚未绑定查分器，无法代查"
+    ),
+):
+    """条件组合查询（解析/执行全在 core.combo，子插件只消费四态结果）：
+
+    出图 / 歧义提示（裸紫白）/ 谱面集空文案 / 静默（零条件——``^(.+?)50$``
+    松匹配下以 50 结尾的闲聊不是查询，绝不回话防刷屏）。
+    """
+    parsed = parse_combo(groups[0])
+    if parsed is None:
+        return
+    if isinstance(parsed, ComboAmbiguity):
+        await UniMessage.text(f" {parsed.message}").finish(at_sender=True)
+    if bad := inapplicable(parsed, OutputKind.B50):
+        # §9.7 适用矩阵（P1 仅 b50 一种输出，暂不触发；机制先建）
+        await UniMessage.text(
+            f" {'、'.join(c.label for c in bad)} 不适用于条件50"
+        ).finish(at_sender=True)
+    if score_service.view_of(binding.service) == "jp" and score_service.needs_fetch(
+        binding
+    ):
+        await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
+            at_sender=True
+        )
+    result = await run_combo(parsed, binding, notify_slow=slow_notice())
+    if isinstance(result, ComboEmpty):
+        await UniMessage.text(f" {result.message}").finish(at_sender=True)
+    png = await _render_combo(result, binding)
+    await UniMessage.image(raw=png).finish(at_sender=True)
+
+
 @minfo.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
@@ -351,6 +438,23 @@ help_registry.declare(
             aliases=("AP50",),
             capability=Capability.SCORES_ALL,
             brief="AP-only best50（全 AP 成绩组装出图）",
+        ),
+        CommandSpec(
+            matcher=combo50,
+            name="条件50",
+            capability=Capability.SCORES_ALL,
+            brief="条件组合查分：辉50 / 紫谱50 / 神50 / 寸50 等（@某人=代查）",
+            detail=(
+                "格式：<条件串>50，条件可任意叠加（同类「或」、跨类「且」），"
+                "末尾以 50 结尾即触发。条件词：\n"
+                "谱面：版本字（辉/雪辉/真超檄…可多代连写）、dx/旧框、标准/dx谱、"
+                "新版本/旧版本、分类（东方/音击中二/流行动漫/其他游戏/maimai）、"
+                "紫谱/白谱/绿/黄/红、13级、14.5定数、宴谱\n"
+                "成绩：fc/全连/极、ap/神、理论/ap+、舞舞/fdx、将/鸟/sss、"
+                "大将/鸟加/sss+、纯<档>/仅<档>、牛逼、越级、一星~五星、寸、"
+                "锁/名刀、理想\n"
+                "例：东方50、雪辉dx50、紫谱将50、祝将50、辉50"
+            ),
         ),
         CommandSpec(
             matcher=minfo,

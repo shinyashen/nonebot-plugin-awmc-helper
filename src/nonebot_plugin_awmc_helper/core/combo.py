@@ -1,0 +1,881 @@
+"""条件组合查询（「辉50」「紫谱50」「神50」类）：解析与执行，core 单源。
+
+设计权威：``local/reference/karenbot-combo-notes.md`` §8/§9/§11（2026-09-30
+定稿）。四段管线：matcher 剥尾缀 → :func:`parse_combo`（分层 FMM 词法扫描 +
+线性条件装配）→ :func:`run_combo`（曲库谱面键集 → 全量成绩过滤 → 组装）→
+渲染层。子插件只消费结果，不触碰解析/谓词（硬性架构规则 1/2）。
+
+- **输出四态**：``list[Cond]``（出图）/ :class:`ComboAmbiguity`（裸紫/白
+  歧义提示，不出图）/ ``None``（零条件或纯数字串——**静默不回话**，
+  ``^(.+?)50$`` 松匹配下以 50 结尾的闲聊不是本 bot 的消息）/ :class:`ComboEmpty`
+  （谱面集空，文案终止）。
+- **组合语义**：同 CondType OR、跨型 AND；版本字（S-1）/世代（S-3）/新旧
+  （S-5）是三个不同 CondType——「雪辉dx50」= 雪辉版本 ∩ DX 世代（AND，非并集）。
+- **n15 判定**（§8）：含谱面类条件 → 平铺（库切片语义），纯成绩类 → 拆分
+  （b50 变体）；不足 15 首留白不回退。``全``/``含new`` 已剔除，无强制出口。
+- **宴谱**：默认排除；S-19 宴谱条件在场时 = 仅宴谱。
+- **包含式语义**（§9）：FC 族 = fc 有值（AP 必然也是全连）、AP 族 =
+  ``fc ≤ AP``（FCType 值序 APP=0 最优）、FSD 族 = ``fs ≥ FSD``（FSType 值序
+  相反，SYNC=0 为无徽章）；rate 一律 ``RateType._from_achievement`` 派生；
+  达成率比较全走万分位整数。
+- **理想（S-25）**modifier 作用于 ``dataclasses.replace`` 副本——NET 成绩是
+  窗口缓存共享对象，禁止原地改。
+"""
+
+import re
+from enum import Enum
+from typing import Any
+from dataclasses import replace, dataclass
+from collections.abc import Callable
+
+from maimai_py import (
+    Song,
+    Genre,
+    FCType,
+    FSType,
+    Version,
+    RateType,
+    SongType,
+    LevelIndex,
+    ScoreExtend,
+    SongDifficulty,
+    current_version,
+    plate_to_version,
+    current_version_jp,
+)
+
+from .calc import build_bests, compute_rating, build_flat_bests
+from .score import score_service
+from .songs import song_service
+from .plates import norm_plate
+
+# ---------------------------------------------------------------- 模型
+
+
+class CondType(Enum):
+    """条件类型：同型 OR、跨型 AND；S-1/S-3/S-5 分型见模块 docstring。"""
+
+    # 谱面类（库切片；n15 → 平铺）
+    VERSION = "version"  # S-1 版本字连续段（码集）
+    ERA = "era"  # S-3 世代：旧框（≤19900）/ DX（>19900）
+    CHART_TYPE = "chart_type"  # S-4 谱面类型：标准/DX 谱（≠世代）
+    NEWNESS = "newness"  # S-5 新旧（按视图现行版本）
+    GENRE = "genre"  # S-6 曲目分类
+    DIFF = "diff"  # S-7 难度色（chart+record 双谓词）
+    LEVEL = "level"  # S-8 等级精确匹配
+    DS = "ds"  # S-9 定数精确匹配
+    UTAGE = "utage"  # S-19 仅宴谱（默认排除的反向条件）
+    # 成绩类（质量过滤；n15 → 拆分）
+    COMBO = "combo"  # S-12 FC 族 / AP 族 / 理论值
+    SYNC = "sync"  # S-13 FSD 族 / FSD+
+    RATE = "rate"  # S-14 评级档（≥ 档 / 纯·仅 == 档）
+    BADGE = "badge"  # S-15 牛逼（≥100.8）/ 越级（<95）
+    STAR = "star"  # S-16 DX 星数（恰好 N）
+    CUN = "cun"  # S-17 寸（距里程碑不足，排序覆盖）
+    KILL = "kill"  # S-18 名刀（刚过里程碑，排序覆盖）
+    IDEAL = "ideal"  # S-25 理想（升一档 modifier）
+
+
+CHART_COND_TYPES = frozenset(
+    {
+        CondType.VERSION,
+        CondType.ERA,
+        CondType.CHART_TYPE,
+        CondType.NEWNESS,
+        CondType.GENRE,
+        CondType.DIFF,
+        CondType.LEVEL,
+        CondType.DS,
+        CondType.UTAGE,
+    }
+)
+"""谱面类条件集（条件集含任一 → n15 平铺，§8）。"""
+
+
+class OutputKind(str, Enum):
+    """输出口径（§9.7 适用矩阵的轴）：条件 × 指令准入校验用。"""
+
+    B50 = "b50"
+    SCORE_LIST = "score_list"
+    TABLE = "table"
+    DS_TABLE = "ds_table"
+
+
+@dataclass(frozen=True)
+class Cond:
+    """单条条件（声明式）：谓词 + 展示名 + 可选排序覆盖/修改器。
+
+    ``key`` 为同型去重键（规范化载荷）；``value`` 保留原始载荷（空集点破的
+    静态矛盾检测读它）。``chart`` 第三参为视图现行版本码（NEWNESS 比较按
+    视图分界用，其余谓词忽略）——对设计稿 ``(Song, SongDifficulty)`` 签名的
+    实施修正（见笔记 §8.2）。``applicability`` 声明适用的输出口径（§9.7
+    矩阵；P1 仅 b50 一种输出，全部默认适用）。
+    """
+
+    ctype: CondType
+    key: str
+    label: str
+    chart: "Callable[[Song, SongDifficulty, int], bool] | None" = None
+    record: "Callable[[ScoreExtend], bool] | None" = None
+    sort_key: "Callable[[ScoreExtend], Any] | None" = None
+    modifier: "Callable[[ScoreExtend], ScoreExtend] | None" = None
+    value: Any = None
+    single_chart: bool = False
+    applicability: frozenset[OutputKind] = frozenset(OutputKind)
+
+
+@dataclass
+class ComboAmbiguity:
+    """歧义中止（裸紫/白）：整条查询不出图，回引导文案（§9.4）。"""
+
+    message: str
+
+
+@dataclass
+class ComboEmpty:
+    """谱面集空（§9.4）：条件语法合法但曲库无交集，文案终止（可点破矛盾）。"""
+
+    message: str
+
+
+@dataclass
+class ComboResult:
+    """执行产物：渲染层消费的组装结果。
+
+    ``flat=True`` 时组装体全部位于 ``bests.scores_b35``（b15 侧置空、rating =
+    合计 RA），渲染层走 flat 版式；``flat=False`` 为标准 35/15 拆分。
+    ``bests`` 为 maimai_py ``PlayerBests``。
+    """
+
+    title: str  # 条件显示串（称号条「条件 · 条数 · 合计RA」口径的条件段）
+    bests: Any
+    flat: bool
+    total_ra: int
+    scores: list[ScoreExtend]
+
+
+def inapplicable(conds: "list[Cond]", output: OutputKind) -> "list[Cond]":
+    """§9.7 适用矩阵校验：返回对 ``output`` 不适用的条件（P1 b50 恒空）。"""
+    return [c for c in conds if output not in c.applicability]
+
+
+# ---------------------------------------------------------------- 词表（纯数据）
+# 分层 FMM：逐位置扫描，层号小者优先、同层命中长者赢；未匹配字符跳过
+# （对齐 KarenBot contains 语义）。规则表纯数据，可表驱动测试。
+#
+# 层 1 = 复合/消歧词（先于版本段，消解吞噬）；层 2 = 多字词；层 3 = 原子。
+# P1 未注册：谱师别名（P2 动态）、回到过去「舞萌dxYYYY」（P3，层 1 预留）。
+
+# S-6 分类词（长词在前防前缀吞噬；口语别名本地补表）。⚠️ 不收单字「烤」
+# （误触发面大）；「宴」不进分类表——它是版本字（宴=双代），宴谱场景由
+# 「宴谱/宴会场」全称承担。
+_GENRE_WORDS: tuple[tuple[str, Genre], ...] = (
+    ("音击中二", Genre.オンゲキCHUNITHM),
+    ("ポップアニメ", Genre.POPSアニメ),
+    ("niconico", Genre.niconicoボーカロイド),
+    ("vocaloid", Genre.niconicoボーカロイド),
+    ("流行动漫", Genre.POPSアニメ),
+    ("其他游戏", Genre.ゲームバラエティ),
+    ("オンゲキ", Genre.オンゲキCHUNITHM),
+    ("ongeki", Genre.オンゲキCHUNITHM),
+    ("术力口", Genre.niconicoボーカロイド),
+    ("ボカロ", Genre.niconicoボーカロイド),
+    ("二次元", Genre.POPSアニメ),
+    ("variety", Genre.ゲームバラエティ),
+    ("maimai", Genre.maimai),
+    ("舞萌", Genre.maimai),
+    ("东方", Genre.東方Project),
+    ("東方", Genre.東方Project),
+    ("音击", Genre.オンゲキCHUNITHM),
+    ("中二", Genre.オンゲキCHUNITHM),
+    ("流行", Genre.POPSアニメ),
+    ("动漫", Genre.POPSアニメ),
+    ("游戏", Genre.ゲームバラエティ),
+    ("nico", Genre.niconicoボーカロイド),
+    ("pjsk", Genre.ゲームバラエティ),
+    ("车万", Genre.東方Project),
+    ("v家", Genre.niconicoボーカロイド),
+)
+_GENRE_PAIRS = sorted(_GENRE_WORDS, key=lambda p: len(p[0]), reverse=True)
+_GENRE_OF = {w.lower(): g for w, g in _GENRE_PAIRS}
+
+# S-14 评级档位词（≥ 语义）：alternation 长度降序防前缀吞噬（sss+ 先于 sss
+# 先于 ss 先于 s）；大小写不敏感（load 侧 lower 归一）。大将/鸟加 ≥SSS+、
+# 鸟 ≥SSS、霸/clear ≥A。
+_RATE_GE_WORDS = r"sssp|sss\+|ss\+|ssp|sss|ss|s\+|aaa|sp|s|clear|大将|鸟加|鸟|霸"
+_RATE_GE: "dict[str, RateType]" = {
+    "sssp": RateType.SSSP,
+    "sss+": RateType.SSSP,
+    "ss+": RateType.SSSP,
+    "ssp": RateType.SSSP,
+    "大将": RateType.SSSP,
+    "鸟加": RateType.SSSP,
+    "sss": RateType.SSS,
+    "鸟": RateType.SSS,
+    "ss": RateType.SS,
+    "s+": RateType.SP,
+    "sp": RateType.SP,
+    "s": RateType.S,
+    "aaa": RateType.AAA,
+    "霸": RateType.A,
+    "clear": RateType.A,
+}
+
+# S-12 连击族词：fc/全连 → FC 族；理论/ap+/app → 理论值；ap → AP 族
+_COMBO_ALTERNATION = r"全连|理论|fc|ap\+|app|ap"
+
+# S-13 同步族词（层 1 复合词）：FSD+ 变体先于 FSD 族
+_SYNC_ALTERNATION = r"fdxp|fsdp|fdx\+|fsd\+|fdx|fsd"
+
+# S-1 版本字连续段：含繁体/和制牌字（load 侧 norm_plate 归一）；「代」尾缀
+# 为布尔标记（裸字与「代」双注册同语义）；「未」不收（FUTURE 占位、两视图皆空）
+_VERSION_RUN = (
+    r"[初真超檄橙晓桃樱紫堇白雪辉舞熊华爽煌宙星祭祝双宴镜彩丸回廻暁櫻菫輝華鏡]+代?"
+)
+
+# S-8/S-9：数字尾缀 combo（50/40）下「级」「定数」必带——裸数字串（1350/650、
+# 13.50 类）一律不解析为条件（§9.4 拍板：群聊以 50 结尾的数字不是查询）
+_LEVEL_NUM = r"(\d{1,2}\+?)级"
+_DS_NUM = r"(\d{1,2})\.(\d)定数"
+
+_PURE_NUMBER = re.compile(r"[\d.]+")
+"""纯数字（含小数点）整串：一律静默（§11.1 拍板）。"""
+
+_AMBIGUITY_HINT = (
+    "「{ch}」有歧义：查{ch}谱（难度）请用「{ch}谱50」，查{ch}代（版本）请用「{ch}代50」"
+)
+"""裸紫/白的歧义引导文案（§9.4：不猜语义不出图）。"""
+
+
+@dataclass(frozen=True)
+class Token:
+    kind: str
+    value: Any
+    text: str
+    pos: int
+
+
+@dataclass(frozen=True)
+class _Rule:
+    layer: int
+    pattern: "re.Pattern[str]"
+    kind: str
+    load: "Callable[[re.Match[str]], Any]"
+
+
+def _const(value: Any):
+    return lambda m: value
+
+
+def _color_of(text: str) -> LevelIndex:
+    """难度色字 → LevelIndex（紫谱/白谱/绿黄红；裸紫白不走此路，见装配）。"""
+    from ..constants import COLOR_TO_LEVEL_INDEX
+
+    return COLOR_TO_LEVEL_INDEX[text]
+
+
+def _combo_kind_of(word: str) -> str:
+    """连击族词 → 子型（fc 全族 / ap 族 / app 理论值）。"""
+    if word in ("fc", "全连"):
+        return "fc_all"
+    if word in ("理论", "ap+", "app"):
+        return "app"
+    return "ap_all"
+
+
+def _star_of(text: str) -> int:
+    """星级词 → 星数（一~五 / 1~5）。"""
+    return "一二三四五12345".index(text[0]) % 5 + 1
+
+
+_RULES: "tuple[_Rule, ...]" = (
+    # ---- 层 1：复合/消歧词 ----
+    _Rule(1, re.compile(r"([紫白])谱"), "diff", lambda m: _color_of(m.group(1))),
+    _Rule(1, re.compile(r"([紫白])代"), "version", lambda m: ((m.group(1),), True)),
+    _Rule(1, re.compile(r"舞舞"), "sync", _const("fsd")),
+    _Rule(
+        1,
+        re.compile(_SYNC_ALTERNATION, re.IGNORECASE),
+        "sync",
+        lambda m: (
+            "fsdp" if m.group().lower() in ("fdxp", "fsdp", "fdx+", "fsd+") else "fsd"
+        ),
+    ),
+    # ---- 层 2：多字词 ----
+    _Rule(
+        2,
+        re.compile("|".join(w for w, _ in _GENRE_PAIRS), re.IGNORECASE),
+        "genre",
+        lambda m: _GENRE_OF[m.group().lower()],
+    ),
+    _Rule(2, re.compile(r"大将|鸟加"), "rate", _const("大将")),
+    _Rule(2, re.compile(r"纯|仅"), "rate_mod", _const(None)),
+    _Rule(2, re.compile(r"牛逼|nb", re.IGNORECASE), "badge", _const("nb")),
+    _Rule(2, re.compile(r"丢人|招笑|越级"), "badge", _const("loser")),
+    _Rule(2, re.compile(r"[一二三四五1-5]星"), "star", lambda m: _star_of(m.group())),
+    _Rule(2, re.compile(r"寸"), "cun", _const(None)),
+    _Rule(2, re.compile(r"锁血|名刀|血压|锁"), "kill", _const(None)),
+    _Rule(2, re.compile(r"宴谱|宴会场"), "utage", _const(None)),
+    _Rule(2, re.compile(r"旧框"), "era", _const("old")),
+    _Rule(2, re.compile(r"dx谱", re.IGNORECASE), "chart_type", _const(SongType.DX)),
+    _Rule(2, re.compile(r"标准"), "chart_type", _const(SongType.STANDARD)),
+    _Rule(2, re.compile(r"旧版本"), "newness", _const("old")),
+    _Rule(2, re.compile(r"新版本|新歌"), "newness", _const("new")),
+    _Rule(2, re.compile(r"理想"), "ideal", _const(None)),
+    _Rule(2, re.compile(_LEVEL_NUM), "level", lambda m: m.group(1)),
+    _Rule(
+        2,
+        re.compile(_DS_NUM),
+        "ds",
+        lambda m: int(m.group(1)) + int(m.group(2)) / 10,
+    ),
+    _Rule(
+        2,
+        re.compile(_RATE_GE_WORDS, re.IGNORECASE),
+        "rate",
+        lambda m: m.group().lower(),
+    ),
+    _Rule(
+        2,
+        re.compile(_COMBO_ALTERNATION, re.IGNORECASE),
+        "combo",
+        lambda m: _combo_kind_of(m.group().lower()),
+    ),
+    _Rule(2, re.compile(r"dx", re.IGNORECASE), "era", _const("dx")),
+    _Rule(2, re.compile(r"标"), "chart_type", _const(SongType.STANDARD)),
+    _Rule(2, re.compile(r"旧"), "newness", _const("old")),
+    _Rule(2, re.compile(r"新"), "newness", _const("new")),
+    # ---- 层 3：原子 ----
+    _Rule(
+        3,
+        re.compile(_VERSION_RUN),
+        "version",
+        lambda m: (
+            tuple(norm_plate(ch) for ch in m.group().rstrip("代")),
+            m.group().endswith("代"),
+        ),
+    ),
+    _Rule(3, re.compile(r"绿|黄|红"), "diff", lambda m: _color_of(m.group())),
+    _Rule(3, re.compile(r"将|极|神|者|極|將"), "kind", lambda m: norm_plate(m.group())),
+)
+
+
+def tokenize(text: str) -> "list[Token]":
+    """分层 FMM 扫描：层号小者优先、同层命中长者赢，未匹配字符跳过。"""
+    tokens: list[Token] = []
+    i = 0
+    while i < len(text):
+        best: "tuple[int, int, re.Match[str], _Rule] | None" = None
+        for rule in _RULES:
+            m = rule.pattern.match(text, i)
+            if m is None:
+                continue
+            # 层号小者优先；同层 m.end() 更大（命中更长）者赢——两维方向
+            # 相反，不能合成一个元组比较
+            if (
+                best is None
+                or rule.layer < best[0]
+                or (rule.layer == best[0] and m.end() > best[1])
+            ):
+                best = (rule.layer, m.end(), m, rule)
+        if best is None:
+            i += 1
+            continue
+        _, end, m, rule = best
+        tokens.append(Token(rule.kind, rule.load(m), m.group(), i))
+        i = end
+    return tokens
+
+
+# ---------------------------------------------------------------- 谓词工厂
+
+
+def _bps(a: "float | None") -> int:
+    """达成率 → 万分位整数（所有区间比较的统一口径）。"""
+    return round((a or 0) * 10000)
+
+
+def _version_codes(chars: "tuple[str, ...]") -> frozenset[int]:
+    """版本字 → 版本码集：「真」=初+真两码、「舞」=旧作全集（plates 同口径）。"""
+    codes: set[int] = set()
+    for ch in chars:
+        if ch == "真":
+            codes |= {Version.MAIMAI.value, Version.MAIMAI_PLUS.value}
+        elif ch == "舞":
+            codes |= {v.value for v in Version if v < Version.MAIMAI_DX}
+        else:
+            codes.add(plate_to_version[ch].value)
+    return frozenset(codes)
+
+
+def _version_cond(chars: "tuple[str, ...]", dai: bool) -> Cond:
+    codes = _version_codes(chars)
+    return Cond(
+        CondType.VERSION,
+        key="version:" + ",".join(sorted(map(str, codes))),
+        label="".join(chars) + ("代" if dai else ""),
+        chart=lambda s, d, _cur: d.version in codes,
+        value=codes,
+    )
+
+
+def _rate_cond(spec: "str | RateType", *, exact: bool = False) -> Cond:
+    """评级档条件（S-14）：≥ 档（默认）或 == 档（纯/仅）。"""
+    target = spec if isinstance(spec, RateType) else _RATE_GE[spec]
+    label = _RATE_LABEL[target] + ("纯" if exact else "")
+
+    def record(s: ScoreExtend, _t: RateType = target, _eq: bool = exact) -> bool:
+        if s.achievements is None:
+            return False
+        rate = RateType._from_achievement(s.achievements)
+        return rate == _t if _eq else rate.value <= _t.value
+
+    return Cond(
+        CondType.RATE,
+        key=f"rate:{'eq' if exact else 'ge'}:{target.name}",
+        label=label,
+        record=record,
+        value=(target, exact),
+    )
+
+
+def _combo_cond(kind: str) -> Cond:
+    """连击族条件（S-12 包含式）：FC 族 ⊃ AP 族 ⊃ 理论值。"""
+    if kind == "fc_all":
+        label, key = "FC", "fc_all"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fc is not None
+
+    elif kind == "ap_all":
+        label, key = "AP", "ap_all"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fc is not None and s.fc.value <= FCType.AP.value
+
+    else:
+        label, key = "理论值", "app"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fc == FCType.APP
+
+    return Cond(CondType.COMBO, key=key, label=label, record=record)
+
+
+def _sync_cond(kind: str) -> Cond:
+    """同步族条件（S-13 包含式）：FSType 值序与 FCType 相反（越大越好）。"""
+    if kind == "fsd":
+        label, key = "舞舞", "fsd"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fs is not None and s.fs.value >= FSType.FSD.value
+
+    else:
+        label, key = "舞舞+", "fsdp"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fs == FSType.FSDP
+
+    return Cond(CondType.SYNC, key=key, label=label, record=record)
+
+
+def _badge_cond(kind: str) -> Cond:
+    """牛逼/越级（S-15，万分位整数比较）。"""
+    if kind == "nb":
+        label, key = "牛逼", "nb"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.achievements is not None and _bps(s.achievements) >= 1008000
+
+    else:
+        label, key = "越级", "loser"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.achievements is not None and _bps(s.achievements) < 950000
+
+    return Cond(CondType.BADGE, key=key, label=label, record=record)
+
+
+def _star_cond(n: int) -> Cond:
+    """DX 星数（S-16，恰好 N 星；dx_score 缺失的记录不命中任何星档）。"""
+    return Cond(
+        CondType.STAR,
+        key=f"star:{n}",
+        label=f"{n}星",
+        record=lambda s: s.dx_star == n,
+        value=n,
+    )
+
+
+def _cun_distance(bps: int) -> int:
+    """寸：距所属里程碑（100.0 / 100.5）的万分位差。"""
+    return 1005000 - bps if bps >= 1004500 else 1000000 - bps
+
+
+def _kill_overshoot(bps: int) -> int:
+    """名刀：超出所属里程碑（100.0 / 100.5）的万分位量。"""
+    return bps - 1005000 if bps >= 1005000 else bps - 1000000
+
+
+def _cun_cond() -> Cond:
+    """寸（S-17 定稿区间）：[99.9,100) ∪ [100.45,100.5)，按距目标线升序。"""
+    return Cond(
+        CondType.CUN,
+        key="cun",
+        label="寸",
+        record=lambda s: (
+            s.achievements is not None
+            and (
+                999000 <= _bps(s.achievements) < 1000000
+                or 1004500 <= _bps(s.achievements) < 1005000
+            )
+        ),
+        sort_key=lambda s: -_cun_distance(_bps(s.achievements)),
+    )
+
+
+def _kill_cond() -> Cond:
+    """名刀（S-18 定稿区间）：[100,100.1) ∪ [100.5,100.55)，按超出量升序。"""
+    return Cond(
+        CondType.KILL,
+        key="kill",
+        label="名刀",
+        record=lambda s: (
+            s.achievements is not None
+            and (
+                1000000 <= _bps(s.achievements) < 1001000
+                or 1005000 <= _bps(s.achievements) < 1005500
+            )
+        ),
+        sort_key=lambda s: -_kill_overshoot(_bps(s.achievements)),
+    )
+
+
+def _ideal_of(s: ScoreExtend) -> ScoreExtend:
+    """理想（S-25）：升一档重算 RA（SSSP 封顶=理论值 101/AP+）。
+
+    返回 ``dataclasses.replace`` 副本——NET 成绩是窗口缓存共享对象，
+    原地改会污染缓存。
+    """
+    if s.rate == RateType.SSSP:
+        return replace(
+            s,
+            achievements=101.0,
+            fc=FCType.APP,
+            dx_rating=compute_rating(s.level_value, 101.0),
+        )
+    nxt = RateType(s.rate.value - 1)
+    ach = _RATE_FLOOR[nxt]
+    return replace(
+        s, rate=nxt, achievements=ach, dx_rating=compute_rating(s.level_value, ach)
+    )
+
+
+def _ideal_cond() -> Cond:
+    return Cond(CondType.IDEAL, key="ideal", label="理想", modifier=_ideal_of)
+
+
+_RATE_FLOOR: "dict[RateType, float]" = {
+    RateType.SSSP: 100.5,
+    RateType.SSS: 100.0,
+    RateType.SSP: 99.5,
+    RateType.SS: 99.0,
+    RateType.SP: 98.0,
+    RateType.S: 97.0,
+    RateType.AAA: 94.0,
+    RateType.AA: 90.0,
+    RateType.A: 80.0,
+    RateType.BBB: 75.0,
+    RateType.BB: 70.0,
+    RateType.B: 60.0,
+    RateType.C: 50.0,
+    RateType.D: 50.0,
+}
+"""评级档位下限达成率（对齐 ``RateType._from_achievement`` 阈值；理想升档用）。"""
+
+_RATE_LABEL: "dict[RateType, str]" = {
+    RateType.SSSP: "SSS+",
+    RateType.SSS: "SSS",
+    RateType.SSP: "SS+",
+    RateType.SS: "SS",
+    RateType.SP: "S+",
+    RateType.S: "S",
+    RateType.AAA: "AAA",
+    RateType.AA: "AA",
+    RateType.A: "A",
+}
+
+# 牌种字 → 判型条件（S-11 方案 B：牌条件 = 版本 Cond + 判型 Cond 的分解，
+# 「紫将50」与 紫+将 自然同一）；「者」（覇者 ≥A）仅牌绑定内部谓词、落单丢弃
+_KIND_CONDS: "dict[str, Cond]" = {
+    "将": replace(_rate_cond("sss"), label="将"),
+    "极": replace(_combo_cond("fc_all"), label="极"),
+    "神": replace(_combo_cond("ap_all"), label="神"),
+    "者": replace(_rate_cond(RateType.A), label="者"),
+}
+
+
+# ---------------------------------------------------------------- 装配（assembler）
+# 全部邻接/上下文规则集中于此（§11.3）；未识别残片忽略（contains 语义）。
+
+
+def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
+    conds: "list[Cond]" = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if t.kind == "version":
+            chars, dai = t.value
+            if len(chars) == 1 and chars[0] in ("紫", "白") and not dai:
+                # 裸紫/白（段长 1 且无「代」）：右邻牌种字 → 牌绑定（歧义豁免）；
+                # 否则中止。「紫代/白谱」等显式组合在层 1 已消解，不受影响
+                if nxt is not None and nxt.kind == "kind" and nxt.value in _KIND_CONDS:
+                    conds.append(_version_cond(chars, False))
+                    conds.append(_KIND_CONDS[nxt.value])
+                    i += 2
+                    continue
+                return ComboAmbiguity(_AMBIGUITY_HINT.format(ch=chars[0]))
+            conds.append(_version_cond(chars, dai))
+        elif t.kind == "kind":
+            if cond := _KIND_CONDS.get(t.value):
+                conds.append(cond)  # 「者」落单丢弃（S-11 内部谓词不暴露）
+        elif t.kind == "rate_mod":
+            # 纯/仅：绑定紧邻档位词 → 精确档变体；落单残片忽略
+            if nxt is not None and nxt.kind == "rate" and nxt.value in _RATE_GE:
+                conds.append(_rate_cond(nxt.value, exact=True))
+                i += 2
+                continue
+        elif t.kind == "rate":
+            if t.value in _RATE_GE:
+                conds.append(_rate_cond(t.value))
+        elif t.kind == "combo":
+            conds.append(_combo_cond(t.value))
+        elif t.kind == "sync":
+            conds.append(_sync_cond(t.value))
+        elif t.kind == "badge":
+            conds.append(_badge_cond(t.value))
+        elif t.kind == "star":
+            conds.append(_star_cond(t.value))
+        elif t.kind == "cun":
+            conds.append(_cun_cond())
+        elif t.kind == "kill":
+            conds.append(_kill_cond())
+        elif t.kind == "ideal":
+            conds.append(_ideal_cond())
+        elif t.kind == "diff":
+            li: LevelIndex = t.value
+            conds.append(
+                Cond(
+                    CondType.DIFF,
+                    key=f"diff:{li.name}",
+                    label=t.text,
+                    chart=lambda s, d, _cur, _li=li: d.level_index == _li,
+                    record=lambda s, _li=li: s.level_index == _li,
+                    value=li,
+                    single_chart=True,
+                )
+            )
+        elif t.kind == "level":
+            lv: str = t.value
+            conds.append(
+                Cond(
+                    CondType.LEVEL,
+                    key=f"level:{lv}",
+                    label=f"{lv}级",
+                    chart=lambda s, d, _cur, _lv=lv: d.level == _lv,
+                    value=lv,
+                    single_chart=True,
+                )
+            )
+        elif t.kind == "ds":
+            v: float = t.value
+            conds.append(
+                Cond(
+                    CondType.DS,
+                    key=f"ds:{round(v * 10)}",
+                    label=f"{v}定数",
+                    chart=lambda s, d, _cur, _v=v: (
+                        round(d.level_value * 10) == round(_v * 10)
+                    ),
+                    value=v,
+                    single_chart=True,
+                )
+            )
+        elif t.kind == "genre":
+            g: Genre = t.value
+            conds.append(
+                Cond(
+                    CondType.GENRE,
+                    key=f"genre:{g.name}",
+                    label=t.text,
+                    chart=lambda s, d, _cur, _g=g: s.genre == _g,
+                    value=g,
+                )
+            )
+        elif t.kind == "era":
+            which: str = t.value
+            conds.append(
+                Cond(
+                    CondType.ERA,
+                    key=f"era:{which}",
+                    label="dx" if which == "dx" else "旧框",
+                    chart=(
+                        (lambda s, d, _cur: d.version > 19900)
+                        if which == "dx"
+                        else (lambda s, d, _cur: d.version <= 19900)
+                    ),
+                    value=which,
+                )
+            )
+        elif t.kind == "chart_type":
+            st: SongType = t.value
+            conds.append(
+                Cond(
+                    CondType.CHART_TYPE,
+                    key=f"ctype:{st.name}",
+                    label="dx谱" if st == SongType.DX else "标准",
+                    chart=lambda s, d, _cur, _st=st: d.type == _st,
+                    value=st,
+                )
+            )
+        elif t.kind == "newness":
+            which_n: str = t.value
+            conds.append(
+                Cond(
+                    CondType.NEWNESS,
+                    key=f"new:{which_n}",
+                    label="新版本" if which_n == "new" else "旧版本",
+                    chart=lambda s, d, cur, _w=which_n: (
+                        d.version == cur if _w == "new" else d.version != cur
+                    ),
+                    value=which_n,
+                )
+            )
+        elif t.kind == "utage":
+            conds.append(
+                Cond(
+                    CondType.UTAGE,
+                    key="utage",
+                    label="宴谱",
+                    chart=lambda s, d, _cur: d.type == SongType.UTAGE,
+                )
+            )
+        i += 1
+    # 同型同键去重（§9.0：同一 Cond 不重复计入），保持解析顺序
+    seen: set[tuple[CondType, str]] = set()
+    deduped: "list[Cond]" = []
+    for c in conds:
+        if (k := (c.ctype, c.key)) not in seen:
+            seen.add(k)
+            deduped.append(c)
+    return deduped or None
+
+
+def parse_combo(text: str) -> "list[Cond] | ComboAmbiguity | None":
+    """条件串 → 条件表 / 歧义中止 / None（零条件，静默不回话）。"""
+    text = text.strip()
+    if not text or _PURE_NUMBER.fullmatch(text):
+        return None
+    return _assemble(tokenize(text))
+
+
+# ---------------------------------------------------------------- 执行器
+
+
+def _empty_message(conds: "list[Cond]", cur: int) -> str:
+    """谱面集空文案：可静态判定的版本∩世代/新旧矛盾附点破提示（§9.4）。"""
+    ver = next((c for c in conds if c.ctype is CondType.VERSION), None)
+    if ver is None:
+        return "没有符合条件的谱面"
+    codes: "frozenset[int]" = ver.value
+    dx_bound = Version.MAIMAI_DX.value
+    all_old = all(code < dx_bound for code in codes)
+    all_new = all(code >= dx_bound for code in codes)
+    era = next((c for c in conds if c.ctype is CondType.ERA), None)
+    if era is not None:
+        if era.value == "dx" and all_old:
+            return f"没有符合条件的谱面（{ver.label} 为旧作版本，与 dx 世代无交集）"
+        if era.value == "old" and all_new:
+            return f"没有符合条件的谱面（{ver.label} 为 DX 世代版本，与旧框无交集）"
+    new = next((c for c in conds if c.ctype is CondType.NEWNESS), None)
+    if new is not None:
+        if new.value == "new" and all(code < cur for code in codes):
+            return f"没有符合条件的谱面（{ver.label} 非当前版本，与「新版本」无交集）"
+        if new.value == "old" and all(code >= cur for code in codes):
+            return f"没有符合条件的谱面（{ver.label} 即当前版本，与「旧版本」无交集）"
+    return "没有符合条件的谱面"
+
+
+def _chart_key(song: Song, diff: SongDifficulty) -> "tuple[int, SongType, LevelIndex]":
+    """谱面键（与成绩 id 口径对齐）：SD/DX = 归一根 id；宴谱 = diff_id
+    （水鱼 _deser_score 对 >100000 的 song_id 原样保留、本模块 NET 抓取不含
+    宴谱），与完成表 ``chart_display_id`` 同语义。"""
+    if diff.type == SongType.UTAGE:
+        return (diff.diff_id, diff.type, diff.level_index)
+    return (song.id, diff.type, diff.level_index)
+
+
+async def run_combo(
+    conds: "list[Cond]",
+    binding,
+    notify_slow: "Callable[[], Any] | None" = None,
+) -> "ComboResult | ComboEmpty":
+    """执行条件组合（§8.3）：曲库键集 → 全量成绩过滤 → 排序/修改 → 组装。
+
+    一次 IO（``get_scores_all``，NET 走窗口缓存）+ 纯过滤；谱面类条件在绑定
+    源视图的曲库上产出谱面键集 ``(id, type, level_index)``（各源成绩 id 均为
+    归一根 id、宴谱为 diff_id，与完成表同口径）。谱面集空 → :class:`ComboEmpty`；
+    成绩集空 → 照常返回空组装（渲染全空槽卡，对齐两上游）。
+    ``notify_slow``：落雪续期等待的慢提示回调，透传成绩拉取。
+    """
+    jp = score_service.view_of(binding.service) == "jp"
+    songs = await (song_service.jp_all() if jp else song_service.get_all())
+    cur = current_version_jp.value if jp else current_version.value
+    chart_conds = [c for c in conds if c.chart is not None]
+    record_conds = [c for c in conds if c.record is not None]
+    has_utage = any(c.ctype is CondType.UTAGE for c in conds)
+
+    keys: "set[tuple[int, SongType, LevelIndex]] | None" = None
+    if chart_conds:
+        keys = set()
+        for song in songs:
+            for diff in song.get_difficulties():
+                if (diff.type == SongType.UTAGE) != has_utage:
+                    # 宴谱默认排除；宴谱条件在场时 = 仅宴谱
+                    continue
+                if all(c.chart(song, diff, cur) for c in chart_conds):
+                    keys.add(_chart_key(song, diff))
+        if not keys:
+            return ComboEmpty(_empty_message(conds, cur))
+
+    scores = (await score_service.get_scores_all(binding, notify_slow)).scores
+    if keys is not None:
+        scores = [s for s in scores if (s.id, s.type, s.level_index) in keys]
+    else:
+        scores = list(scores)
+    scores = [s for s in scores if (s.type == SongType.UTAGE) == has_utage]
+    scores = [s for s in scores if all(c.record(s) for c in record_conds)]
+
+    # 排序覆盖 / modifier：取最后声明者（§9.0）
+    sort_key = next(
+        (c.sort_key for c in reversed(conds) if c.sort_key is not None),
+        lambda s: s.dx_rating or 0,
+    )
+    modifier = next((c.modifier for c in reversed(conds) if c.modifier), None)
+    if modifier is not None:
+        scores = [modifier(s) for s in scores]
+
+    # n15 判定（§8）：条件集构成派生——含谱面类 → 平铺，纯成绩类 → 拆分
+    flat = any(c.ctype in CHART_COND_TYPES for c in conds)
+    if flat:
+        bests = build_flat_bests(scores, key=sort_key)
+    else:
+        bests = build_bests(scores, key=sort_key, latest_version_value=cur)
+    return ComboResult(
+        title="·".join(c.label for c in conds),
+        bests=bests,
+        flat=flat,
+        total_ra=bests.rating,
+        scores=bests.scores_b35 + bests.scores_b15,
+    )

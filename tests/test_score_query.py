@@ -1034,3 +1034,41 @@ async def test_ginfo_jp_only_numeric_fallback(app: App, db, songs, monkeypatch):
     await _send_image_reply(
         app, score_query.ginfo, "ginfo 1634", expected, with_session=False
     )
+
+
+# ------------------------------------------------------------- 条件50（combo50）
+
+import re as _re
+
+
+def test_combo_regex_captures():
+    """at_tolerant 包装不改变捕获组：尾缀前为条件串、末尾 50 为尾缀。"""
+    from nonebot_plugin_awmc_helper.core.binding import at_tolerant
+
+    pat = _re.compile(at_tolerant(r"^(.+?)(50)$"))
+    assert pat.match("东方50").groups() == ("东方", "50")
+    # 「b50」「1350」同形状命中松匹配——分别被 priority 1 的 b50 命令与
+    # 解析静默兜住（正则层只保证捕获正确，不保证最终响应）
+    assert pat.match("b50").groups() == ("b", "50")
+    assert pat.match("1350").groups() == ("13", "50")
+
+
+def test_combo50_priority_below_all_existing():
+    """combo50 注册优先级必须低于全部既有指令（b50/完成表等先命中即 block）。"""
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    assert sq.combo50.priority == 5
+    assert sq.combo50.priority > sq.b50.priority
+    assert sq.combo50.priority > sq.ap50.priority
+    assert sq.combo50.block is True
+
+
+def test_combo50_help_declared():
+    """帮助声明：capability=SCORES_ALL（水鱼/落雪/NET 均支持全量成绩）。"""
+    from nonebot_plugin_awmc_helper.core.help import help_registry
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    spec = help_registry.spec_of(sq.combo50)
+    assert spec is not None
+    assert spec.capability == "scores_all"
+    assert spec.name == "条件50"
