@@ -1635,3 +1635,24 @@ async def test_run_combo_b40_excludes_utage(db, songs, monkeypatch):
         parse_combo("牛逼"), _binding(), output=OutputKind.B40
     )
     assert [s.id for s in result.scores] == [199]
+
+
+# ---------------------------------------------------------------- at 段位置
+
+
+def test_parse_combo_strips_at_segments():
+    """at 夹在条件词中间：昵称里的条件字不污染解析（雪/神/将等单字）。"""
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    # 中间 at：条件串会捕获 CQ 码全文，剥除后仅剩东方
+    conds = parse_combo("东方[CQ:at,qq=99999999,name=雪] ")
+    assert [(c.ctype.value, c.label) for c in conds] == [("genre", "东方")]
+    # 昵称含多字条件词同样不污染
+    conds = parse_combo("东方[CQ:at,qq=99999999,name=大将]50")
+    assert [(c.ctype.value, c.label) for c in conds] == [("genre", "东方")]
+    # 纯 at 串 → 零条件静默
+    assert parse_combo("[CQ:at,qq=99999999,name=雪]") is None
+    # 无 at 的输入不受影响
+    assert [(c.ctype.value, c.label) for c in parse_combo("东方50")] == [
+        ("genre", "东方")
+    ]

@@ -1238,7 +1238,9 @@ def parse_combo(
     （分数列表等）排除纯数字闲聊、裸数字即可。默认 False（b50 语境保持
     「1350/650 静默」防护）。
     """
-    text = text.strip()
+    from .binding import strip_at_segments
+
+    text = strip_at_segments(text).strip()
     if not text:
         return None
     if _PURE_NUMBER.fullmatch(text) or (

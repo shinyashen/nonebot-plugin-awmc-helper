@@ -6,6 +6,7 @@ core/ext/divingfish 直连补齐）——水鱼绑定三档：「绑定水鱼」
 落雪为「OAuth 授权码换个人 token」或「好友码 + 开发者 token」。
 """
 
+import re
 import time
 import asyncio
 import hashlib
@@ -155,6 +156,17 @@ r"""消息串中可容忍的 at 段连排（段间/段后空白一并吞掉）�
 消息串以「at 段 + 尾随空格」结束（``…[CQ:at,qq=..,name=..] ``）；段数据可带
 ``name=`` 键。``[^\]]*`` 对段内数据整体吞（nickname 的 ``]`` 已被 CQ 转义）。
 """
+
+
+def strip_at_segments(text: str) -> str:
+    """剥除消息串中的 at 段（条件文本清洗用）：段形状与
+    :func:`extract_at_target` 同口径（OneBot v11），段间/前后空白一并吞掉。
+
+    用于「at 夹在条件词中间」的形态（如「东方 @某人 50」）——此时 at 段
+    落入正则捕获的条件串，昵称里的条件字（雪/神/将…）会污染解析；头部/
+    尾部 at 由 :func:`at_tolerant` 锚点吞掉，不经此函数。
+    """
+    return re.sub(r"\s*\[CQ:at,[^\]]*\]", "", text)
 
 
 def at_tolerant(pattern: str) -> str:
