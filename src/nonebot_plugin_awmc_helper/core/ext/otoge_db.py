@@ -21,3 +21,26 @@ async def fetch_music_ex() -> list[dict]:
 async def fetch_music_ex_deleted() -> list[dict]:
     """下架记录表。"""
     return await _fetch_json("music-ex-deleted.json")
+
+
+_fetch_ongeki = fetch_github_raw(
+    "https://raw.githubusercontent.com/zvuc/otoge-db/main/ongeki/data",
+    source="otoge-db",
+)
+"""音击曲库（同仓 ongeki 目录；中二/音击侧别判定数据源，combo 笔记 §12.4）。"""
+
+
+async def fetch_ongeki_origin() -> "list[dict]":
+    """音击原创栏条目（现役 + 下架一体抓取，供 norm_title 标题集）。
+
+    两文件作为一个作业：任一失败整体抛错（songdb 侧保留旧集合）——下架
+    记录（music-ex-deleted，含オンゲキ 5）单独缺档会造成「原创曲已从音击
+    下架但 maimai 仍在」的误判缺口，不允部分成功。
+    """
+    import asyncio
+
+    music, deleted = await asyncio.gather(
+        _fetch_ongeki("music.json"),
+        _fetch_ongeki("music-ex-deleted.json"),
+    )
+    return [*music, *deleted]

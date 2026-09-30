@@ -48,6 +48,7 @@ from .calc import build_bests, compute_rating, build_flat_bests
 from .score import score_service
 from .songs import song_service
 from .plates import norm_plate
+from .songdb import ensure_ongeki_titles
 from ..constants import normalize_text
 
 # ---------------------------------------------------------------- 模型
@@ -62,6 +63,7 @@ class CondType(Enum):
     CHART_TYPE = "chart_type"  # S-4 谱面类型：标准/DX 谱（≠世代）
     NEWNESS = "newness"  # S-5 新旧（按视图现行版本）
     GENRE = "genre"  # S-6 曲目分类
+    GENRE_SUB = "genre_sub"  # S-6 细分：中二/音击（オンゲキCHUNITHM 大类二分）
     DIFF = "diff"  # S-7 难度色（chart+record 双谓词）
     LEVEL = "level"  # S-8 等级精确匹配
     DS = "ds"  # S-9 定数精确匹配
@@ -87,6 +89,7 @@ CHART_COND_TYPES = frozenset(
         CondType.CHART_TYPE,
         CondType.NEWNESS,
         CondType.GENRE,
+        CondType.GENRE_SUB,
         CondType.DIFF,
         CondType.LEVEL,
         CondType.DS,
@@ -269,18 +272,16 @@ _GENRE_WORDS: tuple[tuple[str, Genre], ...] = (
     ("vocaloid", Genre.niconicoボーカロイド),
     ("流行动漫", Genre.POPSアニメ),
     ("其他游戏", Genre.ゲームバラエティ),
-    ("オンゲキ", Genre.オンゲキCHUNITHM),
-    ("ongeki", Genre.オンゲキCHUNITHM),
     ("术力口", Genre.niconicoボーカロイド),
     ("ボカロ", Genre.niconicoボーカロイド),
     ("二次元", Genre.POPSアニメ),
     ("variety", Genre.ゲームバラエティ),
+    ("音击中二", Genre.オンゲキCHUNITHM),
+    ("中二音击", Genre.オンゲキCHUNITHM),
     ("maimai", Genre.maimai),
     ("舞萌", Genre.maimai),
     ("东方", Genre.東方Project),
     ("東方", Genre.東方Project),
-    ("音击", Genre.オンゲキCHUNITHM),
-    ("中二", Genre.オンゲキCHUNITHM),
     ("流行", Genre.POPSアニメ),
     ("动漫", Genre.POPSアニメ),
     ("游戏", Genre.ゲームバラエティ),
@@ -291,6 +292,18 @@ _GENRE_WORDS: tuple[tuple[str, Genre], ...] = (
 )
 _GENRE_PAIRS = sorted(_GENRE_WORDS, key=lambda p: len(p[0]), reverse=True)
 _GENRE_OF = {w.lower(): g for w, g in _GENRE_PAIRS}
+
+# S-6 细分词（オンゲキCHUNITHM 大类二分，2026-09-30 用户穷举别名口径）：
+# 中二 = 中二/中二节奏/chunithm，音击 = 音击/ongeki；全称「音击中二」仍在
+# 大类词表（同层最长匹配自然先于侧别词命中）
+_GENRE_SUB_WORDS: "tuple[tuple[str, str], ...]" = (
+    ("中二节奏", "chunithm"),
+    ("chunithm", "chunithm"),
+    ("ongeki", "ongeki"),
+    ("中二", "chunithm"),
+    ("音击", "ongeki"),
+)
+_GENRE_SUB_PAIRS = sorted(_GENRE_SUB_WORDS, key=lambda p: len(p[0]), reverse=True)
 
 # S-14 评级档位词（≥ 语义）：alternation 长度降序防前缀吞噬（sss+ 先于 sss
 # 先于 ss 先于 s）；大小写不敏感（load 侧 lower 归一）。大将/鸟加 ≥SSS+、
@@ -367,6 +380,18 @@ def _const(value: Any):
     return lambda m: value
 
 
+def _genre_sub_match(song: Song, which: str) -> bool:
+    """中二/音击侧别判定（§12.3 归属算法）：オンゲキCHUNITHM 大类内，
+    norm_title ∈ ongeki 原创栏标题集 → 音击，其余默认中二（イロドリミドリ
+    并入中二侧）。集合未加载（冷启动且 kv 无值）时音击=空集、中二=大类。"""
+    if song.genre != Genre.オンゲキCHUNITHM:
+        return False
+    from .songdb import norm_title, ongeki_titles
+
+    in_ongeki = norm_title(song.title) in ongeki_titles()
+    return in_ongeki if which == "ongeki" else not in_ongeki
+
+
 def _color_of(text: str) -> LevelIndex:
     """难度色字 → LevelIndex（紫谱/白谱/绿黄红；裸紫白不走此路，见装配）。"""
     from ..constants import COLOR_TO_LEVEL_INDEX
@@ -418,6 +443,12 @@ _RULES: "tuple[_Rule, ...]" = (
         re.compile("|".join(w for w, _ in _GENRE_PAIRS), re.IGNORECASE),
         "genre",
         lambda m: _GENRE_OF[m.group().lower()],
+    ),
+    _Rule(
+        2,
+        re.compile("|".join(w for w, _ in _GENRE_SUB_PAIRS), re.IGNORECASE),
+        "genre_sub",
+        lambda m: dict(_GENRE_SUB_PAIRS)[m.group().lower()],
     ),
     _Rule(2, re.compile(r"大将|鸟加"), "rate", _const("大将")),
     _Rule(2, re.compile(r"纯|仅"), "rate_mod", _const(None)),
@@ -953,6 +984,17 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                     value=g,
                 )
             )
+        elif t.kind == "genre_sub":
+            which: str = t.value
+            conds.append(
+                Cond(
+                    CondType.GENRE_SUB,
+                    key=f"genre_sub:{which}",
+                    label="音击" if which == "ongeki" else "中二",
+                    chart=lambda s, d, _cur, _w=which: _genre_sub_match(s, _w),
+                    value=which,
+                )
+            )
         elif t.kind == "era":
             which: str = t.value
             conds.append(
@@ -1164,6 +1206,7 @@ async def combo_chart_entries(
     """
     songs = await _songs_of(binding)
     cur = _current_of(binding)
+    await ensure_ongeki_titles()  # 中二/音击谓词的集合前置加载（幂等）
     has_utage = any(c.ctype is CondType.UTAGE for c in conds)
     if any(c.single_chart for c in conds if c.chart is not None):
         entries = [
@@ -1208,6 +1251,7 @@ async def combo_filtered_scores(
     """
     songs = await _songs_of(binding)
     cur = _current_of(binding)
+    await ensure_ongeki_titles()  # 中二/音击谓词的集合前置加载（幂等）
     has_utage = any(c.ctype is CondType.UTAGE for c in conds)
     has_chart = any(c.chart is not None for c in conds)
 

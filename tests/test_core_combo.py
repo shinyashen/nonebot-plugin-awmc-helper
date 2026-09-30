@@ -811,3 +811,99 @@ def test_plate_shape():
     assert is_valid_plate(norm_plate("暁"), norm_plate("極"))
     assert not is_valid_plate("真", "将")  # 真无将
     assert not is_valid_plate("樱", "者")  # 樱无者
+
+
+# ---------------------------------------------------------------- 中二/音击侧别
+
+
+@pytest.fixture
+def ongeki_titles(monkeypatch):
+    """音击原创栏标题集（真实锚：STARTLINER/Perfect Shining!! 现役、Titania 下架）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    titles = frozenset(
+        {
+            songdb.norm_title("STARTLINER"),
+            songdb.norm_title("Perfect Shining!!"),
+            songdb.norm_title("Titania"),  # 下架条目并入集合（§12.4）
+        }
+    )
+    monkeypatch.setattr(songdb, "_ongeki_origin_titles", titles)
+    return titles
+
+
+@pytest.mark.parametrize(
+    ("text", "expect"),
+    [
+        ("音击中二", "genre"),  # 全称 = 大类不区分（同层最长先于侧别词）
+        ("中二节奏", "genre_sub"),
+        ("chunithm", "genre_sub"),
+        ("中二", "genre_sub"),
+        ("ongeki", "genre_sub"),
+        ("音击", "genre_sub"),
+    ],
+)
+def test_genre_sub_tokenize(text: str, expect: str):
+    from nonebot_plugin_awmc_helper.core.combo import tokenize
+
+    assert [t.kind for t in tokenize(text)] == [expect]
+
+
+def test_genre_sub_predicate(ongeki_titles):
+    """侧别判定（§12.3）：原创栏 → 音击；大类其余（イロドリミドリ等）→ 中二。"""
+    from mocks import make_song
+    from maimai_py import Genre
+
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    ong = make_song(2001, "STARTLINER", genre=Genre.オンゲキCHUNITHM, version=26000)
+    chunithm = make_song(
+        2002, "Titania", genre=Genre.オンゲキCHUNITHM, version=26000
+    )  # 下架音击原创，但在集合内 → 音击
+    irodori = make_song(
+        2003,
+        "私たちは、花になる",
+        genre=Genre.オンゲキCHUNITHM,
+        version=26000,
+    )  # イロドリミドリ → 默认中二
+    other = make_song(2004, "True Love Song", version=10000)  # 非本大类
+
+    ong_cond = parse_combo("音击")[0]
+    chu_cond = parse_combo("中二")[0]
+    assert ong_cond.chart(ong, None, 25500)
+    assert ong_cond.chart(chunithm, None, 25500)
+    assert not ong_cond.chart(irodori, None, 25500)
+    assert not ong_cond.chart(other, None, 25500)
+    assert chu_cond.chart(irodori, None, 25500)
+    assert not chu_cond.chart(ong, None, 25500)
+    assert not chu_cond.chart(other, None, 25500)  # 非本大类两侧都不命中
+
+
+def test_genre_sub_types_and_n15(ongeki_titles):
+    """GENRE_SUB 为谱面类（n15 平铺）；与音击中二全称是三个不同 key。"""
+    from nonebot_plugin_awmc_helper.core.combo import (
+        CHART_COND_TYPES,
+        CondType,
+        parse_combo,
+    )
+
+    conds = parse_combo("音击")
+    assert conds[0].ctype is CondType.GENRE_SUB
+    assert CondType.GENRE_SUB in CHART_COND_TYPES
+    assert parse_combo("音击中二")[0].ctype is CondType.GENRE
+    assert parse_combo("中二节奏")[0].key == "genre_sub:chunithm"
+
+
+def test_ongeki_titles_unloaded_is_empty(monkeypatch):
+    """集合未加载（冷启动 kv 无值）：音击=空集、中二=大类全部（断网降级）。"""
+    from mocks import make_song
+    from maimai_py import Genre
+
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    monkeypatch.setattr(songdb, "_ongeki_origin_titles", None)
+    song = make_song(2001, "STARTLINER", genre=Genre.オンゲキCHUNITHM, version=26000)
+    assert songdb.ongeki_titles() == frozenset()
+    assert not parse_combo("音击")[0].chart(song, None, 25500)
+    assert parse_combo("中二")[0].chart(song, None, 25500)

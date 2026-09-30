@@ -70,6 +70,59 @@ def norm_title(title: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", title)).lower()
 
 
+# ---------------------------------------------------------------------------
+# 中二/音击侧别（「オンゲキ＆CHUNITHM」大类出身判定，song-db-design §2.22 /
+# karenbot-combo-notes §12.3/§12.4）：norm_title ∈ ongeki 原创栏标题集 → 音击，
+# 其余（大类内）默认中二。集合随 refresh_all 抓取入库（kv_cache 单行）。
+# ---------------------------------------------------------------------------
+
+_ongeki_origin_titles: "frozenset[str] | None" = None
+"""音击原创栏归一标题集；None = 进程未加载（消费侧经 :func:`ongeki_titles`）。"""
+
+
+def ongeki_titles() -> frozenset[str]:
+    """音击原创栏标题集。
+
+    未加载（冷启动且 kv 无值）视作空集——「音击」条件得谱面集空文案、
+    「中二」=大类全部，与断网降级语义一致。
+    """
+    return _ongeki_origin_titles if _ongeki_origin_titles is not None else frozenset()
+
+
+async def ensure_ongeki_titles() -> None:
+    """进程内集合惰性加载（kv_cache；幂等，combo 消费入口在谓词求值前调用）。"""
+    global _ongeki_origin_titles
+    if _ongeki_origin_titles is not None:
+        return
+    stored = await store.kv_get("ongeki_origin_titles")
+    _ongeki_origin_titles = frozenset(stored or ())
+
+
+def _ongeki_origin_titles_of(entries: "list[dict]") -> frozenset[str]:
+    """otoge-db ongeki 条目 → 原创栏（``category=オンゲキ``）归一标题集。"""
+    return frozenset(
+        norm_title(x["title"]) for x in entries if x.get("category") == "オンゲキ"
+    )
+
+
+async def store_ongeki_titles(payload: "list[dict] | None") -> bool:
+    """refresh_all 抓取产物入库（kv_cache 单行替换 + 进程缓存更新）。
+
+    ``payload=None``（一体抓取失败）→ 保留旧集合（断网降级现成语义），返回
+    False。全量替换语义：集合定义 = ongeki 原创栏标题集，现役与下架一体
+    抓取保证不缺下架档。
+    """
+    global _ongeki_origin_titles
+    if payload is None:
+        return False
+    titles = _ongeki_origin_titles_of(payload)
+    if not titles:
+        return False
+    await store.kv_set("ongeki_origin_titles", sorted(titles))
+    _ongeki_origin_titles = titles
+    return True
+
+
 def utage_ids(diff_id: int) -> tuple[int, int]:
     """宴谱 6 位机台内部 id → (song_id, level_id)。
 
@@ -1572,6 +1625,7 @@ async def refresh_all(
             _fetch("dschange", ext_info.fetch_dschange),
             _fetch("otoge_db", ext_otoge.fetch_music_ex),
             _fetch("otoge_deleted", ext_otoge.fetch_music_ex_deleted),
+            _fetch("ongeki_origin", ext_otoge.fetch_ongeki_origin),
         ]
     if include_cn:
         jobs += [
@@ -1590,6 +1644,15 @@ async def refresh_all(
         f"songdb：重建完成——曲 {result['songs']}、谱面组 {result['groups']}、"
         f"谱面 {result['charts']}（总耗时 {time.monotonic() - total_started:.1f}s）"
     )
+    # 中二/音击侧别标题集（song-db-design §2.22）：抓取失败保留旧集合，
+    # 失败期 maimai 新增大类曲按默认中二、下次刷新自愈
+    try:
+        if await store_ongeki_titles(payloads.get("ongeki_origin")):
+            logger.info("songdb：音击原创栏标题集已更新（中二/音击侧别判定）")
+        else:
+            logger.warning("songdb: 音击原创栏标题集未更新（本轮抓取失败，保留旧集合）")
+    except Exception:
+        logger.exception("songdb: 音击标题集存储失败（不影响规范表）")
     if extra_docs:
         try:
             # force：重建已用基础源覆写外部字段（maimaiinfo 物量/定数历史无条件
