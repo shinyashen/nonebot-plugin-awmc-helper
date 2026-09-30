@@ -339,6 +339,7 @@ async def _draw_header(
     course_image: bytes | None = None,
     class_image: bytes | None = None,
     nameplate_image: bytes | None = None,
+    force_trophy_name: bool = False,
 ) -> None:
     """头部落雪名片，元素与层级顺序照搬 Hoshino PlayerBest50.draw。
 
@@ -435,8 +436,12 @@ async def _draw_header(
     im.alpha_composite(class_badge, (620, 60))
 
     # 称号条：先确定文本/字体与底色来源（落雪称号优先，NET 称号次之；
-    # color=None 表示无称号），再走同一段底图装配（无称号彩虹底 + B35/B15 统计）
+    # force_trophy_name=True 时自定义称号覆盖数据源称号——条件50/40 口径，
+    # 2026-10-01 QoL）；color=None 表示无称号。同一段底图装配（无称号彩虹
+    # 底 + B35/B15 统计）
     trophy = getattr(player, "trophy", None)
+    if force_trophy_name and trophy_name:
+        trophy = None  # 条件口径覆盖数据源称号
     shougou_dir = assets.static_path() / "mai" / "shougou"
     if trophy is not None:
         color: str | None = trophy.color or "Normal"
@@ -570,12 +575,14 @@ async def draw_b50_nb(
     class_image: bytes | None = None,
     nameplate_image: bytes | None = None,
     sub_of: Callable[[ScoreExtend], str | None] | None = None,
+    force_trophy_name: bool = False,
 ) -> Image.Image:
     """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。
 
     icon_image/trophy_name/trophy_color/course_image/class_image/nameplate_image
     为 NET 数据源身份注入（player 缺失或对应字段缺失时生效）；
-    ``sub_of`` 透传成绩行副行钩子（pc50 等变体替换「定数 -> 单曲Ra」）。
+    ``sub_of`` 透传成绩行副行钩子（pc50 等变体替换「定数 -> 单曲Ra」）；
+    ``force_trophy_name``：trophy_name（条件50/40 口径串）强制覆盖数据源称号。
     """
     im = assets.canvas("b50.png", theme)
     draw = ImageDraw.Draw(im)
@@ -596,6 +603,7 @@ async def draw_b50_nb(
         course_image=course_image,
         class_image=class_image,
         nameplate_image=nameplate_image,
+        force_trophy_name=force_trophy_name,
     )
 
     # 成绩行：b35 从 y=235、b15 从 y=1085（Hoshino 布局，几何见 table_layout）
@@ -717,6 +725,7 @@ async def best50_bytes(
     class_image: bytes | None = None,
     nameplate_image: bytes | None = None,
     sub_of: Callable[[ScoreExtend], str | None] | None = None,
+    force_trophy_name: bool = False,
 ) -> bytes:
     return image_to_bytes(
         await draw_b50_nb(
@@ -737,6 +746,7 @@ async def best50_bytes(
             class_image=class_image,
             nameplate_image=nameplate_image,
             sub_of=sub_of,
+            force_trophy_name=force_trophy_name,
         )
     )
 
@@ -798,7 +808,8 @@ async def net_best50_card(
 
     player = net_score_service.player_of(binding)
     identity = await jp_cover.net_player_assets(player)
-    trophy = (player.trophy_name if player else None) or label or None
+    # 条件口径（label 非空）覆盖数据源称号（2026-10-01 QoL）
+    trophy = label or (player.trophy_name if player else None) or None
     if flat:
         return await best50_flat_bytes(
             (player.name if player else None) or binding.net_sega_id or "maimai NET",

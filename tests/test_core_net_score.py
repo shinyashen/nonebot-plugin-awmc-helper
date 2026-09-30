@@ -682,6 +682,10 @@ async def test_ap50_net_command(app: App, db, net_service, jp_view, monkeypatch)
         key=lambda s: s.dx_rating or 0,
         latest_version_value=current_version_jp.value,
     )
+    # ap50 合并进条件管线后：称号条 = 条件口径（label 覆盖数据源称号）
+    label = (
+        f"AP · {len(bests.scores_b35 + bests.scores_b15)} 条 · 合计 RA {bests.rating}"
+    )
     expected_png = await best50_bytes(
         net_player.name,
         bests.rating,
@@ -693,8 +697,8 @@ async def test_ap50_net_command(app: App, db, net_service, jp_view, monkeypatch)
         qqid=12345678,
         service="net",
         theme="prism_plus",
-        trophy_name=net_player.trophy_name,
-        trophy_color=net_player.trophy_color,
+        trophy_name=label,
+        force_trophy_name=True,
     )
     event = fake_private_message_event_v11(message="ap50", user_id=12345678)
     async with app.test_matcher(score_query.ap50) as ctx:

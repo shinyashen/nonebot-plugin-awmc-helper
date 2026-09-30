@@ -1,7 +1,6 @@
 """查分指令入口：b50 / ap50 / minfo / ginfo。"""
 
 from nonebot import on_regex, on_command
-from maimai_py import current_version_jp
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.adapters import Event, Message
 from nonebot_plugin_uninfo import Session, UniSession
@@ -19,7 +18,7 @@ from ...core.combo import (
     inapplicable,
     ensure_designer_rules,
 )
-from ...core.score import UserScoreError, build_bests, score_service
+from ...core.score import UserScoreError, score_service
 from ...core.songs import (
     ChartEntry,
     cn_song_map,
@@ -27,7 +26,7 @@ from ...core.songs import (
     entries_list_text,
     prefer_type_from_raw_id,
 )
-from ...core.types import FCType, SongType, LevelIndex
+from ...core.types import SongType, LevelIndex
 from ...core.utils import slow_notice, handle_errors, player_display_name
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
@@ -43,8 +42,6 @@ from ...core.binding import (
     resolve_session_query,
 )
 from ...core.sources import Capability
-
-AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
 b50 = on_command("b50", aliases={"B50"}, block=True)
 ap50 = on_command("ap50", aliases={"AP50"}, block=True)
@@ -226,55 +223,14 @@ async def _(
         )
     ),
 ):
-    """AP50（用户口径）：b50 的升级版——只统计 AP/APP 的 best50，渲染 B50 大图。
+    """AP50（用户口径）：b50 的 AP 判型特例，已合并进条件管线——等价
+    「神50」（AP 族包含式：AP/AP+ 全算），组装/渲染与条件卡同链路。
 
-    maimai_py 无 AP50 端点：全量成绩本地过滤 fc∈{AP,APP} 后经公共
-    build_bests 组装（Hoshino 落雪 ap50 端点 → Best50 → draw_best50 同构）。
+    maimai_py 无 AP50 端点：全量成绩本地过滤经公共 build_bests 组装
+    （Hoshino 落雪 ap50 端点 → Best50 → draw_best50 同构）。
     """
-
-    notify_slow = slow_notice()
-    jp = score_service.view_of(binding.service) == "jp"
-    if jp:
-        # NET：全量成绩来自窗口缓存（抓取提示先行，b50/minfo 同款交互）
-        if score_service.needs_fetch(binding):
-            await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
-                at_sender=True
-            )
-        scores = await score_service.get_scores_all(binding)
-    else:
-        scores = await score_service.get_scores_all(binding, notify_slow=notify_slow)
-    ap_scores = [
-        s
-        for s in scores.scores
-        if s.fc is not None
-        and s.fc.value in AP_FC_VALUES
-        and s.achievements is not None
-    ]
-    if not ap_scores:
-        await UniMessage.text(" 没有查到 AP/APP 成绩").finish(at_sender=True)
-    # NET 的旧/新版本分侧用日服现行版本（与 net_score 组装同口径）
-    bests = build_bests(
-        ap_scores,
-        key=lambda s: s.dx_rating or 0,
-        latest_version_value=current_version_jp.value if jp else None,
-    )
-    if jp:  # NET 身份卡与 b50 共用 core 链路（CN 路径走查分器玩家资料）
-        png = await b50_render.net_best50_card(bests, binding)
-    else:
-        player = await score_service.get_player(binding, notify_slow=notify_slow)
-        png = await b50_render.best50_bytes(
-            player_display_name(player),
-            bests.rating,
-            bests.rating_b35,
-            bests.rating_b15,
-            bests.scores_b35,
-            bests.scores_b15,
-            player=player,
-            qqid=binding_service.qq_of(binding),
-            service=binding.service,
-            theme=binding.theme or DEFAULT_THEME,
-        )
-    await UniMessage.image(raw=png).finish(at_sender=True)
+    # ap50 无谱师语境，无需 ensure_designer_rules
+    await _combo_query(parse_combo("ap"), binding, OutputKind.B50)
 
 
 async def _render_combo(result, binding, output=None) -> bytes:
@@ -319,7 +275,31 @@ async def _render_combo(result, binding, output=None) -> bytes:
         service=binding.service,
         theme=binding.theme or DEFAULT_THEME,
         trophy_name=label,
+        force_trophy_name=True,  # 条件口径覆盖数据源称号（QoL）
     )
+
+
+async def _combo_query(
+    parsed, binding: UserBinding, output: OutputKind, suffix: str = "50"
+) -> None:
+    """条件查询共享收尾（combo50 与 ap50 共用）：适用矩阵 → 抓取提示 →
+    执行 → 四态出图。"""
+    if bad := inapplicable(parsed, output):
+        # §9.7 适用矩阵（era_year/ideal/fit 等 D/C 类仅 b50/40）
+        await UniMessage.text(
+            f" {'、'.join(c.label for c in bad)} 不适用于条件{suffix}"
+        ).finish(at_sender=True)
+    if score_service.view_of(binding.service) == "jp" and score_service.needs_fetch(
+        binding
+    ):
+        await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
+            at_sender=True
+        )
+    result = await run_combo(parsed, binding, output=output, notify_slow=slow_notice())
+    if isinstance(result, ComboEmpty):
+        await UniMessage.text(f" {result.message}").finish(at_sender=True)
+    png = await _render_combo(result, binding, output)
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @combo50.handle()
@@ -345,22 +325,7 @@ async def _(
         return
     if isinstance(parsed, ComboAmbiguity):
         await UniMessage.text(f" {parsed.message}").finish(at_sender=True)
-    if bad := inapplicable(parsed, output):
-        # §9.7 适用矩阵（era_year/ideal/fit 等 D/C 类仅 b50/40）
-        await UniMessage.text(
-            f" {'、'.join(c.label for c in bad)} 不适用于条件{suffix}"
-        ).finish(at_sender=True)
-    if score_service.view_of(binding.service) == "jp" and score_service.needs_fetch(
-        binding
-    ):
-        await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
-            at_sender=True
-        )
-    result = await run_combo(parsed, binding, output=output, notify_slow=slow_notice())
-    if isinstance(result, ComboEmpty):
-        await UniMessage.text(f" {result.message}").finish(at_sender=True)
-    png = await _render_combo(result, binding, output)
-    await UniMessage.image(raw=png).finish(at_sender=True)
+    await _combo_query(parsed, binding, output, suffix)
 
 
 @minfo.handle()
