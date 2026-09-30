@@ -30,6 +30,7 @@ from .table_layout import (
     LV15_START_Y,
     LV15_COL_STEP,
     LV15_ROW_STEP,
+    PLATE_START_X,
     RATING_START_X,
     RATING_START_Y,
     RATING_GRID_STEP,
@@ -330,15 +331,16 @@ def _draw_rating_core(
                 stamp_sync(x, y, score, lv15=True)
     else:
         # 同序契约：底图分组随 by_level（条件版标级大类 / 单等级定数节），
-        # 列数同步（标级大类每行 13 列，标签让位）
+        # 列数/列起点同步（标级大类 13 列 + x=180，标签让位）
         groups = group_by_level(entries) if by_level else group_by_ds(entries)
         cols = RATING_COLS - 1 if by_level else RATING_COLS
+        start_x = PLATE_START_X if by_level else RATING_START_X
         current_y = RATING_START_Y
         for ds in groups:
             charts = groups[ds]
             for num, (song, diff) in enumerate(charts):
                 row, col = divmod(num, cols)
-                x = RATING_START_X + col * RATING_GRID_STEP
+                x = start_x + col * RATING_GRID_STEP
                 y = current_y + row * RATING_GRID_STEP
                 score = played.get((song.id, diff.level_index.value))
                 if score is None:
