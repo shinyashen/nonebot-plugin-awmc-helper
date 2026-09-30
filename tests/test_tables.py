@@ -56,7 +56,8 @@ async def test_plate_invalid_kind_rejected(app: App):
             MessageSegment.text(" 没有找到「真将」牌子。真代牌为 真极/真神/真舞舞"),
         ]
     )
-    async with app.test_matcher(plugin.plate_cmd) as ctx:
+    # P2-b 收编：进度尾缀统一走条件化进度 matcher 的牌子身份回认
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
         # UniSession 依赖注入触发群信息/成员信息拉取
@@ -232,7 +233,8 @@ async def test_plate_traditional_alias_reachable(app: App, monkeypatch):
 
     event = fake_group_message_event_v11(message="暁将进度")
     expected = Message([MessageSegment.at(12345678), MessageSegment.text(" 进度 OK")])
-    async with app.test_matcher(plugin.plate_cmd) as ctx:
+    # P2-b 收编：进度尾缀统一走条件化进度 matcher 的牌子身份回认
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
         # UniSession 依赖注入触发群信息/成员信息拉取
@@ -393,10 +395,14 @@ async def test_plate_at_net_target_unsupported(app: App, db, songs):
 
 
 @pytest.mark.asyncio
-async def test_score_list_at_trailing_space(app: App, db, monkeypatch):
+async def test_score_list_at_trailing_space(app: App, db, songs, monkeypatch):
     """@代查回归（2026-09-30 线上实测）：QQ 客户端在 at 段后自动留空格，
     消息串以尾随空格结束——锚定正则必须容忍，否则指令完全不触发
-    （消息形状原样取自服务器日志）。"""
+    （消息形状原样取自服务器日志）。
+
+    P2-b 收编后「13+」经解析器成为等级条件（键集过滤，样例库无 13+ 谱面），
+    空态文案为谱面集口径「没有符合条件的谱面」。
+    """
     from types import SimpleNamespace
 
     import nonebot
@@ -451,11 +457,159 @@ async def test_score_list_at_trailing_space(app: App, db, monkeypatch):
             Message(
                 [
                     MessageSegment.at(12345678),
-                    MessageSegment.text(" 没有找到符合条件的成绩"),
+                    MessageSegment.text(" 没有符合条件的谱面"),
                 ]
             ),
             result=None,
             bot=bot,
         )
         ctx.should_finished()
-    assert captured["user_id"] == "99999999"
+    # 收编后「13+」在样例库无谱面，空键集于 get_scores_all 之前短路（captured
+    # 不再有值）；at 代查目标可达性由 test_score_table_at_target 继续覆盖
+    assert captured == {}
+
+
+# ------------------------------------------------- P2-b 条件化进度/分数列表
+
+
+def _fake_scores():
+    """样例成绩（真实曲目 + 合理值）：199 SD 紫（东方曲、13 级锚）。"""
+    from maimai_py import FCType, RateType, SongType, LevelIndex, ScoreExtend
+    from maimai_py.utils import ScoreCoefficient
+
+    def score(song_id, type_, li, ach, level_value, *, fc=None):
+        return ScoreExtend(
+            id=song_id,
+            level="13",
+            level_index=li,
+            achievements=ach,
+            fc=fc,
+            fs=None,
+            dx_score=2000,
+            dx_rating=int(ScoreCoefficient(ach).ra(level_value)),
+            play_count=None,
+            play_time=None,
+            rate=RateType._from_achievement(ach),
+            type=type_,
+            title="t",
+            level_value=level_value,
+            level_dx_score=3000,
+            dx_star=None,
+            version=26000,
+        )
+
+    return [
+        score(199, SongType.STANDARD, LevelIndex.MASTER, 100.5, 13.3, fc=FCType.AP),
+        score(199, SongType.DX, LevelIndex.MASTER, 97.0, 13.0),
+    ]
+
+
+def _combo_progress_expected(cond_text: str, completed: list) -> "tuple[int, int, int]":
+    """进度总览几何（handler 同 NB 公式），供预期图构造。"""
+
+    def played_rows(count: int) -> int:
+        return max(4, -(-count // 5))
+
+    comp_limit = 60 if True else 30
+    c_y = played_rows(len(completed[:comp_limit])) * 109 + 140
+    u_y = played_rows(0) * 109 + 140
+    n_y = max(4, -(-0 // 20)) * 65 + 140
+    return c_y, u_y, n_y
+
+
+@pytest.mark.asyncio
+async def test_combo_progress_renders(app: App, db, songs, monkeypatch):
+    """东方进度：条件化三段总览（评级章默认判型，199 SD 紫 100.5% 已完成）。"""
+    import base64 as _b64
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+    from nonebot_plugin_awmc_helper.core.render.score import DrawScore
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_divingfish_username(binding, "tester")
+
+    scores = _fake_scores()
+    completed = [scores[0]]  # 199 SD 紫（东方曲、≥80%）
+
+    async def fake_scores_all(b, notify_slow=None):
+        return SimpleNamespace(scores=scores)
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+
+    c_y, u_y, n_y = _combo_progress_expected("东方", completed)
+    card = DrawScore(150 + c_y + u_y + n_y, service="Diving-Fish")
+    expected_png = card.draw_plan("东方", completed, c_y, [], u_y, [], "", 60)
+
+    event = fake_group_message_event_v11(message="东方进度", user_id=12345678)
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{_b64.b64encode(expected_png).decode()}"),
+        ]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_combo_progress_inapplicable_rejected(app: App, db, songs, monkeypatch):
+    """理想进度：修改类条件不适用于进度（§9.7 C 类）→ 拒绝并提示。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import tables as plugin
+
+    event = fake_group_message_event_v11(message="理想进度", user_id=12345678)
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.text(" 理想 不适用于进度"),
+        ]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()

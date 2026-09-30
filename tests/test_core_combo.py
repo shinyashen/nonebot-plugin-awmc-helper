@@ -684,3 +684,130 @@ async def test_designer_rules_skipped_when_cold(monkeypatch):
     await combo_mod.ensure_designer_rules()
     assert combo_mod.parse_combo("まぐランド") is None
     combo_mod.set_designer_rules(())  # 清理，防污染后续用例
+
+
+# ---------------------------------------------------------------- P2-b：表格条件化
+
+
+def test_plan_of_matches_legacy_checkers():
+    """判型推导对齐既有 plan 语义（收编触发文本逐字不变的核心）。"""
+    from maimai_py import FCType, FSType
+
+    from nonebot_plugin_awmc_helper.core.combo import plan_of, parse_combo
+
+    def probe(checker, ach=90.0, fc=None, fs=None):
+        return checker(ach, fc, fs)
+
+    # fc 族：包含式（FC/FCP/AP/APP 全算），与旧 _plan_checker("fc") 同
+    checker, plan, kind = plan_of(parse_combo("fc"))
+    assert (plan, kind) == ("fc", "fc")
+    assert probe(checker, fc=FCType.FC)
+    assert probe(checker, fc=FCType.FCP)
+    assert probe(checker, fc=FCType.APP)
+    assert not probe(checker)
+    # ap：只 AP/APP
+    checker, plan, _ = plan_of(parse_combo("神"))
+    assert plan == "ap"
+    assert probe(checker, fc=FCType.AP)
+    assert not probe(checker, fc=FCType.FCP)
+    # fcp：FCP 以上（收编词）
+    checker, plan, _ = plan_of(parse_combo("fcp"))
+    assert plan == "fcp"
+    assert probe(checker, fc=FCType.FCP)
+    assert not probe(checker, fc=FCType.FC)
+    # fs 族（收编词）/fdx/fsp
+    checker, plan, kind = plan_of(parse_combo("fs"))
+    assert (plan, kind) == ("fs", "fs")
+    assert probe(checker, fs=FSType.FS)
+    assert not probe(checker, fs=None)
+    checker, plan, _ = plan_of(parse_combo("舞舞"))
+    assert plan == "fdx"
+    assert probe(checker, fs=FSType.FSD)
+    assert not probe(checker, fs=FSType.FSP)
+    checker, plan, _ = plan_of(parse_combo("fsp"))
+    assert plan == "fsp"
+    assert probe(checker, fs=FSType.FSP)
+    # rate 档：阈值按 _from_achievement 边界
+    checker, plan, kind = plan_of(parse_combo("sss+"))
+    assert (plan, kind) == ("sssp", "rate")
+    assert probe(checker, ach=100.5)
+    assert not probe(checker, ach=100.4)
+    # 无达标型条件 → 达成率 ≥80%
+    checker, plan, kind = plan_of(parse_combo("东方"))
+    assert (plan, kind) == ("", "rate")
+    assert probe(checker, ach=80.0)
+    assert not probe(checker, ach=79.9)
+
+
+def test_inapplicability_matrix():
+    """§9.7 适用矩阵：B1 进表格不进定数表；B2 不进表格；C 只进 b50。"""
+    from nonebot_plugin_awmc_helper.core.combo import (
+        OutputKind,
+        parse_combo,
+        inapplicable,
+    )
+
+    assert inapplicable(parse_combo("fc"), OutputKind.TABLE) == []
+    assert [c.label for c in inapplicable(parse_combo("fc"), OutputKind.DS_TABLE)] == [
+        "FC"
+    ]
+    assert [c.label for c in inapplicable(parse_combo("寸"), OutputKind.TABLE)] == [
+        "寸"
+    ]
+    assert inapplicable(parse_combo("寸"), OutputKind.SCORE_LIST) == []
+    assert [
+        c.label for c in inapplicable(parse_combo("理想"), OutputKind.SCORE_LIST)
+    ] == ["理想"]
+    assert [c.label for c in inapplicable(parse_combo("拟合"), OutputKind.TABLE)] == [
+        "拟合"
+    ]
+    assert inapplicable(parse_combo("东方"), OutputKind.DS_TABLE) == []
+
+
+@pytest.mark.asyncio
+async def test_combo_chart_entries_heuristic(db, songs):
+    """§5 选谱启发式：一般条件每曲代表谱面；谱面级条件不收缩。"""
+    from nonebot_plugin_awmc_helper.core.combo import (
+        ComboEmpty,
+        parse_combo,
+        combo_chart_entries,
+    )
+
+    # 东方：非 single_chart → 每曲代表（199 取最高难度 DX 紫，无 ReM）
+    entries = await combo_chart_entries(parse_combo("东方"))
+    assert not isinstance(entries, ComboEmpty)
+    # 同色双谱（SD 紫 13.3 / DX 紫 13.0）收定数高者
+    assert [(s.id, d.type.name, d.level_index.name) for s, d in entries] == [
+        (199, "STANDARD", "MASTER")
+    ]
+    # 紫谱：single_chart → 全部紫谱保留（199 SD/DX、8、624）
+    entries = await combo_chart_entries(parse_combo("紫谱"))
+    assert len(entries) == 4
+    # 13级：single_chart → 199SD/199DX/624 紫（level="13"）
+    entries = await combo_chart_entries(parse_combo("13级"))
+    assert len(entries) == 3
+    # 雪辉dx：谱面集空 → ComboEmpty
+    assert isinstance(await combo_chart_entries(parse_combo("雪辉dx")), ComboEmpty)
+
+
+def test_plate_shape():
+    """牌子形状检测：牌组合文本 → (版本, 牌种)；非牌形状 → None。
+
+    形状与合法性两段式——「真将」形状成立但牌单无此牌，由调用方拒绝
+    （保持旧「没有找到牌子」文案），不落入条件分解。
+    """
+    from nonebot_plugin_awmc_helper.core.plates import norm_plate, is_valid_plate
+    from nonebot_plugin_awmc_helper.plugins.tables.sheet import _plate_shape
+
+    assert _plate_shape("祝将") == ("祝", "将")
+    assert _plate_shape("舞神") == ("舞", "神")
+    assert _plate_shape("樱舞舞") == ("樱", "舞舞")
+    assert _plate_shape("暁極") == ("暁", "極")  # 形状层不归一
+    assert _plate_shape("辉") is None  # 无牌种
+    assert _plate_shape("东方") is None  # 非牌文本
+    # 合法性校验（归一后按牌单例外表）
+    ver, kind = _plate_shape("暁極")
+    assert (norm_plate(ver), norm_plate(kind)) == ("晓", "极")
+    assert is_valid_plate(norm_plate("暁"), norm_plate("極"))
+    assert not is_valid_plate("真", "将")  # 真无将
+    assert not is_valid_plate("樱", "者")  # 樱无者

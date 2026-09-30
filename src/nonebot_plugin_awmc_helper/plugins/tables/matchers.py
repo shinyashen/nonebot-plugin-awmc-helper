@@ -6,14 +6,22 @@ from nonebot.permission import SUPERUSER
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .sheet import (
-    PLANS,
-    _plan_checker,
+    _plate_shape,
     _level_entries,
+    combo_progress_card,
+    combo_score_list_card,
     _plate_completion_sheet,
     _plate_progress_overview,
 )
-from ...constants import PLATE_CHARS, DEFAULT_THEME, chart_display_id
+from ...constants import PLATE_CHARS, DEFAULT_THEME
 from ...core.help import CommandSpec, help_registry
+from ...core.combo import (
+    OutputKind,
+    ComboAmbiguity,
+    parse_combo,
+    inapplicable,
+    ensure_designer_rules,
+)
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service
 from ...core.store import UserBinding
@@ -26,13 +34,8 @@ from ...core.plates import (
     is_valid_plate,
     plate_kinds_hint,
 )
-from ...core.binding import (
-    SessionQueryBinding,
-    at_tolerant,
-    service_display,
-)
+from ...core.binding import SessionQueryBinding, at_tolerant
 from ...core.sources import Capability
-from ...core.render.score import DrawScore, score_list_height
 from ...core.render.tools import text_image_bytes
 
 # 牌种正则（牌种并集取自 core.plates 单源；正则交替最长优先，
@@ -48,19 +51,17 @@ PLAN_RE = r"(sssp|sss|ssp|ss|sp|s|ap|fcp|fc|fsp|fs|fdx)"
 ds_table_cmd = on_regex(at_tolerant(rf"^{LEVEL_RE}定数表$"), block=True)
 score_table_cmd = on_regex(at_tolerant(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$"), block=True)
 progress_cmd = on_regex(
-    at_tolerant(
-        rf"^{LEVEL_RE}{PLAN_RE}\+?(已完成|未完成|未开始|未游玩)?进度\s?([0-9]+)?$",
-    ),
+    at_tolerant(r"^(.+?)(已完成|未完成|未游玩|未开始)?进度\s?([0-9]+)?$"),
     block=True,
 )
 plate_cmd = on_regex(
     at_tolerant(
-        rf"^([{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}])({PLATE_KIND_ALT})(完成表|进度)\s?([0-9]+)?$"
+        rf"^([{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}])({PLATE_KIND_ALT})完成表$"
     ),
     block=True,
 )
 plate_help = on_fullmatch("牌子条件", block=True)
-score_list_cmd = on_regex(at_tolerant(rf"^{DS_RE}\s?分数列表\s?([0-9]+)?$"), block=True)
+score_list_cmd = on_regex(at_tolerant(r"^(.+?)分数列表\s?([0-9]+)?$"), block=True)
 update_rating = on_command("更新定数表", permission=SUPERUSER, block=True)
 update_plate = on_command("更新完成表", permission=SUPERUSER, block=True)
 
@@ -120,86 +121,39 @@ async def _(
     binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
-    """等级进度（R4，NB DrawScore.draw_plan/draw_category 版式）。
+    """条件化进度（R4 版式泛化）：条件 → 谱面集（§5 启发式）→ 盖章分三段。
 
-    - `13fc进度`：三段总览（已完成 30/未完成 30/未游玩 100 网格）；
-    - `13fc已完成进度 [页]` / `未完成进度 [页]`：80/页成绩行卡；
-    - `13fc未游玩进度`：未游玩封面网格。
+    四态：出图 / 牌子身份回认（牌组合文本走牌子专用渲染）/ 不适用拒绝 /
+    歧义提示 / 静默（零条件——以「进度」结尾的闲聊不是查询）。
     """
-    level, plan, category, page_raw = groups
+    cond_text, category, page_raw = groups
     page = int(page_raw) if page_raw else 1
-    checker = _plan_checker(plan)
-    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
-    score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
-
-    completed: list = []
-    unfinished: list = []
-    notplayed: list[tuple[int, int, float]] = []
-    for song, d in await _level_entries(level):
-        # NB by_plan 含 SD+DX 全部谱面（与本插件完成表口径一致），宴谱除外
-        sc = score_map.get((song.id, d.type, d.level_index))
-        if sc is None:
-            # 未游玩网格显示游戏内 per-type id（DX 曲 10231 形状，NB 同款）
-            notplayed.append(
-                (chart_display_id(song, d), d.level_index.value, d.level_value)
+    await ensure_designer_rules()
+    if category is None:  # 分类进度无牌子语义，不回认
+        shape = _plate_shape(cond_text)
+        if shape is not None:
+            # 牌组合形状：合法牌走牌子进度（回认专用版式）；非法组合保持
+            # 旧拒绝文案（牌单点破，如「真将」→ 真代无将牌）
+            version, kind = norm_plate(shape[0]), norm_plate(shape[1])
+            if not is_valid_plate(version, kind):
+                await UniMessage.text(
+                    f" 没有找到「{version}{kind}」牌子。{plate_kinds_hint(version)}"
+                ).finish(at_sender=True)
+            plates = await score_service.get_plates(
+                binding, f"{version}{kind}", notify_slow=slow_notice()
             )
-        elif checker(sc.achievements, sc.fc, sc.fs):
-            completed.append(sc)
-        else:
-            unfinished.append(sc)
-    total = len(completed) + len(unfinished) + len(notplayed)
-    if total == 0:
-        await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
-            at_sender=True
-        )
-
-    # NB 排序：按计划类型取值降序（fc/fs 枚举值越大越好，rate 按达成率）
-    kind = PLANS[plan].split(":")[0]
-
-    def _sort_key(sc):
-        if kind == "rate":
-            return sc.achievements or 0
-        if kind == "fc":
-            return sc.fc.value if sc.fc else -1
-        return sc.fs.value if sc.fs else -1
-
-    completed.sort(key=_sort_key, reverse=True)
-    unfinished.sort(key=_sort_key, reverse=True)
-    notplayed.sort(key=lambda x: x[2], reverse=True)
-
-    service = service_display(binding)
-
-    def played_rows(count: int) -> int:
-        return max(4, -(-count // 5))
-
-    if category is None:
-        # 三段总览（comp_limit 语义对齐 NB：仅完成时放宽到 60）
-        comp_limit = 60 if not unfinished and not notplayed else 30
-        c_y = played_rows(len(completed[:comp_limit])) * 109 + 140
-        u_y = played_rows(len(unfinished[:30])) * 109 + 140
-        n_y = max(4, -(-len(notplayed[:100]) // 20)) * 65 + 140
-        card = DrawScore(150 + c_y + u_y + n_y, service=service)
-        png = card.draw_plan(
-            level, completed, c_y, unfinished, u_y, notplayed, plan, comp_limit
-        )
-    elif category in ("已完成", "未完成"):
-        data = completed if category == "已完成" else unfinished
-        total_pages = max(1, -(-(len(data)) // 80))
-        real = min(max(page, 1), total_pages)
-        display = data[(real - 1) * 80 : real * 80]
-        y_size = played_rows(len(display)) * 109
-        card = DrawScore(240 + y_size + 120, service=service)
-        png = card.draw_category(
-            "completed" if category == "已完成" else "unfinished",
-            data,
-            real,
-            total_pages,
-        )
-    else:
-        y_size = max(4, -(-len(notplayed) // 20)) * 65
-        card = DrawScore(max(240 + y_size + 120, 600), service=service)
-        png = card.draw_category("notplayed", notplayed)
-    await UniMessage.image(raw=png).finish(at_sender=True)
+            await _plate_progress_overview(binding, plates, version, kind, page)
+            return
+    parsed = parse_combo(cond_text)
+    if parsed is None:
+        return
+    if isinstance(parsed, ComboAmbiguity):
+        await UniMessage.text(f" {parsed.message}").finish(at_sender=True)
+    if bad := inapplicable(parsed, OutputKind.TABLE):
+        await UniMessage.text(
+            f" {'、'.join(c.label for c in bad)} 不适用于进度"
+        ).finish(at_sender=True)
+    await combo_progress_card(binding, parsed, cond_text, category, page)
 
 
 @plate_cmd.handle()
@@ -208,7 +162,7 @@ async def _(
     binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
-    version, kind, mode, page_raw = groups
+    version, kind = groups
     # 繁体/和制牌字先归一（正则层只负责识别）：校验/查库/渲染全按简体口径
     version, kind = norm_plate(version), norm_plate(kind)
     # 牌单按真实牌表收紧（素材包 mai/plate_version 全量实证）：舞代四牌、
@@ -217,14 +171,8 @@ async def _(
         await UniMessage.text(
             f" 没有找到「{version}{kind}」牌子。{plate_kinds_hint(version)}"
         ).finish(at_sender=True)
-    page = parse_page(page_raw)
-    plates = await score_service.get_plates(
-        binding, f"{version}{kind}", notify_slow=slow_notice()
-    )
-    if mode == "完成表":
-        await _plate_completion_sheet(binding, version, kind, page)
-        return
-    await _plate_progress_overview(binding, plates, version, kind, page)
+    # 牌子进度经条件化进度 matcher 的身份回认承接（统一入口）
+    await _plate_completion_sheet(binding, version, kind, 1)
 
 
 @plate_help.handle()
@@ -245,28 +193,20 @@ async def _(
     binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
-    """分数列表（R5，NB DrawScore.draw_score_list 行卡版式，80/页）。"""
-    ds_raw, page_raw = groups
+    """条件化分数列表（R5 行卡版式泛化，80/页）：条件 → 成绩集，达成率降序。"""
+    cond_text, page_raw = groups
     page = parse_page(page_raw)
-    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
-    if "." in ds_raw:  # 定数
-        ds = float(ds_raw)
-        matched = [s for s in scores.scores if abs(s.level_value - ds) < 0.05]
-        title = ds_raw
-    else:
-        matched = [s for s in scores.scores if s.level == ds_raw]
-        title = ds_raw
-    matched.sort(key=lambda s: s.achievements or 0, reverse=True)
-    if not matched:
-        await UniMessage.text(" 没有找到符合条件的成绩").finish(at_sender=True)
-    end_page = max(1, -(-len(matched) // 80))
-    real = min(max(page, 1), end_page)
-    # NB 高度公式已下沉 core（pc 列表等第三方扩展共用）
-    plc = score_list_height(len(matched), real, end_page)
-    service = service_display(binding)
-    card = DrawScore(280 + plc, service=service)
-    png = card.draw_score_list(title, matched, real, end_page)
-    await UniMessage.image(raw=png).finish(at_sender=True)
+    await ensure_designer_rules()
+    parsed = parse_combo(cond_text, numeric_level=True)
+    if parsed is None:
+        return
+    if isinstance(parsed, ComboAmbiguity):
+        await UniMessage.text(f" {parsed.message}").finish(at_sender=True)
+    if bad := inapplicable(parsed, OutputKind.SCORE_LIST):
+        await UniMessage.text(
+            f" {'、'.join(c.label for c in bad)} 不适用于分数列表"
+        ).finish(at_sender=True)
+    await combo_score_list_card(binding, parsed, cond_text, page)
 
 
 @update_rating.handle()
@@ -321,17 +261,22 @@ help_registry.declare(
         ),
         CommandSpec(
             matcher=progress_cmd,
-            name="<等级><评价>进度",
+            name="<条件>进度",
             capability=Capability.SCORES_ALL,
-            brief="完成度进度（总览/已完成/未完成/未游玩；@某人=代查）",
-            detail="格式：<等级><评价>进度 [页]（如 13fc进度 2）。",
+            brief="条件化进度：总览/已完成/未完成/未游玩（@某人=代查）",
+            detail=(
+                "格式：<条件串>进度 [页]，条件同条件50（辉/东方/13级/紫谱/fc…），"
+                "可加类别：已完成|未完成|未游玩（如 13fc进度 2、东方未完成进度）。"
+                "无达标条件时按达成率 ≥80% 盖章；牌组合（真将进度）走牌子进度。"
+            ),
         ),
         CommandSpec(
             matcher=plate_cmd,
-            name="<版本><牌种>完成表|进度",
+            name="<版本><牌种>完成表",
             capability=Capability.PLATES,
-            brief="牌子完成表与进度总览（@某人=代查）",
-            detail="如 真将完成表、舞神进度；达成条件见「牌子条件」。",
+            brief="牌子完成表（@某人=代查）",
+            detail="如 真将完成表；达成条件见「牌子条件」。牌子进度已并入"
+            "「<条件>进度」（真将进度）。",
         ),
         CommandSpec(
             matcher=plate_help,
@@ -340,10 +285,13 @@ help_registry.declare(
         ),
         CommandSpec(
             matcher=score_list_cmd,
-            name="<等级|定数>分数列表",
+            name="<条件>分数列表",
             capability=Capability.SCORES_ALL,
-            brief="按等级或定数过滤成绩列表（80/页；@某人=代查）",
-            detail="整数=标级（13、13+），小数=定数（13.0）。",
+            brief="条件化成绩列表（80/页；@某人=代查）",
+            detail=(
+                "格式：<条件串>分数列表 [页]，条件同条件50（13级/14.5定数/紫谱/"
+                "东方/fc…），按达成率降序（如 14.5分数列表、东方分数列表 2）。"
+            ),
         ),
         CommandSpec(
             matcher=update_rating,

@@ -126,7 +126,8 @@ class Cond:
     modifier: "Callable[[ScoreExtend], ScoreExtend] | None" = None
     value: Any = None
     single_chart: bool = False
-    applicability: frozenset[OutputKind] = frozenset(OutputKind)
+    applicability: "frozenset[OutputKind] | None" = None
+    """显式适用口径；None = 按 §9.7 矩阵（:func:`applicability_of`）派生。"""
 
 
 @dataclass
@@ -159,9 +160,96 @@ class ComboResult:
     scores: list[ScoreExtend]
 
 
+# §9.7 适用矩阵（2026-09-30 拍板：不适用=拒绝并提示，非上游静默失效）：
+# A 谱面类全输出适用；B1 达标型（combo/sync/rate）进分数列表与表格盖章判型、
+# 不进定数表；B2 区间型（badge/star/cun/kill）只进 b50 与分数列表；C 修改类
+# （ideal/fit）只进 b50（拟合定数表随 P3 再议）。
+_B1_KINDS = frozenset({OutputKind.B50, OutputKind.SCORE_LIST, OutputKind.TABLE})
+_B2_KINDS = frozenset({OutputKind.B50, OutputKind.SCORE_LIST})
+_APPLICABILITY: "dict[CondType, frozenset[OutputKind]]" = {
+    **{ct: frozenset(OutputKind) for ct in CHART_COND_TYPES},
+    CondType.COMBO: _B1_KINDS,
+    CondType.SYNC: _B1_KINDS,
+    CondType.RATE: _B1_KINDS,
+    CondType.BADGE: _B2_KINDS,
+    CondType.STAR: _B2_KINDS,
+    CondType.CUN: _B2_KINDS,
+    CondType.KILL: _B2_KINDS,
+    CondType.IDEAL: frozenset({OutputKind.B50}),
+    CondType.FIT: frozenset({OutputKind.B50}),
+}
+
+
+def applicability_of(cond: Cond) -> "frozenset[OutputKind]":
+    """条件的适用输出口径（Cond 显式声明优先，缺省按 §9.7 矩阵）。"""
+    return (
+        cond.applicability
+        if cond.applicability is not None
+        else _APPLICABILITY[cond.ctype]
+    )
+
+
 def inapplicable(conds: "list[Cond]", output: OutputKind) -> "list[Cond]":
-    """§9.7 适用矩阵校验：返回对 ``output`` 不适用的条件（P1 b50 恒空）。"""
-    return [c for c in conds if output not in c.applicability]
+    """§9.7 适用矩阵校验：返回对 ``output`` 不适用的条件。"""
+    return [c for c in conds if output not in applicability_of(c)]
+
+
+def plan_of(conds: "list[Cond]") -> "tuple[Callable[[Any, Any, Any], bool], str, str]":
+    """表格判型推导（§5）：条件集首个达标型（combo/sync/rate）条件 → 盖章
+    checker 与 plan 词（进度卡提示文案/排序 kind 用）；无达标型条件 → 达成率
+    ≥80%（KarenBot「否则→评级章」同款）。返回 (checker, plan 词, 排序 kind)。
+    """
+    for c in conds:
+        if c.ctype is CondType.COMBO:
+            if c.key == "fcp_all":
+                return _fc_checker(FCType.FCP), "fcp", "fc"
+            if c.key == "ap_all":
+                return _fc_checker(FCType.AP), "ap", "fc"
+            if c.key == "app":
+                return _fc_checker(FCType.APP), "ap", "fc"
+            return _fc_checker(FCType.FC), "fc", "fc"
+        if c.ctype is CondType.SYNC:
+            if c.key == "fs_all":
+                return _fs_checker(FSType.FS), "fs", "fs"
+            if c.key == "fsp_all":
+                return _fs_checker(FSType.FSP), "fsp", "fs"
+            if c.key == "fsdp":
+                return _fs_checker(FSType.FSDP), "fdx", "fs"
+            return _fs_checker(FSType.FSD), "fdx", "fs"
+        if c.ctype is CondType.RATE:
+            target, exact = c.value
+            floor = _RATE_FLOOR[target]
+
+            def checker(ach, _fc, _fs, _t=target, _eq=exact, _f=floor):
+                if ach is None:
+                    return False
+                rate = RateType._from_achievement(ach)
+                return rate == _t if _eq else (ach or 0) >= _f
+
+            return checker, _PLAN_WORD[target], "rate"
+    return (lambda ach, _fc, _fs: (ach or 0) >= 80), "", "rate"
+
+
+_PLAN_WORD: "dict[RateType, str]" = {
+    RateType.SSSP: "sssp",
+    RateType.SSS: "sss",
+    RateType.SSP: "ssp",
+    RateType.SS: "ss",
+    RateType.SP: "sp",
+    RateType.S: "s",
+    RateType.AAA: "aaa",
+    RateType.AA: "aa",
+    RateType.A: "a",
+}
+"""RATE 档 → 进度卡 plan 词（对齐既有 PLANS 键，提示文案回放用户口径）。"""
+
+
+def _fc_checker(minimum: FCType):
+    return lambda ach, fc, _fs: fc is not None and fc.value <= minimum.value
+
+
+def _fs_checker(minimum: FSType):
+    return lambda ach, _fc, fs: fs is not None and fs.value >= minimum.value
 
 
 # ---------------------------------------------------------------- 词表（纯数据）
@@ -227,10 +315,14 @@ _RATE_GE: "dict[str, RateType]" = {
 }
 
 # S-12 连击族词：fc/全连 → FC 族；理论/ap+/app → 理论值；ap → AP 族
-_COMBO_ALTERNATION = r"全连|理论|fc|ap\+|app|ap"
+# fcp（FCP 族）为既有 plan 词收编（13fcp完成表 等触发文本逐字不变；
+# alternation 长词在前，fcp 先于 fc）
+_COMBO_ALTERNATION = r"全连|理论|fcp|fc|ap\+|app|ap"
 
 # S-13 同步族词（层 1 复合词）：FSD+ 变体先于 FSD 族
-_SYNC_ALTERNATION = r"fdxp|fsdp|fdx\+|fsd\+|fdx|fsd"
+# fsp/fs 为既有 plan 词收编（13fs完成表 等触发文本不变；2026-09-30 拍板
+# 不补「同步」口语词与此无关——收编保触发 ≠ 新增口语词）
+_SYNC_ALTERNATION = r"fdxp|fsdp|fdx\+|fsd\+|fdx|fsd|fsp|fs"
 
 # S-1 版本字连续段：含繁体/和制牌字（load 侧 norm_plate 归一）；「代」尾缀
 # 为布尔标记（裸字与「代」双注册同语义）；「未」不收（FUTURE 占位、两视图皆空）
@@ -245,6 +337,9 @@ _DS_NUM = r"(\d{1,2})\.(\d)定数"
 
 _PURE_NUMBER = re.compile(r"[\d.]+")
 """纯数字（含小数点）整串：一律静默（§11.1 拍板）。"""
+
+_PURE_NUMBER_LEVEL = re.compile(r"[\d.]+\+?")
+"""裸数字条件形态（含 13+ 尾缀）：numeric_level 语境下的等级/定数条件。"""
 
 _AMBIGUITY_HINT = (
     "「{ch}」有歧义：查{ch}谱（难度）请用「{ch}谱50」，查{ch}代（版本）请用「{ch}代50」"
@@ -279,8 +374,21 @@ def _color_of(text: str) -> LevelIndex:
     return COLOR_TO_LEVEL_INDEX[text]
 
 
+def _sync_kind_of(word: str) -> str:
+    """同步族词 → 子型（fs 全族 / fsp 族 / fdx 族 / fsdp）。"""
+    if word in ("fdxp", "fsdp", "fdx+", "fsd+"):
+        return "fsdp"
+    if word in ("fsp",):
+        return "fsp_all"
+    if word in ("fs",):
+        return "fs_all"
+    return "fsd"
+
+
 def _combo_kind_of(word: str) -> str:
-    """连击族词 → 子型（fc 全族 / ap 族 / app 理论值）。"""
+    """连击族词 → 子型（fcp 族 / fc 全族 / ap 族 / app 理论值）。"""
+    if word == "fcp":
+        return "fcp_all"
     if word in ("fc", "全连"):
         return "fc_all"
     if word in ("理论", "ap+", "app"):
@@ -302,9 +410,7 @@ _RULES: "tuple[_Rule, ...]" = (
         1,
         re.compile(_SYNC_ALTERNATION, re.IGNORECASE),
         "sync",
-        lambda m: (
-            "fsdp" if m.group().lower() in ("fdxp", "fsdp", "fdx+", "fsd+") else "fsd"
-        ),
+        lambda m: _sync_kind_of(m.group().lower()),
     ),
     # ---- 层 2：多字词 ----
     _Rule(
@@ -509,12 +615,18 @@ def _rate_cond(spec: "str | RateType", *, exact: bool = False) -> Cond:
 
 
 def _combo_cond(kind: str) -> Cond:
-    """连击族条件（S-12 包含式）：FC 族 ⊃ AP 族 ⊃ 理论值。"""
+    """连击族条件（S-12 包含式）：理论值 ⊂ AP 族 ⊂ FCP 族 ⊂ FC 族。"""
     if kind == "fc_all":
         label, key = "FC", "fc_all"
 
         def record(s: ScoreExtend) -> bool:
             return s.fc is not None
+
+    elif kind == "fcp_all":
+        label, key = "FC+", "fcp_all"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fc is not None and s.fc.value <= FCType.FCP.value
 
     elif kind == "ap_all":
         label, key = "AP", "ap_all"
@@ -532,12 +644,27 @@ def _combo_cond(kind: str) -> Cond:
 
 
 def _sync_cond(kind: str) -> Cond:
-    """同步族条件（S-13 包含式）：FSType 值序与 FCType 相反（越大越好）。"""
-    if kind == "fsd":
+    """同步族条件（S-13 包含式）：FSType 值序与 FCType 相反（越大越好）。
+
+    ``fs``/``fsp`` 子型为既有 plan 词收编（FS 族 / FSP 族）。
+    """
+    if kind == "fs_all":
+        label, key = "FS", "fs_all"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fs is not None
+
+    elif kind == "fsd":
         label, key = "舞舞", "fsd"
 
         def record(s: ScoreExtend) -> bool:
             return s.fs is not None and s.fs.value >= FSType.FSD.value
+
+    elif kind == "fsp_all":
+        label, key = "FSP", "fsp_all"
+
+        def record(s: ScoreExtend) -> bool:
+            return s.fs is not None and s.fs.value >= FSType.FSP.value
 
     else:
         label, key = "舞舞+", "fsdp"
@@ -812,31 +939,9 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                 )
             )
         elif t.kind == "level":
-            lv: str = t.value
-            conds.append(
-                Cond(
-                    CondType.LEVEL,
-                    key=f"level:{lv}",
-                    label=f"{lv}级",
-                    chart=lambda s, d, _cur, _lv=lv: d.level == _lv,
-                    value=lv,
-                    single_chart=True,
-                )
-            )
+            conds.append(_level_cond(t.value))
         elif t.kind == "ds":
-            v: float = t.value
-            conds.append(
-                Cond(
-                    CondType.DS,
-                    key=f"ds:{round(v * 10)}",
-                    label=f"{v}定数",
-                    chart=lambda s, d, _cur, _v=v: (
-                        round(d.level_value * 10) == round(_v * 10)
-                    ),
-                    value=v,
-                    single_chart=True,
-                )
-            )
+            conds.append(_ds_cond(t.value))
         elif t.kind == "genre":
             g: Genre = t.value
             conds.append(
@@ -907,11 +1012,51 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
     return deduped or None
 
 
-def parse_combo(text: str) -> "list[Cond] | ComboAmbiguity | None":
-    """条件串 → 条件表 / 歧义中止 / None（零条件，静默不回话）。"""
+def _level_cond(level: str) -> Cond:
+    """等级精确条件（S-8）。"""
+    return Cond(
+        CondType.LEVEL,
+        key=f"level:{level}",
+        label=f"{level}级",
+        chart=lambda s, d, _cur, _lv=level: d.level == _lv,
+        value=level,
+        single_chart=True,
+    )
+
+
+def _ds_cond(v: float) -> Cond:
+    """定数精确条件（S-9，一位小数整数比较防浮点尾差）。"""
+    return Cond(
+        CondType.DS,
+        key=f"ds:{round(v * 10)}",
+        label=f"{v:g}定数",
+        chart=lambda s, d, _cur, _v=v: round(d.level_value * 10) == round(_v * 10),
+        value=v,
+        single_chart=True,
+    )
+
+
+def parse_combo(
+    text: str, *, numeric_level: bool = False
+) -> "list[Cond] | ComboAmbiguity | None":
+    """条件串 → 条件表 / 歧义中止 / None（零条件，静默不回话）。
+
+    ``numeric_level``：裸数字（含 13+ / 14.5 形态）是否解析为等级/定数条件
+    ——S-8 拍板口径「『级/定数』必带**仅限数字尾缀 50/40**」，中文尾缀
+    （分数列表等）排除纯数字闲聊、裸数字即可。默认 False（b50 语境保持
+    「1350/650 静默」防护）。
+    """
     text = text.strip()
-    if not text or _PURE_NUMBER.fullmatch(text):
+    if not text:
         return None
+    if _PURE_NUMBER.fullmatch(text) or (
+        numeric_level and _PURE_NUMBER_LEVEL.fullmatch(text)
+    ):
+        if not numeric_level:
+            return None
+        if "." in text:
+            return [_ds_cond(float(text.rstrip("+")))]  # 「13.5+」定数串剥 +
+        return [_level_cond(text)]  # 「13+」的 + 是等级语义，原样保留
     return _assemble(tokenize(text))
 
 
@@ -960,36 +1105,120 @@ def _chart_key(song: Song, diff: SongDifficulty) -> "tuple[int, SongType, LevelI
     return (song.id, diff.type, diff.level_index)
 
 
-async def run_combo(
+async def _songs_of(binding) -> "list[Song]":
+    """绑定源视图曲库（``binding=None`` = CN 视图；定数表等纯曲库输出用）。"""
+    jp = binding is not None and score_service.view_of(binding.service) == "jp"
+    return await (song_service.jp_all() if jp else song_service.get_all())
+
+
+def _current_of(binding) -> int:
+    """绑定源视图的现行版本码（CN 25500 / JP 27000 分界）。"""
+    jp = binding is not None and score_service.view_of(binding.service) == "jp"
+    return current_version_jp.value if jp else current_version.value
+
+
+def _entry_hit(
+    song: Song, diff: SongDifficulty, conds: "list[Cond]", has_utage: bool, cur: int
+) -> bool:
+    """单谱面条件判定（含宴谱口径：默认排除 / S-19 在场时仅宴谱）。"""
+    if (diff.type == SongType.UTAGE) != has_utage:
+        return False
+    return all(c.chart(song, diff, cur) for c in conds if c.chart is not None)
+
+
+def _representative_of(
+    per_song: "list[tuple[Song, list[SongDifficulty]]]",
+) -> "list[tuple[Song, SongDifficulty]]":
+    """§5 选谱启发式（每曲代表谱面）：一般条件下每曲只取最高难度，
+    有 Re:MASTER 谱 → MASTER + Re:MASTER 两张。"""
+    out: "list[tuple[Song, SongDifficulty]]" = []
+    for song, diffs in per_song:
+        if not diffs:
+            continue
+        remasters = [d for d in diffs if d.level_index == LevelIndex.ReMASTER]
+        if remasters:
+            masters = [d for d in diffs if d.level_index == LevelIndex.MASTER]
+            if masters:
+                out.append((song, max(masters, key=lambda d: d.level_value)))
+            out.append((song, max(remasters, key=lambda d: d.level_value)))
+        else:
+            # 最高难度 = 难度色最高、同色取定数高者（199 类 SD/DX 同色双谱
+            # 收定数高的那张）
+            out.append(
+                (song, max(diffs, key=lambda d: (d.level_index.value, d.level_value)))
+            )
+    return out
+
+
+async def combo_chart_entries(
+    conds: "list[Cond]", binding=None
+) -> "list[tuple[Song, SongDifficulty]] | ComboEmpty":
+    """条件 → 谱面集（§5 选谱启发式）：进度/完成表/定数表消费。
+
+    - 谱面级精确条件（难度/等级/定数/谱师，``single_chart``）在场 → 命中
+      谱面全部保留（完成表不收缩难度，§9.0）；
+    - 否则每曲只取代表谱面（:func:`_representative_of`）；
+    - 收缩后仍 >400 → 只留 MASTER；>200 → 只留定数 ≥14.0（KarenBot §5
+      图长启发式）；
+    - 谱面集空 → :class:`ComboEmpty`（可证明矛盾附点破提示）。
+    """
+    songs = await _songs_of(binding)
+    cur = _current_of(binding)
+    has_utage = any(c.ctype is CondType.UTAGE for c in conds)
+    if any(c.single_chart for c in conds if c.chart is not None):
+        entries = [
+            (song, diff)
+            for song in songs
+            for diff in song.get_difficulties()
+            if _entry_hit(song, diff, conds, has_utage, cur)
+        ]
+    else:
+        per_song = [
+            (
+                song,
+                [
+                    d
+                    for d in song.get_difficulties()
+                    if _entry_hit(song, d, conds, has_utage, cur)
+                ],
+            )
+            for song in songs
+        ]
+        entries = _representative_of(per_song)
+    if not entries:
+        return ComboEmpty(_empty_message(conds, cur))
+    if len(entries) > 400:
+        entries = [e for e in entries if e[1].level_index == LevelIndex.MASTER]
+    if len(entries) > 200:
+        entries = [e for e in entries if e[1].level_value >= 14.0]
+    return entries
+
+
+async def combo_filtered_scores(
     conds: "list[Cond]",
     binding,
-    notify_slow: "Callable[[], Any] | None" = None,
-) -> "ComboResult | ComboEmpty":
-    """执行条件组合（§8.3）：曲库键集 → 全量成绩过滤 → 排序/修改 → 组装。
+    notify_slow=None,
+) -> "list[ScoreExtend] | ComboEmpty":
+    """条件 → 成绩集（分数列表消费；键集全量过滤、无选谱收缩）。
 
-    一次 IO（``get_scores_all``，NET 走窗口缓存）+ 纯过滤；谱面类条件在绑定
-    源视图的曲库上产出谱面键集 ``(id, type, level_index)``（各源成绩 id 均为
-    归一根 id、宴谱为 diff_id，与完成表同口径）。谱面集空 → :class:`ComboEmpty`；
-    成绩集空 → 照常返回空组装（渲染全空槽卡，对齐两上游）。
-    ``notify_slow``：落雪续期等待的慢提示回调，透传成绩拉取。
+    谱面类条件在绑定源视图曲库上产出谱面键集 ``(id, type, level_index)``
+    （各源成绩 id 均为归一根 id、宴谱为 diff_id，与完成表同口径）；
+    纯成绩类条件不过滤谱面。成绩集空 ≠ 错误——分数列表自行出空态文案，
+    b50 组装路径照常渲染空槽卡（§9.4）。
     """
-    jp = score_service.view_of(binding.service) == "jp"
-    songs = await (song_service.jp_all() if jp else song_service.get_all())
-    cur = current_version_jp.value if jp else current_version.value
-    chart_conds = [c for c in conds if c.chart is not None]
-    record_conds = [c for c in conds if c.record is not None]
+    songs = await _songs_of(binding)
+    cur = _current_of(binding)
     has_utage = any(c.ctype is CondType.UTAGE for c in conds)
+    has_chart = any(c.chart is not None for c in conds)
 
     keys: "set[tuple[int, SongType, LevelIndex]] | None" = None
-    if chart_conds:
-        keys = set()
-        for song in songs:
-            for diff in song.get_difficulties():
-                if (diff.type == SongType.UTAGE) != has_utage:
-                    # 宴谱默认排除；宴谱条件在场时 = 仅宴谱
-                    continue
-                if all(c.chart(song, diff, cur) for c in chart_conds):
-                    keys.add(_chart_key(song, diff))
+    if has_chart:
+        keys = {
+            _chart_key(song, diff)
+            for song in songs
+            for diff in song.get_difficulties()
+            if _entry_hit(song, diff, conds, has_utage, cur)
+        }
         if not keys:
             return ComboEmpty(_empty_message(conds, cur))
 
@@ -999,7 +1228,24 @@ async def run_combo(
     else:
         scores = list(scores)
     scores = [s for s in scores if (s.type == SongType.UTAGE) == has_utage]
-    scores = [s for s in scores if all(c.record(s) for c in record_conds)]
+    record_conds = [c for c in conds if c.record is not None]
+    return [s for s in scores if all(c.record(s) for c in record_conds)]
+
+
+async def run_combo(
+    conds: "list[Cond]",
+    binding,
+    notify_slow: "Callable[[], Any] | None" = None,
+) -> "ComboResult | ComboEmpty":
+    """执行条件组合（§8.3）：成绩过滤（:func:`combo_filtered_scores`）→
+    排序/修改 → 组装。谱面集空 → :class:`ComboEmpty`；成绩集空 → 照常返回
+    空组装（渲染全空槽卡，对齐两上游）。
+    """
+    filtered = await combo_filtered_scores(conds, binding, notify_slow)
+    if isinstance(filtered, ComboEmpty):
+        return filtered
+    scores = filtered
+    cur = _current_of(binding)
 
     # 排序覆盖：取最后声明者（§9.0）；modifier：声明序链式应用（理想升档
     # 与拟合重算叠加时按声明序变换），拟合重算器恒居链尾——RA 只取决于
@@ -1010,7 +1256,7 @@ async def run_combo(
     )
     modifiers = [c.modifier for c in conds if c.modifier is not None]
     if any(c.ctype is CondType.FIT for c in conds):
-        modifiers.append(_fit_modifier_of(_build_fit_map(songs)))
+        modifiers.append(_fit_modifier_of(_build_fit_map(await _songs_of(binding))))
     if modifiers:
         scores = [_apply_modifiers(s, modifiers) for s in scores]
 
