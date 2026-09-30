@@ -174,6 +174,9 @@ async def _(
             header_text=table_header,
             theme=theme,
             checker=checker,
+            # 盖章分组与底图一致：单等级+判型混合（14+sss+完成表）底图为
+            # 定数节文件底图，仅跨等级条件（single_level=None）为标级大类
+            by_level=single_level is None,
         )
         if png is None:
             await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(

@@ -316,9 +316,20 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         captured["level"] = level
         return "im-sentinel"
 
-    def fake_cond(im, plan, scores, entries, *, header_text, theme=None, checker=None):
+    def fake_cond(
+        im,
+        plan,
+        scores,
+        entries,
+        *,
+        header_text,
+        theme=None,
+        checker=None,
+        by_level=None,
+    ):
         captured["header"] = header_text
         captured["plan"] = plan
+        captured["by_level"] = by_level
         return b"png"
 
     monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
@@ -361,6 +372,7 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
     assert captured["user_id"] == "99999999"
     assert captured["level"] == "13"  # 单等级条件 → 文件底图优先
     assert captured["header"] == "Level. 13"  # 收编等价：表头保持 Level. 13
+    assert captured["by_level"] is False  # 单等级+判型混合 → 定数节盖章（防错位）
 
 
 @pytest.mark.asyncio
@@ -665,9 +677,20 @@ async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
         captured["level"] = level
         return "im-sentinel"
 
-    def fake_cond(im, plan, scores, entries, *, header_text, theme=None, checker=None):
+    def fake_cond(
+        im,
+        plan,
+        scores,
+        entries,
+        *,
+        header_text,
+        theme=None,
+        checker=None,
+        by_level=None,
+    ):
         captured["header"] = header_text
         captured["plan"] = plan
+        captured["by_level"] = by_level
         return b"png"
 
     monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
@@ -699,11 +722,12 @@ async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
     # 条件版：无等级条件 → 底图现算（level=None）；表头=规范化 label 串
-    # （评级档大写，QoL3）；plan=fc 判型
+    # （评级档大写，QoL3）；plan=fc 判型；跨等级 → 标级大类盖章
     assert captured == {
         "level": None,
         "header": "东方·FC",
         "plan": "fc",
+        "by_level": True,
     }
 
 
