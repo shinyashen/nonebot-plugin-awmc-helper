@@ -108,11 +108,12 @@ def _rating_grid(
 
     start_y = RATING_START_Y
     for label, charts in groups.items():
-        # 节标签：定数节 = 完整定数（"13.9"）；标级大类 = 等级串（"14+"）
+        # 节标签：定数节 = 小数节（".9"~".0" 旧版式——单等级表头已带等级
+        # 语境）；标级大类 = 等级串（"14+"）
         dr.text(
             (70, start_y + 35),
-            label,
-            font=font(30, FONT_RODIN),
+            label if by_level else f".{label.split('.')[-1]}",
+            font=font(40, FONT_RODIN),
             fill=FONT_BLUE,
             anchor="lm",
             stroke_width=4,
