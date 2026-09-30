@@ -148,7 +148,13 @@ def SessionQueryBinding(unbound_hint: str | None = None):
     return Depends(_get)
 
 
-_AT_SEGMENT = r"(?:\s*\[CQ:at,[^\]]*\])*"
+_AT_RUN = r"(?:\s*\[CQ:at,[^\]]*\])*\s*"
+r"""消息串中可容忍的 at 段连排（段间/段后空白一并吞掉）。
+
+实测形状（2026-09-30 服务器日志）：QQ 客户端在 @ 之后自动留一个空格，
+消息串以「at 段 + 尾随空格」结束（``…[CQ:at,qq=..,name=..] ``）；段数据可带
+``name=`` 键。``[^\]]*`` 对段内数据整体吞（nickname 的 ``]`` 已被 CQ 转义）。
+"""
 
 
 def at_tolerant(pattern: str) -> str:
@@ -161,9 +167,9 @@ def at_tolerant(pattern: str) -> str:
     :func:`extract_at_target` 同口径）。仅用于已接入 @ 代查的 on_regex 指令。
     """
     if pattern.startswith("^"):
-        pattern = "^" + _AT_SEGMENT + pattern[1:]
+        pattern = "^" + _AT_RUN + pattern[1:]
     if pattern.endswith("$"):
-        pattern = pattern[:-1] + _AT_SEGMENT + "$"
+        pattern = pattern[:-1] + _AT_RUN + "$"
     return pattern
 
 

@@ -390,3 +390,72 @@ async def test_plate_at_net_target_unsupported(app: App, db, songs):
             bot=bot,
         )
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_score_list_at_trailing_space(app: App, db, monkeypatch):
+    """@代查回归（2026-09-30 线上实测）：QQ 客户端在 at 段后自动留空格，
+    消息串以尾随空格结束——锚定正则必须容忍，否则指令完全不触发
+    （消息形状原样取自服务器日志）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    target = await binding_service.ensure("OneBot V11", "99999999")
+    await binding_service.bind_divingfish_username(target, "fishuser")
+
+    captured = {}
+
+    async def fake_scores_all(binding, notify_slow=None):
+        captured["user_id"] = binding.user_id
+        return SimpleNamespace(scores=[])
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+
+    event = fake_group_message_event_v11(
+        message=Message(
+            [
+                MessageSegment.text("13+分数列表"),
+                MessageSegment("at", {"qq": "99999999", "name": "你的避税有点多了"}),
+                MessageSegment.text(" "),
+            ]
+        ),
+        user_id=12345678,
+    )
+    async with app.test_matcher(plugin.score_list_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(12345678),
+                    MessageSegment.text(" 没有找到符合条件的成绩"),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    assert captured["user_id"] == "99999999"
