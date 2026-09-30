@@ -143,12 +143,22 @@ def plate_version_range(version: str) -> tuple[int, int] | None:
     return (lo, hi)
 
 
+def version_code_of(diff: SongDifficulty) -> int | None:
+    """谱面版本 → 归一代码（``Version.from_value`` carry-forward）。
+
+    otoge-db 的 version 字段是**代内逐曲递增值**（如 11007、19999），非枚举
+    基码——等值/区间比较必须先归一到所属代（from_value(11007)=11000），
+    否则「舞」类全集码等值匹配与牌子区间上界大量漏曲（19992–19999 的 FiNALE
+    末期 lv15 ReM 谱被 19900 上界排除，舞将完成表缺 15）。
+    """
+    if diff.version is None:
+        return None
+    return Version.from_value(diff.version).value
+
+
 def in_plate_scope(
     song: Song, diff: SongDifficulty, lo: int, hi: int, major_type: SongType
 ) -> bool:
-    """谱面是否落在牌子范围内（主类型 + 版本区间）。"""
-    return (
-        diff.type == major_type
-        and diff.version is not None
-        and lo <= diff.version <= hi
-    )
+    """谱面是否落在牌子范围内（主类型 + 版本区间；version 归一后比较）。"""
+    code = version_code_of(diff)
+    return diff.type == major_type and code is not None and lo <= code <= hi

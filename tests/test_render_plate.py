@@ -96,6 +96,7 @@ async def test_plate_qualified_kinds(songs):
     # 者/将：达成率阈值
     assert _qualified("者", score(ach=80.0))
     assert not _qualified("者", score(ach=79.9))
+    # 将 = ≥SSS（100.0；S=97/S+=98/SS=99/SS+=99.5/SSS=100/SSS+=100.5 大将）
     assert _qualified("将", score(ach=100.0))
-    assert not _qualified("将", score(ach=99.9))
+    assert not _qualified("将", score(ach=99.9999))
     assert not _qualified("将", None)

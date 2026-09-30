@@ -41,6 +41,8 @@ def _qualified(kind: str, score) -> bool:
     if kind == "者":
         return (score.achievements or 0) >= 80
     if kind == "将":
+        # 将 = 全谱面 SSS（100.0）以上（SSS+=100.5 为自定义大将）；SS 档
+        # 口径：S=97/S+=98/SS=99/SS+=99.5/SSS=100/SSS+=100.5
         return (score.achievements or 0) >= 100
     if kind == "极":
         return score.fc is not None and score.fc.value <= FCType.FC.value
@@ -115,15 +117,27 @@ def draw_plate_table(
         )
         song_rep[song_id] = slot_rep(master, re_m, use_remaster=is_wu)
     song_level = {sid: rep.level for sid, rep in song_rep.items()}
+    # 槽数按曲动态（Hoshino _process_plate_table_wu_data 同款：`slot_size =
+    # 5 if sid in wu_re_id_set else 4`）——舞/霸的 ReM 槽只对**实际拥有白谱**
+    # 的曲存在；固定 5 槽会让无白谱曲的槽 4 恒 None、整曲永不标记（2026-09-30
+    # 用户实测：只有白谱曲被标记）
+    song_slot_size: dict[int, int] = {
+        sid: 5 if (is_wu and any(d.level_index.value == 4 for d in diffs)) else 4
+        for sid, diffs in all_slots.items()
+    }
     played: dict[str, dict[int, list]] = {}
     for song_id, level in song_level.items():
-        played.setdefault(level, {}).setdefault(song_id, [None] * slot_num)
+        played.setdefault(level, {}).setdefault(
+            song_id, [None] * song_slot_size[song_id]
+        )
     for score in play_result:
         if score.type != major or score.level_index.value >= slot_num:
             continue
         if score.id not in song_level:
             continue
-        slots = played[song_level[score.id]].setdefault(score.id, [None] * slot_num)
+        slots = played[song_level[score.id]].setdefault(
+            score.id, [None] * song_slot_size[score.id]
+        )
         slots[score.level_index.value] = score
 
     qualified_count = 0
@@ -197,8 +211,11 @@ def draw_plate_table(
             x = START_X + col * COL_STEP
             y = current_y + row * ROW_STEP
             qualified_slots = qualified_slots_of[song_id]
-            if slot_num - 1 in qualified_slots:
-                best = slots[slot_num - 1]
+            # 大章 = 该曲**最后一槽**（动态 4/5，Hoshino `len(results)-1` 同款）：
+            # 无白谱曲的最后一槽是 Master（index 3），固定槽 4 会永不画章
+            best_index = len(slots) - 1
+            if best_index in qualified_slots:
+                best = slots[best_index]
                 if best is not None:
                     im.alpha_composite(assets.pic("complete_2.png"), (x + 1, y + 1))
                     icon, offset = _plate_icon(kind, best)

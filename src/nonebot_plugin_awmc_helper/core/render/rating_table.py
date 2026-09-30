@@ -6,6 +6,9 @@ S~SSS+ 评级分布、Sync/FC 分布）并逐谱面盖章：普通模式盖评�
 缺失该谱面成绩的谱面不盖章。
 """
 
+from typing import Any
+from collections.abc import Callable
+
 from PIL import Image, ImageDraw
 from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
@@ -31,7 +34,7 @@ from .table_layout import (
     RATING_START_Y,
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
-    group_by_ds,
+    group_by_level,
 )
 
 # NB constants 同源：统计键序与阈值表
@@ -102,12 +105,15 @@ def draw_rating_table(
     entries: list[tuple[Song, SongDifficulty]],
     *,
     theme: str = DEFAULT_THEME,
+    checker: "Callable[[Any, Any, Any], bool] | None" = None,
 ) -> bytes | None:
     """绘制等级完成表（条件化收编后保留：单等级条件走文件底图与 lv15 版式）。
 
     ``plan``：None/达成率计划 → 评级章模式；fc/fcp/ap → 连击章模式（NB
     plan=True）；fs/fdx/fsp → Sync 章模式（NB 未支持，按连击章模式自然扩展）。
     ``play_result``：玩家全量成绩（ScoreExtend 列表）。底图缺失返回 None。
+    ``checker``：达标判定 ``(achievements, fc, fs) -> bool``（plan_of 产物），
+    驱动盖章三态背景（QoL：达标白/不达标黑/未打无）；None 回退 ≥100 分界。
     """
     path = table_template.rating_table_dir() / f"{level}.png"
     if not path.exists():
@@ -126,6 +132,8 @@ def draw_rating_table(
         theme=theme,
         lv15=(level == "15"),
         header_text=f"Level. {level}",
+        header_prefix="Level.",
+        checker=checker,
     )
 
 
@@ -137,11 +145,13 @@ def draw_rating_table_cond(
     *,
     header_text: str,
     theme: str = DEFAULT_THEME,
+    checker: "Callable[[Any, Any, Any], bool] | None" = None,
 ) -> bytes:
     """条件化完成表（P2-c）：调用方提供现算/文件底图，成绩按谱面键集过滤。
 
     ``header_text``：标题大字（单等级条件传 "Level. {level}" 保收编等价，
-    其余传条件串）。
+    其余传条件 label 串——规范化显示，评级档大写）；无 Level. 前缀。
+    ``checker``：同 :func:`draw_rating_table`。
     """
     keys = {(song.id, d.level_index.value) for song, d in entries}
     played = {
@@ -150,7 +160,15 @@ def draw_rating_table_cond(
         if (score.id, score.level_index.value) in keys
     }
     return _draw_rating_core(
-        im, plan, played, entries, theme=theme, lv15=False, header_text=header_text
+        im,
+        plan,
+        played,
+        entries,
+        theme=theme,
+        lv15=False,
+        header_text=header_text,
+        header_prefix=None,
+        checker=checker,
     )
 
 
@@ -163,11 +181,26 @@ def _draw_rating_core(
     theme: str,
     lv15: bool,
     header_text: str,
+    header_prefix: "str | None" = "Level.",
+    checker: "Callable[[Any, Any, Any], bool] | None" = None,
 ) -> bytes:
-    """盖章核心（等级版/条件版共用）：统计头 + 逐谱面盖章 + 全曲徽章。"""
+    """盖章核心（等级版/条件版共用）：统计头 + 逐谱面盖章 + 全曲徽章。
+
+    背景三态跟随 ``checker``（QoL 2026-09-30）：达标 → 白色半透明
+    （complete_1）、有成绩不达标 → 黑色半透明（unfinished_1）、未打 → 无
+    （底图原样）；``checker=None`` 回退旧 ≥100 分界。lv15 大格分支保持
+    Hoshino 惯例不画底。
+    """
     dr = ImageDraw.Draw(im)
     combo_mode = plan in ("fc", "fcp", "ap")
     sync_mode = plan in ("fs", "fdx", "fsp")
+
+    def bg_of(score) -> str:
+        if checker is not None:
+            ok = checker(score.achievements, score.fc, score.fs)
+        else:
+            ok = (score.achievements or 0) >= 100
+        return _COMPLETED_BG if ok else _UNFINISHED_BG
 
     stats = _Stats()
     total_count = len(entries)
@@ -182,8 +215,9 @@ def _draw_rating_core(
             stats.add_sync(score.fs)
 
     # 标题 + 统计头（普通分支坐标；lv15 由模板自身布局承载，统计同位）
+    # 条件版无 Level. 前缀（QoL：多余前缀去除）
     title_y = 160
-    table_template.draw_level_header(dr, header_text, title_y)
+    table_template.draw_level_header(dr, header_text, title_y, prefix=header_prefix)
 
     im.alpha_composite(assets.pic("complete.png"), (251, 190))
     dr.text(
@@ -224,9 +258,7 @@ def _draw_rating_core(
             if rank := assets.pic_optional(name, theme):
                 im.alpha_composite(rank, (x + 55, y + 115))
             return
-        im.alpha_composite(
-            assets.pic(_COMPLETED_BG if ach >= 100 else _UNFINISHED_BG), (x + 1, y + 1)
-        )
+        im.alpha_composite(assets.pic(bg_of(score)), (x + 1, y + 1))
         if rank := assets.pic_optional(name, theme):
             im.alpha_composite(rank.resize((78, 35)), (x, y + 20))
 
@@ -240,28 +272,36 @@ def _draw_rating_core(
             if bonus := assets.pic_optional(f"UI_CHR_PlayBonus_{name}.png"):
                 im.alpha_composite(bonus.resize((200, 200)), (x + 75, y + 80))
             return
-        im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
-        im.alpha_composite(
-            assets.pic(
-                f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name.lower()]}.png"
-            ).resize((50, 50)),
-            (x + 15, y + 13),
-        )
+        # 三态背景（checker 驱动）：达标白底+徽章；有成绩不达标 → 黑底，
+        # 实际徽章照画（如 ap 表里的 fcp 曲显示 FCp 章）
+        im.alpha_composite(assets.pic(bg_of(score)), (x + 1, y + 1))
+        if score.fc:
+            im.alpha_composite(
+                assets.pic(
+                    f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name.lower()]}.png"
+                ).resize((50, 50)),
+                (x + 15, y + 13),
+            )
 
     def stamp_sync(x: int, y: int, score, *, lv15: bool = False) -> None:
         if not score.fs or score.fs.name.lower() == "sync":
+            # Sync 档（同玩标记，无 FS 徽章）：不达任何 fs 族 plan → 黑底
+            # （lv15 大格分支保持无底惯例）
+            if not lv15:
+                im.alpha_composite(assets.pic(_UNFINISHED_BG), (x + 1, y + 1))
             return
         qualified.append(SYNC_D_SP.index(score.fs.name.lower()))
         # 扩展分支（NB 未支持 Sync 计划）：PlayBonus 大章无 Sync 档素材，
         # lv15 也只能用 50×50 小章；lv15 按 Hoshino 分支惯例不画完成底
         if not lv15:
-            im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
-        im.alpha_composite(
-            assets.pic(
-                f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name.lower()]}.png"
-            ).resize((50, 50)),
-            (x + 15, y + 13),
-        )
+            im.alpha_composite(assets.pic(bg_of(score)), (x + 1, y + 1))
+        if score.fs and score.fs.name.lower() != "sync":
+            im.alpha_composite(
+                assets.pic(
+                    f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name.lower()]}.png"
+                ).resize((50, 50)),
+                (x + 15, y + 13),
+            )
 
     if lv15:
         # 同序契约：与 table_template._rating_grid_15 的底图摆放同一排序
@@ -281,7 +321,8 @@ def _draw_rating_core(
             else:
                 stamp_sync(x, y, score, lv15=True)
     else:
-        groups = group_by_ds(entries)
+        # 同序契约：与 table_template._rating_grid 底图同走 group_by_level
+        groups = group_by_level(entries)
         current_y = RATING_START_Y
         for ds in groups:
             charts = groups[ds]

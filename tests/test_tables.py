@@ -316,8 +316,9 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         captured["level"] = level
         return "im-sentinel"
 
-    def fake_cond(im, plan, scores, entries, *, header_text, theme=None):
+    def fake_cond(im, plan, scores, entries, *, header_text, theme=None, checker=None):
         captured["header"] = header_text
+        captured["plan"] = plan
         return b"png"
 
     monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
@@ -664,7 +665,7 @@ async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
         captured["level"] = level
         return "im-sentinel"
 
-    def fake_cond(im, plan, scores, entries, *, header_text, theme=None):
+    def fake_cond(im, plan, scores, entries, *, header_text, theme=None, checker=None):
         captured["header"] = header_text
         captured["plan"] = plan
         return b"png"
@@ -697,10 +698,11 @@ async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
         )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
-    # 条件版：无等级条件 → 底图现算（level=None）；表头=条件串；plan=fc 判型
+    # 条件版：无等级条件 → 底图现算（level=None）；表头=规范化 label 串
+    # （评级档大写，QoL3）；plan=fc 判型
     assert captured == {
         "level": None,
-        "header": "东方fc",
+        "header": "东方·FC",
         "plan": "fc",
     }
 

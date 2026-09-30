@@ -13,14 +13,15 @@
 """
 
 import asyncio
+from typing import Any
 from pathlib import Path
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from PIL import Image, ImageDraw
 from nonebot import logger
 from maimai_py import Song, SongType, SongDifficulty
 
-from .fonts import FONT_NUM, FONT_RODIN, font
+from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
     TITLE_BLUE,
     DIFF_TEXT_COLORS,
@@ -52,8 +53,8 @@ from .table_layout import (
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
     slot_rep,
-    group_by_ds,
     slot_level_of,
+    group_by_level,
     level_page_key,
 )
 
@@ -81,8 +82,12 @@ def _credit(im: Image.Image, height: int) -> None:
 def _rating_grid(
     entries: Sequence[tuple[Song, SongDifficulty]],
 ) -> Image.Image:
-    """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 定数节封面网格。"""
-    groups = group_by_ds(entries)
+    """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 标级节封面网格。
+
+    分组与盖章（``rating_table``）同走 ``group_by_level``（同序契约）；节
+    标签 = 标级串（"14+"/"14"，牌子完成表同款观感，2026-09-30 QoL 拍板）。
+    """
+    groups = group_by_level(entries)
 
     current_y = RATING_START_Y
     for charts in groups.values():
@@ -98,11 +103,11 @@ def _rating_grid(
     _credit(im, height)
 
     start_y = RATING_START_Y
-    for ds, charts in groups.items():
-        # 节标签 = 定数小数部分（如 ".6"）
+    for level, charts in groups.items():
+        # 节标签 = 标级串（如 "14+"；对齐牌子完成表标签画法）
         dr.text(
             (70, start_y + 35),
-            f".{ds.split('.')[-1]}",
+            level,
             font=font(40, FONT_RODIN),
             fill=FONT_BLUE,
             anchor="lm",
@@ -442,14 +447,17 @@ async def draw_rating_table_with_fallback(
     *,
     theme: str,
     song_service,
+    checker: "Callable[[Any, Any, Any], bool] | None" = None,
 ) -> bytes | None:
     """定数表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。"""
     from .rating_table import draw_rating_table
 
-    png = draw_rating_table(level, plan, scores, entries, theme=theme)
+    png = draw_rating_table(level, plan, scores, entries, theme=theme, checker=checker)
     if png is None:
         await generate_rating_template(level, song_service)
-        png = draw_rating_table(level, plan, scores, entries, theme=theme)
+        png = draw_rating_table(
+            level, plan, scores, entries, theme=theme, checker=checker
+        )
     return png
 
 
@@ -502,7 +510,8 @@ def draw_level_header(
     dr.text(
         (x, y),
         level,
-        font=font(100 if _width(level) <= 4 else 60, FONT_RODIN),
+        # 值文本 = 条件串（含中文）：中文字体（Rodin 无简中字形无 fallback）
+        font=font(100 if _width(level) <= 4 else 60, FONT_HAN),
         fill=FONT_BLUE,
         anchor="ld",
         stroke_width=8,

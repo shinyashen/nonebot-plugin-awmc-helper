@@ -19,6 +19,7 @@ from ...core.combo import (
     OutputKind,
     ComboAmbiguity,
     plan_of,
+    conds_title,
     parse_combo,
     inapplicable,
     combo_chart_entries,
@@ -121,17 +122,20 @@ async def _(
     if isinstance(entries, ComboEmpty):
         await UniMessage.text(f" {entries.message}").finish(at_sender=True)
 
+    # 表头 = 规范化 label 串（评级档大写等，QoL：s 强制大写）
+    header = conds_title(parsed) or cond_text
+
     if suffix == "定数表":
         # 单等级条件走文件底图 + Level. 前缀（收编等价）；其余现算
         if len(parsed) == 1 and parsed[0].ctype is CondType.LEVEL:
             png = await table_template.rating_table_text_bytes(parsed[0].value, entries)
         else:
-            png = await table_template.rating_table_cond_text_bytes(entries, cond_text)
+            png = await table_template.rating_table_cond_text_bytes(entries, header)
         await UniMessage.image(raw=png).finish(at_sender=True)
 
     # 完成表：单等级条件优先文件底图（同速同像素），lv15 单条件走既有三列
-    # 大图管线；其余条件现算底图
-    _, plan_word, _ = plan_of(parsed)
+    # 大图管线；其余条件现算底图。checker 驱动盖章三态背景（QoL）
+    checker, plan_word, _ = plan_of(parsed)
     plan = plan_word if plan_word in ("fc", "fcp", "ap", "fs", "fdx", "fsp") else None
     theme = binding.theme or DEFAULT_THEME
     scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
@@ -145,13 +149,25 @@ async def _(
     )
     if single_level == "15":
         png = await table_template.draw_rating_table_with_fallback(
-            "15", plan, scores.scores, entries, theme=theme, song_service=song_service
+            "15",
+            plan,
+            scores.scores,
+            entries,
+            theme=theme,
+            song_service=song_service,
+            checker=checker,
         )
     else:
         im = await table_template.rating_table_base_image(entries, single_level)
-        header = f"Level. {single_level}" if single_level else cond_text
+        table_header = f"Level. {single_level}" if single_level else header
         png = draw_rating_table_cond(
-            im, plan, scores.scores, entries, header_text=header, theme=theme
+            im,
+            plan,
+            scores.scores,
+            entries,
+            header_text=table_header,
+            theme=theme,
+            checker=checker,
         )
         if png is None:
             await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(

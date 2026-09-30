@@ -47,7 +47,7 @@ from maimai_py import (
 from .calc import build_bests, compute_rating, build_flat_bests
 from .score import score_service
 from .songs import song_service
-from .plates import norm_plate
+from .plates import norm_plate, version_code_of
 from .songdb import State, ensure_ongeki_titles
 from ..constants import normalize_text
 
@@ -263,6 +263,12 @@ def _fc_checker(minimum: FCType):
 
 def _fs_checker(minimum: FSType):
     return lambda ach, _fc, fs: fs is not None and fs.value >= minimum.value
+
+
+def conds_title(conds: "list[Cond]") -> str:
+    """条件的规范化显示串（label 以 · 连接；评级档大写、分类/谱师原文）——
+    ``ComboResult.title`` 与条件完成表/定数表表头单源。"""
+    return "·".join(c.label for c in conds)
 
 
 # ---------------------------------------------------------------- 词表（纯数据）
@@ -668,7 +674,7 @@ def _version_cond(chars: "tuple[str, ...]", dai: bool) -> Cond:
         CondType.VERSION,
         key="version:" + ",".join(sorted(map(str, codes))),
         label="".join(chars) + ("代" if dai else ""),
-        chart=lambda s, d, _cur: d.version in codes,
+        chart=lambda s, d, _cur: version_code_of(d) in codes,
         value=codes,
     )
 
@@ -1123,9 +1129,9 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                     key=f"era:{which}",
                     label="dx" if which == "dx" else "旧框",
                     chart=(
-                        (lambda s, d, _cur: d.version > 19900)
+                        (lambda s, d, _cur: (version_code_of(d) or 0) > 19900)
                         if which == "dx"
-                        else (lambda s, d, _cur: d.version <= 19900)
+                        else (lambda s, d, _cur: 0 < (version_code_of(d) or 0) <= 19900)
                     ),
                     value=which,
                 )
@@ -1149,7 +1155,9 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                     key=f"new:{which_n}",
                     label="新版本" if which_n == "new" else "旧版本",
                     chart=lambda s, d, cur, _w=which_n: (
-                        d.version == cur if _w == "new" else d.version != cur
+                        version_code_of(d) == cur
+                        if _w == "new"
+                        else version_code_of(d) != cur
                     ),
                     value=which_n,
                 )
@@ -1199,7 +1207,7 @@ def _era_year_cond(year: int, label: str) -> Cond:
         CondType.ERA_YEAR,
         key=f"era_year:{code}",
         label=label,
-        chart=lambda s, d, _cur, _c=code: d.version is not None and d.version <= _c,
+        chart=lambda s, d, _cur, _c=code: _c >= (version_code_of(d) or 0) > 0,
         value=code,
     )
 
@@ -1538,7 +1546,7 @@ async def run_combo(
             old_cap=25 if output is OutputKind.B40 else 35,
         )
     return ComboResult(
-        title="·".join(c.label for c in conds),
+        title=conds_title(conds),
         bests=bests,
         flat=flat,
         total_ra=bests.rating,
