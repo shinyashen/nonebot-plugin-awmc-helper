@@ -55,6 +55,7 @@ from .table_layout import (
     slot_rep,
     group_by_ds,
     slot_level_of,
+    group_by_level,
     level_page_key,
 )
 
@@ -80,16 +81,17 @@ def _credit(im: Image.Image, height: int) -> None:
 
 
 def _rating_grid(
-    entries: Sequence[tuple[Song, SongDifficulty]],
+    entries: Sequence[tuple[Song, SongDifficulty]], *, by_level: bool = False
 ) -> Image.Image:
-    """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 定数节封面网格。
+    """NB update_rating_table 布局（lv7–14）：毛玻璃卡 + 节封面网格。
 
-    分组与盖章（``rating_table``）同走 ``group_by_ds``（同序契约）；节标签
-    = **完整定数**（"14.8" 而非 ".8"，2026-10-01 QoL 修订）：单等级条件与
-    旧版式信息等价（13.9~13.0），跨等级条件沿定数轴自然合并且节标签自带
-    等级（定数一位小数与标级一一对应，同节必同标级）。
+    分组按 ``by_level`` 分流（与盖章侧同函数同序契约）：
+    - ``False``（默认，单等级条件/预渲染底图）：``group_by_ds`` 定数节，节
+      标签 = 完整定数（"13.9"~"13.0"，与旧版式节序一致）；
+    - ``True``（跨等级条件版）：``group_by_level`` 标级大类（"14+"/"14" 各
+      一组合并、组内不细分定数小数节，2026-10-01 拍板）。
     """
-    groups = group_by_ds(entries)
+    groups = group_by_level(entries) if by_level else group_by_ds(entries)
 
     current_y = RATING_START_Y
     for charts in groups.values():
@@ -105,12 +107,11 @@ def _rating_grid(
     _credit(im, height)
 
     start_y = RATING_START_Y
-    for ds, charts in groups.items():
-        # 节标签 = 完整定数（如 "14.8"；旧版为小数节 ".8"，跨等级条件合并
-        # 后需自带等级），字号缩小适配 4 字符宽度
+    for label, charts in groups.items():
+        # 节标签：定数节 = 完整定数（"13.9"）；标级大类 = 等级串（"14+"）
         dr.text(
             (70, start_y + 35),
-            ds,
+            label,
             font=font(30, FONT_RODIN),
             fill=FONT_BLUE,
             anchor="lm",
@@ -543,7 +544,9 @@ async def rating_table_base_image(
         if level == "15":
             # lv15 三列大图版式（含 UNKNOWN 槽）仅文件缺失现算分支保持
             return await asyncio.to_thread(lambda: _rating_grid_15(entries))
-    return await asyncio.to_thread(lambda: _rating_grid(entries))
+        return await asyncio.to_thread(lambda: _rating_grid(entries))
+    # 跨等级条件版：标级大类分组（等级各一组合并、组内不细分定数小数节）
+    return await asyncio.to_thread(lambda: _rating_grid(entries, by_level=True))
 
 
 async def rating_table_text_bytes(

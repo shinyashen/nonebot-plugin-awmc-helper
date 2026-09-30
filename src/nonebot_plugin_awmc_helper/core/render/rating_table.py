@@ -35,6 +35,7 @@ from .table_layout import (
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
     group_by_ds,
+    group_by_level,
 )
 
 # NB constants 同源：统计键序与阈值表
@@ -169,6 +170,7 @@ def draw_rating_table_cond(
         header_text=header_text,
         header_prefix=None,
         checker=checker,
+        by_level=True,
     )
 
 
@@ -183,13 +185,15 @@ def _draw_rating_core(
     header_text: str,
     header_prefix: "str | None" = "Level.",
     checker: "Callable[[Any, Any, Any], bool] | None" = None,
+    by_level: bool = False,
 ) -> bytes:
     """盖章核心（等级版/条件版共用）：统计头 + 逐谱面盖章 + 全曲徽章。
 
     背景三态跟随 ``checker``（QoL 2026-09-30）：达标 → 白色半透明
     （complete_1）、有成绩不达标 → 黑色半透明（unfinished_1）、未打 → 无
     （底图原样）；``checker=None`` 回退旧 ≥100 分界。lv15 大格分支保持
-    Hoshino 惯例不画底。
+    Hoshino 惯例不画底。``by_level``：条件版（跨等级）底图按标级大类分组 →
+    盖章同序（``group_by_level``）；单等级版走 ``group_by_ds`` 定数节。
     """
     dr = ImageDraw.Draw(im)
     combo_mode = plan in ("fc", "fcp", "ap")
@@ -321,8 +325,8 @@ def _draw_rating_core(
             else:
                 stamp_sync(x, y, score, lv15=True)
     else:
-        # 同序契约：与 table_template._rating_grid 底图同走 group_by_ds
-        groups = group_by_ds(entries)
+        # 同序契约：底图分组随 by_level（条件版标级大类 / 单等级定数节）
+        groups = group_by_level(entries) if by_level else group_by_ds(entries)
         current_y = RATING_START_Y
         for ds in groups:
             charts = groups[ds]

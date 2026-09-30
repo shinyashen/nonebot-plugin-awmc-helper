@@ -1671,5 +1671,26 @@ def test_numeric_level_progress_context():
         ("LEVEL", "14+级"),
         ("RATE", "SSS+"),
     ]
-    # 与完成表语境同解析
-    assert parse_combo("14+sss+完成表", numeric_level=True) is not None
+    # 与完成表语境同解析（「完成表」尾缀由 matcher 剥离后传入）
+    assert [(c.ctype, c.key) for c in parse_combo("14+sss+", numeric_level=True)] == [
+        (c.ctype, c.key) for c in conds
+    ]
+
+
+def test_parse_exact_match_only():
+    """精确匹配口径（2026-10-01 拍板）：条件串出现第一个未匹配汉字即静默
+    ——闲聊长句偶然含条件字不触发（英文/数字残渣不拒）。"""
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    # 用户实测案例：长句尾缀 50 + 句中「彩代」条件字
+    assert parse_combo("你把所有版本名除彩代打一遍+") is None
+    # 首汉字 junk 即静默（「来点」「帮我看看」类动词前缀）
+    assert parse_combo("来点东方") is None
+    assert parse_combo("帮我看看东方完成表", numeric_level=True) is None
+    # 「更新」不再含单字新条件词（单字新/旧已收窄）
+    assert parse_combo("更新") is None
+    # 合法形态不受影响
+    assert parse_combo("东方") is not None
+    assert parse_combo("雪辉dx") is not None
+    # 英文/数字残渣不拒：dx2024b50 尾缀 b 的吸收机制
+    assert parse_combo("dx2024b") is not None

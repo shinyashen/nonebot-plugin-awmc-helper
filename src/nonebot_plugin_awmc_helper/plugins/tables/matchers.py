@@ -62,8 +62,11 @@ progress_cmd = on_regex(
 
 plate_help = on_fullmatch("牌子条件", block=True)
 score_list_cmd = on_regex(at_tolerant(r"^(.+?)分数列表\s?([0-9]+)?$"), block=True)
-update_rating = on_command("更新定数表", permission=SUPERUSER, block=True)
-update_plate = on_command("更新完成表", permission=SUPERUSER, block=True)
+# priority=0：条件化表格 matcher（priority=1 的 `(.+?)(完成表|定数表)` 万能
+# 捕获在同层先注册先跑，会吞掉「更新完成表」——「更新」的单字解析曾命中
+# newness 条件；提权后 permission 不满足时非阻塞跳过，不误伤普通用户
+update_rating = on_command("更新定数表", permission=SUPERUSER, block=True, priority=0)
+update_plate = on_command("更新完成表", permission=SUPERUSER, block=True, priority=0)
 
 
 @progress_cmd.handle()

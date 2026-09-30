@@ -44,6 +44,26 @@ def group_by_ds(
     return {k: grouped[k] for k in sorted(grouped, key=float, reverse=True)}
 
 
+def group_by_level(
+    entries: Sequence[tuple[Song, SongDifficulty]],
+) -> dict[str, list[tuple[Song, SongDifficulty]]]:
+    """按标级大类分组（"14+"/"14" 各一组；2026-10-01 拍板：跨等级条件完成表
+    一个等级大类全部合在一起，组内**不再细分定数小数节**），节序
+    ``level_page_key`` 降序、组内定数降序。
+
+    仅跨等级条件版完成表/定数表使用；单等级条件走文件底图
+    （``group_by_ds`` 定数节，与旧版式一致）。
+    """
+    grouped: dict[str, list[tuple[Song, SongDifficulty]]] = {}
+    for song, diff in entries:
+        if diff.level_value < 7:
+            continue
+        grouped.setdefault(diff.level, []).append((song, diff))
+    for group in grouped.values():
+        group.sort(key=lambda pair: pair[1].level_value, reverse=True)
+    return {k: grouped[k] for k in sorted(grouped, key=level_page_key, reverse=True)}
+
+
 def slot_rep(
     master: SongDifficulty,
     remaster: SongDifficulty | None,

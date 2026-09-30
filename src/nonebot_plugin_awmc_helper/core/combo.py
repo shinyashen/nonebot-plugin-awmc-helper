@@ -539,8 +539,8 @@ _RULES: "tuple[_Rule, ...]" = (
     ),
     _Rule(2, re.compile(r"dx", re.IGNORECASE), "era", _const("dx")),
     _Rule(2, re.compile(r"标"), "chart_type", _const(SongType.STANDARD)),
-    _Rule(2, re.compile(r"旧"), "newness", _const("old")),
-    _Rule(2, re.compile(r"新"), "newness", _const("new")),
+    # 单字「新」「旧」不收（2026-10-01：误触发面大——「更新完成表」的「新」
+    # 会解析成 newness 条件吞掉 SUPERUSER 指令；保留多字「新版本/新歌/旧版本」）
     # ---- 层 3：原子 ----
     _Rule(
         3,
@@ -1273,7 +1273,18 @@ def parse_combo(
             # 须带 dx 前缀（裸年份不收，2026-09-30 拍板）
             return None
         return [_level_cond(text)]  # 「13+」的 + 是等级语义，原样保留
-    return _assemble(tokenize(text, numeric_level=numeric_level))
+    tokens = tokenize(text, numeric_level=numeric_level)
+    # 精确匹配口径（2026-10-01 拍板）：条件串必须完全由条件词构成——出现
+    # 第一个未匹配汉字即静默（闲聊长句偶然含条件字如「你把所有版本名除
+    # 彩代打一遍+50」）；英文/数字残渣（dx2024b50 的 b、输入法残渣）不拒。
+    covered = [False] * len(text)
+    for t in tokens:
+        for i in range(t.pos, t.pos + len(t.text)):
+            covered[i] = True
+    for i, ch in enumerate(text):
+        if not covered[i] and "\u4e00" <= ch <= "\u9fff":
+            return None
+    return _assemble(tokens)
 
 
 # ---------------------------------------------------------------- 执行器
