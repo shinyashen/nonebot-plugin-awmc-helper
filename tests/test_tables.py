@@ -569,9 +569,7 @@ async def test_combo_progress_renders(app: App, db, songs, monkeypatch):
 
     c_y, u_y, n_y = _combo_progress_expected("东方", completed)
     card = DrawScore(150 + c_y + u_y + n_y, service="Diving-Fish")
-    expected_png = card.draw_plan(
-        "东方", completed, c_y, [], u_y, [], "", 60, goal="A"
-    )
+    expected_png = card.draw_plan("东方", completed, c_y, [], u_y, [], "", 60, goal="A")
 
     event = fake_group_message_event_v11(message="东方进度", user_id=12345678)
     expected = Message(
