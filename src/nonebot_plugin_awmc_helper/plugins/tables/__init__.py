@@ -1,12 +1,11 @@
-"""awmc.tables：定数表 / 完成表 / 牌子 / 进度 / 分数列表。
+"""awmc.tables：条件化进度 / 完成表 / 定数表 / 牌子 / 分数列表。
 
-指令（对齐原版 maimaiDX）：
-- `<等级>定数表`（如 13+定数表）
-- `<等级><评价>完成表`（如 13fc完成表 / 14sssp完成表）
-- `<等级><评价>进度 [页]`（如 13fc进度）
-- `<版本><牌种>完成表 / 进度`（如 真将完成表 / 樱极进度）
+指令（P2-c 条件化收编）：
+- `<条件串>进度 [页]`（如 13fc进度 2 / 东方未完成进度 / 真将进度）
+- `<条件串>完成表`（如 13fc完成表 / 东方完成表 / 暁将完成表）
+- `<条件串>定数表`（如 13+定数表 / 雪辉dx定数表）
 - `牌子条件`
-- `<等级|定数>分数列表 [页]`
+- `<条件串>分数列表 [页]`（如 13+分数列表 / 东方分数列表）
 - `更新定数表 / 更新完成表`（SUPERUSER，预渲染底图；查询时叠加成绩）
 
 内部结构：``matchers`` 定义指令入口；``sheet`` 为表格编排域（评价计划
@@ -43,12 +42,9 @@ async def _warn_missing_templates() -> None:
 
 
 from .matchers import (  # noqa: F401
-    plate_cmd,
     plate_help,
-    ds_table_cmd,
     progress_cmd,
     update_plate,
     update_rating,
     score_list_cmd,
-    score_table_cmd,
 )

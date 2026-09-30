@@ -7,19 +7,21 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .sheet import (
     _plate_shape,
-    _level_entries,
     combo_progress_card,
     combo_score_list_card,
     _plate_completion_sheet,
     _plate_progress_overview,
 )
-from ...constants import PLATE_CHARS, DEFAULT_THEME
+from ...constants import DEFAULT_THEME
 from ...core.help import CommandSpec, help_registry
 from ...core.combo import (
+    ComboEmpty,
     OutputKind,
     ComboAmbiguity,
+    plan_of,
     parse_combo,
     inapplicable,
+    combo_chart_entries,
     ensure_designer_rules,
 )
 from ...core.score import UserScoreError, score_service
@@ -29,7 +31,6 @@ from ...core.utils import parse_page, slow_notice, handle_errors
 from ...core.plates import (
     PLATE_KINDS,
     PLATE_KIND_ALIAS_CHARS,
-    PLATE_VERSION_ALIAS_CHARS,
     norm_plate,
     is_valid_plate,
     plate_kinds_hint,
@@ -37,6 +38,7 @@ from ...core.plates import (
 from ...core.binding import SessionQueryBinding, at_tolerant
 from ...core.sources import Capability
 from ...core.render.tools import text_image_bytes
+from ...core.render.rating_table import draw_rating_table_cond
 
 # 牌种正则（牌种并集取自 core.plates 单源；正则交替最长优先，
 # 防将来新增牌种被单字牌种遮蔽；繁体/和制牌种字一并入交替）
@@ -48,142 +50,113 @@ LEVEL_RE = r"([0-9]+\+?)"
 DS_RE = r"([0-9]+(?:\.[0-9]+)?\+?)"
 PLAN_RE = r"(sssp|sss|ssp|ss|sp|s|ap|fcp|fc|fsp|fs|fdx)"
 
-ds_table_cmd = on_regex(at_tolerant(rf"^{LEVEL_RE}定数表$"), block=True)
-score_table_cmd = on_regex(at_tolerant(rf"^{LEVEL_RE}{PLAN_RE}\+?完成表$"), block=True)
+# 表格条件化统一入口（P2-c 收编：定数表/完成表尾缀并入，触发文本逐字不变；
+# 类别词/页码为尾缀附带参数）
 progress_cmd = on_regex(
-    at_tolerant(r"^(.+?)(已完成|未完成|未游玩|未开始)?进度\s?([0-9]+)?$"),
-    block=True,
-)
-plate_cmd = on_regex(
     at_tolerant(
-        rf"^([{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}])({PLATE_KIND_ALT})完成表$"
+        r"^(.+?)(已完成|未完成|未游玩|未开始)?(进度|完成表|定数表)\s?([0-9]+)?$"
     ),
     block=True,
 )
+
 plate_help = on_fullmatch("牌子条件", block=True)
 score_list_cmd = on_regex(at_tolerant(r"^(.+?)分数列表\s?([0-9]+)?$"), block=True)
 update_rating = on_command("更新定数表", permission=SUPERUSER, block=True)
 update_plate = on_command("更新完成表", permission=SUPERUSER, block=True)
 
 
-@ds_table_cmd.handle()
-@handle_errors("生成定数表失败")
-async def _(
-    groups: tuple = RegexGroup(),
-):
-    """定数表（R8，NB DrawRatingTable(level_text=True) 版式网格图）。"""
-    from ...core.render import table_template
-
-    (level,) = groups
-    entries = await _level_entries(level)
-    if not entries:
-        await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
-            at_sender=True
-        )
-    png = await table_template.rating_table_text_bytes(level, entries)
-    await UniMessage.image(raw=png).finish(at_sender=True)
-
-
-@score_table_cmd.handle()
-@handle_errors("生成完成表失败", except_with_message=(UserScoreError,))
-async def _(
-    binding: UserBinding = SessionQueryBinding(),
-    groups: tuple = RegexGroup(),
-):
-    """等级完成表（NB DrawRatingTable 移植）：模板 + 统计头 + 逐谱面盖章。
-
-    计划映射：fc/fcp/ap → 连击章模式（NB plan=True）；fs 族 → Sync 章
-    （NB 未支持，按连击章模式扩展）；达成率计划/无计划 → 评级章模式
-    （NB plan=False，盖章为各谱面实际评级）。
-    """
-    from ...core.render import table_template
-
-    level, plan = groups
-    entries = await _level_entries(level)
-    if not entries:
-        await UniMessage.text(f" 没有找到等级为「{level}」的谱面").finish(
-            at_sender=True
-        )
-    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
-
-    theme = binding.theme or DEFAULT_THEME
-    png = await table_template.draw_rating_table_with_fallback(
-        level, plan, scores.scores, entries, theme=theme, song_service=song_service
-    )
-    if png is None:
-        await UniMessage.text(" 定数表底图生成失败，请稍后再试").finish(at_sender=True)
-    await UniMessage.image(raw=png).finish(at_sender=True)
-
-
 @progress_cmd.handle()
-@handle_errors("生成进度失败", except_with_message=(UserScoreError,))
+@handle_errors("生成表格失败", except_with_message=(UserScoreError,))
 async def _(
     binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
-    """条件化进度（R4 版式泛化）：条件 → 谱面集（§5 启发式）→ 盖章分三段。
+    """条件化表格（进度/完成表/定数表统一入口，P2-c 收编）：
 
-    四态：出图 / 牌子身份回认（牌组合文本走牌子专用渲染）/ 不适用拒绝 /
-    歧义提示 / 静默（零条件——以「进度」结尾的闲聊不是查询）。
+    牌组合文本经形状回认走牌子专用渲染（非法牌保持旧拒绝文案）；完成表/
+    定数表的单等级条件走文件底图与既有版式（收编等价 + 同速），其余条件
+    底图现算（不缓存，2026-09-30 拍板）。
     """
-    cond_text, category, page_raw = groups
-    page = int(page_raw) if page_raw else 1
+    from ...core.combo import CondType
+    from ...core.render import table_template
+
+    cond_text, category, suffix, page_raw = groups
+    page = parse_page(page_raw)
     await ensure_designer_rules()
-    if category is None:  # 分类进度无牌子语义，不回认
+
+    # 牌形状回认：进度（无类别）与完成表；定数表无牌子语义不回认
+    if suffix != "定数表" and category is None:
         shape = _plate_shape(cond_text)
         if shape is not None:
-            # 牌组合形状：合法牌走牌子进度（回认专用版式）；非法组合保持
-            # 旧拒绝文案（牌单点破，如「真将」→ 真代无将牌）
             version, kind = norm_plate(shape[0]), norm_plate(shape[1])
             if not is_valid_plate(version, kind):
                 await UniMessage.text(
                     f" 没有找到「{version}{kind}」牌子。{plate_kinds_hint(version)}"
                 ).finish(at_sender=True)
-            plates = await score_service.get_plates(
-                binding, f"{version}{kind}", notify_slow=slow_notice()
-            )
-            await _plate_progress_overview(binding, plates, version, kind, page)
+            if suffix == "进度":
+                plates = await score_service.get_plates(
+                    binding, f"{version}{kind}", notify_slow=slow_notice()
+                )
+                await _plate_progress_overview(binding, plates, version, kind, page)
+            else:
+                await _plate_completion_sheet(binding, version, kind, page)
             return
-    parsed = parse_combo(cond_text)
+
+    parsed = parse_combo(cond_text, numeric_level=suffix != "进度")
     if parsed is None:
         return
     if isinstance(parsed, ComboAmbiguity):
         await UniMessage.text(f" {parsed.message}").finish(at_sender=True)
-    if bad := inapplicable(parsed, OutputKind.TABLE):
+    output = OutputKind.DS_TABLE if suffix == "定数表" else OutputKind.TABLE
+    if bad := inapplicable(parsed, output):
         await UniMessage.text(
-            f" {'、'.join(c.label for c in bad)} 不适用于进度"
+            f" {'、'.join(c.label for c in bad)} 不适用于{suffix}"
         ).finish(at_sender=True)
-    await combo_progress_card(binding, parsed, cond_text, category, page)
 
+    if suffix == "进度":
+        await combo_progress_card(binding, parsed, cond_text, category, page)
+        return
 
-@plate_cmd.handle()
-@handle_errors("查询牌子失败", except_with_message=(UserScoreError,))
-async def _(
-    binding: UserBinding = SessionQueryBinding(),
-    groups: tuple = RegexGroup(),
-):
-    version, kind = groups
-    # 繁体/和制牌字先归一（正则层只负责识别）：校验/查库/渲染全按简体口径
-    version, kind = norm_plate(version), norm_plate(kind)
-    # 牌单按真实牌表收紧（素材包 mai/plate_version 全量实证）：舞代四牌、
-    # 霸仅者、真无将、初整代无牌
-    if not is_valid_plate(version, kind):
-        await UniMessage.text(
-            f" 没有找到「{version}{kind}」牌子。{plate_kinds_hint(version)}"
-        ).finish(at_sender=True)
-    # 牌子进度经条件化进度 matcher 的身份回认承接（统一入口）
-    await _plate_completion_sheet(binding, version, kind, 1)
+    entries = await combo_chart_entries(parsed, binding)
+    if isinstance(entries, ComboEmpty):
+        await UniMessage.text(f" {entries.message}").finish(at_sender=True)
 
+    if suffix == "定数表":
+        # 单等级条件走文件底图 + Level. 前缀（收编等价）；其余现算
+        if len(parsed) == 1 and parsed[0].ctype is CondType.LEVEL:
+            png = await table_template.rating_table_text_bytes(parsed[0].value, entries)
+        else:
+            png = await table_template.rating_table_cond_text_bytes(entries, cond_text)
+        await UniMessage.image(raw=png).finish(at_sender=True)
 
-@plate_help.handle()
-@handle_errors()
-async def _():
-    from ...constants import PLATE_KIND_ZH
-
-    lines = ["牌子达成条件说明："]
-    lines += [f"{kind}：{desc}" for kind, desc in PLATE_KIND_ZH.items()]
-    lines.append("舞/霸：旧作（含 Re:MASTER 单列）全曲谱面")
-    png = text_image_bytes("\n".join(lines))
+    # 完成表：单等级条件优先文件底图（同速同像素），lv15 单条件走既有三列
+    # 大图管线；其余条件现算底图
+    _, plan_word, _ = plan_of(parsed)
+    plan = plan_word if plan_word in ("fc", "fcp", "ap", "fs", "fdx", "fsp") else None
+    theme = binding.theme or DEFAULT_THEME
+    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
+    level_conds = [c for c in parsed if c.ctype is CondType.LEVEL]
+    # 恰一个等级条件且无其他谱面条件 → 等价旧「<等级>完成表」，走文件底图
+    other_chart = [
+        c for c in parsed if c.chart is not None and c.ctype is not CondType.LEVEL
+    ]
+    single_level = (
+        level_conds[0].value if len(level_conds) == 1 and not other_chart else None
+    )
+    if single_level == "15":
+        png = await table_template.draw_rating_table_with_fallback(
+            "15", plan, scores.scores, entries, theme=theme, song_service=song_service
+        )
+    else:
+        im = await table_template.rating_table_base_image(entries, single_level)
+        header = f"Level. {single_level}" if single_level else cond_text
+        png = draw_rating_table_cond(
+            im, plan, scores.scores, entries, header_text=header, theme=theme
+        )
+        if png is None:
+            await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
+                at_sender=True
+            )
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
@@ -207,6 +180,18 @@ async def _(
             f" {'、'.join(c.label for c in bad)} 不适用于分数列表"
         ).finish(at_sender=True)
     await combo_score_list_card(binding, parsed, cond_text, page)
+
+
+@plate_help.handle()
+@handle_errors()
+async def _():
+    from ...constants import PLATE_KIND_ZH
+
+    lines = ["牌子达成条件说明："]
+    lines += [f"{kind}：{desc}" for kind, desc in PLATE_KIND_ZH.items()]
+    lines.append("舞/霸：旧作（含 Re:MASTER 单列）全曲谱面")
+    png = text_image_bytes("\n".join(lines))
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @update_rating.handle()
@@ -248,36 +233,20 @@ help_registry.declare(
     description="定数表/完成表/牌子/进度/分数列表",
     commands=[
         CommandSpec(
-            matcher=ds_table_cmd,
-            name="<等级>定数表",
-            brief="定数网格表（如 13+定数表）",
-        ),
-        CommandSpec(
-            matcher=score_table_cmd,
-            name="<等级><评价>完成表",
-            capability=Capability.SCORES_ALL,
-            brief="达成度盖章完成表（@某人=代查）",
-            detail="评价支持 s/fc/fs/ap 族（如 13fc完成表）。",
-        ),
-        CommandSpec(
             matcher=progress_cmd,
-            name="<条件>进度",
+            name="<条件>进度|完成表|定数表",
             capability=Capability.SCORES_ALL,
-            brief="条件化进度：总览/已完成/未完成/未游玩（@某人=代查）",
+            brief="条件化进度/完成表/定数表（@某人=代查）",
             detail=(
-                "格式：<条件串>进度 [页]，条件同条件50"
-                "（辉/东方/中二/音击/13级/紫谱/fc…），"
-                "可加类别：已完成|未完成|未游玩（如 13fc进度 2、东方未完成进度）。"
-                "无达标条件时按达成率 ≥80% 盖章；牌组合（真将进度）走牌子进度。"
+                "格式：<条件串>进度|完成表|定数表 [页]，条件同条件50"
+                "（辉/东方/中二/音击/13级/紫谱/fc…）。\n"
+                "进度可加类别：已完成|未完成|未游玩（如 13fc进度 2、"
+                "东方未完成进度），无达标条件按达成率 ≥80% 盖章；\n"
+                "完成表同款盖章（如 13fc完成表、东方完成表）；\n"
+                "定数表为谱面网格（13+定数表、雪辉dx定数表）；\n"
+                "牌组合（真将进度/暁将完成表）走牌子专用渲染，"
+                "达成条件见「牌子条件」。"
             ),
-        ),
-        CommandSpec(
-            matcher=plate_cmd,
-            name="<版本><牌种>完成表",
-            capability=Capability.PLATES,
-            brief="牌子完成表（@某人=代查）",
-            detail="如 真将完成表；达成条件见「牌子条件」。牌子进度已并入"
-            "「<条件>进度」（真将进度）。",
         ),
         CommandSpec(
             matcher=plate_help,

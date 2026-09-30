@@ -426,6 +426,18 @@ def _star_of(text: str) -> int:
     return "一二三四五12345".index(text[0]) % 5 + 1
 
 
+_NUMERIC_LEVEL_RULE = _Rule(
+    2,
+    re.compile(r"(\d{1,2}\+?)(?![\d.])"),
+    "level",
+    lambda m: m.group(),
+)
+r"""裸数字等级 token（13/13+；numeric_level 语境注入）。
+
+``(?![\d.])``：后随数字/小数点不吞——``1350``（三位数）不成等级、
+``13.5`` 是定数串（裸小数由 parse_combo 纯数字分支处理），均自然跳过。
+"""
+
 _RULES: "tuple[_Rule, ...]" = (
     # ---- 层 1：复合/消歧词 ----
     _Rule(1, re.compile(r"([紫白])谱"), "diff", lambda m: _color_of(m.group(1))),
@@ -566,13 +578,29 @@ async def ensure_designer_rules() -> None:
     set_designer_rules(_designer_rules_of(designers))
 
 
-def tokenize(text: str) -> "list[Token]":
-    """分层 FMM 扫描：层号小者优先、同层命中长者赢，未匹配字符跳过。"""
+def tokenize(text: str, *, numeric_level: bool = False) -> "list[Token]":
+    """分层 FMM 扫描：层号小者优先、同层命中长者赢，未匹配字符跳过。
+
+    ``numeric_level``：中文尾缀语境（完成表/定数表/分数列表）下裸数字
+    （13/13+）解析为等级 token（S-8 拍板：仅数字尾缀 50/40 要求「级」必带）。
+    """
+    numeric_rule = _NUMERIC_LEVEL_RULE if numeric_level else None
     tokens: list[Token] = []
     i = 0
     while i < len(text):
         best: "tuple[int, int, re.Match[str], _Rule] | None" = None
-        for rule in (*_RULES, *_EXTRA_RULES):
+        rules = (
+            (*_RULES, *_EXTRA_RULES, numeric_rule)
+            if numeric_rule
+            else (*_RULES, *_EXTRA_RULES)
+        )
+        # 裸数字等级只在「中文语境段首」生效：前邻数字/小数点（1350→50、
+        # 13.5→5，同一串碎片化）或 ASCII 字母/空格（b50→50、ab13→13、
+        # 「I Love 50」→50，英文闲聊碎片）均不成立——数字等级合法形态是
+        # 紧贴中文条件词（13fc、辉13）或位于串首
+        if numeric_rule and i > 0 and not "\u4e00" <= text[i - 1] <= "\u9fff":
+            rules = (*_RULES, *_EXTRA_RULES)
+        for rule in rules:
             m = rule.pattern.match(text, i)
             if m is None:
                 continue
@@ -1097,9 +1125,12 @@ def parse_combo(
         if not numeric_level:
             return None
         if "." in text:
-            return [_ds_cond(float(text.rstrip("+")))]  # 「13.5+」定数串剥 +
+            # 「13.5」定数串（剥 +；一位小数域由 _ds_cond 语义保证）
+            return [_ds_cond(float(text.rstrip("+")))]
+        if int(text.rstrip("+")) > 15:
+            return None  # 「1350」非等级域（1-15），静默防闲聊误触发
         return [_level_cond(text)]  # 「13+」的 + 是等级语义，原样保留
-    return _assemble(tokenize(text))
+    return _assemble(tokenize(text, numeric_level=numeric_level))
 
 
 # ---------------------------------------------------------------- 执行器

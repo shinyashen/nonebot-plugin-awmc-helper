@@ -160,9 +160,26 @@ async def test_ds_table_command(app: App, songs):
             MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
         ]
     )
-    async with app.test_matcher(tables.ds_table_cmd) as ctx:
+    async with app.test_matcher(tables.progress_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
+        # 统一 handler 带 SessionQueryBinding（定数表 @ 代查）：会话注入触
+        # 发群信息/成员信息拉取（定数表无凭据语义，绑定解析成功即放行）
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
 
@@ -295,12 +312,17 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         captured["user_id"] = binding.user_id
         return SimpleNamespace(scores=[])
 
-    async def fake_draw(level, plan, scores, entries, theme=None, song_service=None):
+    async def fake_base_image(entries, level=None):
         captured["level"] = level
+        return "im-sentinel"
+
+    def fake_cond(im, plan, scores, entries, *, header_text, theme=None):
+        captured["header"] = header_text
         return b"png"
 
     monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
-    monkeypatch.setattr(table_template, "draw_rating_table_with_fallback", fake_draw)
+    monkeypatch.setattr(table_template, "rating_table_base_image", fake_base_image)
+    monkeypatch.setattr(plugin, "draw_rating_table_cond", fake_cond)
 
     event = fake_group_message_event_v11(
         message=Message(
@@ -308,7 +330,7 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         ),
         user_id=12345678,
     )
-    async with app.test_matcher(plugin.score_table_cmd) as ctx:
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
         ctx.should_call_api(
@@ -336,7 +358,8 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         )
         ctx.should_finished()
     assert captured["user_id"] == "99999999"
-    assert captured["level"] == "13"
+    assert captured["level"] == "13"  # 单等级条件 → 文件底图优先
+    assert captured["header"] == "Level. 13"  # 收编等价：表头保持 Level. 13
 
 
 @pytest.mark.asyncio
@@ -360,7 +383,7 @@ async def test_plate_at_net_target_unsupported(app: App, db, songs):
         ),
         user_id=12345678,
     )
-    async with app.test_matcher(plugin.plate_cmd) as ctx:
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
         ctx.receive_event(bot, event)
         ctx.should_call_api(
@@ -592,6 +615,109 @@ async def test_combo_progress_inapplicable_rejected(app: App, db, songs, monkeyp
             MessageSegment.at(12345678),
             MessageSegment.text(" 理想 不适用于进度"),
         ]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
+    """东方fc完成表：条件底图现算链路（draw_rating_table_cond 消费）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_divingfish_username(binding, "tester")
+
+    async def fake_scores_all(b, notify_slow=None):
+        return SimpleNamespace(scores=[])
+
+    captured = {}
+
+    async def fake_base_image(entries, level=None):
+        captured["level"] = level
+        return "im-sentinel"
+
+    def fake_cond(im, plan, scores, entries, *, header_text, theme=None):
+        captured["header"] = header_text
+        captured["plan"] = plan
+        return b"png"
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+    monkeypatch.setattr(table_template, "rating_table_base_image", fake_base_image)
+    monkeypatch.setattr(plugin, "draw_rating_table_cond", fake_cond)
+
+    event = fake_group_message_event_v11(message="东方fc完成表", user_id=12345678)
+    expected = Message(
+        [MessageSegment.at(12345678), MessageSegment.image("base64://cG5n")]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+    # 条件版：无等级条件 → 底图现算（level=None）；表头=条件串；plan=fc 判型
+    assert captured == {
+        "level": None,
+        "header": "东方fc",
+        "plan": "fc",
+    }
+
+
+@pytest.mark.asyncio
+async def test_combo_ds_table_inapplicable(app: App, db, songs):
+    """fc定数表：达标型成绩条件不适用于定数表（§9.7 B1）→ 拒绝提示。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import tables as plugin
+
+    event = fake_group_message_event_v11(message="fc定数表", user_id=12345678)
+    expected = Message(
+        [MessageSegment.at(12345678), MessageSegment.text(" FC 不适用于定数表")]
     )
     async with app.test_matcher(plugin.progress_cmd) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))

@@ -477,29 +477,61 @@ async def draw_plate_table_with_fallback(
 # ---------------------------------------------------------------------------
 
 
-def draw_level_header(dr: ImageDraw.ImageDraw, level: str, y: int) -> None:
+def draw_level_header(
+    dr: ImageDraw.ImageDraw, level: str, y: int, *, prefix: "str | None" = "Level."
+) -> None:
     """完成表「Level. {level}」大字表头（rating_table/table_template 共用）。
 
     两版式 y 有意错位（普通分支统计头不同），由调用方传入。
+    ``prefix=None`` 为条件化表头（P2-c）：无 Level. 前缀、直接画条件串，
+    超 4 显示字降字号防溢出。
     """
+    if prefix:
+        dr.text(
+            (495, y),
+            prefix,
+            font=font(70, FONT_RODIN),
+            fill=FONT_BLUE,
+            anchor="ld",
+            stroke_width=8,
+            stroke_fill=(255, 255, 255, 255),
+        )
+        x = 750
+    else:
+        x = 495
     dr.text(
-        (495, y),
-        "Level.",
-        font=font(70, FONT_RODIN),
-        fill=FONT_BLUE,
-        anchor="ld",
-        stroke_width=8,
-        stroke_fill=(255, 255, 255, 255),
-    )
-    dr.text(
-        (750, y),
+        (x, y),
         level,
-        font=font(100, FONT_RODIN),
+        font=font(100 if _width(level) <= 4 else 60, FONT_RODIN),
         fill=FONT_BLUE,
         anchor="ld",
         stroke_width=8,
         stroke_fill=(255, 255, 255, 255),
     )
+
+
+def _width(text: str) -> int:
+    """显示宽度粗算（全角 2 / 半角 1；标题字号选择用）。"""
+    return sum(2 if ord(ch) > 0x2E7F else 1 for ch in text)
+
+
+async def rating_table_base_image(
+    entries: Sequence[tuple[Song, SongDifficulty]], level: "str | None" = None
+) -> Image.Image:
+    """完成表/定数表底图统一入口：level 文件底图优先（既有预渲染，收编后
+    单等级条件保持同速同像素），缺失或无条件 level 时按 entries 现算。
+
+    条件版现算不落盘、不做进程缓存（2026-09-30 拍板：条件组合长尾命中率
+    低，现算 1-3s 可接受）。CPU 密集，整体在工作线程执行（L-6）。
+    """
+    if level:
+        path = rating_table_dir() / f"{level}.png"
+        if path.exists():
+            return Image.open(path).convert("RGBA")
+        if level == "15":
+            # lv15 三列大图版式（含 UNKNOWN 槽）仅文件缺失现算分支保持
+            return await asyncio.to_thread(lambda: _rating_grid_15(entries))
+    return await asyncio.to_thread(lambda: _rating_grid(entries))
 
 
 async def rating_table_text_bytes(
@@ -512,13 +544,17 @@ async def rating_table_text_bytes(
 
     现算分支 CPU 密集，整体在工作线程执行（L-6），故本函数为协程。
     """
-    path = rating_table_dir() / f"{level}.png"
-    if path.exists():
-        im = Image.open(path).convert("RGBA")
-    else:
-        im = await asyncio.to_thread(
-            lambda: _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
-        )
+    im = await rating_table_base_image(entries, level)
     dr = ImageDraw.Draw(im)
     draw_level_header(dr, level, 220)
+    return image_to_bytes(scale_output(im))
+
+
+async def rating_table_cond_text_bytes(
+    entries: Sequence[tuple[Song, SongDifficulty]], header_text: str
+) -> bytes:
+    """条件化定数表（P2-c）：底图按条件谱面集现算（不落盘）、条件串表头。"""
+    im = await rating_table_base_image(entries)
+    dr = ImageDraw.Draw(im)
+    draw_level_header(dr, header_text, 220, prefix=None)
     return image_to_bytes(scale_output(im))

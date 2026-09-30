@@ -103,7 +103,7 @@ def draw_rating_table(
     *,
     theme: str = DEFAULT_THEME,
 ) -> bytes | None:
-    """绘制等级完成表。
+    """绘制等级完成表（条件化收编后保留：单等级条件走文件底图与 lv15 版式）。
 
     ``plan``：None/达成率计划 → 评级章模式；fc/fcp/ap → 连击章模式（NB
     plan=True）；fs/fdx/fsp → Sync 章模式（NB 未支持，按连击章模式自然扩展）。
@@ -113,18 +113,65 @@ def draw_rating_table(
     if not path.exists():
         return None
     im = Image.open(path).convert("RGBA")
+    played = {
+        (score.id, score.level_index.value): score
+        for score in play_result
+        if score.level == level
+    }
+    return _draw_rating_core(
+        im,
+        plan,
+        played,
+        entries,
+        theme=theme,
+        lv15=(level == "15"),
+        header_text=f"Level. {level}",
+    )
 
+
+def draw_rating_table_cond(
+    im: Image.Image,
+    plan: str | None,
+    play_result: list,
+    entries: list[tuple[Song, SongDifficulty]],
+    *,
+    header_text: str,
+    theme: str = DEFAULT_THEME,
+) -> bytes:
+    """条件化完成表（P2-c）：调用方提供现算/文件底图，成绩按谱面键集过滤。
+
+    ``header_text``：标题大字（单等级条件传 "Level. {level}" 保收编等价，
+    其余传条件串）。
+    """
+    keys = {(song.id, d.level_index.value) for song, d in entries}
+    played = {
+        (score.id, score.level_index.value): score
+        for score in play_result
+        if (score.id, score.level_index.value) in keys
+    }
+    return _draw_rating_core(
+        im, plan, played, entries, theme=theme, lv15=False, header_text=header_text
+    )
+
+
+def _draw_rating_core(
+    im: Image.Image,
+    plan: str | None,
+    played: dict,
+    entries: list[tuple[Song, SongDifficulty]],
+    *,
+    theme: str,
+    lv15: bool,
+    header_text: str,
+) -> bytes:
+    """盖章核心（等级版/条件版共用）：统计头 + 逐谱面盖章 + 全曲徽章。"""
     dr = ImageDraw.Draw(im)
     combo_mode = plan in ("fc", "fcp", "ap")
     sync_mode = plan in ("fs", "fdx", "fsp")
 
     stats = _Stats()
-    played: dict[tuple[int, int], object] = {}
     total_count = len(entries)
-    for score in play_result:
-        if score.level != level:
-            continue
-        played[(score.id, score.level_index.value)] = score
+    for score in played.values():
         ach = score.achievements or 0
         if ach >= 80:
             stats.data["clear"] += 1
@@ -136,7 +183,7 @@ def draw_rating_table(
 
     # 标题 + 统计头（普通分支坐标；lv15 由模板自身布局承载，统计同位）
     title_y = 160
-    table_template.draw_level_header(dr, level, title_y)
+    table_template.draw_level_header(dr, header_text, title_y)
 
     im.alpha_composite(assets.pic("complete.png"), (251, 190))
     dr.text(
@@ -216,7 +263,7 @@ def draw_rating_table(
             (x + 15, y + 13),
         )
 
-    if level == "15":
+    if lv15:
         # 同序契约：与 table_template._rating_grid_15 的底图摆放同一排序
         # （定数降序、稳定等值保序；Level.15 现全为 15.0，排序今日为无操作）
         ordered = sorted(entries, key=lambda pair: pair[1].level_value, reverse=True)
