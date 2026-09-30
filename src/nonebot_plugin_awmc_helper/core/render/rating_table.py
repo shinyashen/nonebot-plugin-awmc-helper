@@ -329,13 +329,15 @@ def _draw_rating_core(
             else:
                 stamp_sync(x, y, score, lv15=True)
     else:
-        # 同序契约：底图分组随 by_level（条件版标级大类 / 单等级定数节）
+        # 同序契约：底图分组随 by_level（条件版标级大类 / 单等级定数节），
+        # 列数同步（标级大类每行 13 列，标签让位）
         groups = group_by_level(entries) if by_level else group_by_ds(entries)
+        cols = RATING_COLS - 1 if by_level else RATING_COLS
         current_y = RATING_START_Y
         for ds in groups:
             charts = groups[ds]
             for num, (song, diff) in enumerate(charts):
-                row, col = divmod(num, RATING_COLS)
+                row, col = divmod(num, cols)
                 x = RATING_START_X + col * RATING_GRID_STEP
                 y = current_y + row * RATING_GRID_STEP
                 score = played.get((song.id, diff.level_index.value))
@@ -347,7 +349,7 @@ def _draw_rating_core(
                     stamp_sync(x, y, score)
                 else:
                     stamp_rank(x, y, score)
-            rows = (len(charts) - 1) // RATING_COLS + 1
+            rows = (len(charts) - 1) // cols + 1
             current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
 
     # 全曲达成徽章（Hoshino _calc_achievements_fc 同构）：连击/Sync 计划的

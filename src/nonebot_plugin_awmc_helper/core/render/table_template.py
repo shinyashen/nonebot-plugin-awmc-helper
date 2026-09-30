@@ -92,10 +92,13 @@ def _rating_grid(
       一组合并、组内不细分定数小数节，2026-10-01 拍板）。
     """
     groups = group_by_level(entries) if by_level else group_by_ds(entries)
+    # by_level（标级大类）每行少渲染一个（14→13 列）：等级串标签（"14+"）
+    # 右缘会压住行首封面（2026-10-01 用户实测）
+    cols = RATING_COLS - 1 if by_level else RATING_COLS
 
     current_y = RATING_START_Y
     for charts in groups.values():
-        rows = (len(charts) - 1) // RATING_COLS + 1
+        rows = (len(charts) - 1) // cols + 1
         current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
     height = current_y + 230
 
@@ -121,7 +124,7 @@ def _rating_grid(
         )
         max_row = 0
         for num, (song, diff) in enumerate(charts):
-            row, col = divmod(num, RATING_COLS)
+            row, col = divmod(num, cols)
             max_row = max(max_row, row)
             x = RATING_START_X + col * RATING_GRID_STEP
             y = start_y + row * RATING_GRID_STEP
