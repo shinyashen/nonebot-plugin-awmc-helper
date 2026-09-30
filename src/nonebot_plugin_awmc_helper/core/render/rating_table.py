@@ -272,7 +272,13 @@ def _draw_rating_core(
             im.alpha_composite(rank.resize((78, 35)), (x, y + 20))
 
     def stamp_combo(x: int, y: int, score, *, lv15: bool = False) -> None:
-        if not score.fc:
+        # 判型完成表 Hoshino 同款（2026-10-01 用户澄清）：只有**达标**谱面画
+        # 白底 + 实际徽章，不达标/未打完全不显示（黑色半透明背景仅评级模式
+        # 三态使用）。checker 缺省（第三方直调）回退「有 fc 即显示」。
+        if checker is not None:
+            if not checker(score.achievements, score.fc, score.fs):
+                return
+        elif not score.fc:
             return
         qualified.append(COMBO_SP.index(score.fc.name.lower()))
         if lv15:
@@ -281,36 +287,33 @@ def _draw_rating_core(
             if bonus := assets.pic_optional(f"UI_CHR_PlayBonus_{name}.png"):
                 im.alpha_composite(bonus.resize((200, 200)), (x + 75, y + 80))
             return
-        # 三态背景（checker 驱动）：达标白底+徽章；有成绩不达标 → 黑底，
-        # 实际徽章照画（如 ap 表里的 fcp 曲显示 FCp 章）
-        im.alpha_composite(assets.pic(bg_of(score)), (x + 1, y + 1))
-        if score.fc:
-            im.alpha_composite(
-                assets.pic(
-                    f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name.lower()]}.png"
-                ).resize((50, 50)),
-                (x + 15, y + 13),
-            )
+        im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
+        im.alpha_composite(
+            assets.pic(
+                f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name.lower()]}.png"
+            ).resize((50, 50)),
+            (x + 15, y + 13),
+        )
 
     def stamp_sync(x: int, y: int, score, *, lv15: bool = False) -> None:
-        if not score.fs or score.fs.name.lower() == "sync":
-            # Sync 档（同玩标记，无 FS 徽章）：不达任何 fs 族 plan → 黑底
-            # （lv15 大格分支保持无底惯例）
-            if not lv15:
-                im.alpha_composite(assets.pic(_UNFINISHED_BG), (x + 1, y + 1))
+        # 同 stamp_combo：checker 达标才显示（Sync 档不达任何 fs 族 plan →
+        # 不显示）
+        if checker is not None:
+            if not checker(score.achievements, score.fc, score.fs):
+                return
+        elif not score.fs or score.fs.name.lower() == "sync":
             return
         qualified.append(SYNC_D_SP.index(score.fs.name.lower()))
         # 扩展分支（NB 未支持 Sync 计划）：PlayBonus 大章无 Sync 档素材，
         # lv15 也只能用 50×50 小章；lv15 按 Hoshino 分支惯例不画完成底
         if not lv15:
-            im.alpha_composite(assets.pic(bg_of(score)), (x + 1, y + 1))
-        if score.fs and score.fs.name.lower() != "sync":
-            im.alpha_composite(
-                assets.pic(
-                    f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name.lower()]}.png"
-                ).resize((50, 50)),
-                (x + 15, y + 13),
-            )
+            im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
+        im.alpha_composite(
+            assets.pic(
+                f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name.lower()]}.png"
+            ).resize((50, 50)),
+            (x + 15, y + 13),
+        )
 
     if lv15:
         # 同序契约：与 table_template._rating_grid_15 的底图摆放同一排序
