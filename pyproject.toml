@@ -93,6 +93,7 @@ exclude = [
   "**/data",
   "**/cache",
   "**/__pycache__",
+  "**/tests",
 ]
 executionEnvironments = [
   { root = "./tests", extraPaths = [

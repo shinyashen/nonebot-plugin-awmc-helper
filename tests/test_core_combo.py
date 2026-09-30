@@ -225,11 +225,14 @@ def test_parse_version_segment():
     from nonebot_plugin_awmc_helper.core.combo import parse_combo
 
     conds = parse_combo("雪辉")
+    assert isinstance(conds, list)
     assert len(conds) == 1
     codes = conds[0].value
     assert codes == {Version.MAIMAI_MILK_PLUS.value, Version.MAIMAI_FINALE.value}
-    assert Version.MAIMAI.value in parse_combo("真")[0].value
-    assert Version.MAIMAI_PLUS.value in parse_combo("真")[0].value
+    zhen = parse_combo("真")
+    assert isinstance(zhen, list)
+    assert Version.MAIMAI.value in zhen[0].value
+    assert Version.MAIMAI_PLUS.value in zhen[0].value
 
 
 def test_parse_three_types_and():

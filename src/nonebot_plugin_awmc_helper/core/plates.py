@@ -153,7 +153,8 @@ def version_code_of(diff: SongDifficulty) -> int | None:
     """
     if diff.version is None:
         return None
-    return Version.from_value(diff.version).value
+    ver = Version.from_value(diff.version)
+    return ver.value if ver is not None else None
 
 
 def in_plate_scope(

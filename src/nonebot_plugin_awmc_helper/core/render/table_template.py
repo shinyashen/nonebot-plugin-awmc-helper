@@ -450,7 +450,7 @@ _template_lock = asyncio.Lock()
 
 async def draw_rating_table_with_fallback(
     level: str,
-    plan: str,
+    plan: "str | None",
     scores: list,
     entries: list,
     *,
