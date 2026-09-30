@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-awmc-helper"
-version = "0.1.0"
+version = "0.2.0"
 description = "NoneBot2 舞萌DX (maimaiDX) 辅助插件：查歌/别名/查分/表格/猜歌/排卡，数据层基于 maimai-py"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -55,7 +55,7 @@ build-backend = "uv_build"
 nonebug = { git = "https://github.com/nonebot/nonebug" }
 
 [tool.bumpversion]
-current_version = "0.1.0"
+current_version = "0.2.0"
 commit = true
 message = "release: bump vesion from {current_version} to {new_version}"
 tag = true
