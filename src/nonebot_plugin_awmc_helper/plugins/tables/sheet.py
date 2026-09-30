@@ -8,7 +8,9 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...constants import LEVEL_LIST, PLATE_CHARS, chart_display_id
 from ...core.combo import (
     ComboEmpty,
+    goal_of,
     plan_of,
+    conds_title,
     combo_chart_entries,
     combo_filtered_scores,
 )
@@ -242,7 +244,7 @@ async def combo_progress_card(
         await UniMessage.text(f" {entries.message}").finish(at_sender=True)
     scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
     score_map = {(s.id, s.type, s.level_index): s for s in scores.scores}
-    checker, plan, kind = plan_of(conds)
+    checker, _plan, kind = plan_of(conds)
 
     completed: list = []
     unfinished: list = []
@@ -286,8 +288,19 @@ async def combo_progress_card(
         u_y = played_rows(len(unfinished[:30])) * 109 + 140
         n_y = max(4, -(-len(notplayed[:100]) // 20)) * 65 + 140
         card = DrawScore(150 + c_y + u_y + n_y, service=service)
+        # 条件形态文案：level=规范化条件串（评级档大写）、plan 后缀置空
+        # （避免「14+sss+SSSP」连串）、页脚达标线=条件 label（SSS+ 而非
+        # 枚举名 SSSP）
         png = card.draw_plan(
-            cond_text, completed, c_y, unfinished, u_y, notplayed, plan, comp_limit
+            conds_title(conds) or cond_text,
+            completed,
+            c_y,
+            unfinished,
+            u_y,
+            notplayed,
+            "",
+            comp_limit,
+            goal=goal_of(conds),
         )
     elif category in ("已完成", "未完成"):
         data = completed if category == "已完成" else unfinished

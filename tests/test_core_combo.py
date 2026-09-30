@@ -1656,3 +1656,20 @@ def test_parse_combo_strips_at_segments():
     assert [(c.ctype.value, c.label) for c in parse_combo("东方50")] == [
         ("genre", "东方")
     ]
+
+
+def test_numeric_level_progress_context():
+    """进度/完成表语境裸数字等级：14+sss+ 双条件（等级 14+ ∩ SSS+）。
+
+    回归锁：进度语境曾把 numeric_level 写成 False——「14+」被丢弃，整表
+    退化为纯 sss+ 过滤（用户实测 14.0~14.5 曲混入）。
+    """
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    conds = parse_combo("14+sss+", numeric_level=True)
+    assert [(c.ctype.name, c.label) for c in conds] == [
+        ("LEVEL", "14+级"),
+        ("RATE", "SSS+"),
+    ]
+    # 与完成表语境同解析
+    assert parse_combo("14+sss+完成表", numeric_level=True) is not None

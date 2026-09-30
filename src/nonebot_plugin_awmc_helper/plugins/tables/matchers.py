@@ -103,7 +103,10 @@ async def _(
                 await _plate_completion_sheet(binding, version, kind, page)
             return
 
-    parsed = parse_combo(cond_text, numeric_level=suffix != "进度")
+    # 中文尾缀（进度/完成表/定数表）排除纯数字闲聊，裸数字等级/定数一律
+    # 放行（S-8 拍板「级/定数必带仅限数字尾缀 50/40」；曾把进度语境排除在
+    # 外——14+sss+进度 的「14+」被丢弃，整表退化为纯 sss+ 过滤）
+    parsed = parse_combo(cond_text, numeric_level=True)
     if parsed is None:
         return
     if isinstance(parsed, ComboAmbiguity):

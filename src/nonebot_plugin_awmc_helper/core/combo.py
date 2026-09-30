@@ -265,6 +265,15 @@ def _fs_checker(minimum: FSType):
     return lambda ach, _fc, fs: fs is not None and fs.value >= minimum.value
 
 
+def goal_of(conds: "list[Cond]") -> str:
+    """条件集的达标线显示串（首个达标型条件的规范化 label，如「SSS+」
+    「FC」「舞舞」；无达标型条件 = 评级 ≥80% 达标线，返回「A」）。"""
+    for c in conds:
+        if c.ctype in (CondType.COMBO, CondType.SYNC, CondType.RATE):
+            return c.label
+    return "A"
+
+
 def conds_title(conds: "list[Cond]") -> str:
     """条件的规范化显示串（label 以 · 连接；评级档大写、分类/谱师原文）——
     ``ComboResult.title`` 与条件完成表/定数表表头单源。"""

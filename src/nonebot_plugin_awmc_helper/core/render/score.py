@@ -341,20 +341,29 @@ class DrawScore:
         notstarted: list[tuple[int, int, float]],
         plan: str,
         completed_len: int,
+        *,
+        goal: "str | None" = None,
     ) -> bytes:
         """绘制三段进度总览（已完成 / 未完成 / 未游玩，NB draw_plan 同布局）。
 
         ``completed_y``/``unfinished_y``：调用方按 NB 公式预算的段落高度。
+        ``plan``：旧指令形态的提示后缀（``13fc进度`` → level="13" plan="fc"
+        拼出「13FC已完成进度」）；**条件化形态（combo_progress_card）传空串**
+        ——level 已是完整条件串，再拼 plan 词会出「14+sss+SSSP」连串乱码。
+        ``goal``：页脚达标线词（缺省 plan.upper()；条件化传规范化 label，
+        如「SSS+」——plan 词大写 SSSP 是枚举名非玩家口径）。
         """
+        suffix = plan.upper() if plan else ""
+        goal_text = goal if goal is not None else plan.upper()
         self._section_title(
             77,
             f"已完成谱面「{len(completed)}」个",
-            f"可使用「{level}{plan.upper()}已完成进度」\n指令查询详细列表",
+            f"可使用「{level}{suffix}已完成进度」\n指令查询详细列表",
         )
         self._section_title(
             77 + completed_y,
             f"未完成谱面「{len(unfinished)}」个",
-            f"可使用「{level}{plan.upper()}未完成进度」\n指令查询详细列表",
+            f"可使用「{level}{suffix}未完成进度」\n指令查询详细列表",
         )
         self._section_title(
             77 + completed_y + unfinished_y, f"未游玩谱面「{len(notstarted)}」个"
@@ -368,7 +377,7 @@ class DrawScore:
         max_count = len(completed) + len(unfinished) + len(notstarted)
         pagemsg = (
             f"「{level}」共计「{max_count}」个谱面，"
-            f"剩余「{len(unfinished) + len(notstarted)}」个谱面未完成「{plan.upper()}」"
+            f"剩余「{len(unfinished) + len(notstarted)}」个谱面未完成「{goal_text}」"
         )
         self._footer(pagemsg, design_bg_y=height - 133, text_y=height - 90)
         return image_to_bytes(self._im)
