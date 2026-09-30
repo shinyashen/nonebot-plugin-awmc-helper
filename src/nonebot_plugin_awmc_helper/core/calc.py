@@ -254,8 +254,11 @@ def build_bests(
     *,
     key: Callable[[ScoreExtend], Any],
     latest_version_value: int | None = None,
+    old_cap: int = 35,
+    new_cap: int = 15,
 ) -> PlayerBests:
-    """公共 best50 组装：按版本拆旧 35 / 新 15，两侧各按 ``key`` 降序取满。
+    """公共 best50 组装：按版本拆旧 ``old_cap`` / 新 ``new_cap``（默认 35/15，
+    b40 传 25/15），两侧各按 ``key`` 降序取满。
 
     maimai_py 的 ``MaimaiScores.configure`` 固定按 RA 排序且不可注入排序键，
     b50 变体（ap50、日服 NET、第三方 pc50）经本函数得到同构 PlayerBests。
@@ -278,7 +281,7 @@ def build_bests(
         (new if (score.version or 0) >= latest_version_value else old).append(score)
     old.sort(key=key, reverse=True)
     new.sort(key=key, reverse=True)
-    old, new = old[:35], new[:15]
+    old, new = old[:old_cap], new[:new_cap]
     ra_old = int(sum(s.dx_rating or 0 for s in old))
     ra_new = int(sum(s.dx_rating or 0 for s in new))
     return PlayerBests(

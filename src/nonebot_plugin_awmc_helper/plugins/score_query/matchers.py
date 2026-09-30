@@ -48,9 +48,11 @@ AP_FC_VALUES = (FCType.AP.value, FCType.APP.value)  # 越小越好
 
 b50 = on_command("b50", aliases={"B50"}, block=True)
 ap50 = on_command("ap50", aliases={"AP50"}, block=True)
-# 条件组合查询（辉50/紫谱50/神50 类）：`^(.+?)(50)$` 松匹配，priority 必须
-# 低于全部既有指令（b50/13fc完成表 等先命中即 block，杜绝被本 matcher 吞掉）
-combo50 = on_regex(at_tolerant(r"^(.+?)(50)$"), block=True, priority=5)
+# 条件组合查询（辉50/紫谱50/神50/dx2024b40 类）：`^(.+?)(40|50)$` 松匹配，
+# 「b40」的 b 由 tokenizer 未识别残片跳过自然吸收（nb40=牛逼、dx2024b40=回到
+# 过去，零歧义）；priority 必须低于全部既有指令（b50/13fc完成表 等先命中即
+# block，杜绝被本 matcher 吞掉）
+combo50 = on_regex(at_tolerant(r"^(.+?)(40|50)$"), block=True, priority=5)
 minfo = on_command(
     "minfo", aliases={"Minfo", "MINFO", "info", "Info", "INFO"}, block=True
 )
@@ -275,14 +277,20 @@ async def _(
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
-async def _render_combo(result, binding) -> bytes:
-    """条件50 结果渲染：flat（条件50）走 flat 版式，拆分沿用标准 35/15 版式。
+async def _render_combo(result, binding, output=None) -> bytes:
+    """条件50/40 结果渲染：flat（条件50）走 flat 版式，拆分沿用标准 35/15
+    版式（b40=25/15 旧系数，同版式卡面）。
 
-    头部 rating 位两种模式均为所列成绩 RA 合计（不是玩家 rating），称号条
-    以「条件 · 条数 · 合计RA」口径标注防误读（落雪称号在场时优先显示称号，
-    仅无称号回退口径条）；NET 源身份卡与 b50 共用 core 链路。
+    头部 rating 位两种模式均为所列成绩 RA 合计（不是玩家 rating；b40 为
+    FiNALE 旧系数口径），称号条以「条件 · 条数 · 合计RA」口径标注防误读
+    （落雪称号在场时优先显示称号，仅无称号回退口径条）；NET 源身份卡与
+    b50 共用 core 链路。
     """
-    label = f"{result.title} · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
+    if output is OutputKind.B40:
+        head = f"{result.title}·" if result.title else ""
+        label = f"{head}旧系数b40 · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
+    else:
+        label = f"{result.title} · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
     if score_service.view_of(binding.service) == "jp":
         return await b50_render.net_best50_card(
             result.bests, binding, flat=result.flat, label=label
@@ -324,21 +332,23 @@ async def _(
 ):
     """条件组合查询（解析/执行全在 core.combo，子插件只消费四态结果）：
 
-    出图 / 歧义提示（裸紫白）/ 谱面集空文案 / 静默（零条件——``^(.+?)50$``
-    松匹配下以 50 结尾的闲聊不是查询，绝不回话防刷屏）。
+    出图（50=b50 / 40=旧系数 b40）/ 歧义提示（裸紫白）/ 谱面集空文案 /
+    静默（零条件——松匹配下以 40/50 结尾的闲聊不是查询，绝不回话防刷屏）。
     """
     # 谱师实名词随曲库动态注册（幂等；曲库未就绪时跳过——冷启动窗口暂不
     # 生效，任一查询加载曲库后下一条起生效，不在闲聊路径上触发加载）
     await ensure_designer_rules()
-    parsed = parse_combo(groups[0])
+    cond_text, suffix = groups
+    output = OutputKind.B40 if suffix == "40" else OutputKind.B50
+    parsed = parse_combo(cond_text)
     if parsed is None:
         return
     if isinstance(parsed, ComboAmbiguity):
         await UniMessage.text(f" {parsed.message}").finish(at_sender=True)
-    if bad := inapplicable(parsed, OutputKind.B50):
-        # §9.7 适用矩阵（P1 仅 b50 一种输出，暂不触发；机制先建）
+    if bad := inapplicable(parsed, output):
+        # §9.7 适用矩阵（era_year/ideal/fit 等 D/C 类仅 b50/40）
         await UniMessage.text(
-            f" {'、'.join(c.label for c in bad)} 不适用于条件50"
+            f" {'、'.join(c.label for c in bad)} 不适用于条件{suffix}"
         ).finish(at_sender=True)
     if score_service.view_of(binding.service) == "jp" and score_service.needs_fetch(
         binding
@@ -346,10 +356,10 @@ async def _(
         await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
             at_sender=True
         )
-    result = await run_combo(parsed, binding, notify_slow=slow_notice())
+    result = await run_combo(parsed, binding, output=output, notify_slow=slow_notice())
     if isinstance(result, ComboEmpty):
         await UniMessage.text(f" {result.message}").finish(at_sender=True)
-    png = await _render_combo(result, binding)
+    png = await _render_combo(result, binding, output)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
@@ -447,7 +457,7 @@ help_registry.declare(
             matcher=combo50,
             name="条件50",
             capability=Capability.SCORES_ALL,
-            brief="条件组合查分：辉50 / 紫谱50 / 神50 / 寸50 等（@某人=代查）",
+            brief="条件组合查分：辉50 / 紫谱50 / dx2024b40 / 寸50 等（@某人=代查）",
             detail=(
                 "格式：<条件串>50，条件可任意叠加（同类「或」、跨类「且」），"
                 "末尾以 50 结尾即触发。条件词：\n"
@@ -458,7 +468,9 @@ help_registry.declare(
                 "大将/鸟加/sss+、纯<档>/仅<档>、牛逼、越级、一星~五星、寸、"
                 "锁/名刀\n"
                 "修改：理想（升一档重算）、拟合（拟合定数重算）\n"
-                "例：东方50、雪辉dx50、紫谱将50、祝将50、辉50、拟合理想50"
+                "回到过去：dx2024/舞萌dx2024/2024/dx无印（分界移到该年，定数取时点值）\n"
+                "输出：尾缀 50=b50、40/b40=旧系数 b40（25+15，FiNALE 口径）\n"
+                "例：东方50、雪辉dx50、紫谱将50、dx2024b50、拟合理想50、nb40"
             ),
         ),
         CommandSpec(

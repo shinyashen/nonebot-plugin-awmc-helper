@@ -1045,12 +1045,22 @@ def test_combo_regex_captures():
     """at_tolerant 包装不改变捕获组：尾缀前为条件串、末尾 50 为尾缀。"""
     from nonebot_plugin_awmc_helper.core.binding import at_tolerant
 
-    pat = _re.compile(at_tolerant(r"^(.+?)(50)$"))
+    pat = _re.compile(at_tolerant(r"^(.+?)(40|50)$"))
     assert pat.match("东方50").groups() == ("东方", "50")
     # 「b50」「1350」同形状命中松匹配——分别被 priority 1 的 b50 命令与
     # 解析静默兜住（正则层只保证捕获正确，不保证最终响应）
     assert pat.match("b50").groups() == ("b", "50")
     assert pat.match("1350").groups() == ("13", "50")
+    # P3：40 尾缀。「b40」的 b 留在条件串由 tokenizer 跳过吸收——nb40=牛逼、
+    # dx2024b40=回到过去，零歧义（b 不进尾缀正则，避免 nb40 被拆成 n+b40）
+    assert pat.match("dx2024b40").groups() == ("dx2024b", "40")
+    assert pat.match("nb40").groups() == ("nb", "40")
+    assert pat.match("祝将b40").groups() == ("祝将b", "40")
+    assert pat.match("b40").groups() == ("b", "40")
+    assert pat.match("超b40").groups() == ("超b", "40")
+    # 裸「40」/「50」不满足 ≥1 字符条件串 → matcher 层不触发
+    assert pat.match("40") is None
+    assert pat.match("50") is None
 
 
 def test_combo50_priority_below_all_existing():

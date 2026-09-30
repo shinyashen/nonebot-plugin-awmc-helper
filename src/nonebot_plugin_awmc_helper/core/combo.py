@@ -48,7 +48,7 @@ from .calc import build_bests, compute_rating, build_flat_bests
 from .score import score_service
 from .songs import song_service
 from .plates import norm_plate
-from .songdb import ensure_ongeki_titles
+from .songdb import State, ensure_ongeki_titles
 from ..constants import normalize_text
 
 # ---------------------------------------------------------------- 模型
@@ -60,6 +60,7 @@ class CondType(Enum):
     # 谱面类（库切片；n15 → 平铺）
     VERSION = "version"  # S-1 版本字连续段（码集）
     ERA = "era"  # S-3 世代：旧框（≤19900）/ DX（>19900）
+    ERA_YEAR = "era_year"  # S-2 回到过去：版本 ≤ 年份码 + 新旧分界移到该码（恒拆分）
     CHART_TYPE = "chart_type"  # S-4 谱面类型：标准/DX 谱（≠世代）
     NEWNESS = "newness"  # S-5 新旧（按视图现行版本）
     GENRE = "genre"  # S-6 曲目分类
@@ -86,6 +87,7 @@ CHART_COND_TYPES = frozenset(
     {
         CondType.VERSION,
         CondType.ERA,
+        CondType.ERA_YEAR,
         CondType.CHART_TYPE,
         CondType.NEWNESS,
         CondType.GENRE,
@@ -97,13 +99,15 @@ CHART_COND_TYPES = frozenset(
         CondType.UTAGE,
     }
 )
-"""谱面类条件集（条件集含任一 → n15 平铺，§8）。"""
+"""谱面类条件集（条件集含任一 → n15 平铺，§8；例外：ERA_YEAR 在场 → 恒拆分，
+覆盖其谱面类性质——查询目的即分界结构，§8 n15 特则）。"""
 
 
 class OutputKind(str, Enum):
     """输出口径（§9.7 适用矩阵的轴）：条件 × 指令准入校验用。"""
 
     B50 = "b50"
+    B40 = "b40"  # 与 B50 同矩阵列（§9.7 「b50/40」一列）
     SCORE_LIST = "score_list"
     TABLE = "table"
     DS_TABLE = "ds_table"
@@ -166,11 +170,17 @@ class ComboResult:
 # §9.7 适用矩阵（2026-09-30 拍板：不适用=拒绝并提示，非上游静默失效）：
 # A 谱面类全输出适用；B1 达标型（combo/sync/rate）进分数列表与表格盖章判型、
 # 不进定数表；B2 区间型（badge/star/cun/kill）只进 b50 与分数列表；C 修改类
-# （ideal/fit）只进 b50（拟合定数表随 P3 再议）。
-_B1_KINDS = frozenset({OutputKind.B50, OutputKind.SCORE_LIST, OutputKind.TABLE})
-_B2_KINDS = frozenset({OutputKind.B50, OutputKind.SCORE_LIST})
+# （ideal/fit）只进 b50/40（拟合定数表随 P3 再议）；D 回到过去（era_year）只进
+# b50/40（分数列表按达成率排、历史完成表/定数表未定义，§9.7 D 行）。
+_B1_KINDS = frozenset(
+    {OutputKind.B50, OutputKind.B40, OutputKind.SCORE_LIST, OutputKind.TABLE}
+)
+_B2_KINDS = frozenset({OutputKind.B50, OutputKind.B40, OutputKind.SCORE_LIST})
+_B40_KINDS = frozenset({OutputKind.B50, OutputKind.B40})
 _APPLICABILITY: "dict[CondType, frozenset[OutputKind]]" = {
+    # 谱面类默认全集；era_year 收窄为 b50/40（覆盖全 entries 展开的多余项）
     **{ct: frozenset(OutputKind) for ct in CHART_COND_TYPES},
+    CondType.ERA_YEAR: _B40_KINDS,
     CondType.COMBO: _B1_KINDS,
     CondType.SYNC: _B1_KINDS,
     CondType.RATE: _B1_KINDS,
@@ -178,8 +188,8 @@ _APPLICABILITY: "dict[CondType, frozenset[OutputKind]]" = {
     CondType.STAR: _B2_KINDS,
     CondType.CUN: _B2_KINDS,
     CondType.KILL: _B2_KINDS,
-    CondType.IDEAL: frozenset({OutputKind.B50}),
-    CondType.FIT: frozenset({OutputKind.B50}),
+    CondType.IDEAL: _B40_KINDS,
+    CondType.FIT: _B40_KINDS,
 }
 
 
@@ -440,6 +450,15 @@ r"""裸数字等级 token（13/13+；numeric_level 语境注入）。
 
 _RULES: "tuple[_Rule, ...]" = (
     # ---- 层 1：复合/消歧词 ----
+    _Rule(
+        1,
+        # S-2 回到过去：dx2024/舞萌dx2024/2024（层 1 先于层 2 的 dx 世代词
+        # 与层 3 版本段）；value=年份，未收录年份在装配期丢弃
+        re.compile(r"(舞萌dx|dx)?20\d{2}", re.IGNORECASE),
+        "era_year",
+        lambda m: int(m.group()[-4:]),
+    ),
+    _Rule(1, re.compile(r"dx无印", re.IGNORECASE), "era_year", _const(2019)),
     _Rule(1, re.compile(r"([紫白])谱"), "diff", lambda m: _color_of(m.group(1))),
     _Rule(1, re.compile(r"([紫白])代"), "version", lambda m: ((m.group(1),), True)),
     _Rule(1, re.compile(r"舞舞"), "sync", _const("fsd")),
@@ -830,6 +849,73 @@ def _ideal_cond() -> Cond:
     return Cond(CondType.IDEAL, key="ideal", label="理想", modifier=_ideal_of)
 
 
+_OLD_RATE_COEF: "dict[RateType, float]" = {
+    RateType.D: 0.0,
+    RateType.C: 5.0,
+    RateType.B: 6.0,
+    RateType.BB: 7.0,
+    RateType.BBB: 7.5,
+    RateType.A: 8.5,
+    RateType.AA: 9.5,
+    RateType.AAA: 10.5,
+    RateType.S: 12.5,
+    RateType.SP: 12.7,
+    RateType.SS: 13.0,
+    RateType.SSP: 13.2,
+    RateType.SSS: 13.5,
+    RateType.SSSP: 14.0,
+}
+"""FiNALE 旧版 RA 系数表（KarenBot ``Rating.kt`` calcOld 同源；SSS+ 14.0 vs
+现行 22.4）。b40 唯一动公式处（§3），maimai_py 无此表、本地硬编码。"""
+
+
+def _old_ra(level_value: float, achievements: "float | None") -> int:
+    """旧版单曲 RA：``floor(定数 × 档位系数 × min(100.5, 达成率)万倍 / 1e6)``。
+
+    成绩为现达成率（历史成绩任何实现不可得，§9 S-2 固有限制）。
+    """
+    coef = _OLD_RATE_COEF[RateType._from_achievement(achievements or 0)]
+    bps = min(1005000, _bps(achievements))
+    return int(level_value * coef * bps / 1000000)
+
+
+def _b40_modifier(s: ScoreExtend) -> ScoreExtend:
+    """b40 旧系数重算（副本）：dx_rating 替换为 FiNALE 口径 RA。
+
+    默认排序（dx_rating 降序）、头部合计与副行「定数 -> 单曲Ra」随之切换
+    为旧口径。恒居 modifier 链尾。
+    """
+    return replace(s, dx_rating=_old_ra(s.level_value, s.achievements))
+
+
+async def _era_level_modifier(boundary: int):
+    """回到过去时点定数 modifier（§9 S-2 定稿）：定数取版本时点值
+    （``State.resolve_chart_level`` carry-forward），RA 按现行系数表重算
+    （系数表历史缺失按不变处理——2026-09-30 拍板）。历史无值（早于首变化
+    点/无历史表）→ 保持现行值。"""
+    state = await State.load()
+
+    def mod(s: ScoreExtend) -> ScoreExtend:
+        kind = (
+            "utage"
+            if s.type == SongType.UTAGE
+            else "sd"
+            if s.type == SongType.STANDARD
+            else "dx"
+        )
+        hist = state.resolve_chart_level(s.id, kind, s.level_index.value, boundary)
+        if hist is None:
+            return s
+        ra = (
+            compute_rating(hist, s.achievements)
+            if s.achievements is not None
+            else s.dx_rating
+        )
+        return replace(s, level_value=hist, dx_rating=ra)
+
+    return mod
+
+
 def _fit_cond() -> Cond:
     """拟合定数（S-24）：modifier 类条件，不过滤、只重算。
 
@@ -1023,6 +1109,11 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                     value=which,
                 )
             )
+        elif t.kind == "era_year":
+            year_e: int = t.value
+            if year_e in _YEAR_TO_CODE:
+                conds.append(_era_year_cond(year_e, t.text))
+            # 未收录年份（2000–2018 / 2027+）：残片忽略
         elif t.kind == "era":
             which: str = t.value
             conds.append(
@@ -1082,6 +1173,36 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
     return deduped or None
 
 
+_YEAR_TO_CODE: "dict[int, int]" = {
+    2019: Version.MAIMAI_DX.value,
+    2020: Version.MAIMAI_DX_PLUS.value,
+    2021: Version.MAIMAI_DX_SPLASH.value,
+    2022: Version.MAIMAI_DX_UNIVERSE.value,
+    2023: Version.MAIMAI_DX_FESTIVAL.value,
+    2024: Version.MAIMAI_DX_BUDDIES.value,
+    2025: Version.MAIMAI_DX_PRISM.value,
+    2026: Version.MAIMAI_DX_CIRCLE.value,
+}
+"""回到过去 年份 → 代基码（Version 枚举直查；PLUS 尾码不分，对齐笔记 §9 S-2
+与 KarenBot nowVersion）。未收录年份（2000–2018 / 2027+）的 token 丢弃。"""
+
+
+def _era_year_cond(year: int, label: str) -> Cond:
+    """回到过去条件（S-2）：版本 ≤ 年份码 + boundary 覆写（value=码）。
+
+    定数时点值与分界覆写在执行器侧由 :func:`_era_level_modifier` 与
+    ``build_bests(latest_version_value=码)`` 承接。
+    """
+    code = _YEAR_TO_CODE[year]
+    return Cond(
+        CondType.ERA_YEAR,
+        key=f"era_year:{code}",
+        label=label,
+        chart=lambda s, d, _cur, _c=code: d.version is not None and d.version <= _c,
+        value=code,
+    )
+
+
 def _level_cond(level: str) -> Cond:
     """等级精确条件（S-8）。"""
     return Cond(
@@ -1127,7 +1248,11 @@ def parse_combo(
         if "." in text:
             # 「13.5」定数串（剥 +；一位小数域由 _ds_cond 语义保证）
             return [_ds_cond(float(text.rstrip("+")))]
-        if int(text.rstrip("+")) > 15:
+        year = int(text.rstrip("+"))
+        if year in _YEAR_TO_CODE:
+            # 「2024进度」裸年份 = 回到过去（等级域 ≤15，4 位数无歧义）
+            return [_era_year_cond(year, text)]
+        if year > 15:
             return None  # 「1350」非等级域（1-15），静默防闲聊误触发
         return [_level_cond(text)]  # 「13+」的 + 是等级语义，原样保留
     return _assemble(tokenize(text, numeric_level=numeric_level))
@@ -1190,13 +1315,56 @@ def _current_of(binding) -> int:
     return current_version_jp.value if jp else current_version.value
 
 
-def _entry_hit(
-    song: Song, diff: SongDifficulty, conds: "list[Cond]", has_utage: bool, cur: int
-) -> bool:
-    """单谱面条件判定（含宴谱口径：默认排除 / S-19 在场时仅宴谱）。"""
-    if (diff.type == SongType.UTAGE) != has_utage:
-        return False
-    return all(c.chart(song, diff, cur) for c in conds if c.chart is not None)
+def _group_by_type(conds: "list[Cond]", attr: str) -> "dict[CondType, list[Cond]]":
+    """条件按 CondType 分组（§9.0：同型 OR、跨型 AND——分组语义在执行器
+    统一实现，本函数即其单源）。"""
+    groups: "dict[CondType, list[Cond]]" = {}
+    for c in conds:
+        if getattr(c, attr) is not None:
+            groups.setdefault(c.ctype, []).append(c)
+    return groups
+
+
+async def _build_chart_hit(conds: "list[Cond]", cur: int):
+    """谱面判定闭包（同型 OR/跨型 AND + 宴谱口径 + 回到过去时点定数）。
+
+    - 返回 None = 条件集无谱面类条件（全库通过）；
+    - DS 条件在回到过去在场时对比**历史定数**（``State.resolve_chart_level``
+      carry-forward；早于首变化点视为未实装 → 不命中，§9 S-2）。
+    """
+    groups = _group_by_type(conds, "chart")
+    if not groups:
+        return None
+    has_utage = any(c.ctype is CondType.UTAGE for c in conds)
+    era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
+    hist_state = (
+        await State.load() if era is not None and CondType.DS in groups else None
+    )
+
+    def chart_hit(song: Song, diff: SongDifficulty) -> bool:
+        if (diff.type == SongType.UTAGE) != has_utage:
+            return False
+        for ctype, group in groups.items():
+            if ctype is CondType.DS and hist_state is not None:
+                kind = (
+                    "utage"
+                    if diff.type == SongType.UTAGE
+                    else "sd"
+                    if diff.type == SongType.STANDARD
+                    else "dx"
+                )
+                hist = hist_state.resolve_chart_level(
+                    song.id, kind, diff.level_index.value, era.value
+                )
+                if hist is None or not any(
+                    round(hist * 10) == round(c.value * 10) for c in group
+                ):
+                    return False
+            elif not any(c.chart(song, diff, cur) for c in group):
+                return False
+        return True
+
+    return chart_hit
 
 
 def _representative_of(
@@ -1238,13 +1406,13 @@ async def combo_chart_entries(
     songs = await _songs_of(binding)
     cur = _current_of(binding)
     await ensure_ongeki_titles()  # 中二/音击谓词的集合前置加载（幂等）
-    has_utage = any(c.ctype is CondType.UTAGE for c in conds)
+    chart_hit = await _build_chart_hit(conds, cur)
     if any(c.single_chart for c in conds if c.chart is not None):
         entries = [
             (song, diff)
             for song in songs
             for diff in song.get_difficulties()
-            if _entry_hit(song, diff, conds, has_utage, cur)
+            if chart_hit is not None and chart_hit(song, diff)
         ]
     else:
         per_song = [
@@ -1253,7 +1421,7 @@ async def combo_chart_entries(
                 [
                     d
                     for d in song.get_difficulties()
-                    if _entry_hit(song, d, conds, has_utage, cur)
+                    if chart_hit is None or chart_hit(song, d)
                 ],
             )
             for song in songs
@@ -1273,7 +1441,7 @@ async def combo_filtered_scores(
     binding,
     notify_slow=None,
 ) -> "list[ScoreExtend] | ComboEmpty":
-    """条件 → 成绩集（分数列表消费；键集全量过滤、无选谱收缩）。
+    """条件 → 成绩集（分数列表/b50 组装消费；键集全量过滤、无选谱收缩）。
 
     谱面类条件在绑定源视图曲库上产出谱面键集 ``(id, type, level_index)``
     （各源成绩 id 均为归一根 id、宴谱为 diff_id，与完成表同口径）；
@@ -1283,16 +1451,15 @@ async def combo_filtered_scores(
     songs = await _songs_of(binding)
     cur = _current_of(binding)
     await ensure_ongeki_titles()  # 中二/音击谓词的集合前置加载（幂等）
-    has_utage = any(c.ctype is CondType.UTAGE for c in conds)
-    has_chart = any(c.chart is not None for c in conds)
+    chart_hit = await _build_chart_hit(conds, cur)
 
     keys: "set[tuple[int, SongType, LevelIndex]] | None" = None
-    if has_chart:
+    if chart_hit is not None:
         keys = {
             _chart_key(song, diff)
             for song in songs
             for diff in song.get_difficulties()
-            if _entry_hit(song, diff, conds, has_utage, cur)
+            if chart_hit(song, diff)
         }
         if not keys:
             return ComboEmpty(_empty_message(conds, cur))
@@ -1302,45 +1469,73 @@ async def combo_filtered_scores(
         scores = [s for s in scores if (s.id, s.type, s.level_index) in keys]
     else:
         scores = list(scores)
-    scores = [s for s in scores if (s.type == SongType.UTAGE) == has_utage]
-    record_conds = [c for c in conds if c.record is not None]
-    return [s for s in scores if all(c.record(s) for c in record_conds)]
+    scores = [
+        s
+        for s in scores
+        if (s.type == SongType.UTAGE) == any(c.ctype is CondType.UTAGE for c in conds)
+    ]
+    record_groups = _group_by_type(conds, "record")
+    return [
+        s
+        for s in scores
+        if all(any(c.record(s) for c in group) for group in record_groups.values())
+    ]
 
 
 async def run_combo(
     conds: "list[Cond]",
     binding,
+    *,
+    output: OutputKind = OutputKind.B50,
     notify_slow: "Callable[[], Any] | None" = None,
 ) -> "ComboResult | ComboEmpty":
     """执行条件组合（§8.3）：成绩过滤（:func:`combo_filtered_scores`）→
     排序/修改 → 组装。谱面集空 → :class:`ComboEmpty`；成绩集空 → 照常返回
     空组装（渲染全空槽卡，对齐两上游）。
+
+    ``output``：b50（35/15 现行系数，n15 按条件集构成）或 b40（§3 旧口径：
+    FiNALE 系数重算 + 恒拆分 25/15，可与回到过去叠加：dx2022b40）。
     """
     filtered = await combo_filtered_scores(conds, binding, notify_slow)
     if isinstance(filtered, ComboEmpty):
         return filtered
     scores = filtered
     cur = _current_of(binding)
+    era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
 
-    # 排序覆盖：取最后声明者（§9.0）；modifier：声明序链式应用（理想升档
-    # 与拟合重算叠加时按声明序变换），拟合重算器恒居链尾——RA 只取决于
-    # 最终 (达成率, 定数)，升档在拟合前的语义对任意声明序成立
+    # 排序覆盖：取最后声明者（§9.0）；modifier：声明序链式应用。链序定案：
+    # 时点定数居首（历史值先落位），理想/拟合随声明序，b40 旧系数恒居链尾
+    # （对最终 (达成率, 定数) 做旧口径重算）
     sort_key = next(
         (c.sort_key for c in reversed(conds) if c.sort_key is not None),
         lambda s: s.dx_rating or 0,
     )
     modifiers = [c.modifier for c in conds if c.modifier is not None]
+    if era is not None:
+        modifiers.insert(0, await _era_level_modifier(era.value))
     if any(c.ctype is CondType.FIT for c in conds):
         modifiers.append(_fit_modifier_of(_build_fit_map(await _songs_of(binding))))
+    if output is OutputKind.B40:
+        modifiers.append(_b40_modifier)
     if modifiers:
         scores = [_apply_modifiers(s, modifiers) for s in scores]
 
-    # n15 判定（§8）：条件集构成派生——含谱面类 → 平铺，纯成绩类 → 拆分
-    flat = any(c.ctype in CHART_COND_TYPES for c in conds)
+    # n15 判定（§8 + 特则）：b40 恒拆分（25/15 旧口径）；回到过去恒拆分
+    # （查询目的即分界结构，覆盖其谱面类性质）；其余按条件集构成——含谱面类
+    # → 平铺，纯成绩类 → 拆分
+    if output is OutputKind.B40 or era is not None:
+        flat = False
+    else:
+        flat = any(c.ctype in CHART_COND_TYPES for c in conds)
     if flat:
         bests = build_flat_bests(scores, key=sort_key)
     else:
-        bests = build_bests(scores, key=sort_key, latest_version_value=cur)
+        bests = build_bests(
+            scores,
+            key=sort_key,
+            latest_version_value=era.value if era is not None else cur,
+            old_cap=25 if output is OutputKind.B40 else 35,
+        )
     return ComboResult(
         title="·".join(c.label for c in conds),
         bests=bests,
