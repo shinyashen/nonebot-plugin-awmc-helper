@@ -972,14 +972,15 @@ def test_era_year_predicate():
 
 
 def test_era_year_pure_number_context():
-    """裸年份数字：numeric 语境 → era；b50 语境 → None（纯数字静默）。"""
+    """裸年份数字不收（2026-09-30 拍板）：两种语境均静默，须带 dx 前缀。"""
     from nonebot_plugin_awmc_helper.core.combo import parse_combo
 
-    assert [c.ctype.name for c in parse_combo("2024", numeric_level=True)] == [
-        "ERA_YEAR"
-    ]
     assert parse_combo("2024") is None
-    assert parse_combo("2027", numeric_level=True) is None  # 未收录年份
+    assert parse_combo("2024", numeric_level=True) is None
+    assert parse_combo("2024进度", numeric_level=True) is None
+    # 「2024b50」尾缀形态同样静默（条件串「2024b」无前缀不成回到过去）
+    assert parse_combo("2024b") is None
+    assert parse_combo("2027", numeric_level=True) is None
     assert parse_combo("1350", numeric_level=True) is None  # 非年份非等级
     assert parse_combo("13", numeric_level=True)[0].ctype.name == "LEVEL"
 

@@ -452,9 +452,10 @@ _RULES: "tuple[_Rule, ...]" = (
     # ---- 层 1：复合/消歧词 ----
     _Rule(
         1,
-        # S-2 回到过去：dx2024/舞萌dx2024/2024（层 1 先于层 2 的 dx 世代词
-        # 与层 3 版本段）；value=年份，未收录年份在装配期丢弃
-        re.compile(r"(舞萌dx|dx)?20\d{2}", re.IGNORECASE),
+        # S-2 回到过去：dx2024/舞萌dx2024（前缀必选——裸年份数字与等级/
+        # 定数裸数字语境冲突，2026-09-30 拍板不收；层 1 先于层 2 的 dx 世代
+        # 词与层 3 版本段）；value=年份，未收录年份在装配期丢弃
+        re.compile(r"(舞萌dx|dx)20\d{2}", re.IGNORECASE),
         "era_year",
         lambda m: int(m.group()[-4:]),
     ),
@@ -1248,12 +1249,10 @@ def parse_combo(
         if "." in text:
             # 「13.5」定数串（剥 +；一位小数域由 _ds_cond 语义保证）
             return [_ds_cond(float(text.rstrip("+")))]
-        year = int(text.rstrip("+"))
-        if year in _YEAR_TO_CODE:
-            # 「2024进度」裸年份 = 回到过去（等级域 ≤15，4 位数无歧义）
-            return [_era_year_cond(year, text)]
-        if year > 15:
-            return None  # 「1350」非等级域（1-15），静默防闲聊误触发
+        if int(text.rstrip("+")) > 15:
+            # 「1350」「2024」非等级域（1-15）→ 静默防闲聊误触发；回到过去
+            # 须带 dx 前缀（裸年份不收，2026-09-30 拍板）
+            return None
         return [_level_cond(text)]  # 「13+」的 + 是等级语义，原样保留
     return _assemble(tokenize(text, numeric_level=numeric_level))
 
