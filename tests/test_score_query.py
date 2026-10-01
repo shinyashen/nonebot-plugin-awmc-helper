@@ -1082,3 +1082,77 @@ def test_combo50_help_declared():
     assert spec is not None
     assert spec.capability == "scores_all"
     assert spec.name == "条件50"
+
+
+# ------------------------------------------------- b40（无条件全量旧系数卡）
+
+
+def test_b40_command_registered():
+    """裸 b40 独立指令（karenbot-combo-notes §13.2「未做」项补齐）：priority 1
+    先于 combo50 松匹配（松匹配下裸「b40」零条件静默）；nb40/dx2024b40 等
+    带条件的组合不以 b40 开头，不冲突。"""
+    from nonebot_plugin_awmc_helper.core.help import help_registry
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    assert sq.b40.priority < sq.combo50.priority
+    assert sq.b40.block is True
+    spec = help_registry.spec_of(sq.b40)
+    assert spec is not None
+    assert spec.name == "b40"
+    assert spec.capability == "scores_all"
+
+
+@pytest.mark.asyncio
+async def test_render_combo_b40_trophy_and_rating(monkeypatch):
+    """b40 称号固定「底分: X + 段位分: 2100」、头部 rating = 底分 + 2100
+    （旧口径 rating = 底分 + 段位 Rating；查分器不下发段位，按最高 2100 定值，
+    2026-10-02）。分区小计保持底分口径。"""
+    from types import SimpleNamespace
+
+    from maimai_py import PlayerBests
+
+    from nonebot_plugin_awmc_helper.core.combo import (
+        B40_DAN_SCORE,
+        OutputKind,
+        ComboResult,
+    )
+    from nonebot_plugin_awmc_helper.core.store import UserBinding
+    from nonebot_plugin_awmc_helper.core.render import best50 as b50mod
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    bests = PlayerBests(
+        rating=5000,
+        rating_b35=4000,
+        rating_b15=1000,
+        scores_b35=[],
+        scores_b15=[],
+    )
+    binding = UserBinding(platform="OneBot V11", user_id="1", service="divingfish")
+    captured: dict = {}
+
+    async def fake_bytes(_name, head_rating, b35, b15, _s35, _s15, **kwargs):
+        captured["head_rating"] = head_rating
+        captured["rating_b35"] = b35
+        captured["rating_b15"] = b15
+        captured.update(kwargs)
+        return b"png"
+
+    async def fake_player(_binding):
+        return SimpleNamespace(name="tester")
+
+    monkeypatch.setattr(b50mod, "best50_bytes", fake_bytes)
+    monkeypatch.setattr(sq.score_service, "get_player", fake_player)
+
+    for title, expected_label in (
+        ("辉40", "辉40·底分: 5000 + 段位分: 2100"),
+        ("", "底分: 5000 + 段位分: 2100"),
+    ):
+        result = ComboResult(
+            title=title, bests=bests, flat=False, total_ra=5000, scores=[]
+        )
+        await sq._render_combo(result, binding, OutputKind.B40)
+        assert captured["head_rating"] == 5000 + B40_DAN_SCORE
+        assert captured["trophy_name"] == expected_label
+        assert captured["force_trophy_name"] is True
+        assert captured["rating_b35"] == 4000  # 分区小计保持底分口径
+        assert captured["rating_b15"] == 1000

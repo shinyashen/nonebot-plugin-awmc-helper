@@ -1,4 +1,6 @@
-"""查分指令入口：b50 / ap50 / minfo / ginfo。"""
+"""查分指令入口：b50 / b40 / ap50 / minfo / ginfo。"""
+
+from dataclasses import replace
 
 from nonebot import on_regex, on_command
 from nonebot.params import CommandArg, RegexGroup
@@ -10,6 +12,7 @@ from .render import _ginfo_image
 from ...constants import DEFAULT_THEME, COLOR_TO_LEVEL_INDEX
 from ...core.help import CommandSpec, help_registry
 from ...core.combo import (
+    B40_DAN_SCORE,
     ComboEmpty,
     OutputKind,
     ComboAmbiguity,
@@ -46,6 +49,7 @@ from ...core.sources import Capability
 from ...core.net_score import net_best50_card
 
 b50 = on_command("b50", aliases={"B50"}, block=True)
+b40 = on_command("b40", aliases={"B40"}, block=True)
 ap50 = on_command("ap50", aliases={"AP50"}, block=True)
 # 条件组合查询（辉50/紫谱50/神50/dx2024b40 类）：`^(.+?)(40|50)$` 松匹配，
 # 「b40」的 b 由 tokenizer 未识别残片跳过自然吸收（nb40=牛逼、dx2024b40=回到
@@ -229,24 +233,45 @@ async def _(
     await _combo_query(parse_combo("ap"), binding, OutputKind.B50)
 
 
+@b40.handle()
+@handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
+async def _(
+    binding: UserBinding = SessionQueryBinding(
+        unbound_hint="对方尚未绑定查分器，无法代查"
+    ),
+):
+    """无条件全量 b40（旧系数口径）：全部成绩 FiNALE 系数重算 + 恒拆分 25/15。
+
+    松匹配下裸「b40」条件串只剩残片「b」、零条件静默（笔记 §13.2），无条件
+    全量卡由此独立指令承担（priority 1 先于 combo50；nb40/dx2024b40 等带
+    条件的仍走松匹配，不以 b40 开头不冲突）。
+    """
+    await _combo_query([], binding, OutputKind.B40, suffix="40")
+
+
 async def _render_combo(result, binding, output=None) -> bytes:
     """条件50/40 结果渲染：flat（条件50）走 flat 版式，拆分沿用标准 35/15
     版式（b40=25/15 旧系数，同版式卡面）。
 
-    头部 rating 位两种模式均为所列成绩 RA 合计（不是玩家 rating；b40 为
-    FiNALE 旧系数口径），称号条以「条件 · 条数 · 合计RA」口径标注防误读，
-    条件口径强制覆盖数据源称号（2026-10-01 QoL：flat 版式曾漏传
-    force 标记，落雪称号压过条件串）；NET 源身份卡与 b50 共用 core 链路。
+    头部 rating 位两种模式均为所列成绩 RA 合计（不是玩家 rating）；b40 为
+    FiNALE 旧口径——旧 rating = 底分 + 段位 Rating，段位分按最高 2100 定值
+    计入头部合计，称号条如实拆出「底分 + 段位分」（B40_DAN_SCORE，2026-10-02）。
+    条件50 的称号条以「条件 · 条数 · 合计RA」口径标注防误读，条件口径强制
+    覆盖数据源称号（2026-10-01 QoL：flat 版式曾漏传 force 标记，落雪称号
+    压过条件串）；NET 源身份卡与 b50 共用 core 链路。
     """
     if output is OutputKind.B40:
         head = f"{result.title}·" if result.title else ""
-        label = f"{head}旧系数b40 · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
+        label = f"{head}底分: {result.total_ra} + 段位分: {B40_DAN_SCORE}"
     else:
         label = f"{result.title} · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
+    dan = B40_DAN_SCORE if output is OutputKind.B40 else 0
+    head_rating = result.bests.rating + dan
     if score_service.view_of(binding.service) == "jp":
-        return await net_best50_card(
-            result.bests, binding, flat=result.flat, label=label
-        )
+        bests = result.bests
+        if dan:
+            bests = replace(bests, rating=head_rating)
+        return await net_best50_card(bests, binding, flat=result.flat, label=label)
     player = await score_service.get_player(binding)
     if result.flat:
         return await b50_render.best50_flat_bytes(
@@ -261,7 +286,7 @@ async def _render_combo(result, binding, output=None) -> bytes:
         )
     return await b50_render.best50_bytes(
         player_display_name(player),
-        result.bests.rating,
+        head_rating,
         result.bests.rating_b35,
         result.bests.rating_b15,
         result.bests.scores_b35,
@@ -401,6 +426,13 @@ help_registry.declare(
             brief="B50 成绩大图（带参数=水鱼用户名代查，@某人=代查）",
         ),
         CommandSpec(
+            matcher=b40,
+            name="b40",
+            aliases=("B40",),
+            capability=Capability.SCORES_ALL,
+            brief="无条件全量 b40（旧系数 FiNALE 口径，头部含段位分 2100）",
+        ),
+        CommandSpec(
             matcher=ap50,
             name="ap50",
             aliases=("AP50",),
@@ -423,7 +455,8 @@ help_registry.declare(
                 "锁/名刀\n"
                 "修改：理想（升一档重算）、拟合（拟合定数重算）\n"
                 "回到过去：dx2024/舞萌dx2024/dx无印（分界移到该年，定数取时点值）\n"
-                "输出：尾缀 50=b50、40/b40=旧系数 b40（25+15，FiNALE 口径）\n"
+                "输出：尾缀 50=b50、40=旧系数 b40（25+15，头部含段位分 2100）；"
+                "裸 b40=无条件全量旧系数卡\n"
                 "例：东方50、雪辉dx50、紫谱将50、dx2024b50、拟合理想50、nb40"
             ),
         ),

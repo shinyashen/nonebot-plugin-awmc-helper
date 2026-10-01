@@ -117,6 +117,12 @@ class OutputKind(str, Enum):
     DS_TABLE = "ds_table"
 
 
+B40_DAN_SCORE = 2100
+"""b40 段位分定值：FiNALE 旧 rating = 底分 + 段位 Rating（旧 b40 时代段位可
+计分）；现查分器不下发段位数据（§13.2 已知边界），按最高段位 2100 定值计入
+头部合计，称号条如实拆出「底分 + 段位分」展示（2026-10-02 用户拍板）。"""
+
+
 @dataclass(frozen=True)
 class Cond:
     """单条条件（声明式）：谓词 + 展示名 + 可选排序覆盖/修改器。

@@ -1300,6 +1300,30 @@ async def test_run_combo_b40_split_caps(db, songs, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_combo_b40_unconditional(db, songs, monkeypatch):
+    """无条件 b40（裸 b40 指令路径，空条件集）：全量成绩旧系数重算 + 恒拆分
+    25/15；title 为空串（称号条只剩「底分 + 段位分」口径）。"""
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import OutputKind, ComboResult
+
+    scores = [
+        _score(1000 + i, version=12000, achievements=100.8 + i * 0.001)
+        for i in range(30)
+    ] + [
+        _score(2000 + i, version=25500, achievements=100.8 + i * 0.001)
+        for i in range(20)
+    ]
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService(scores))
+    result = await combo_mod.run_combo([], _binding(), output=OutputKind.B40)
+    assert isinstance(result, ComboResult)
+    assert result.title == ""
+    assert result.flat is False
+    assert len(result.bests.scores_b35) == 25
+    assert len(result.bests.scores_b15) == 15
+    assert result.total_ra == sum(s.dx_rating for s in result.scores)
+
+
+@pytest.mark.asyncio
 async def test_run_combo_b40_forces_split_with_chart_cond(db, songs, monkeypatch):
     """东方b40：谱面类条件在场仍恒拆分（b40 无平铺形态）。"""
     from nonebot_plugin_awmc_helper.core import combo as combo_mod
