@@ -77,8 +77,9 @@ async def ext_request(
 
     状态码检查与 JSON 解析留在各源模块——协议形态不同（柚子 4xx 带
     message 错误体、落雪 OAuth error 体、水鱼 device 流按状态码分支、
-    MuNET 双主机自管节流），底座只收口网络异常语义；重试次数由调用方
-    显式声明（幂等 GET 列表端点 3 次，令牌/提交类端点 0 次直抛）。
+    MuNET 双主机自管节流），底座只收口网络异常语义；``retries`` 是首次
+    之外的额外尝试次数（幂等 GET 列表端点共 3 次尝试即 retries=2，
+    令牌/提交类端点 0 次直抛）。
     """
     last_error: httpx.RequestError | None = None
     for _ in range(1 + max(0, retries)):
@@ -90,12 +91,12 @@ async def ext_request(
 
 
 async def fetch_json(url: str, *, name: str, timeout: float = 60) -> Any:
-    """GET JSON 公共封装：幂等列表口径重试 3 次后包装 ExtNetworkError，
-    非 200 抛 ExtError，JSON 解析失败抛 ExtError。
+    """GET JSON 公共封装：幂等列表口径共 3 次尝试（retries=2）后包装
+    ExtNetworkError，非 200 抛 ExtError，JSON 解析失败抛 ExtError。
 
     ``name`` 用于错误文案（如 ``"maimaiinfo all_data.json"``）。
     """
-    resp = await ext_request("GET", url, name=name, retries=3, timeout=timeout)
+    resp = await ext_request("GET", url, name=name, retries=2, timeout=timeout)
     if resp.status_code != 200:
         raise ExtError(f"{name} 拉取失败（HTTP {resp.status_code}）")
     try:

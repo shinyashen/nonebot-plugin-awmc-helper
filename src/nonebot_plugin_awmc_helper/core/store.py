@@ -797,12 +797,16 @@ async def remove_arcade_alias_by_name(alias: str) -> bool:
         return True
 
 
-async def get_arcade_aliases(arcade_id: int | None = None) -> list[ArcadeAlias]:
+async def get_arcade_aliases(arcade_id: int) -> list[ArcadeAlias]:
+    """按机厅取别名（生产已被 get_arcade_aliases_by_ids 取代，当前仅测试消费）。"""
     async with session() as db:
-        stmt = select(ArcadeAlias)
-        if arcade_id is not None:
-            stmt = stmt.where(ArcadeAlias.arcade_id == arcade_id)
-        return list((await db.exec(stmt)).all())
+        return list(
+            (
+                await db.exec(
+                    select(ArcadeAlias).where(ArcadeAlias.arcade_id == arcade_id)
+                )
+            ).all()
+        )
 
 
 async def get_arcade_aliases_by_ids(arcade_ids: set[int]) -> list[ArcadeAlias]:

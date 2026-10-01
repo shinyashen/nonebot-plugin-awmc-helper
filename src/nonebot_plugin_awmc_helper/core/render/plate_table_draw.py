@@ -211,9 +211,10 @@ def draw_plate_table(
             if best_index in qualified_slots:
                 best = slots[best_index]
                 if best is not None:
-                    im.alpha_composite(assets.pic("complete_2.png"), (x + 1, y + 1))
                     icon, offset = _plate_icon(kind, best)
-                    im.alpha_composite(icon, (x + offset[0], y + offset[1]))
+                    if icon is not None:  # 评级章素材缺失时跳过盖章（不画半截底）
+                        im.alpha_composite(assets.pic("complete_2.png"), (x + 1, y + 1))
+                        im.alpha_composite(icon, (x + offset[0], y + offset[1]))
             for s_idx in qualified_slots:
                 mark = finished_marks[s_idx]
                 if is_wu and len(slots) == 5:

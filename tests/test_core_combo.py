@@ -814,7 +814,7 @@ async def test_combo_chart_entries_heuristic(db, songs):
     assert isinstance(await combo_chart_entries(parse_combo("雪辉dx")), ComboEmpty)
 
 
-def testplate_shape():
+def test_plate_shape():
     """牌子形状检测：牌组合文本 → (版本, 牌种)；非牌形状 → None。
 
     形状与合法性两段式——「真将」形状成立但牌单无此牌，由调用方拒绝

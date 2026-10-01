@@ -19,7 +19,6 @@ dependencies = [
   "numpy>=1.26.0",                            # 猜歌曲绘 FFT 裁剪
   "pillow>=10.0.0",                           # PIL 绘图
   "sqlmodel>=0.0.16",                         # 统一 SQLite ORM
-  "tenacity>=9.0",                            # ext 层网络重试（与 maimai_py provider 同款策略）
   "zhconv>=1.4.3",
 ]
 

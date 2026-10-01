@@ -28,6 +28,8 @@ from ...core.plates import (
 from ...core.binding import service_display
 from ...core.sources import Capability
 from ...core.render.score import (
+    SCORE_LIST_PER_PAGE,
+    SCORE_LIST_HEAD_HEIGHT,
     DrawScore,
     score_list_page,
     score_list_height,
@@ -263,7 +265,7 @@ async def combo_progress_card(
     elif category in ("已完成", "未完成"):
         data = completed if category == "已完成" else unfinished
         total_pages, real = score_list_page(len(data), page)
-        display = data[(real - 1) * 80 : real * 80]
+        display = data[(real - 1) * SCORE_LIST_PER_PAGE : real * SCORE_LIST_PER_PAGE]
         y_size = played_rows(len(display)) * 109
         card = DrawScore(240 + y_size + 120, service=service)
         png = card.draw_category(
@@ -288,11 +290,10 @@ async def combo_score_list_card(binding, conds, cond_text: str, page: int) -> No
     matched = sorted(filtered, key=lambda s: s.achievements or 0, reverse=True)
     if not matched:
         await UniMessage.text(" 没有找到符合条件的成绩").finish(at_sender=True)
-    end_page = max(1, -(-len(matched) // 80))
-    real = min(max(page, 1), end_page)
+    end_page, real = score_list_page(len(matched), page)
     # NB 高度公式已下沉 core（pc 列表等第三方扩展共用）
     plc = score_list_height(len(matched), real, end_page)
     service = service_display(binding)
-    card = DrawScore(280 + plc, service=service)
+    card = DrawScore(SCORE_LIST_HEAD_HEIGHT + plc, service=service)
     png = card.draw_score_list(cond_text, matched, real, end_page)
     await UniMessage.image(raw=png).finish(at_sender=True)

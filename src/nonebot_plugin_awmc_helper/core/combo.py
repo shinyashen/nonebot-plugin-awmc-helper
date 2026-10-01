@@ -44,6 +44,7 @@ from maimai_py import (
     current_version_jp,
 )
 
+from . import designer as designer_mod
 from .calc import build_bests, compute_rating, build_flat_bests
 from .score import score_service
 from .songs import song_service
@@ -638,22 +639,20 @@ async def ensure_designer_rules() -> None:
     """
     if not song_service.is_loaded():
         return
-    from . import designer as _designer_mod
-
     designers: "set[str]" = set()
     for songs in (await song_service.get_all(), await song_service.jp_all()):
         for song in songs:
             for diff in song.get_difficulties():
                 if diff.note_designer:
                     designers.add(diff.note_designer)
-    designers.update(_designer_mod.QUERY_ALIASES)
-    graph = await _designer_mod.get_alias_graph()
+    designers.update(designer_mod.QUERY_ALIASES)
+    graph = await designer_mod.get_alias_graph()
     if graph:
         designers.update(graph)
         for aliases in graph.values():
             designers.update(aliases)
     # 单字查询别名豁免 ≥2 字限制（用户裁定，见 _designer_rules_of 文档）
-    singles = {a for a in _designer_mod.QUERY_ALIASES if len(normalize_text(a)) == 1}
+    singles = {a for a in designer_mod.QUERY_ALIASES if len(normalize_text(a)) == 1}
     set_designer_rules(_designer_rules_of(designers, allow_single=singles))
 
 

@@ -304,7 +304,7 @@ async def test_cn_runtime_switched_to_songdb(db, monkeypatch):
         song_service._ready.clear()
 
 
-def testmajor_diffs_prefer_type():
+def test_major_diffs_prefer_type():
     """双谱歌曲卡片主类型：默认 DX 优先；带「标准/标」前缀搜索时显示 SD。"""
     from mocks import make_diff, make_song
     from maimai_py import SongType, LevelIndex
@@ -433,7 +433,6 @@ async def _rebuild_load(monkeypatch, *, jp_extra: bool = False) -> None:
     assert await song_service.load()
 
 
-@pytest.mark.asyncio
 @pytest.mark.asyncio
 async def test_jp_title_exact_match_pinned(db, monkeypatch):
     """完整曲名查歌的集成防回归（上游 by_keywords 精确优先语义，JP 视图）：

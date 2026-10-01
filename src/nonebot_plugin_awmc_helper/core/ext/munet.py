@@ -32,10 +32,9 @@ _MIN_INTERVAL = 1.0
 
 _throttle_lock = asyncio.Lock()
 _last_request_at = 0.0
-_walk_lock = asyncio.Lock()
-"""别名走查互斥锁：每日任务与手动触发（重载补充数据）不会并发走查。"""
 _walk_running = False
-"""走查在跑标志（与 _walk_lock 配合消除预检 TOCTOU，见 refresh_aliases_full）。"""
+"""别名走查在跑标志（互斥单源）：check 与置位之间无 await，事件循环内
+原子——并发触发（每日 cron + 手动 force）后到者立即 running，不排队重走。"""
 
 _WALK_KV = "munet_alias_walk"
 _WALK_BUDGET_SECONDS = 3600.0
@@ -283,12 +282,13 @@ async def refresh_aliases_full(
       继续（单条失败游标照常前进，下个刷新周期自然重试）；
     - ``awmc_munet_alias_days`` 控制整轮间隔（0=禁用）；时间预算默认 60 分钟，
       单晚走完（实测 1763 请求 ≈ 30 分钟）；
-    - ``force=True``（手动触发，重载补充数据）：跳过间隔/禁用检查，仍受互斥锁
-      保护（进行中直接返回 running）。
+    - ``force=True``（手动触发，重载补充数据）：跳过间隔/禁用检查，仍受
+      在跑标志互斥（进行中直接返回 running）。
     """
+    global _walk_running
     from ...config import plugin_config
 
-    if _walk_lock.locked():
+    if _walk_running:
         return {"status": "running"}
     interval_days = plugin_config.awmc_munet_alias_days
     if not force:
@@ -302,19 +302,13 @@ async def refresh_aliases_full(
             and time.time() - finished_at < interval_days * 86400
         ):
             return {"status": "fresh", "finished_at": finished_at}
-    # 互斥（无 TOCTOU）：locked() 预检挡常规并发；预检窗口内仍可能被并发者
-    # 抢先，故拿到锁后复查 _walk_running（check-and-set 之间无 await，原子）
-    if _walk_lock.locked():
+    if _walk_running:
         return {"status": "running"}
-    async with _walk_lock:
-        global _walk_running
-        if _walk_running:
-            return {"status": "running"}
-        _walk_running = True
-        try:
-            return await _walk_targets(budget_seconds)
-        finally:
-            _walk_running = False
+    _walk_running = True
+    try:
+        return await _walk_targets(budget_seconds)
+    finally:
+        _walk_running = False
 
 
 async def _walk_targets(budget_seconds: float) -> dict:
@@ -341,7 +335,7 @@ async def _walk_targets(budget_seconds: float) -> dict:
         entry = None
         try:
             entry = await fetch_music_by_id(targets[index])
-        except (ExtError, ExtNetworkError) as e:
+        except ExtError as e:
             logger.warning(f"MuNET 别名走查：id={targets[index]} 失败（{e}）")
         if entry is None:
             misses += 1
@@ -442,7 +436,7 @@ async def run_batch_supplement() -> dict:
     for title in titles:
         try:
             hits = await search_music(title)
-        except (ExtError, ExtNetworkError) as e:
+        except ExtError as e:
             logger.warning(f"MuNET 批次：搜索「{title}」失败（{e}）")
             continue
         want = normalize_text(title)
@@ -452,7 +446,7 @@ async def run_batch_supplement() -> dict:
                 continue
             try:
                 payload = await fetch_music_by_id(int(entry["id"]))
-            except (ExtError, ExtNetworkError) as e:
+            except ExtError as e:
                 logger.warning(f"MuNET 批次：id={entry['id']} 拉取失败（{e}）")
                 continue
             if payload is None:
@@ -495,7 +489,7 @@ async def run_batch_supplement() -> dict:
     try:
         filters = await fetch_browse_filters()
         logger.info(f"MuNET 版本状态：addVersion {filters.get('versions')}")
-    except (ExtError, ExtNetworkError) as e:
+    except ExtError as e:
         logger.debug(f"MuNET BrowseFilters 状态获取失败（信息性）：{e}")
     logger.info(f"MuNET 批次补充完成：{result}")
     return result
