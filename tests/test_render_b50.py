@@ -487,3 +487,24 @@ async def test_flat_layout_bytes():
     )
     assert png.startswith(b"\x89PNG")
     assert len(png) > 1000
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_flat_label_forces_trophy(monkeypatch):
+    """flat 版式 label 强制覆盖数据源称号：force 标记必须传到 _draw_header
+    （回归：落雪称号曾压过「条件 · 条数 · 合计RA」口径条，2026-10-01）。"""
+    from nonebot_plugin_awmc_helper.core.render import best50
+
+    captured: dict = {}
+
+    async def fake_header(im, draw, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(best50, "_draw_header", fake_header)
+    from maimai_py import SongType
+
+    label = "辉50 · 1 条 · 合计 RA 250"
+    await best50.draw_b50_flat("tester", 250, [_score(199, SongType.DX)], label=label)
+    assert captured["force_trophy_name"] is True
+    assert captured["trophy_name"] == best50.truncate_hoshino(label, 36)

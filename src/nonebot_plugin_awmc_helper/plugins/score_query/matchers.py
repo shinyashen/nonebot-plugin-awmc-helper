@@ -238,9 +238,9 @@ async def _render_combo(result, binding, output=None) -> bytes:
     版式（b40=25/15 旧系数，同版式卡面）。
 
     头部 rating 位两种模式均为所列成绩 RA 合计（不是玩家 rating；b40 为
-    FiNALE 旧系数口径），称号条以「条件 · 条数 · 合计RA」口径标注防误读
-    （落雪称号在场时优先显示称号，仅无称号回退口径条）；NET 源身份卡与
-    b50 共用 core 链路。
+    FiNALE 旧系数口径），称号条以「条件 · 条数 · 合计RA」口径标注防误读，
+    条件口径强制覆盖数据源称号（2026-10-01 QoL：flat 版式曾漏传
+    force 标记，落雪称号压过条件串）；NET 源身份卡与 b50 共用 core 链路。
     """
     if output is OutputKind.B40:
         head = f"{result.title}·" if result.title else ""

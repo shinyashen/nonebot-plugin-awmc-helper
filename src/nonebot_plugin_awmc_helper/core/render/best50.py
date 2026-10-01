@@ -660,8 +660,9 @@ async def draw_b50_flat(
 
     取消 35/15 分区，10 行等距 × 5 列满卡布；底部装饰带与页脚位置和标准卡
     完全一致、**不裁高**；不足 50 条空槽留底图。头部 rating 位=``rating_total``
-    （合计 RA），称号条=``label``（「条件 · 条数 · 合计RA」口径防误读；
-    称号条文字区约 260px / 14pt ≈ 36 显示列，超宽按 Hoshino 规则截断）。
+    （合计 RA），称号条=``label``（「条件 · 条数 · 合计RA」口径防误读，
+    强制覆盖数据源称号——flat 版式只服务于条件50、label 必填；文字区约
+    260px / 14pt ≈ 36 显示列，超宽按 Hoshino 规则截断）。
     """
     im = assets.canvas("b50.png", theme)
     draw = ImageDraw.Draw(im)
@@ -677,6 +678,7 @@ async def draw_b50_flat(
         theme=theme,
         icon_image=icon_image,
         trophy_name=truncate_hoshino(label, 36),
+        force_trophy_name=True,  # 条件口径覆盖数据源称号（与标准卡条件路径同口径）
         trophy_color=trophy_color,
         course_image=course_image,
         class_image=class_image,
@@ -800,7 +802,8 @@ async def net_best50_card(
     身份取 NET 窗口缓存的玩家资料（缺失回退 SEGA ID），头像/段位认定/
     でらっクラス/名牌素材并发落盘注入。调用方负责抓取提示（needs_fetch）
     与成绩拉取——本函数只做身份装配 + 渲染。``flat=True`` 走条件50 flat 版式；
-    ``label`` 为条件50 的称号条口径文案（玩家自带称号在场时优先称号）。
+    ``label`` 为条件50 的称号条口径文案（非空时强制覆盖数据源称号，
+    2026-10-01 QoL）。
     """
     from . import jp_cover
     from ..binding import binding_service
