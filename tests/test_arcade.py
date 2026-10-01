@@ -176,6 +176,19 @@ async def test_search_arcade(app: App, arcade_enabled):
 
 
 @pytest.mark.asyncio
+async def test_search_arcade_like_wildcard_escaped(app: App, arcade_enabled):
+    """搜索关键词中的 LIKE 通配符被转义（P3：单输 % 不再命中全表）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import arcade
+
+    assert await store.get_arcades_by_name("%") == []
+    assert await store.get_arcades_by_name("游_") == []
+    await _run(
+        app, arcade.arcade_search, "查找机厅 %", "没有这样的机厅哦"
+    )
+
+
+@pytest.mark.asyncio
 async def test_add_person_flow(app: App, arcade_enabled):
     """订阅 → 加人 → 减人 → 超限拒绝；排卡操作人人可用（对齐原版，无权限限制）。"""
     from nonebot_plugin_awmc_helper.plugins import arcade
@@ -403,3 +416,29 @@ async def test_find_arcade_ambiguous_lists_candidates(app: App, arcade_enabled):
     assert await store.get_arcade(20001) is not None
     assert "别名x" not in [a.alias for a in await store.get_arcade_aliases(10000)]
     assert await store.get_arcade_aliases(20001) == []
+
+
+@pytest.mark.asyncio
+async def test_delete_arcade_alias(app: App, arcade_enabled):
+    """「删除机厅别名 <别名>」按命中指令分流（P1-5：CommandArg 不含指令词，
+    旧版按参数文本 startswith 判动词，删除分支永不可达）。"""
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins.arcade import matchers as am
+
+    await _run(app, am.arcade_alias_set, "删除机厅别名 Game", "已删除别名")
+    assert "Game" not in [a.alias for a in await store.get_arcade_aliases(10000)]
+    # 删除不存在的别名
+    await _run(app, am.arcade_alias_set, "删除机厅别名 Game", "未找到该别名")
+    # 添加路径不受影响：首参数叫「删除」也照常按店名添加
+    await store.save_arcade(
+        store.Arcade(
+            id=20002, name="删除", address="某路 4 号", machines=1, is_custom=True
+        )
+    )
+    await _run(
+        app,
+        am.arcade_alias_set,
+        "添加机厅别名 删除 别名y",
+        "已为「删除」添加别名「别名y」",
+    )
+    assert "别名y" in [a.alias for a in await store.get_arcade_aliases(20002)]

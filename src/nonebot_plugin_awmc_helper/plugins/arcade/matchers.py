@@ -208,18 +208,25 @@ async def _(message: Message = CommandArg()):
 
 @arcade_alias_set.handle()
 @handle_errors("操作失败")
-async def _(message: Message = CommandArg()):
+async def _(
+    message: Message = CommandArg(),
+    command: tuple = Command(),
+):
     text = message.extract_plain_text().strip()
     args = text.split(maxsplit=1)
+    # 按命中的指令/别名分流添加与删除（CommandArg 不含指令词，不能按参数
+    # 文本判断动词——「删除机厅别名 X」的参数只有「X」）
+    if "删除" in "".join(command):
+        if not args:
+            await UniMessage.text(" 格式：删除机厅别名 <别名>").finish(at_sender=True)
+        ok = await store.remove_arcade_alias_by_name(args[0].strip())
+        await UniMessage.text(" 已删除别名" if ok else "未找到该别名").finish(
+            at_sender=True
+        )
     if len(args) < 2:
         await UniMessage.text(
             "格式：添加机厅别名 <店名|ID> <别名> / 删除机厅别名 <别名>"
         ).finish(at_sender=True)
-    if text.startswith("删除"):
-        ok = await store.remove_arcade_alias_by_name(args[1].strip())
-        await UniMessage.text(" 已删除别名" if ok else "未找到该别名").finish(
-            at_sender=True
-        )
     arcade = await _find_arcade(args[0])
     if arcade is None:
         await UniMessage.text(" 没有这样的机厅哦").finish(at_sender=True)
@@ -276,16 +283,21 @@ async def _(
     await UniMessage.text(f" 已订阅「{arcade.name}」").finish(at_sender=True)
 
 
-@arcade_show_sub.handle()
-@handle_errors("查询失败")
-async def _(session: Session = UniSession()):
+async def _subscribed_arcades(session: Session) -> list[store.Arcade]:
+    """本群订阅的机厅对象列表；未订阅任何机厅时直接 finish。"""
     group_id = group_id_of(session)
     ids = await store.get_subscriptions(group_id) if group_id else []
     if not ids:
         await UniMessage.text(" 该群未订阅任何机厅").finish(at_sender=True)
+    return await store.get_arcade_by_ids(ids)
+
+
+@arcade_show_sub.handle()
+@handle_errors("查询失败")
+async def _(session: Session = UniSession()):
     lines = [
         f"「{a.name}」（ID {a.id}，机台 {a.machines}，排卡 {a.person} 人）"
-        for a in await store.get_arcade_by_ids(ids)
+        for a in await _subscribed_arcades(session)
     ]
     await UniMessage.text(" 本群订阅的机厅：\n" + "\n".join(lines)).finish(
         at_sender=True
@@ -336,9 +348,8 @@ async def _(
     subs = await store.get_arcade_by_ids(sub_ids)
     # 订阅机厅的别称集合（按机厅分组；多别称必须全部参与匹配）
     alias_by_arcade: dict[int, set[str]] = {}
-    for al in await store.get_arcade_aliases():
-        if al.arcade_id in sub_ids:
-            alias_by_arcade.setdefault(al.arcade_id, set()).add(al.alias)
+    for al in await store.get_arcade_aliases_by_ids(set(sub_ids)):
+        alias_by_arcade.setdefault(al.arcade_id, set()).add(al.alias)
     arcade = next(
         (a for a in subs if a.name == name or name in alias_by_arcade.get(a.id, set())),
         None,
@@ -397,13 +408,9 @@ async def _(
 @arcade_person_num.handle()
 @handle_errors("查询失败")
 async def _(session: Session = UniSession()):
-    group_id = group_id_of(session)
-    ids = await store.get_subscriptions(group_id) if group_id else []
-    if not ids:
-        await UniMessage.text(" 该群未订阅任何机厅").finish(at_sender=True)
     lines = [
         f"「{a.name}」排卡 {a.person} 人（机台 {a.machines}）"
-        for a in await store.get_arcade_by_ids(ids)
+        for a in await _subscribed_arcades(session)
     ]
     await UniMessage.text(" \n".join(lines)).finish(at_sender=True)
 

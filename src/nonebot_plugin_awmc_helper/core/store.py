@@ -641,15 +641,16 @@ async def get_arcade_by_ids(ids: list[int]) -> list[Arcade]:
 
 async def get_arcades_by_name(keyword: str) -> list[Arcade]:
     """按名称/地址/别称模糊查找机厅（名称/地址/别称均走 SQL LIKE）。"""
-    kw = keyword.lower()
+    # 用户输入面：转义 LIKE 通配符（% _ \），否则单输 % 命中全表
+    kw = keyword.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     async with session() as db:
         rows = list(
             (
                 await db.exec(
                     select(Arcade).where(
                         or_(
-                            col(Arcade.name).ilike(f"%{kw}%"),
-                            col(Arcade.address).ilike(f"%{kw}%"),
+                            col(Arcade.name).ilike(f"%{kw}%", escape="\\"),
+                            col(Arcade.address).ilike(f"%{kw}%", escape="\\"),
                         )
                     )
                 )
@@ -658,7 +659,9 @@ async def get_arcades_by_name(keyword: str) -> list[Arcade]:
         alias_rows = list(
             (
                 await db.exec(
-                    select(ArcadeAlias).where(col(ArcadeAlias.alias).ilike(f"%{kw}%"))
+                    select(ArcadeAlias).where(
+                        col(ArcadeAlias.alias).ilike(f"%{kw}%", escape="\\")
+                    )
                 )
             ).all()
         )
@@ -800,6 +803,22 @@ async def get_arcade_aliases(arcade_id: int | None = None) -> list[ArcadeAlias]:
         if arcade_id is not None:
             stmt = stmt.where(ArcadeAlias.arcade_id == arcade_id)
         return list((await db.exec(stmt)).all())
+
+
+async def get_arcade_aliases_by_ids(arcade_ids: set[int]) -> list[ArcadeAlias]:
+    """按机厅 id 集合取别名（订阅列表匹配用，免全表拉取后 Python 过滤）。"""
+    if not arcade_ids:
+        return []
+    async with session() as db:
+        return list(
+            (
+                await db.exec(
+                    select(ArcadeAlias).where(
+                        col(ArcadeAlias.arcade_id).in_(arcade_ids)
+                    )
+                )
+            ).all()
+        )
 
 
 async def add_arcade_alias(arcade_id: int, alias: str) -> bool:
