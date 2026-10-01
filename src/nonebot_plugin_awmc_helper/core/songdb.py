@@ -834,9 +834,11 @@ def _apply_otoge_utage(
         )
     elif not buddy and not chart.is_buddy and main_empty:
         # 非 buddy 平铺物量（otoge 时效支柱：新宴谱常先于机台源更新）
-        flat = [_safe_int(item.get(f"lev_utage_notes_{k}")) or 0 for k in _NOTE_KEYS]
-        if any(flat):
-            _set_notes(chart, tuple(flat))
+        tap, hold, slide, touch, brk = (
+            _safe_int(item.get(f"lev_utage_notes_{k}")) or 0 for k in _NOTE_KEYS
+        )
+        if any((tap, hold, slide, touch, brk)):
+            _set_notes(chart, (tap, hold, slide, touch, brk))
     # 无历史源的宴谱退化为登场版本单行（§6）；标级推导值
     if not state.history_of(song_id, "utage", level_id):
         derived = parse_level_float(item.get("lev_utage", "") or "")
@@ -2148,7 +2150,13 @@ def _merge_chart_content(
         and len(notes) == 5
         and (mode == "override" or not target.notes_tap)
     ):
-        new_notes = tuple(int(v) for v in notes)
+        new_notes: tuple[int, int, int, int, int] = (
+            int(notes[0]),
+            int(notes[1]),
+            int(notes[2]),
+            int(notes[3]),
+            int(notes[4]),
+        )
         if _chart_notes_of(target) != new_notes:
             changed += 1
         _set_notes(target, new_notes)

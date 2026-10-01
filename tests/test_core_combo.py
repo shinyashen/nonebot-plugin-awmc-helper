@@ -12,6 +12,23 @@ import pytest
 from mocks import seed_service
 
 
+@pytest.fixture(autouse=True)
+def _bare_designer_rules():
+    """本文件全部用例在**裸谱师规则表**上起步（用例前清、结束后再清）。
+
+    背景：`_EXTRA_RULES` 是进程级状态，CI 的 pytest -n auto 按用例交错
+    分派——同 worker 先跑到任何触发 `ensure_designer_rules` 的用例（真实
+    曲库加载后的 score_query/tables 等）再跑到本文件的解析断言，「鸟加」
+    这类兼任谱师别名的条件词就会被层 1 规则抢走。注册类用例（文件内三处
+    ensure_designer_rules）不受影响：fixture 清理在用例体之前完成，用例
+    内自行注册。teardown 再清一次，防本文件的注册泄漏给后续文件。"""
+    from nonebot_plugin_awmc_helper.core import combo
+
+    combo.set_designer_rules(())
+    yield
+    combo.set_designer_rules(())
+
+
 def _score(
     song_id: int,
     *,
@@ -175,14 +192,10 @@ async def songs(db):
 def test_tokenizer_rules(text: str, kinds: list[str]):
     """规则表逐条正例：kind 序列即词法形态（同层最长、层小优先）。
 
-    开头清谱师动态规则：本文件若在其他加载了完整曲库的测试（tables 等，
-    会触发 ensure_designer_rules）之后运行，进程级层 1 规则会把「鸟加」等
-    兼任谱师别名的条件词抢走——词法正例必须在裸规则表上断言。
-    """
-    from nonebot_plugin_awmc_helper.core import combo
+    裸规则表由文件级 autouse fixture 保证（CI -n auto 交错分派下进程级
+    谱师规则会把「鸟加」等兼任谱师别名的条件词抢走）。"""
     from nonebot_plugin_awmc_helper.core.combo import tokenize
 
-    combo.set_designer_rules(())
     assert [t.kind for t in tokenize(text)] == kinds
 
 
