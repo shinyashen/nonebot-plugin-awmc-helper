@@ -83,10 +83,14 @@ class NetScoreService:
             tuple[str, str], tuple[float, list[ScoreExtend], NetPlayer | None]
         ] = {}
         # (platform, user_id) → (fetched_at, 组装后的全量成绩, 登录时抓到的首页身份)
+        # 每绑定一份全量成绩（几百 KB 级），设条目上限防长期运行无界增长
         self._fail_until: dict[tuple[str, str], float] = {}
         # 抓取失败短退避，窗口内重试防轰炸
         self._title_index: tuple[str | None, dict[str, list[Song]]] = (None, {})
         # 标题索引随曲库指纹缓存：(fingerprint, {归一化标题: [Song]})
+
+    _WINDOW_CACHE_MAX = 32
+    """窗口缓存条目上限（超出淘汰最旧抓取，量级按活跃绑定数估）."""
 
     def _window(self) -> int:
         return max(0, plugin_config.awmc_net_cooldown_minutes) * 60
@@ -176,6 +180,10 @@ class NetScoreService:
         scores = await self.assemble(records)
         if window > 0:
             self._window_cache[key] = (time.monotonic(), scores, player)
+            while len(self._window_cache) > self._WINDOW_CACHE_MAX:
+                # 淘汰最旧抓取（dict 保插入序；命中不续期，最旧即最久未抓）
+                oldest = min(self._window_cache, key=lambda k: self._window_cache[k][0])
+                del self._window_cache[oldest]
         else:
             self._window_cache.pop(key, None)
         return scores, False

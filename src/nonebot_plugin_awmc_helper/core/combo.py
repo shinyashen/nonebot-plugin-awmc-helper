@@ -48,10 +48,11 @@ from .calc import build_bests, compute_rating, build_flat_bests
 from .score import score_service
 from .songs import song_service
 from .plates import norm_plate, version_code_of
-from .songdb import State, ensure_ongeki_titles
+from .songdb import State, ensure_ongeki_titles, norm_title, ongeki_titles
 from .designer import match as _designer_match
 from .designer import build_needles as _designer_needles
-from ..constants import normalize_text
+from .binding import strip_at_segments
+from ..constants import COLOR_TO_LEVEL_INDEX, RATE_TO_ZH, normalize_text
 
 # ---------------------------------------------------------------- 模型
 
@@ -304,7 +305,6 @@ _GENRE_WORDS: tuple[tuple[str, Genre], ...] = (
     ("ボカロ", Genre.niconicoボーカロイド),
     ("二次元", Genre.POPSアニメ),
     ("variety", Genre.ゲームバラエティ),
-    ("音击中二", Genre.オンゲキCHUNITHM),
     ("中二音击", Genre.オンゲキCHUNITHM),
     ("maimai", Genre.maimai),
     ("舞萌", Genre.maimai),
@@ -421,16 +421,12 @@ def _genre_sub_match(song: Song, which: str) -> bool:
     并入中二侧）。集合未加载（冷启动且 kv 无值）时音击=空集、中二=大类。"""
     if song.genre != Genre.オンゲキCHUNITHM:
         return False
-    from .songdb import norm_title, ongeki_titles
-
     in_ongeki = norm_title(song.title) in ongeki_titles()
     return in_ongeki if which == "ongeki" else not in_ongeki
 
 
 def _color_of(text: str) -> LevelIndex:
     """难度色字 → LevelIndex（紫谱/白谱/绿黄红；裸紫白不走此路，见装配）。"""
-    from ..constants import COLOR_TO_LEVEL_INDEX
-
     return COLOR_TO_LEVEL_INDEX[text]
 
 
@@ -569,11 +565,26 @@ _EXTRA_RULES: "tuple[_Rule, ...]" = ()
 """动态注册的额外词法规则（谱师实名，层 1；由 :func:`ensure_designer_rules`
 装配，进程级状态）。规则表其余部分为模块常量，谱师词表随曲库动态生成。"""
 
+# 合并规则表的进程级缓存（tokenize 每位置不再重建元组）；set_designer_rules
+# 替换谱师规则时一并失效重建
+_COMBINED_RULES: "tuple[_Rule, ...]" = ()
+_COMBINED_NUMERIC_RULES: "tuple[_Rule, ...]" = ()
+
+
+def _rebuild_combined_rules() -> None:
+    global _COMBINED_RULES, _COMBINED_NUMERIC_RULES
+    _COMBINED_RULES = (*_RULES, *_EXTRA_RULES)
+    _COMBINED_NUMERIC_RULES = (*_COMBINED_RULES, _NUMERIC_LEVEL_RULE)
+
+
+_rebuild_combined_rules()
+
 
 def set_designer_rules(rules: "tuple[_Rule, ...]") -> None:
     """整体替换谱师词法规则（测试注入与 :func:`ensure_designer_rules` 共用）。"""
     global _EXTRA_RULES
     _EXTRA_RULES = rules
+    _rebuild_combined_rules()
 
 
 def _designer_rules_of(
@@ -657,17 +668,13 @@ def tokenize(text: str, *, numeric_level: bool = False) -> "list[Token]":
     i = 0
     while i < len(text):
         best: "tuple[int, int, re.Match[str], _Rule] | None" = None
-        rules = (
-            (*_RULES, *_EXTRA_RULES, numeric_rule)
-            if numeric_rule
-            else (*_RULES, *_EXTRA_RULES)
-        )
+        rules = _COMBINED_NUMERIC_RULES if numeric_rule else _COMBINED_RULES
         # 裸数字等级只在「中文语境段首」生效：前邻数字/小数点（1350→50、
         # 13.5→5，同一串碎片化）或 ASCII 字母/空格（b50→50、ab13→13、
         # 「I Love 50」→50，英文闲聊碎片）均不成立——数字等级合法形态是
         # 紧贴中文条件词（13fc、辉13）或位于串首
         if numeric_rule and i > 0 and not "\u4e00" <= text[i - 1] <= "\u9fff":
-            rules = (*_RULES, *_EXTRA_RULES)
+            rules = _COMBINED_RULES
         for rule in rules:
             m = rule.pattern.match(text, i)
             if m is None:
@@ -937,12 +944,14 @@ def _b40_modifier(s: ScoreExtend) -> ScoreExtend:
     return replace(s, dx_rating=_old_ra(s.level_value, s.achievements))
 
 
-async def _era_level_modifier(boundary: int):
+async def _era_level_modifier(boundary: int, state: "State | None" = None):
     """回到过去时点定数 modifier（§9 S-2 定稿）：定数取版本时点值
     （``State.resolve_chart_level`` carry-forward），RA 按现行系数表重算
     （系数表历史缺失按不变处理——2026-09-30 拍板）。历史无值（早于首变化
-    点/无历史表）→ 保持现行值。"""
-    state = await State.load()
+    点/无历史表）→ 保持现行值。``state``：调用方已物化的规范表态（与
+    ``_build_chart_hit`` 共享，era 查询单次 State.load），缺省自载。"""
+    if state is None:
+        state = await State.load()
 
     def mod(s: ScoreExtend) -> ScoreExtend:
         kind = (
@@ -1031,16 +1040,12 @@ _RATE_FLOOR: "dict[RateType, float]" = {
 }
 """评级档位下限达成率（对齐 ``RateType._from_achievement`` 阈值；理想升档用）。"""
 
+# 评级档显示名复用 constants.RATE_TO_ZH 前 9 档（同数据单源，勿再复制）
 _RATE_LABEL: "dict[RateType, str]" = {
-    RateType.SSSP: "SSS+",
-    RateType.SSS: "SSS",
-    RateType.SSP: "SS+",
-    RateType.SS: "SS",
-    RateType.SP: "S+",
-    RateType.S: "S",
-    RateType.AAA: "AAA",
-    RateType.AA: "AA",
-    RateType.A: "A",
+    r: RATE_TO_ZH[r] for r in (
+        RateType.SSSP, RateType.SSS, RateType.SSP, RateType.SS,
+        RateType.SP, RateType.S, RateType.AAA, RateType.AA, RateType.A,
+    )
 }
 
 # 牌种字 → 判型条件（S-11 方案 B：牌条件 = 版本 Cond + 判型 Cond 的分解，
@@ -1294,8 +1299,6 @@ def parse_combo(
     （分数列表等）排除纯数字闲聊、裸数字即可。默认 False（b50 语境保持
     「1350/650 静默」防护）。
     """
-    from .binding import strip_at_segments
-
     text = strip_at_segments(text).strip()
     if not text:
         return None
@@ -1396,12 +1399,14 @@ def _group_by_type(conds: "list[Cond]", attr: str) -> "dict[CondType, list[Cond]
     return groups
 
 
-async def _build_chart_hit(conds: "list[Cond]", cur: int):
+async def _build_chart_hit(conds: "list[Cond]", cur: int, state: "State | None" = None):
     """谱面判定闭包（同型 OR/跨型 AND + 宴谱口径 + 回到过去时点定数）。
 
     - 返回 None = 条件集无谱面类条件（全库通过）；
     - DS 条件在回到过去在场时对比**历史定数**（``State.resolve_chart_level``
-      carry-forward；早于首变化点视为未实装 → 不命中，§9 S-2）。
+      carry-forward；早于首变化点视为未实装 → 不命中，§9 S-2）；
+    - ``state``：调用方已物化的规范表态（run_combo 全链单次 State.load），
+      缺省自载（完成表等单次路径）。
     """
     groups = _group_by_type(conds, "chart")
     if not groups:
@@ -1410,7 +1415,9 @@ async def _build_chart_hit(conds: "list[Cond]", cur: int):
     era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
     boundary = era.value if era is not None else None
     hist_state = (
-        await State.load() if era is not None and CondType.DS in groups else None
+        state if state is not None else await State.load()
+        if era is not None and CondType.DS in groups
+        else None
     )
 
     def chart_hit(song: Song, diff: SongDifficulty) -> bool:
@@ -1512,18 +1519,22 @@ async def combo_filtered_scores(
     conds: "list[Cond]",
     binding,
     notify_slow=None,
+    hist_state: "State | None" = None,
+    songs: "list[Song] | None" = None,
 ) -> "list[ScoreExtend] | ComboEmpty":
     """条件 → 成绩集（分数列表/b50 组装消费；键集全量过滤、无选谱收缩）。
 
     谱面类条件在绑定源视图曲库上产出谱面键集 ``(id, type, level_index)``
     （各源成绩 id 均为归一根 id、宴谱为 diff_id，与完成表同口径）；
     纯成绩类条件不过滤谱面。成绩集空 ≠ 错误——分数列表自行出空态文案，
-    b50 组装路径照常渲染空槽卡（§9.4）。
+    b50 组装路径照常渲染空槽卡（§9.4）。``hist_state``/``songs``：era 查询
+    链与拟合链由 run_combo 预载传入，免重复物化。
     """
-    songs = await _songs_of(binding)
+    if songs is None:
+        songs = await _songs_of(binding)
     cur = _current_of(binding)
     await ensure_ongeki_titles()  # 中二/音击谓词的集合前置加载（幂等）
-    chart_hit = await _build_chart_hit(conds, cur)
+    chart_hit = await _build_chart_hit(conds, cur, state=hist_state)
 
     keys: "set[tuple[int, SongType, LevelIndex]] | None" = None
     if chart_hit is not None:
@@ -1571,12 +1582,20 @@ async def run_combo(
     ``output``：b50（35/15 现行系数，n15 按条件集构成）或 b40（§3 旧口径：
     FiNALE 系数重算 + 恒拆分 25/15，可与回到过去叠加：dx2022b40）。
     """
-    filtered = await combo_filtered_scores(conds, binding, notify_slow)
+    cur = _current_of(binding)
+    era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
+    fit_songs = (
+        await _songs_of(binding) if any(c.ctype is CondType.FIT for c in conds) else None
+    )
+    # 回到过去：规范表态全链只物化一次（谱面判定 + 时点定数 modifier 共享）；
+    # 拟合：曲库列表同一次取用（键集过滤与 _build_fit_map 共享）
+    hist_state = await State.load() if era is not None else None
+    filtered = await combo_filtered_scores(
+        conds, binding, notify_slow, hist_state=hist_state, songs=fit_songs
+    )
     if isinstance(filtered, ComboEmpty):
         return filtered
     scores = filtered
-    cur = _current_of(binding)
-    era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
 
     # 排序覆盖：取最后声明者（§9.0）；modifier：声明序链式应用。链序定案：
     # 时点定数居首（历史值先落位），理想/拟合随声明序，b40 旧系数恒居链尾
@@ -1587,9 +1606,9 @@ async def run_combo(
     )
     modifiers = [c.modifier for c in conds if c.modifier is not None]
     if era is not None:
-        modifiers.insert(0, await _era_level_modifier(era.value))
-    if any(c.ctype is CondType.FIT for c in conds):
-        modifiers.append(_fit_modifier_of(_build_fit_map(await _songs_of(binding))))
+        modifiers.insert(0, await _era_level_modifier(era.value, state=hist_state))
+    if fit_songs is not None:
+        modifiers.append(_fit_modifier_of(_build_fit_map(fit_songs)))
     if output is OutputKind.B40:
         modifiers.append(_b40_modifier)
     if modifiers:

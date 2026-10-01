@@ -163,6 +163,12 @@ def _norm(text: str) -> str:
     return _WS_RE.sub("", fold_kana(normalize_text(text)))
 
 
+# CURATED 归一缓存（模块常量，构建一次；build_needles 每次调用不再逐条 NFKC+zhconv）
+_NORM_CURATED: "dict[str, tuple[str, set[str]]]" = {
+    _norm(w): (w, {_norm(m) for m in ms}) for w, ms in CURATED.items()
+}
+
+
 def resolve_class(name: str) -> "set[str]":
     """查询名（原始串）→ 等价类成员集（归一后形态）。
 
@@ -201,11 +207,7 @@ def build_needles(
     needles = set(members)
     folded = {fold_kana(m) for m in members}
     needles |= folded
-    norm_curated = {
-        _norm(w): (w, members_key)
-        for w, members_key in ((w, {_norm(m) for m in ms}) for w, ms in CURATED.items())
-    }
-    for w_norm, (w_raw, w_members) in norm_curated.items():
+    for w_norm, (_w_raw, w_members) in _NORM_CURATED.items():
         if w_members & members:
             needles.add(w_norm)
             needles.add(fold_kana(w_norm))

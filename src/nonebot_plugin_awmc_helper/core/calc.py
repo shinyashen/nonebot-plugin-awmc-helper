@@ -17,7 +17,7 @@ from maimai_py import (
 )
 from maimai_py.utils import ScoreCoefficient
 
-from ..constants import RATE_TO_ZH, UTAGE_ID_BASE
+from ..constants import RATE_TO_ZH
 
 # 推分试算的达成率档位（原版 RISE_ACHIEVEMENT_LIST）
 RISE_ACHIEVEMENTS = (99.0, 99.5, 100.0, 100.5)
@@ -49,8 +49,8 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, float] | None:
 
     返回 TAP+GREAT 等价容错数与 BREAK 50 落等价；参数非法返回 None。
     """
-    reduce = 101 - line
-    if reduce <= 0 or reduce >= 101:
+    reduce_pct = 101 - line
+    if reduce_pct <= 0 or reduce_pct >= 101:
         return None
     total = (
         diff.tap_num * 500
@@ -65,7 +65,7 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, float] | None:
     break_50_reduce = total * break_bonus / 4
     return {
         "total": total,
-        "tap_great": total * reduce / 10000,  # 允许的 TAP+GREAT 等价数
+        "tap_great": total * reduce_pct / 10000,  # 允许的 TAP+GREAT 等价数
         "per_tap_pct": 10000 / total,  # 每个 TAP+GREAT 损失的百分比
         "break_50_tap": break_50_reduce / 100,  # BREAK 50 落等价 TAP 数
         "break_50_pct": break_50_reduce / total * 100,
@@ -162,10 +162,10 @@ def rise_recommend(
 
     results: list[dict] = []
     for song in songs:
-        if song.id >= UTAGE_ID_BASE or song.id in ignored_ids:  # 宴谱不推分
+        if song.id in ignored_ids:
             continue
         for diff in song.get_difficulties():
-            if diff.type == SongType.UTAGE:
+            if diff.type == SongType.UTAGE:  # 宴谱不推分（Song.id 恒为根 id，无 id 域判断）
                 continue
             side = "old" if diff.version < latest_version_value else "new"
             side_scores = sides[side]

@@ -262,7 +262,9 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
         group = entry.group(kind)
         version = _source_version(info.get("from"))
         if version is None:
-            # 「未知」等：定数历史的首版本可补（dschange 自该曲登场版本起记录）
+            # 「未知」等：定数历史的首版本可补（dschange 自该曲登场版本起记录）。
+            # 仅 sd/dx 生效：宴 key 恒 6 位、_dschange_kind 返回 None，
+            # histories 从无宴键（宴版本由 otoge 的 release 补，见下）
             history_by_diff = histories.get(key, {}).get(kind, {})
             for points in history_by_diff.values():
                 version = points[0][0]
@@ -650,6 +652,24 @@ def _notes_left_empty(raw: str | None) -> bool:
     return not any(json.loads(raw))
 
 
+def _chart_notes_of(row) -> "tuple[int, int, int, int, int]":
+    """谱面行物量五元组读取（[Tap, Hold, Slide, Touch, Break]，01 文档线格式）。"""
+    return (
+        row.notes_tap,
+        row.notes_hold,
+        row.notes_slide,
+        row.notes_touch,
+        row.notes_break,
+    )
+
+
+def _set_notes(row, notes: "tuple[int, int, int, int, int]") -> None:
+    """谱面行物量五元组整体写入（原先是五行拆包赋值在四五个调用点各写一份）。"""
+    row.notes_tap, row.notes_hold, row.notes_slide, row.notes_touch, row.notes_break = (
+        notes
+    )
+
+
 def _fill_utage_fields(target: store.SongChart, chart) -> None:
     """宴谱 kanji/is_buddy/左右物量「列从空变满」回填（apply_jp/apply_cn 共用）。"""
     target.kanji = target.kanji or chart.kanji
@@ -681,9 +701,7 @@ def _normalize_utage_notes(state: State) -> None:
             left[4] + right[4],
         )
         if any(combined):
-            row.notes_tap, row.notes_hold = combined[0], combined[1]
-            row.notes_slide, row.notes_touch = combined[2], combined[3]
-            row.notes_break = combined[4]
+            _set_notes(row, combined)
 
 
 def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> None:
@@ -707,15 +725,7 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
                 target = state.chart(song_id, kind, level_id)
                 target.designer = target.designer or chart.designer
                 if chart.notes != (0, 0, 0, 0, 0):
-                    target.notes_tap, target.notes_hold = (
-                        chart.notes[0],
-                        chart.notes[1],
-                    )
-                    target.notes_slide, target.notes_touch = (
-                        chart.notes[2],
-                        chart.notes[3],
-                    )
-                    target.notes_break = chart.notes[4]
+                    _set_notes(target, chart.notes)
                 if kind == "utage":
                     _fill_utage_fields(target, chart)
                 state.set_history(song_id, kind, level_id, chart.history)
@@ -788,19 +798,18 @@ def _fill_row_from_otoge(state: State, song_id: int, item: dict) -> None:
         tap = _safe_int(item.get(f"{prefix}_{suffix}_notes_tap"))
         if tap is None:
             continue
-        if (
-            target.notes_tap,
-            target.notes_hold,
-            target.notes_slide,
-            target.notes_touch,
-            target.notes_break,
-        ) != (0, 0, 0, 0, 0):
+        if _chart_notes_of(target) != (0, 0, 0, 0, 0):
             continue  # 已有物量（maimaiinfo 权威）不覆盖
-        target.notes_tap = tap
-        target.notes_hold = _safe_int(item.get(f"{prefix}_{suffix}_notes_hold")) or 0
-        target.notes_slide = _safe_int(item.get(f"{prefix}_{suffix}_notes_slide")) or 0
-        target.notes_touch = _safe_int(item.get(f"{prefix}_{suffix}_notes_touch")) or 0
-        target.notes_break = _safe_int(item.get(f"{prefix}_{suffix}_notes_break")) or 0
+        _set_notes(
+            target,
+            (
+                tap,
+                _safe_int(item.get(f"{prefix}_{suffix}_notes_hold")) or 0,
+                _safe_int(item.get(f"{prefix}_{suffix}_notes_slide")) or 0,
+                _safe_int(item.get(f"{prefix}_{suffix}_notes_touch")) or 0,
+                _safe_int(item.get(f"{prefix}_{suffix}_notes_break")) or 0,
+            ),
+        )
 
 
 def _apply_otoge_utage(
@@ -815,13 +824,7 @@ def _apply_otoge_utage(
     chart.comment = chart.comment or (item.get("comment") or None)
     buddy = item.get("buddy") == "○"
     chart.is_buddy = chart.is_buddy or buddy
-    main_empty = not (
-        chart.notes_tap
-        or chart.notes_hold
-        or chart.notes_slide
-        or chart.notes_touch
-        or chart.notes_break
-    )
+    main_empty = not any(_chart_notes_of(chart))
     if buddy and _notes_left_empty(chart.notes_left):
         chart.notes_left = json.dumps(
             [_safe_int(item.get(f"lev_utage_left_notes_{k}")) or 0 for k in _NOTE_KEYS]
@@ -833,9 +836,7 @@ def _apply_otoge_utage(
         # 非 buddy 平铺物量（otoge 时效支柱：新宴谱常先于机台源更新）
         flat = [_safe_int(item.get(f"lev_utage_notes_{k}")) or 0 for k in _NOTE_KEYS]
         if any(flat):
-            chart.notes_tap, chart.notes_hold = flat[0], flat[1]
-            chart.notes_slide, chart.notes_touch = flat[2], flat[3]
-            chart.notes_break = flat[4]
+            _set_notes(chart, tuple(flat))
     # 无历史源的宴谱退化为登场版本单行（§6）；标级推导值
     if not state.history_of(song_id, "utage", level_id):
         derived = parse_level_float(item.get("lev_utage", "") or "")
@@ -936,21 +937,8 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                         f"「{entry.title}」{kind}{level_id} 谱师两源不一致："
                         f"{target.designer} / {chart.designer}"
                     )
-                if not any(
-                    (
-                        target.notes_tap,
-                        target.notes_hold,
-                        target.notes_slide,
-                        target.notes_touch,
-                        target.notes_break,
-                    )
-                ):
-                    target.notes_tap, target.notes_hold = chart.notes[0], chart.notes[1]
-                    target.notes_slide, target.notes_touch = (
-                        chart.notes[2],
-                        chart.notes[3],
-                    )
-                    target.notes_break = chart.notes[4]
+                if not any(_chart_notes_of(target)):
+                    _set_notes(target, chart.notes)
                 if kind == "utage":
                     _fill_utage_fields(target, chart)
                 # §5.3 校验：推导国服定数 vs 落雪实测（偏差 > 0.05 记警告）；
@@ -2161,17 +2149,9 @@ def _merge_chart_content(
         and (mode == "override" or not target.notes_tap)
     ):
         new_notes = tuple(int(v) for v in notes)
-        if (
-            target.notes_tap,
-            target.notes_hold,
-            target.notes_slide,
-            target.notes_touch,
-            target.notes_break,
-        ) != new_notes:
+        if _chart_notes_of(target) != new_notes:
             changed += 1
-        target.notes_tap, target.notes_hold = new_notes[0], new_notes[1]
-        target.notes_slide, target.notes_touch = new_notes[2], new_notes[3]
-        target.notes_break = new_notes[4]
+        _set_notes(target, new_notes)
     # 01 文档双人谱口径：宴 buddy 左右手物量（JSON 存 notes_left/right）；
     # 全零视为未填（历史垃圾值，override 除外——人工即权威）
     for key in ("notes_left", "notes_right"):

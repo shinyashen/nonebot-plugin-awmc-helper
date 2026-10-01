@@ -823,22 +823,15 @@ class SongService:
 
     async def aliases_of_many(self, song_ids: list[int]) -> dict[int, list[str] | None]:
         """多曲别名批量查询：本地别名表整表读一次（原先每曲全表读，N 曲 N 次）。"""
-        local_by_song: dict[int, list[str]] = {}
-        for la in await store.get_local_aliases():
-            local_by_song.setdefault(la.song_id, []).append(la.alias)
-        result: dict[int, list[str] | None] = {}
+        base_by_song: dict[int, list[str]] = {}
+        titles: dict[int, str] = {}
         for song_id in song_ids:
             song = await self.by_id(song_id)
             if song is None:
-                result[song_id] = None
                 continue
-            aliases = list(song.aliases or [])
-            for alias in local_by_song.get(song_id, []):
-                if alias not in aliases:
-                    aliases.append(alias)
-            title_key = normalize_text(song.title)
-            result[song_id] = [a for a in aliases if normalize_text(a) != title_key]
-        return result
+            base_by_song[song_id] = list(song.aliases or [])
+            titles[song_id] = song.title
+        return await self._merge_aliases(base_by_song, song_ids, titles=titles)
 
     async def jp_aliases_of(self, song_id: int) -> list[str] | None:
         """日服视图某曲目的全部别名；曲目不在日服视图返回 None。"""
@@ -853,21 +846,37 @@ class SongService:
         （含仅日服曲目条目）与本地别名表读取。
         """
         lib = await self._merged_lib()
+        jp = await self._jp_songs_map()
+        base_by_song = {sid: list(lib.get(sid) or []) for sid in song_ids if sid in jp}
+        titles = {sid: song.title for sid, song in jp.items() if sid in base_by_song}
+        return await self._merge_aliases(base_by_song, song_ids, titles=titles)
+
+    async def _merge_aliases(
+        self,
+        base_by_song: dict[int, list[str]],
+        song_ids: list[int],
+        *,
+        titles: dict[int, str],
+    ) -> dict[int, list[str] | None]:
+        """别名合并公共底座：基础别名 ∪ 本地别名 → 剥与歌名归一相同的形态。
+
+        基础来源两视图不同（CN 曲对象 ``aliases`` / JP 合并库），本地叠加与
+        标题去重口径在此单源；不在 ``base_by_song`` 的 id = 该视图无此曲，
+        统一返回 None。
+        """
         local_by_song: dict[int, list[str]] = {}
         for la in await store.get_local_aliases():
             local_by_song.setdefault(la.song_id, []).append(la.alias)
-        jp = await self._jp_songs_map()
         result: dict[int, list[str] | None] = {}
         for song_id in song_ids:
-            song = jp.get(song_id)
-            if song is None:
+            aliases = base_by_song.get(song_id)
+            if aliases is None:
                 result[song_id] = None
                 continue
-            aliases = list(lib.get(song_id) or [])
             for alias in local_by_song.get(song_id, []):
                 if alias not in aliases:
                     aliases.append(alias)
-            title_key = normalize_text(song.title)
+            title_key = normalize_text(titles[song_id])
             result[song_id] = [a for a in aliases if normalize_text(a) != title_key]
         return result
 
