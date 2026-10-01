@@ -31,6 +31,30 @@ async def test_query_by_title_and_id(songs):
     assert {s.id for s in fuzzy} == {8}  # 大小写不敏感子串
 
 
+def test_exact_first_ordering():
+    """标题精确命中置顶、其余 id 升序（上游 by_keywords 精确优先语义单源）。
+
+    纯函数直测：真实快照裁剪后无「精确曲 id 大于子串曲 id」的天然标题对
+    （id 升序会掩盖置顶效果），排序语义在此用构造曲区分；子串预过滤是
+    调用方职责（by_title_fuzzy），此处先过滤再断言。"""
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.core.songs import _exact_first
+
+    songs = [
+        SimpleNamespace(id=665, title="チルノのパーフェクトさんすう教室 ⑨周年"),
+        SimpleNamespace(id=1355, title="ラグトレイン"),
+        SimpleNamespace(id=199, title="チルノのパーフェクトさんすう教室"),
+    ]
+    # 子串预过滤（调用方职责）后进排序：「チルノの…教室」精确命中 199 置顶
+    kw = "チルノのパーフェクトさんすう教室"
+    hits = [s for s in songs if kw in s.title.lower()]
+    assert [s.id for s in _exact_first(hits, kw)] == [199, 665]
+    # 无精确命中：纯 id 升序
+    hits = [s for s in songs if "ラグ" in s.title.lower()]
+    assert [s.id for s in _exact_first(hits, "ラグ")] == [1355]
+
+
 @pytest.mark.asyncio
 async def test_alias_lookup_incl_disabled_filter(songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service

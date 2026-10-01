@@ -184,6 +184,14 @@ def chart_entries_many(songs: "list[Song]") -> list[ChartEntry]:
     return [entry for song in songs for entry in chart_entries(song)]
 
 
+def _exact_first(songs: "list[Song]", kw: str) -> "list[Song]":
+    """标题**精确命中**置顶、其余按 id 升序（maimai_py ``by_keywords``
+    精确优先语义的单源实现；``kw`` 应已 lower 归一，调用方负责子串预过滤）。"""
+    exact = [s for s in songs if s.title.lower() == kw]
+    fuzzy = [s for s in songs if s.title.lower() != kw]
+    return sorted(exact, key=lambda s: s.id) + sorted(fuzzy, key=lambda s: s.id)
+
+
 def list_jp_note(flags: list[bool]) -> str:
     """多结果列表的日服限定说明：混合列表与全日服列表措辞不同。"""
     if not any(flags):
@@ -432,11 +440,14 @@ class SongService:
         return await (await self.ensure_loaded()).by_id(song_id)
 
     async def by_title_fuzzy(self, title: str, scope: Scope = "cn") -> list[Song]:
-        """标题子串匹配（大小写不敏感），按 id 升序。"""
+        """标题子串匹配（大小写不敏感），标题**精确命中**置顶、其余按 id
+        升序（对齐 maimai_py ``by_keywords`` 的精确优先语义——用户输入完整
+        曲名时目标曲不再被子串命中群淹没在按 id 排的中间页；匹配域保持
+        title 单域：别名/曲师/谱师各有独立指令，上游的三域匹配不并入）。"""
         kw = title.lower()
-        return sorted(
-            (s for s in await self._songs_of_scope(scope) if kw in s.title.lower()),
-            key=lambda s: s.id,
+        return _exact_first(
+            [s for s in await self._songs_of_scope(scope) if kw in s.title.lower()],
+            kw,
         )
 
     async def by_alias(self, alias: str) -> list[Song]:

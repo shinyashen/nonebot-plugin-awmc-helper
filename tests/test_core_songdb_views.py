@@ -434,6 +434,26 @@ async def _rebuild_load(monkeypatch, *, jp_extra: bool = False) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_jp_title_exact_match_pinned(db, monkeypatch):
+    """完整曲名查歌的集成防回归（上游 by_keywords 精确优先语义，JP 视图）：
+    精确命中与子串命中同返、次序不炸。⚠️ 本快照里精确曲（199）恰为最小
+    id，置顶与 id 序同形、无区分度——排序语义的区分性断言在
+    test_core_songs.test_exact_first_ordering（构造曲直测纯函数）。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await _rebuild_load(monkeypatch)
+    try:
+        result = await song_service.jp_by_title_fuzzy(
+            "チルノのパーフェクトさんすう教室"
+        )
+        assert [s.id for s in result][:2] == [199, 665]  # 精确(199) 先于子串(665)
+        assert 665 in {s.id for s in result}
+    finally:
+        song_service._ready.clear()
+
+
+@pytest.mark.asyncio
 async def test_jp_fallback_mixed_list(db, monkeypatch, app):
     """日服标题兜底命中国服也有的曲（真实「バ」前缀：⑨周年×2 体 + テリトリーバトル）：
     混合列表只标注日服限定曲，列表级说明用「包含」而非「此歌曲为」。"""
