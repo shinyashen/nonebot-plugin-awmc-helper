@@ -18,6 +18,7 @@ import re
 import gzip
 import json
 import time
+import asyncio
 import logging
 import unicodedata
 from pathlib import Path
@@ -117,8 +118,6 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
                 return f.read()
         except (OSError, EOFError):
             pass  # 缓存损坏则走网络
-
-    import asyncio
 
     await asyncio.sleep(_FETCH_DELAY)
     # 首请求可能被 202 反爬（空页、无 Cookie），Cookie 入共享客户端 jar 后

@@ -2,9 +2,7 @@
 
 from dataclasses import dataclass
 
-import httpx
-
-from . import ExtError, ExtNetworkError, get_client
+from . import ExtError, ext_request
 
 WAHLAP_LOCATION_URL = "https://wc.wahlap.net/maidx/rest/location"
 
@@ -21,10 +19,13 @@ class WahlapArcade:
 
 async def fetch_locations() -> list[WahlapArcade]:
     """拉取华立官方机厅列表（id/店名/地址/省份/商场/机台数）。"""
-    try:
-        resp = await get_client().get(WAHLAP_LOCATION_URL, timeout=30)
-    except httpx.RequestError as e:
-        raise ExtNetworkError("华立机厅数据网络异常，请稍后再试") from e
+    resp = await ext_request(
+        "GET",
+        WAHLAP_LOCATION_URL,
+        name="华立机厅数据",
+        network_message="华立机厅数据网络异常，请稍后再试",
+        timeout=30,
+    )
     if resp.status_code != 200:
         raise ExtError(f"华立机厅接口异常（HTTP {resp.status_code}）")
     try:

@@ -11,7 +11,8 @@
 - :mod:`.gamerch`：gamerch wiki 运行时补充源（宴谱物量等）；
 - :mod:`.net`：日服 maimai でらっくす NET 官方直连。
 
-每个模块独立客户端、独立 respx 测试；统一超时与异常语义。
+每个模块独立客户端、独立 respx 测试；网络异常与重试口径经
+:func:`ext_request` 单源，状态码检查与 JSON 解析按各源协议自持。
 """
 
 import json
@@ -20,7 +21,6 @@ from typing import Any
 from collections.abc import Callable, Awaitable
 
 import httpx
-from tenacity import retry, stop_after_attempt, retry_if_exception_type
 
 from ..http import create_smart_client
 
@@ -63,27 +63,39 @@ def get_client() -> httpx.AsyncClient:
     return _client
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    retry=retry_if_exception_type(httpx.RequestError),
-    reraise=True,
-)
-async def _fetch_json_attempt(url: str, timeout: float) -> httpx.Response:
-    """单次 GET：连接类失败重试 3 次（对齐 maimai_py provider 的 retry(3)），
-    耗尽后原样 reraise 由 fetch_json 统一包装。"""
-    return await get_client().get(url, timeout=timeout)
+async def ext_request(
+    method: str,
+    url: str,
+    *,
+    name: str,
+    retries: int = 0,
+    network_message: str | None = None,
+    **kwargs,
+) -> httpx.Response:
+    """ext 层请求底座（D1）：网络异常重试 ``retries`` 次后统一包装
+    ExtNetworkError。
+
+    状态码检查与 JSON 解析留在各源模块——协议形态不同（柚子 4xx 带
+    message 错误体、落雪 OAuth error 体、水鱼 device 流按状态码分支、
+    MuNET 双主机自管节流），底座只收口网络异常语义；重试次数由调用方
+    显式声明（幂等 GET 列表端点 3 次，令牌/提交类端点 0 次直抛）。
+    """
+    last_error: httpx.RequestError | None = None
+    for _ in range(1 + max(0, retries)):
+        try:
+            return await get_client().request(method, url, **kwargs)
+        except httpx.RequestError as e:
+            last_error = e
+    raise ExtNetworkError(network_message or f"{name} 网络异常") from last_error
 
 
 async def fetch_json(url: str, *, name: str, timeout: float = 60) -> Any:
-    """GET JSON 公共封装（错误三态样板见 wahlap）：网络异常重试 3 次后包装
-    ExtNetworkError，非 200 或 JSON 解析失败抛 ExtError。
+    """GET JSON 公共封装：幂等列表口径重试 3 次后包装 ExtNetworkError，
+    非 200 抛 ExtError，JSON 解析失败抛 ExtError。
 
     ``name`` 用于错误文案（如 ``"maimaiinfo all_data.json"``）。
     """
-    try:
-        resp = await _fetch_json_attempt(url, timeout)
-    except httpx.RequestError as e:
-        raise ExtNetworkError(f"{name} 网络异常") from e
+    resp = await ext_request("GET", url, name=name, retries=3, timeout=timeout)
     if resp.status_code != 200:
         raise ExtError(f"{name} 拉取失败（HTTP {resp.status_code}）")
     try:

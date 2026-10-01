@@ -46,3 +46,8 @@ async def _startup_alias_push() -> None:
     if plugin_config.awmc_alias_push and plugin_config.awmc_startup_tasks:
         yuzu_ext.start_alias_push(push_apply)
         logger.info("别名推送 SSE 已启动")
+
+
+@get_driver().on_shutdown
+async def _shutdown_alias_push() -> None:
+    await yuzu_ext.stop_alias_push()

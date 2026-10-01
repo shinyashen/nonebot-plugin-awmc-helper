@@ -3,14 +3,13 @@
 端点与字段对齐原版 maimaiDX 的 LXNS OAuth2 实现。
 """
 
+import re
 from dataclasses import dataclass
-
-import httpx
+from urllib.parse import parse_qs, urlparse
 
 from . import (
     ExtError,
-    ExtNetworkError,
-    get_client,
+    ext_request,
     jwt_payload_unverified,
 )
 from ...config import plugin_config
@@ -34,14 +33,14 @@ async def fetch_song_list(notes: bool = True) -> dict:
         if plugin_config.awmc_lxns_developer_token
         else {}
     )
-    try:
-        resp = await get_client().get(
-            f"{LXNS_BASE}/api/v0/maimai/song/list?notes={'true' if notes else 'false'}",
-            headers=headers,
-            timeout=60,
-        )
-    except httpx.RequestError as e:
-        raise ExtNetworkError("落雪曲库列表网络异常") from e
+    resp = await ext_request(
+        "GET",
+        f"{LXNS_BASE}/api/v0/maimai/song/list?notes={'true' if notes else 'false'}",
+        name="落雪曲库列表",
+        network_message="落雪曲库列表网络异常",
+        headers=headers,
+        timeout=60,
+    )
     if resp.status_code != 200:
         raise ExtError(f"落雪曲库列表拉取失败（HTTP {resp.status_code}）")
     try:
@@ -112,10 +111,13 @@ def build_authorize_url() -> str:
 
 async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
     """POST oauth/token 公共封装（两 grant 同端点同响应解析）。"""
-    try:
-        resp = await get_client().post(f"{LXNS_BASE}/api/v0/oauth/token", json=payload)
-    except httpx.RequestError as e:
-        raise ExtNetworkError("落雪授权接口网络异常，请稍后再试") from e
+    resp = await ext_request(
+        "POST",
+        f"{LXNS_BASE}/api/v0/oauth/token",
+        name="落雪授权接口",
+        network_message="落雪授权接口网络异常，请稍后再试",
+        json=payload,
+    )
     data = (
         resp.json()
         if resp.headers.get("content-type", "").startswith("application/json")
@@ -147,6 +149,21 @@ def token_expiry(access_token: str) -> float | None:
     if isinstance(iat, (int, float)):
         return float(iat) + 900
     return None
+
+
+def token_writable(access_token: str) -> bool | None:
+    """读出 access token 是否含写 scope（JWT ``scope`` 含 ``write_player``）。
+
+    第三方传分插件（score-updater）据此判「可上传」而不必复刻 scope 知识
+    （单源）；存量旧授权无写 scope 返回 False，需重新 lxbind。非 JWT /
+    payload 非对象返回 None，调用方按未知态处理（同 :func:`token_expiry`
+    的回退口径）。
+    """
+    payload = jwt_payload_unverified(access_token)
+    if payload is None:
+        return None
+    scope = payload.get("scope")
+    return isinstance(scope, str) and "write_player" in scope.split()
 
 
 async def fetch_token(code: str) -> LxnsToken:
@@ -182,9 +199,6 @@ async def refresh_token(refresh_token: str) -> LxnsToken:
 
 def extract_authorization_code(text: str) -> str | None:
     """从用户输入提取授权码：裸码 / `授权码：xxx` / 回调链接 query。"""
-    import re
-    from urllib.parse import parse_qs, urlparse
-
     value = text.strip()
     pattern = re.compile(
         r"^(?:[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}|[A-Za-z0-9_-]{16,256})$"

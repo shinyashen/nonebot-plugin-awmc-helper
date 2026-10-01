@@ -3,13 +3,10 @@
 import re
 from dataclasses import dataclass
 
-import httpx
-
 from . import (
     ExtError,
-    ExtNetworkError,
     fetch_json,
-    get_client,
+    ext_request,
     jwt_payload_unverified,
 )
 from ...config import plugin_config
@@ -61,9 +58,10 @@ _PREFIX_PATTERN = re.compile(r"^(?:确认码|授权码)\s*[:：]?\s*(\S+)$")
 def extract_confirmation_code(text: str) -> str | None:
     """从整条消息认出确认码并归一化为 ``XXXX-XXXX-XXXX``；不是码返回 None。
 
-    容错小写、连字符/空格丢失、「确认码：」前缀；只认「整条消息就是一串
-    码」——从句子里抠码会把恰好凑够十二个字母的闲聊当码送去兑换（该规则
-    要过每一条群消息）。
+    容错小写、连字符/空格丢失、「确认码：/授权码：」前缀（后者是落雪提取器
+    的文案，混输场景容错面与之对齐）；只认「整条消息就是一串码」——从句子
+    里抠码会把恰好凑够十二个字母的闲聊当码送去兑换（该规则要过每一条群
+    消息）。
     """
     value = (text or "").strip()
     prefixed = _PREFIX_PATTERN.fullmatch(value)
@@ -124,11 +122,14 @@ class DivingFishSubjectMismatch(ExtError):
 
 
 async def _post_form(url: str, data: dict) -> tuple[int, dict]:
-    """OAuth 端点公共封装：网络错误包装 ExtNetworkError、JSON 解析转 ExtError。"""
-    try:
-        resp = await get_client().post(url, data=data)
-    except httpx.RequestError as e:
-        raise ExtNetworkError("水鱼授权服务网络异常，请稍后再试") from e
+    """OAuth 端点公共封装：网络错误经 ext_request 包装、JSON 解析转 ExtError。"""
+    resp = await ext_request(
+        "POST",
+        url,
+        name="水鱼授权服务",
+        network_message="水鱼授权服务网络异常，请稍后再试",
+        data=data,
+    )
     try:
         resp_data = resp.json()
     except Exception as e:

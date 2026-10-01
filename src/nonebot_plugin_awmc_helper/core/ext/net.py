@@ -102,7 +102,9 @@ class NetRecord:
     difficulty: str  # basic / advanced / expert / master / remaster / utage
     achievement: float  # 达成率百分制（万分位精度，如 100.5）
     dx_score: int | None = None
-    dx_score_total: int | None = None
+    dx_score_total: int | None = (
+        None  # 谱面 DX 满值；暂无生产消费方（解析完整性保留，DX 率展示可白得）
+    )
     fc: str | None = None  # fc / fcp / ap / app
     fs: str | None = None  # sync / fs / fsp / fsd / fsdp
 

@@ -5,6 +5,8 @@
   下架记录 ∖ 现役列表，含单张期间限定宴谱）。
 """
 
+import asyncio
+
 from . import fetch_github_raw
 
 _fetch_json = fetch_github_raw(
@@ -37,8 +39,6 @@ async def fetch_ongeki_origin() -> "list[dict]":
     记录（music-ex-deleted，含オンゲキ 5）单独缺档会造成「原创曲已从音击
     下架但 maimai 仍在」的误判缺口，不允部分成功。
     """
-    import asyncio
-
     music, deleted = await asyncio.gather(
         _fetch_ongeki("music.json"),
         _fetch_ongeki("music-ex-deleted.json"),

@@ -165,7 +165,9 @@ def rise_recommend(
         if song.id in ignored_ids:
             continue
         for diff in song.get_difficulties():
-            if diff.type == SongType.UTAGE:  # 宴谱不推分（Song.id 恒为根 id，无 id 域判断）
+            if (
+                diff.type == SongType.UTAGE
+            ):  # 宴谱不推分（Song.id 恒为根 id，无 id 域判断）
                 continue
             side = "old" if diff.version < latest_version_value else "new"
             side_scores = sides[side]

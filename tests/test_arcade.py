@@ -183,9 +183,7 @@ async def test_search_arcade_like_wildcard_escaped(app: App, arcade_enabled):
 
     assert await store.get_arcades_by_name("%") == []
     assert await store.get_arcades_by_name("游_") == []
-    await _run(
-        app, arcade.arcade_search, "查找机厅 %", "没有这样的机厅哦"
-    )
+    await _run(app, arcade.arcade_search, "查找机厅 %", "没有这样的机厅哦")
 
 
 @pytest.mark.asyncio

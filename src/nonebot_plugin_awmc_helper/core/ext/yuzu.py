@@ -12,7 +12,7 @@ from collections.abc import Callable, Awaitable, AsyncIterator
 import httpx
 from nonebot import logger
 
-from . import ExtError, ExtNetworkError, get_client
+from . import ExtError, ext_request
 from ..http import create_smart_client
 from ...config import plugin_config
 
@@ -51,9 +51,8 @@ class AliasVote:
 
 @dataclass
 class AliasPush:
-    """SSE 推送的别名申请事件（type=Apply）。"""
+    """SSE 推送的别名申请事件（仅 Apply 型；非 Apply 在流侧已过滤）。"""
 
-    type: str
     status: list[AliasVote] = field(default_factory=list)
 
 
@@ -98,12 +97,15 @@ def _check(resp: httpx.Response) -> dict | list:
 
 
 async def _request(method: str, url: str, **kwargs) -> dict | list:
-    """请求 + _check 收口：网络异常包装 ExtNetworkError（上层只 catch ExtError，
-    裸 httpx 异常会被记成未捕获而非友好提示）。"""
-    try:
-        resp = await get_client().request(method, url, **kwargs)
-    except httpx.RequestError as e:
-        raise ExtNetworkError("柚子接口网络异常，请稍后再试") from e
+    """请求 + _check 收口：网络异常经 ext_request 包装 ExtNetworkError（上层
+    只 catch ExtError，裸 httpx 异常会被记成未捕获而非友好提示）。"""
+    resp = await ext_request(
+        method,
+        url,
+        name="柚子接口",
+        network_message="柚子接口网络异常，请稍后再试",
+        **kwargs,
+    )
     return _check(resp)
 
 
@@ -296,7 +298,6 @@ async def run_alias_sse(on_apply: Callable[[AliasPush], Awaitable[None]]) -> Non
                             if payload.get("type") != "Apply":
                                 continue
                             push = AliasPush(
-                                type="Apply",
                                 status=[
                                     _parse_vote(x) for x in payload.get("status", [])
                                 ],
@@ -327,3 +328,16 @@ def start_alias_push(on_apply: Callable[[AliasPush], Awaitable[None]]) -> None:
     if _push_task is not None and not _push_task.done():
         _push_task.cancel()
     _push_task = asyncio.create_task(run_alias_sse(on_apply))
+
+
+async def stop_alias_push() -> None:
+    """停机钩子：取消常驻任务并等其退出（SSE 客户端随取消清理，
+    停机时序可控——不留任务残跑到事件循环关闭）。"""
+    global _push_task
+    if _push_task is not None and not _push_task.done():
+        _push_task.cancel()
+        try:
+            await _push_task
+        except asyncio.CancelledError:
+            pass
+    _push_task = None

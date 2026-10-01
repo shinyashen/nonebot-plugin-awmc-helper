@@ -48,11 +48,11 @@ from .calc import build_bests, compute_rating, build_flat_bests
 from .score import score_service
 from .songs import song_service
 from .plates import norm_plate, version_code_of
-from .songdb import State, ensure_ongeki_titles, norm_title, ongeki_titles
+from .songdb import State, norm_title, ongeki_titles, ensure_ongeki_titles
+from .binding import strip_at_segments
 from .designer import match as _designer_match
 from .designer import build_needles as _designer_needles
-from .binding import strip_at_segments
-from ..constants import COLOR_TO_LEVEL_INDEX, RATE_TO_ZH, normalize_text
+from ..constants import RATE_TO_ZH, COLOR_TO_LEVEL_INDEX, normalize_text
 
 # ---------------------------------------------------------------- 模型
 
@@ -1042,9 +1042,17 @@ _RATE_FLOOR: "dict[RateType, float]" = {
 
 # 评级档显示名复用 constants.RATE_TO_ZH 前 9 档（同数据单源，勿再复制）
 _RATE_LABEL: "dict[RateType, str]" = {
-    r: RATE_TO_ZH[r] for r in (
-        RateType.SSSP, RateType.SSS, RateType.SSP, RateType.SS,
-        RateType.SP, RateType.S, RateType.AAA, RateType.AA, RateType.A,
+    r: RATE_TO_ZH[r]
+    for r in (
+        RateType.SSSP,
+        RateType.SSS,
+        RateType.SSP,
+        RateType.SS,
+        RateType.SP,
+        RateType.S,
+        RateType.AAA,
+        RateType.AA,
+        RateType.A,
     )
 }
 
@@ -1415,7 +1423,9 @@ async def _build_chart_hit(conds: "list[Cond]", cur: int, state: "State | None" 
     era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
     boundary = era.value if era is not None else None
     hist_state = (
-        state if state is not None else await State.load()
+        state
+        if state is not None
+        else await State.load()
         if era is not None and CondType.DS in groups
         else None
     )
@@ -1585,7 +1595,9 @@ async def run_combo(
     cur = _current_of(binding)
     era = next((c for c in conds if c.ctype is CondType.ERA_YEAR), None)
     fit_songs = (
-        await _songs_of(binding) if any(c.ctype is CondType.FIT for c in conds) else None
+        await _songs_of(binding)
+        if any(c.ctype is CondType.FIT for c in conds)
+        else None
     )
     # 回到过去：规范表态全链只物化一次（谱面判定 + 时点定数 modifier 共享）；
     # 拟合：曲库列表同一次取用（键集过滤与 _build_fit_map 共享）

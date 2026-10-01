@@ -14,7 +14,7 @@ import json
 import httpx
 from nonebot import logger
 
-from . import ExtError, get_client
+from . import ExtError, ext_request
 from . import otoge_db as ext_otoge
 
 _GITHUB_API = "https://api.github.com/repos/zvuc/otoge-db"
@@ -124,13 +124,17 @@ async def list_open_song_prs() -> list[tuple[int, str, str]]:
     headers = {"accept": "application/vnd.github+json"}
     if plugin_config.awmc_github_token:
         headers["Authorization"] = f"Bearer {plugin_config.awmc_github_token}"
-    resp = await get_client().get(
+    resp = await ext_request(
+        "GET",
         f"{_GITHUB_API}/pulls",
+        name="otoge PR 列表",
+        network_message="otoge PR 列表网络异常，请稍后再试",
         params={"state": "open", "per_page": "50"},
         headers=headers,
         timeout=30,
     )
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        raise ExtError(f"otoge PR 列表拉取失败（HTTP {resp.status_code}）")
     out: list[tuple[int, str, str]] = []
     for pr in resp.json():
         ref = (pr.get("head") or {}).get("ref") or ""
@@ -141,12 +145,17 @@ async def list_open_song_prs() -> list[tuple[int, str, str]]:
 
 async def fetch_branch_music_ex(branch: str) -> str:
     """PR 分支上的 music-ex.json 原文（raw.githubusercontent，智能代理路由）。"""
-    resp = await get_client().get(
-        f"{_RAW_BASE}/{branch}/maimai/data/music-ex.json", timeout=120
+    resp = await ext_request(
+        "GET",
+        f"{_RAW_BASE}/{branch}/maimai/data/music-ex.json",
+        name=f"otoge PR 分支 {branch}",
+        network_message="otoge PR 分支数据网络异常，请稍后再试",
+        timeout=120,
     )
     if resp.status_code == 404:
         raise ExtError(f"otoge PR 分支 {branch} 无 music-ex.json（404）")
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        raise ExtError(f"otoge PR 分支 {branch} 拉取失败（HTTP {resp.status_code}）")
     return resp.text
 
 

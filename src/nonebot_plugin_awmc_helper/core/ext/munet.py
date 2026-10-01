@@ -34,9 +34,10 @@ _throttle_lock = asyncio.Lock()
 _last_request_at = 0.0
 _walk_lock = asyncio.Lock()
 """别名走查互斥锁：每日任务与手动触发（重载补充数据）不会并发走查。"""
+_walk_running = False
+"""走查在跑标志（与 _walk_lock 配合消除预检 TOCTOU，见 refresh_aliases_full）。"""
 
 _WALK_KV = "munet_alias_walk"
-_BATCH_KV = "munet_batch"
 _WALK_BUDGET_SECONDS = 3600.0
 """单次走查时间预算（60 分钟；规范表实测 1763 请求 ≈ 30 分钟，预算留足余量
 保证单晚走完），超时记游标跨日续走。"""
@@ -97,6 +98,10 @@ async def _request(
         if resp.status_code != 200:
             raise ExtError(f"MuNET {path} 拉取失败（HTTP {resp.status_code}）")
         return resp
+    # 全主机网络失败 → ExtNetworkError；全主机 418（WAF 风控语义）→ ExtError，
+    # 两者语义不同，不把风控误报成网络错误
+    if isinstance(last_error, ExtError):
+        raise last_error
     raise ExtNetworkError(f"MuNET {path} 请求失败：{last_error}") from last_error
 
 
@@ -297,8 +302,19 @@ async def refresh_aliases_full(
             and time.time() - finished_at < interval_days * 86400
         ):
             return {"status": "fresh", "finished_at": finished_at}
+    # 互斥（无 TOCTOU）：locked() 预检挡常规并发；预检窗口内仍可能被并发者
+    # 抢先，故拿到锁后复查 _walk_running（check-and-set 之间无 await，原子）
+    if _walk_lock.locked():
+        return {"status": "running"}
     async with _walk_lock:
-        return await _walk_targets(budget_seconds)
+        global _walk_running
+        if _walk_running:
+            return {"status": "running"}
+        _walk_running = True
+        try:
+            return await _walk_targets(budget_seconds)
+        finally:
+            _walk_running = False
 
 
 async def _walk_targets(budget_seconds: float) -> dict:
@@ -397,7 +413,8 @@ async def run_batch_supplement() -> dict:
 
     if not plugin_config.awmc_munet_batch:
         return {"status": "disabled"}
-    canonical_titles = await store.list_song_titles()
+    # 成员判断走 set（全库曲名 × 候选集的 `not in` 否则是数百万次线性比较）
+    canonical_titles = set(await store.list_song_titles())
     images: dict[str, str] = {}
     try:
         pr_entries = await otoge_pr.load_open_pr_entries()
@@ -480,6 +497,5 @@ async def run_batch_supplement() -> dict:
         logger.info(f"MuNET 版本状态：addVersion {filters.get('versions')}")
     except (ExtError, ExtNetworkError) as e:
         logger.debug(f"MuNET BrowseFilters 状态获取失败（信息性）：{e}")
-    await store.kv_set(_BATCH_KV, {"ran_at": time.time(), **result})
     logger.info(f"MuNET 批次补充完成：{result}")
     return result
