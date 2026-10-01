@@ -1118,7 +1118,7 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                     CondType.DESIGNER,
                     key=f"designer:{name}",
                     label=t.text,
-                    chart=lambda s, d, _cur, _ns=frozenset(needles): _designer_match(
+                    chart=lambda s, d, _cur, _ns=set(needles): _designer_match(
                         d.note_designer or "", _ns
                     ),
                     value=name,
