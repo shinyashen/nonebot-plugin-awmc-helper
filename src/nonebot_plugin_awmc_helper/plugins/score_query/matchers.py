@@ -42,6 +42,7 @@ from ...core.binding import (
     resolve_session_query,
 )
 from ...core.sources import Capability
+from ...core.net_score import net_best50_card
 
 b50 = on_command("b50", aliases={"B50"}, block=True)
 ap50 = on_command("ap50", aliases={"AP50"}, block=True)
@@ -194,7 +195,7 @@ async def _(
                     at_sender=True
                 )
             bests = await score_service.get_b50(binding)
-            png = await b50_render.net_best50_card(bests, binding)
+            png = await net_best50_card(bests, binding)
         else:
             notify_slow = slow_notice()
             player = await score_service.get_player(binding, notify_slow=notify_slow)
@@ -248,7 +249,7 @@ async def _render_combo(result, binding, output=None) -> bytes:
     else:
         label = f"{result.title} · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
     if score_service.view_of(binding.service) == "jp":
-        return await b50_render.net_best50_card(
+        return await net_best50_card(
             result.bests, binding, flat=result.flat, label=label
         )
     player = await score_service.get_player(binding)

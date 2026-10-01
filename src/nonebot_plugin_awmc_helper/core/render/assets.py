@@ -8,10 +8,11 @@ from typing import ClassVar
 from pathlib import Path
 
 from PIL import Image
+from maimai_py import RateType
 from nonebot_plugin_localstore import get_data_dir
 
 from ...config import plugin_config
-from ...constants import DEFAULT_THEME
+from ...constants import RATE_FILE, DEFAULT_THEME
 
 # 牌头素材文件名口径（按素材包实测）：版本字仅 晓/樱/堇/辉/华 用繁体，
 # 牌种仅「极」用「極」。maimai_py 的 plate_aliases 是**用户输入归一**口径（含
@@ -115,6 +116,71 @@ class Assets:
             if path.exists():
                 return cls.get(path)
         return None
+
+    # -- 成绩徽章取图原语（D2 收口：各绘图模块不再各拼一遍文件名） ----------
+
+    DX_STAR_FILE = "UI_GAM_Gauge_DXScoreIcon_0{num}.png"
+
+    @classmethod
+    def rate_badge(
+        cls,
+        rate: RateType,
+        theme: str = DEFAULT_THEME,
+        size: tuple[int, int] | None = None,
+    ) -> Image.Image | None:
+        """评级徽章（``UI_TTR_Rank_{name}.png``）：RateType 经 RATE_FILE 映射
+        （同轴单源，缺省 D），主题子目录回退根目录，缺失返回 None。"""
+        name = RATE_FILE.get(rate.name, "D")
+        img = cls.pic_optional(f"UI_TTR_Rank_{name}.png", theme)
+        if img is not None and size is not None:
+            img = img.resize(size)
+        return img
+
+    @classmethod
+    def rate_badge_of_achievement(
+        cls,
+        achievement: float,
+        theme: str = DEFAULT_THEME,
+        size: tuple[int, int] | None = None,
+    ) -> Image.Image | None:
+        """按达成率取评级徽章（内部 ``RateType._from_achievement`` 归档）。"""
+        return cls.rate_badge(RateType._from_achievement(achievement or 0), theme, size)
+
+    @classmethod
+    def play_bonus(cls, name: str, size: tuple[int, int] | None = None) -> Image.Image:
+        """连击/Sync 达成大章（``UI_CHR_PlayBonus_{name}.png``，COMBO_FILE/
+        SYNC_FILE 文件名后缀），根目录素材，可选缩放。"""
+        img = cls.pic(f"UI_CHR_PlayBonus_{name}.png")
+        return img.resize(size) if size else img
+
+    @classmethod
+    def mss_icon(
+        cls,
+        file_map: dict[str, str],
+        value,
+        *,
+        theme: str = DEFAULT_THEME,
+        size: tuple[int, int] | None = None,
+    ) -> Image.Image | None:
+        """FC/Sync 判型小徽章（``UI_MSS_MBase_Icon_{name}.png``）：枚举名小写
+        经 file_map（COMBO_FILE/SYNC_FILE）映射文件名，None/未映射返回 None。"""
+        if value is None:
+            return None
+        name = file_map.get(value.name.lower())
+        if name is None:
+            return None
+        img = cls.pic_optional(f"UI_MSS_MBase_Icon_{name}.png", theme)
+        if img is not None and size is not None:
+            img = img.resize(size)
+        return img
+
+    @classmethod
+    def dx_star_icon(cls, star: int, theme: str = DEFAULT_THEME) -> Image.Image | None:
+        """DX 星徽章（``UI_GAM_Gauge_DXScoreIcon_0{star}.png``，star 1-5），
+        0/负数与素材缺失返回 None。"""
+        if star <= 0:
+            return None
+        return cls.pic_optional(cls.DX_STAR_FILE.format(num=star), theme)
 
 
 assets = Assets()

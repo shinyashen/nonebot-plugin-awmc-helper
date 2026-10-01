@@ -15,6 +15,16 @@ RATING_START_Y = 450
 RATING_COLS = 14
 RATING_GROUP_GAP = 30
 
+
+def grid_geometry(by_level: bool) -> tuple[int, int]:
+    """条件版网格几何（列数, 起点 x）：标级大类 13 列 + x=180（标签让位），
+    定数节 14 列 + x=140。模板生成（table_template）与叠章（rating_table）
+    两侧共用，防「同序契约」靠注释约束的两处手写漂移。"""
+    if by_level:
+        return RATING_COLS - 1, PLATE_START_X
+    return RATING_COLS, RATING_START_X
+
+
 # 定数表 lv15：3 列大格（425×450），起点 (100, 500)
 LV15_COLS = 3
 LV15_START_X = 100

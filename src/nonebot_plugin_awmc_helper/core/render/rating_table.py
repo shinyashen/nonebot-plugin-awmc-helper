@@ -25,17 +25,15 @@ from ...constants import (
 )
 from .table_layout import (
     LV15_COLS,
-    RATING_COLS,
     LV15_START_X,
     LV15_START_Y,
     LV15_COL_STEP,
     LV15_ROW_STEP,
-    PLATE_START_X,
-    RATING_START_X,
     RATING_START_Y,
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
     group_by_ds,
+    grid_geometry,
     group_by_level,
 )
 
@@ -268,21 +266,21 @@ def _draw_rating_core(
     def stamp_rank(x: int, y: int, score, *, lv15: bool = False) -> None:
         ach = score.achievements or 0
         qualified.append(ach)
-        rate = RATE_FILE[RateType._from_achievement(ach).name]
-        name = f"UI_TTR_Rank_{rate}.png"
         if lv15:
             # Hoshino lv15 大格分支：不画完成/未完成底，评级章原尺寸置中
-            if rank := assets.pic_optional(name, theme):
+            if rank := assets.rate_badge_of_achievement(ach, theme):
                 im.alpha_composite(rank, (x + 55, y + 115))
             return
         im.alpha_composite(assets.pic(bg_of(score)), (x + 1, y + 1))
-        if rank := assets.pic_optional(name, theme):
-            im.alpha_composite(rank.resize((78, 35)), (x, y + 20))
+        if rank := assets.rate_badge_of_achievement(ach, theme, (78, 35)):
+            im.alpha_composite(rank, (x, y + 20))
 
     def stamp_combo(x: int, y: int, score, *, lv15: bool = False) -> None:
         # 判型完成表 Hoshino 同款（2026-10-01 用户澄清）：只有**达标**谱面画
         # 白底 + 实际徽章，不达标/未打完全不显示（黑色半透明背景仅评级模式
         # 三态使用）。checker 缺省（第三方直调）回退「有 fc 即显示」。
+        # ⚠️ checker 须自证 fc/fs 非 None（core.combo._fs_checker 有守卫）；
+        # 宽松 checker 传 None 成绩进下方 .name 会 AttributeError
         if checker is not None:
             if not checker(score.achievements, score.fc, score.fs):
                 return
@@ -296,12 +294,8 @@ def _draw_rating_core(
                 im.alpha_composite(bonus.resize((200, 200)), (x + 75, y + 80))
             return
         im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
-        im.alpha_composite(
-            assets.pic(
-                f"UI_MSS_MBase_Icon_{COMBO_FILE[score.fc.name.lower()]}.png"
-            ).resize((50, 50)),
-            (x + 15, y + 13),
-        )
+        if icon := assets.mss_icon(COMBO_FILE, score.fc, size=(50, 50)):
+            im.alpha_composite(icon, (x + 15, y + 13))
 
     def stamp_sync(x: int, y: int, score, *, lv15: bool = False) -> None:
         # 同 stamp_combo：checker 达标才显示（Sync 档不达任何 fs 族 plan →
@@ -316,12 +310,8 @@ def _draw_rating_core(
         # lv15 也只能用 50×50 小章；lv15 按 Hoshino 分支惯例不画完成底
         if not lv15:
             im.alpha_composite(assets.pic(_COMPLETED_BG), (x + 1, y + 1))
-        im.alpha_composite(
-            assets.pic(
-                f"UI_MSS_MBase_Icon_{SYNC_FILE[score.fs.name.lower()]}.png"
-            ).resize((50, 50)),
-            (x + 15, y + 13),
-        )
+        if icon := assets.mss_icon(SYNC_FILE, score.fs, size=(50, 50)):
+            im.alpha_composite(icon, (x + 15, y + 13))
 
     if lv15:
         # 同序契约：与 table_template._rating_grid_15 的底图摆放同一排序
@@ -344,8 +334,7 @@ def _draw_rating_core(
         # 同序契约：底图分组随 by_level（条件版标级大类 / 单等级定数节），
         # 列数/列起点同步（标级大类 13 列 + x=180，标签让位）
         groups = group_by_level(entries) if by_level else group_by_ds(entries)
-        cols = RATING_COLS - 1 if by_level else RATING_COLS
-        start_x = PLATE_START_X if by_level else RATING_START_X
+        cols, start_x = grid_geometry(by_level)
         current_y = RATING_START_Y
         for ds in groups:
             charts = groups[ds]

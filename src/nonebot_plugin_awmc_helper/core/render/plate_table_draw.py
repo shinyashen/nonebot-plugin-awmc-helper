@@ -13,7 +13,7 @@ from .fonts import FONT_RODIN, font
 from .tools import TEXT_BLUE, ID_TEXT_COLORS, scale_output, image_to_bytes
 from .assets import assets
 from ..plates import major_type_of_plate
-from ...constants import RATE_FILE, SYNC_FILE, COMBO_FILE
+from ...constants import SYNC_FILE, COMBO_FILE
 from .table_layout import (
     PLATE_COLS,
     PLATE_START_X,
@@ -58,25 +58,19 @@ def _qualified(kind: str, score) -> bool:
 def _plate_icon(kind: str, score):
     """达成章：者/将盖评级章（compute_rating onlyrate），其余盖连击/Sync 章。"""
     if kind in ("者", "将"):
-        rate = RateType._from_achievement(score.achievements or 0).name
-        name = RATE_FILE.get(rate, "D")
-        return (
-            assets.pic(f"UI_TTR_Rank_{name}.png", "prism_plus").resize((80, 36)),
-            (0, 22),
-        )
+        rate = RateType._from_achievement(score.achievements or 0)
+        return assets.rate_badge(rate, "prism_plus", (80, 36)), (0, 22)
     if kind == "极":
         key = score.fc.name.lower() if score.fc else "fc"
-        name = COMBO_FILE.get(key, "FC")
-        return assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((60, 60)), (10, 12)
+        return assets.play_bonus(COMBO_FILE.get(key, "FC"), (60, 60)), (10, 12)
     if kind == "神":
         ok_ap = score.fc is not None and score.fc.value <= FCType.APP.value
-        name = "APp" if ok_ap else "AP"
-        return assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((60, 60)), (10, 12)
+        return assets.play_bonus("APp" if ok_ap else "AP", (60, 60)), (10, 12)
     # 舞舞
     name = "FSDp"
     if score.fs is not None:
         name = SYNC_FILE.get(score.fs.name.lower(), "FSD")
-    return assets.pic(f"UI_CHR_PlayBonus_{name}.png").resize((60, 60)), (10, 12)
+    return assets.play_bonus(name, (60, 60)), (10, 12)
 
 
 def draw_plate_table(

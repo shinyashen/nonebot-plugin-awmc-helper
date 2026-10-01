@@ -334,3 +334,51 @@ class NetScoreService:
 
 net_score_service = NetScoreService()
 """日服 NET 查分服务单例。"""
+
+
+async def net_best50_card(
+    bests, binding, *, sub_of=None, flat: bool = False, label: str = ""
+) -> bytes:
+    """NET B50 系卡面（主插件 b50/ap50/条件50 共用；业务装配在 core、渲染保持
+    纯绘制——原在 render.best50，是 render 目录唯一反向依赖业务层的函数）。
+
+    ``bests`` 为组装好的 b35/b15 结构（PlayerBests 或 MaimaiScores 同构字段）；
+    身份取 NET 窗口缓存的玩家资料（缺失回退 SEGA ID），头像/段位认定/
+    でらっクラス/名牌素材并发落盘注入。调用方负责抓取提示（needs_fetch）
+    与成绩拉取——本函数只做身份装配 + 渲染。``flat=True`` 走条件50 flat 版式；
+    ``label`` 为条件50 的称号条口径文案（非空时强制覆盖数据源称号，
+    2026-10-01 QoL）。
+    """
+    from .render import jp_cover
+    from .binding import binding_service
+    from ..constants import DEFAULT_THEME
+    from .render.best50 import best50_bytes, best50_flat_bytes
+
+    player = net_score_service.player_of(binding)
+    identity = await jp_cover.net_player_assets(player)
+    # 条件口径（label 非空）覆盖数据源称号（2026-10-01 QoL）
+    trophy = label or (player.trophy_name if player else None) or None
+    name = (player.name if player else None) or binding.net_sega_id or "maimai NET"
+    common = dict(
+        player=None,
+        qqid=binding_service.qq_of(binding),
+        service=binding.service,
+        theme=binding.theme or DEFAULT_THEME,
+        trophy_name=trophy,
+        trophy_color=player.trophy_color if player else None,
+        sub_of=sub_of,
+        **identity,
+    )
+    if flat:
+        return await best50_flat_bytes(
+            name, bests.rating, bests.scores_b35, label=label, **common
+        )
+    return await best50_bytes(
+        name,
+        bests.rating,
+        bests.rating_b35,
+        bests.rating_b15,
+        bests.scores_b35,
+        bests.scores_b15,
+        **common,
+    )

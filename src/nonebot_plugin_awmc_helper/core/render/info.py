@@ -22,7 +22,6 @@ from .tools import (
 from .assets import assets
 from .nb_chart import LOGO_SIZE, major_diffs, chart_version_of, paste_version_logo
 from ...constants import (
-    RATE_FILE,
     SYNC_FILE,
     COMBO_FILE,
     DEFAULT_THEME,
@@ -141,11 +140,8 @@ def song_play_data(
         dx_score = score.dx_score or 0
         # DX 星取库算值（ScoreExtend.dx_star，阈值同现算；0 分为 None → 不画星）
         star = score.dx_star or 0
-        if star:
-            im.alpha_composite(
-                assets.pic(f"UI_GAM_Gauge_DXScoreIcon_0{star}.png").resize((32, 19)),
-                (851, 296 + y),
-            )
+        if star and (star_icon := assets.dx_star_icon(star)):
+            im.alpha_composite(star_icon.resize((32, 19)), (851, 296 + y))
         dr.text(
             (916, 304 + y),
             f"{dx_score}/{score.level_dx_score}",
@@ -156,21 +152,16 @@ def song_play_data(
         im.alpha_composite(assets.pic("fcfs.png"), (965, 265 + y))
         if score.fc:
             im.alpha_composite(
-                assets.pic(
-                    f"UI_CHR_PlayBonus_{COMBO_FILE[score.fc.name.lower()]}.png"
-                ).resize((65, 65)),
+                assets.play_bonus(COMBO_FILE[score.fc.name.lower()], (65, 65)),
                 (960, 261 + y),
             )
         if score.fs:
             im.alpha_composite(
-                assets.pic(
-                    f"UI_CHR_PlayBonus_{SYNC_FILE[score.fs.name.lower()]}.png"
-                ).resize((65, 65)),
+                assets.play_bonus(SYNC_FILE[score.fs.name.lower()], (65, 65)),
                 (1025, 261 + y),
             )
-        rank_file = RATE_FILE.get(score.rate.name, "D") if score.rate else "D"
-        if rank_img := assets.pic_optional(f"UI_TTR_Rank_{rank_file}.png", theme):
-            im.alpha_composite(rank_img.resize((100, 45)), (737, 272 + y))
+        if score.rate and (rank_img := assets.rate_badge(score.rate, theme, (100, 45))):
+            im.alpha_composite(rank_img, (737, 272 + y))
         dr.text(
             (500, 295 + y),
             f"{score.achievements or 0:.4f}%",

@@ -8,7 +8,7 @@
 from collections.abc import Callable
 
 from PIL import ImageDraw
-from maimai_py import RateType, SongType, ScoreExtend
+from maimai_py import SongType, ScoreExtend
 from maimai_py.models import SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
@@ -23,7 +23,7 @@ from .tools import (
 )
 from .assets import assets
 from .best50 import draw_score_row
-from ...constants import RATE_FILE, DX_ID_OFFSET, LEVEL_INDEX_EN, chart_display_id
+from ...constants import DX_ID_OFFSET, LEVEL_INDEX_EN, chart_display_id
 from .table_layout import (
     SCORE_ROW_GAP,
     SCORE_ROW_COLS,
@@ -48,12 +48,6 @@ def score_list_height(total: int, page: int, end_page: int) -> int:
     multiplier = (to_page + 19) // 20
     actual_line = 4 if to_page <= 20 else line
     return actual_line * 109 + 130 * multiplier
-
-
-def _rate_file_of(achievement: float) -> str:
-    """达成率 → 评级徽章文件名后缀（UI_TTR_Rank_*）。"""
-    rate = RateType._from_achievement(achievement)
-    return RATE_FILE[rate.name]
 
 
 class DrawScore:
@@ -103,19 +97,15 @@ class DrawScore:
             # 旧成绩评级（Hoshino：无旧成绩不画旧章；未游玩推荐行不显示 D）
             old_ach = row.get("old_achievements") or 0
             if old_ach:
-                self._im.alpha_composite(
-                    assets.pic(
-                        f"UI_TTR_Rank_{_rate_file_of(old_ach)}.png", self._theme
-                    ).resize((63, 28)),
-                    (x + 145, y + 82),
+                old_rank = assets.rate_badge_of_achievement(
+                    old_ach, self._theme, (63, 28)
                 )
-            self._im.alpha_composite(
-                assets.pic(
-                    f"UI_TTR_Rank_{_rate_file_of(row['achievements'])}.png",
-                    self._theme,
-                ).resize((63, 28)),
-                (x + 305, y + 82),
-            )
+                if old_rank is not None:
+                    self._im.alpha_composite(old_rank, (x + 145, y + 82))
+            if rank := assets.rate_badge_of_achievement(
+                row["achievements"], self._theme, (63, 28)
+            ):
+                self._im.alpha_composite(rank, (x + 305, y + 82))
 
             diff_color = DIFF_TEXT_COLORS[li]
             id_color = ID_TEXT_COLORS[li]

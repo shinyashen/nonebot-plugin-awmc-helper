@@ -24,10 +24,7 @@ from collections.abc import Callable
 from PIL import Image, ImageDraw
 from nonebot import logger
 from maimai_py import (
-    FCType,
-    FSType,
     Player,
-    RateType,
     SongType,
     LevelIndex,
     ScoreExtend,
@@ -48,7 +45,6 @@ from ...config import plugin_config
 from .download import DownloadGate, download_to_file
 from .nb_chart import LOGO_SIZE
 from ...constants import (
-    RATE_FILE,
     SYNC_FILE,
     COMBO_FILE,
     DX_ID_OFFSET,
@@ -180,13 +176,18 @@ RA_STAR_THRESHOLDS = [
 ]
 RA_STAR_NUMS = [1, 2, 1, 2, 1, 2, 3, 4, 1, 2, 3, 4]
 
-DX_STAR_FILE = "UI_GAM_Gauge_DXScoreIcon_0{num}.png"
-
-_ITEM_HOST = "https://www.yuzuchan.moe/assets/maimaidx"
-"""收藏品（牌子/头像）在线素材站，与 Hoshino 版同源。"""
-
 _ITEM_GATE = DownloadGate()
 """在线素材下载去重（同文件并发只发一次请求）。"""
+
+
+def _item_host() -> str:
+    """收藏品在线素材站：与别名 API 同站，跟随 ``awmc_yuzu_proxy`` 双域切换
+    （CN 部署走 .cn 中转，素材下载不再固定打 .moe 慢域）。"""
+    from ..ext.yuzu import YUZU_DOMAIN_CN, YUZU_DOMAIN_MOE
+
+    return (
+        YUZU_DOMAIN_CN if plugin_config.awmc_yuzu_proxy else YUZU_DOMAIN_MOE
+    ) + "/assets/maimaidx"
 
 
 def game_song_id(score: ScoreExtend) -> int:
@@ -248,7 +249,7 @@ async def _fetch_item_image(kind: str, item_id: int) -> Image.Image | None:
         return Image.open(path).convert("RGBA")
     if not plugin_config.awmc_assets_online:
         return None
-    url = f"{_ITEM_HOST}/{kind}/{path.name}"
+    url = f"{_item_host()}/{kind}/{path.name}"
     if not await _ITEM_GATE.run(
         path, lambda: download_to_file(url, path, subject="b50：在线素材")
     ):
@@ -273,33 +274,6 @@ async def _qq_avatar(qqid: int) -> Image.Image | None:
     except Exception as e:
         logger.warning(f"b50：QQ 头像获取失败（{e}）")
         return None
-
-
-def _dx_star_badge(theme: str, star: int) -> Image.Image | None:
-    if star <= 0:
-        return None
-    return assets.pic_optional(DX_STAR_FILE.format(num=star), theme)
-
-
-def _rate_badge(theme: str, rate: RateType) -> Image.Image | None:
-    name = RATE_FILE.get(rate.name, rate.name)
-    return assets.pic_optional(f"UI_TTR_Rank_{name}.png", theme)
-
-
-def _icon_file(file_map: dict[str, str], value) -> Image.Image | None:
-    """FC/Sync 徽章共用取图：枚举名小写映射文件名，pic 主题回退缺失 None。"""
-    if value is None:
-        return None
-    name = file_map.get(value.name.lower())
-    return assets.pic_optional(f"UI_MSS_MBase_Icon_{name}.png")
-
-
-def _combo_icon(fc: FCType | None) -> Image.Image | None:
-    return _icon_file(COMBO_FILE, fc)
-
-
-def _sync_icon(fs: FSType | None) -> Image.Image | None:
-    return _icon_file(SYNC_FILE, fs)
 
 
 def _fit_into(
@@ -503,16 +477,16 @@ def draw_score_row(
     type_abbr = "DX" if score.type == SongType.DX else "SD"
     if badge := assets.type_badge(type_abbr, (37, 14)):
         im.alpha_composite(badge, (x + 51, y + 91))
-    rate = _rate_badge(theme, score.rate)
+    rate = assets.rate_badge(score.rate, theme, size=(63, 28))
     if rate is not None:
-        im.alpha_composite(rate.resize((63, 28)), (x + 92, y + 78))
-    fc = _combo_icon(score.fc)
+        im.alpha_composite(rate, (x + 92, y + 78))
+    fc = assets.mss_icon(COMBO_FILE, score.fc, size=(34, 34))
     if fc is not None:
-        im.alpha_composite(fc.resize((34, 34)), (x + 154, y + 77))
-    fs = _sync_icon(score.fs)
+        im.alpha_composite(fc, (x + 154, y + 77))
+    fs = assets.mss_icon(SYNC_FILE, score.fs, size=(34, 34))
     if fs is not None:
-        im.alpha_composite(fs.resize((34, 34)), (x + 185, y + 77))
-    star = _dx_star_badge(theme, score.dx_star or 0)
+        im.alpha_composite(fs, (x + 185, y + 77))
+    star = assets.dx_star_icon(score.dx_star or 0, theme)
     if star is not None:
         im.alpha_composite(star.resize((47, 26)), (x + 217, y + 80))
 
@@ -708,139 +682,11 @@ async def draw_b50_flat(
     return im
 
 
-async def best50_bytes(
-    player_name: str,
-    rating: int,
-    rating_b35: int,
-    rating_b15: int,
-    scores_b35: list[ScoreExtend],
-    scores_b15: list[ScoreExtend],
-    *,
-    player: Player | None = None,
-    qqid: int | None = None,
-    service: str | None = None,
-    theme: str = DEFAULT_THEME,
-    icon_image: bytes | None = None,
-    trophy_name: str | None = None,
-    trophy_color: str | None = None,
-    course_image: bytes | None = None,
-    class_image: bytes | None = None,
-    nameplate_image: bytes | None = None,
-    sub_of: Callable[[ScoreExtend], str | None] | None = None,
-    force_trophy_name: bool = False,
-) -> bytes:
-    return image_to_bytes(
-        await draw_b50_nb(
-            player_name,
-            rating,
-            rating_b35,
-            rating_b15,
-            scores_b35,
-            scores_b15,
-            player=player,
-            qqid=qqid,
-            service=service,
-            theme=theme,
-            icon_image=icon_image,
-            trophy_name=trophy_name,
-            trophy_color=trophy_color,
-            course_image=course_image,
-            class_image=class_image,
-            nameplate_image=nameplate_image,
-            sub_of=sub_of,
-            force_trophy_name=force_trophy_name,
-        )
-    )
+async def best50_bytes(*args, **kwargs) -> bytes:
+    """:func:`draw_b50_nb` 的 bytes 出口（参数原样透传，签名单源在 draw 层）。"""
+    return image_to_bytes(await draw_b50_nb(*args, **kwargs))
 
 
-async def best50_flat_bytes(
-    player_name: str,
-    rating_total: int,
-    scores: list[ScoreExtend],
-    *,
-    label: str,
-    player: Player | None = None,
-    qqid: int | None = None,
-    service: str | None = None,
-    theme: str = DEFAULT_THEME,
-    icon_image: bytes | None = None,
-    trophy_name: str | None = None,
-    trophy_color: str | None = None,
-    course_image: bytes | None = None,
-    class_image: bytes | None = None,
-    nameplate_image: bytes | None = None,
-    sub_of: Callable[[ScoreExtend], str | None] | None = None,
-) -> bytes:
-    """:func:`draw_b50_flat` 的 bytes 出口（条件50 flat 版式）。"""
-    return image_to_bytes(
-        await draw_b50_flat(
-            player_name,
-            rating_total,
-            scores,
-            label=label,
-            player=player,
-            qqid=qqid,
-            service=service,
-            theme=theme,
-            icon_image=icon_image,
-            trophy_name=trophy_name,
-            trophy_color=trophy_color,
-            course_image=course_image,
-            class_image=class_image,
-            nameplate_image=nameplate_image,
-            sub_of=sub_of,
-        )
-    )
-
-
-async def net_best50_card(
-    bests, binding, *, sub_of=None, flat: bool = False, label: str = ""
-) -> bytes:
-    """NET B50 系卡面（主插件 b50/ap50/条件50、导分插件 pc50 共用）。
-
-    ``bests`` 为组装好的 b35/b15 结构（PlayerBests 或 MaimaiScores 同构字段）；
-    身份取 NET 窗口缓存的玩家资料（缺失回退 SEGA ID），头像/段位认定/
-    でらっクラス/名牌素材并发落盘注入。调用方负责抓取提示（needs_fetch）
-    与成绩拉取——本函数只做身份装配 + 渲染。``flat=True`` 走条件50 flat 版式；
-    ``label`` 为条件50 的称号条口径文案（非空时强制覆盖数据源称号，
-    2026-10-01 QoL）。
-    """
-    from . import jp_cover
-    from ..binding import binding_service
-    from ..net_score import net_score_service
-
-    player = net_score_service.player_of(binding)
-    identity = await jp_cover.net_player_assets(player)
-    # 条件口径（label 非空）覆盖数据源称号（2026-10-01 QoL）
-    trophy = label or (player.trophy_name if player else None) or None
-    if flat:
-        return await best50_flat_bytes(
-            (player.name if player else None) or binding.net_sega_id or "maimai NET",
-            bests.rating,
-            bests.scores_b35,
-            label=label,
-            player=None,
-            qqid=binding_service.qq_of(binding),
-            service=binding.service,
-            theme=binding.theme or DEFAULT_THEME,
-            trophy_name=trophy,
-            trophy_color=player.trophy_color if player else None,
-            sub_of=sub_of,
-            **identity,
-        )
-    return await best50_bytes(
-        (player.name if player else None) or binding.net_sega_id or "maimai NET",
-        bests.rating,
-        bests.rating_b35,
-        bests.rating_b15,
-        bests.scores_b35,
-        bests.scores_b15,
-        player=None,
-        qqid=binding_service.qq_of(binding),
-        service=binding.service,
-        theme=binding.theme or DEFAULT_THEME,
-        trophy_name=trophy,
-        trophy_color=player.trophy_color if player else None,
-        sub_of=sub_of,
-        **identity,
-    )
+async def best50_flat_bytes(*args, **kwargs) -> bytes:
+    """:func:`draw_b50_flat` 的 bytes 出口（条件50 flat 版式，参数原样透传）。"""
+    return image_to_bytes(await draw_b50_flat(*args, **kwargs))

@@ -38,7 +38,6 @@ from ...constants import LEVEL_INDEX_EN, chart_display_id
 from .table_layout import (
     LV15_COLS,
     PLATE_COLS,
-    RATING_COLS,
     LV15_START_X,
     LV15_START_Y,
     LV15_COL_STEP,
@@ -47,13 +46,13 @@ from .table_layout import (
     PLATE_START_Y,
     PLATE_COL_STEP,
     PLATE_ROW_STEP,
-    RATING_START_X,
     RATING_START_Y,
     PLATE_GROUP_GAP,
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
     slot_rep,
     group_by_ds,
+    grid_geometry,
     slot_level_of,
     group_by_level,
     level_page_key,
@@ -94,8 +93,7 @@ def _rating_grid(
     groups = group_by_level(entries) if by_level else group_by_ds(entries)
     # by_level（标级大类）：等级串标签（"14+"）较宽——列起点右移对齐牌子
     # 完成表（x=180）并每行少渲染一个（14→13 列）（2026-10-01 用户实测遮挡）
-    cols = RATING_COLS - 1 if by_level else RATING_COLS
-    start_x = PLATE_START_X if by_level else RATING_START_X
+    cols, start_x = grid_geometry(by_level)
 
     current_y = RATING_START_Y
     for charts in groups.values():
