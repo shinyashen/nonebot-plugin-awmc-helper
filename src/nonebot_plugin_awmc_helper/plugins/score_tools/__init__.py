@@ -14,7 +14,6 @@ from nonebot import on_regex, on_command
 from nonebot.params import CommandArg, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Message
-from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core.ext import divingfish as df_ext
@@ -22,9 +21,8 @@ from ...constants import LEVEL_INDEX_ZH, COLOR_TO_LEVEL_INDEX
 from ...core.calc import score_line, min_ds_of_ra, rise_recommend, rise_candidates
 from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
 from ...core.score import UserScoreError, score_service
-from ...core.songs import song_service
+from ...core.songs import song_service, chart_of_color
 from ...core.store import UserBinding
-from ...core.types import SongType
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
 from ...core.binding import SessionBinding, service_display
 from ...core.sources import Capability
@@ -72,9 +70,7 @@ async def _(message: Message = CommandArg()):
     song = await song_service.by_id(chart_id)
     if song is None:
         await UniMessage.text(f" 未找到ID为「{chart_id}」的乐曲").finish(at_sender=True)
-    diff = song.get_difficulty(SongType.DX, level_index) or song.get_difficulty(
-        SongType.STANDARD, level_index
-    )
+    diff = chart_of_color(song, level_index)
     if diff is None:
         await UniMessage.text(" 该乐曲没有这个等级").finish(at_sender=True)
     result = score_line(diff, line)
@@ -96,7 +92,6 @@ async def _(message: Message = CommandArg()):
 @rise_score.handle()
 @handle_errors("推分推荐失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
-    session: Session = UniSession(),
     binding: UserBinding = SessionBinding(),
     groups: tuple = RegexGroup(),
 ):
@@ -179,7 +174,7 @@ async def _(message: Message = CommandArg()):
 
 @my_rating_ranking.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
+async def _(binding: UserBinding = SessionBinding()):
     # 数据源适配：仅水鱼支持（其余数据源由适配器基类给统一「暂不支持」文案）
     hit = await score_service.get_my_ranking(binding, notify_slow=slow_notice())
     if hit is None:

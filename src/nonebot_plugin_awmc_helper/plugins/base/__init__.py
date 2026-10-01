@@ -28,7 +28,7 @@ from ...core.help import (
     page_entries,
     help_registry,
 )
-from ...core.utils import handle_errors, is_private_session
+from ...core.utils import user_id_of, group_id_of, handle_errors, is_private_session
 from ...core.forward import try_send_forward
 from ...core.render.tools import text_image_bytes
 
@@ -55,13 +55,16 @@ async def _superuser(bot: Bot, event: Event) -> bool:
     return bool(await SUPERUSER(bot, event))
 
 
-async def _send_page(bot: Bot, event: Event, matcher: Matcher, page: Page) -> None:
+async def _send_page(
+    bot: Bot, event: Event, matcher: Matcher, page: Page, session: Session
+) -> None:
     """页面发送链：单节点文本直发；多节点转发→降级整图（at_sender 走事件上下文）。"""
     entries = page_entries(help_registry, page)
     if len(entries) == 1 and isinstance(entries[0], str):
         await UniMessage.text(entries[0]).finish(at_sender=True)
-    group_id = getattr(event, "group_id", None)
-    user_id = None if group_id is not None else getattr(event, "user_id", None)
+    # 转发目标统一走 core uninfo 谓词（不再用 OB11 形状 getattr 双口径）
+    group_id = group_id_of(session)
+    user_id = None if group_id is not None else user_id_of(session)
     if await try_send_forward(bot, entries, group_id=group_id, user_id=user_id):
         await matcher.finish()
     await UniMessage.image(
@@ -89,7 +92,7 @@ async def _(
             f"没有找到「{page.query}」。\n"
             "发送「舞萌帮助」查看总览；详情支持 类别/指令/指南 三类条目。"
         ).finish(at_sender=True)
-    await _send_page(bot, event, matcher, page)
+    await _send_page(bot, event, matcher, page, session)
 
 
 @repo_cmd.handle()

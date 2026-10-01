@@ -5,7 +5,6 @@ from re import Match
 
 from nonebot import on_regex
 from nonebot.params import RegexMatched
-from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .render import (
@@ -24,40 +23,25 @@ from .resolve import (
 )
 from ...constants import UTAGE_ID_BASE, display_song_id
 from ...core.help import CommandSpec, help_registry
-from ...core.score import score_service
 from ...core.songs import cn_song_map, song_service, entries_list_text
 from ...core.store import UserBinding
-from ...core.types import Song, SongType
+from ...core.types import SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.binding import SessionBinding
-from ...core.chart_card import chart_card_bytes
+from ...core.chart_card import chart_card_bytes, resolve_card_view
 
 search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
+# 无 ^ 锚是**有意沿用** Hoshino 功能基准的宽松形态（末尾「是什么歌」即触发，
+# maimaiDX commands/mai_search.py 同式；本仓其余 matcher 均 ^$ 锚定，勿「顺手
+# 收紧」破坏基准口径）
 search_alias_song = on_regex(r"(.+)是(?:什么|啥)歌[？?]?([0-9]+)?$", block=True)
 query_chart = on_regex(r"(?i)^id\s?([0-9]+)$", block=True)
-
-
-async def _net_view_song(song: Song, binding: UserBinding | None) -> tuple[Song, bool]:
-    """NET 绑定用户的查歌路由（L-5 拍板）：曲对象取数据源对应视图（缺失回退原
-    对象），出卡 jp=True（日服口径渲染、不嵌国服 B50——NET 成绩 id 形状
-    与 CN 视图 B50 消费侧失配）。其余绑定原样返回 ``(song, False)``。
-
-    视图判定走 score_service.view_of（数据源注册表单源），不写 service 硬编码。
-
-    日服限定提示与该路由**解耦**：提示只看「该曲是否国服缺席」（各入口
-    既有的 flags/cn_song_map 或 resolve_raw_chart jp 判定），NET 用户查
-    国服在架曲不因本路由误弹提示。
-    """
-    if binding is None or score_service.view_of(binding.service) != "jp":
-        return song, False
-    return (await song_service.jp_by_id(song.id)) or song, True
 
 
 @search.handle()
 @handle_errors()
 async def _(
-    session: Session = UniSession(),
     binding: UserBinding = SessionBinding(),
     match: Match[str] = RegexMatched(),
 ):
@@ -131,7 +115,6 @@ async def _(
 @search_alias_song.handle()
 @handle_errors()
 async def _(
-    session: Session = UniSession(),
     binding: UserBinding = SessionBinding(),
     match: Match[str] = RegexMatched(),
 ):
@@ -182,7 +165,7 @@ async def _(
             png = await _banquet_card(song, utage_diff, jp)
         else:
             song = cn_song or song
-            card_song, jp_card = await _net_view_song(song, binding)
+            card_song, jp_card = await resolve_card_view(song, binding)
             png = await chart_card_bytes(card_song, binding, card_prefer, jp or jp_card)
         # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
         msg = _reply(JP_ONLY_NOTE) if jp else UniMessage()
@@ -201,7 +184,7 @@ async def _(
         hit = await _resolve_raw_id(int(name))
         if hit is not None:
             song, prefer, jp, utage_diff = hit
-            card_song, jp_card = await _net_view_song(song, binding)
+            card_song, jp_card = await resolve_card_view(song, binding)
             png = (
                 await _banquet_card(card_song, utage_diff, jp)
                 if utage_diff is not None
@@ -218,7 +201,7 @@ async def _(
         if hit is None:
             await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
         song, prefer, jp_only, _utage_diff = hit
-        card_song, jp_card = await _net_view_song(song, binding)
+        card_song, jp_card = await resolve_card_view(song, binding)
         # 此别名入口不渲染宴会卡（与「id xxx」指令的口径差异属既有行为）
         png = await chart_card_bytes(card_song, binding, prefer, jp_only or jp_card)
         msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
@@ -251,7 +234,6 @@ async def _(
 @query_chart.handle()
 @handle_errors()
 async def _(
-    session: Session = UniSession(),
     binding: UserBinding = SessionBinding(),
     match: Match[str] = RegexMatched(),
 ):
@@ -262,7 +244,7 @@ async def _(
     if hit is None:
         await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
     song, card_prefer, jp, utage_diff = hit
-    card_song, jp_card = await _net_view_song(song, binding)
+    card_song, jp_card = await resolve_card_view(song, binding)
     png = (
         await _banquet_card(card_song, utage_diff, jp)
         if utage_diff is not None

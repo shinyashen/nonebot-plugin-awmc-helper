@@ -58,6 +58,18 @@ class ScoreService:
         """查询前是否需要真实抓取（NET 窗口缓存过期等；handler 发提示用）。"""
         return self._src(binding).needs_fetch(binding)
 
+    async def notify_fetch_if_needed(self, binding: UserBinding) -> None:
+        """需要真实抓取时先发「正在登录日服 NET 抓取成绩」提示（score_query
+        的 minfo/b50/条件50 三处共用单源，守卫口径不再各写一份；窗口缓存
+        命中静默——仅 NET 源覆写 needs_fetch，无需再判视图）。"""
+        if not self.needs_fetch(binding):
+            return
+        from nonebot_plugin_alconna.uniseg import UniMessage
+
+        await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
+            at_sender=True
+        )
+
     def player_profile(self, binding: UserBinding):
         """数据源玩家身份（NET 官方资料，供卡面渲染；其余源 None）。"""
         return self._src(binding).player_profile(binding)

@@ -246,7 +246,7 @@ async def test_plate_traditional_alias_reachable(app: App, monkeypatch):
         await UniMessage.text("进度 OK").finish(at_sender=True)
 
     monkeypatch.setattr(plugin.score_service, "get_plates", fake_get_plates)
-    monkeypatch.setattr(plugin, "_plate_progress_overview", fake_overview)
+    monkeypatch.setattr(plugin, "plate_progress_overview", fake_overview)
 
     event = fake_group_message_event_v11(message="暁将进度")
     expected = Message([MessageSegment.at(12345678), MessageSegment.text(" 进度 OK")])
@@ -281,11 +281,9 @@ async def test_plate_traditional_alias_reachable(app: App, monkeypatch):
 
 def test_plan_spp_removed():
     """「spp」计划档删除（L-32）：游戏无 S++ 档，原实现与 s 同阈值静默等同。"""
-    from nonebot_plugin_awmc_helper.plugins.tables import matchers as tm
-    from nonebot_plugin_awmc_helper.plugins.tables.sheet import PLANS
+    from nonebot_plugin_awmc_helper.core import combo
 
-    assert "spp" not in tm.PLAN_RE
-    assert "spp" not in PLANS
+    assert "spp" not in combo._PLAN_WORD
 
 
 @pytest.mark.asyncio

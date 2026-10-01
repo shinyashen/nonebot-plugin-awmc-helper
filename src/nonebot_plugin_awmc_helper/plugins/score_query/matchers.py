@@ -23,6 +23,7 @@ from ...core.songs import (
     ChartEntry,
     cn_song_map,
     song_service,
+    chart_of_color,
     entries_list_text,
     prefer_type_from_raw_id,
 )
@@ -137,10 +138,7 @@ async def _minfo_net(key: str, binding) -> None:
     if len(song_ids) > 1:  # 关键词命中多曲：列 id 供用户指定（不查成绩）
         await _finish_entry_list(entries)
     prefer = entries[0][2] if len(entries) == 1 else None
-    if score_service.needs_fetch(binding):
-        await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
-            at_sender=True
-        )
+    await score_service.notify_fetch_if_needed(binding)
     info = await score_service.get_minfo(entries[0][1], binding, prefer)
     if info is None:  # 该谱面类型无成绩（或整曲未游玩）→ 文本提示，不画空卡
         await UniMessage.text(" 尚未游玩过该曲目").finish(at_sender=True)
@@ -190,10 +188,7 @@ async def _(
         if score_service.view_of(binding.service) == "jp":
             # 日服 NET：窗口缓存优先（首次/过期时真实抓取，约 5-15 秒）；
             # 身份卡（玩家名/称号/头像/徽章）经 core 共用链路装配
-            if score_service.needs_fetch(binding):
-                await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
-                    at_sender=True
-                )
+            await score_service.notify_fetch_if_needed(binding)
             bests = await score_service.get_b50(binding)
             png = await net_best50_card(bests, binding)
         else:
@@ -290,12 +285,7 @@ async def _combo_query(
         await UniMessage.text(
             f" {'、'.join(c.label for c in bad)} 不适用于条件{suffix}"
         ).finish(at_sender=True)
-    if score_service.view_of(binding.service) == "jp" and score_service.needs_fetch(
-        binding
-    ):
-        await UniMessage.text(" 正在登录日服 NET 抓取成绩，请稍候…").send(
-            at_sender=True
-        )
+    await score_service.notify_fetch_if_needed(binding)
     result = await run_combo(parsed, binding, output=output, notify_slow=slow_notice())
     if isinstance(result, ComboEmpty):
         await UniMessage.text(f" {result.message}").finish(at_sender=True)
@@ -378,9 +368,7 @@ async def _(groups: tuple = RegexGroup()):
     song = await _resolve_song(key.strip())
     # 默认紫谱（MASTER）
     level_index = COLOR_TO_LEVEL_INDEX.get(color or "", LevelIndex.MASTER)
-    diff = song.get_difficulty(SongType.DX, level_index) or song.get_difficulty(
-        SongType.STANDARD, level_index
-    )
+    diff = chart_of_color(song, level_index)
     if diff is None:
         await UniMessage.text(" 该曲目没有此难度谱面").finish(at_sender=True)
     if diff.curve is None:

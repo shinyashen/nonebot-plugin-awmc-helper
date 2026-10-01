@@ -9,8 +9,24 @@ from nonebot import logger
 from maimai_py import Song, SongType
 
 from .score import UserScoreError, score_service
+from .songs import song_service
 from .render import nb_chart
 from ..constants import DEFAULT_THEME
+
+
+async def resolve_card_view(song: Song, binding=None) -> "tuple[Song, bool]":
+    """出卡路由（L-5 拍板，查歌/随机曲共用单源）：NET 等日服视图数据源的
+    用户，曲对象换 JP 视图（缺失回退原对象）并以日服口径出卡（jp=True，
+    不嵌国服 B50——NET 成绩 id 形状与 CN 视图 B50 消费侧失配）；其余绑定
+    原样返回 ``(song, False)``。视图判定走 score_service.view_of（数据源
+    注册表单源）。
+
+    日服限定**提示**与该路由解耦：提示只看「该曲是否国服缺席」，NET 用户
+    查到国服在架曲不因本路由误弹提示。
+    """
+    if binding is None or score_service.view_of(binding.service) != "jp":
+        return song, False
+    return (await song_service.jp_by_id(song.id)) or song, True
 
 
 async def chart_card_bytes(

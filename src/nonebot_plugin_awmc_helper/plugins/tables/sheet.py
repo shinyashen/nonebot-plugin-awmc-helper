@@ -16,7 +16,6 @@ from ...core.combo import (
 )
 from ...core.score import score_service
 from ...core.songs import song_service
-from ...core.types import FCType, FSType
 from ...core.utils import slow_notice
 from ...core.plates import (
     PLATE_KINDS,
@@ -31,56 +30,11 @@ from ...core.sources import Capability
 from ...core.render.score import DrawScore, score_list_height
 from ...core.render.plate_progress import plate_progress_bytes
 
-# 评价计划 → 判定函数（achievement / fc / fs）
-PLANS: dict[str, str] = {
-    "sssp": "rate:100.5",
-    "sss": "rate:100",
-    "ssp": "rate:99.5",
-    "ss": "rate:99",
-    "sp": "rate:98",
-    "s": "rate:97",
-    "ap": "fc:ap",
-    "fc": "fc:fc",
-    "fs": "fs:fs",
-    "fdx": "fs:fsd",
-    "fcp": "fc:fcp",
-    "fsp": "fs:fsp",
-}
-
 _LEVEL_ORDER = {lv: i for i, lv in enumerate(LEVEL_LIST)}
 """标级 → 序号（替代循环内 LEVEL_LIST.index 的 O(n) 查找）。"""
 
 
-def _plan_checker(plan: str):
-    """评价计划 → 判定谓词（说明文案无消费方，进度卡标题自拼）。"""
-    kind, value = PLANS[plan].split(":")
-    if kind == "rate":
-        return lambda ach, fc, fs: (ach or 0) >= float(value)
-    if kind == "fc":
-        order = {
-            "fc": (FCType.FC, FCType.FCP, FCType.AP, FCType.APP),
-            "fcp": (FCType.FCP, FCType.AP, FCType.APP),
-            "ap": (FCType.AP, FCType.APP),
-        }
-        allow = order[value]
-        return lambda ach, fc, fs: fc in allow
-    allow_fs = {
-        "fs": (FSType.FS, FSType.FSP, FSType.FSD, FSType.FSDP),
-        "fsp": (FSType.FSP, FSType.FSD, FSType.FSDP),
-        "fsd": (FSType.FSD, FSType.FSDP),
-    }
-    allow = allow_fs[value]
-    return lambda ach, fc, fs: fs in allow
-
-
-async def _level_entries(level: str) -> list[tuple]:
-    """全库指定标级的谱面条目（定数表/完成表/推分计划三处查询共用）。"""
-    from ...core.render.table_template import filter_level
-
-    return filter_level(await song_service.get_all(), level)
-
-
-async def _plate_completion_sheet(binding, version: str, kind: str, page: int) -> None:
+async def plate_completion_sheet(binding, version: str, kind: str, page: int) -> None:
     """完成表（NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条）。"""
     from ...core.render import table_template
 
@@ -115,7 +69,7 @@ async def _plate_completion_sheet(binding, version: str, kind: str, page: int) -
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
-async def _plate_progress_overview(
+async def plate_progress_overview(
     binding, plates, version: str, kind: str, page: int
 ) -> None:
     """进度总览（R7：NB DrawPlateProgress 版式总览图）。"""
@@ -210,7 +164,7 @@ _PLATE_SHAPE_VERSION = frozenset(f"{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}")
 """版本字字符集（含繁体/和制；形状检测用）。"""
 
 
-def _plate_shape(text: str) -> "tuple[str, str] | None":
+def plate_shape(text: str) -> "tuple[str, str] | None":
     """条件串的**牌组合形状**：(版本字, 牌种字)。
 
     只判形状不判合法性——「真将进度」这类用户显然想要牌子的输入保持旧

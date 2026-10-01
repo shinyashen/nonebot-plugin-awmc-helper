@@ -191,6 +191,22 @@ def list_jp_note(flags: list[bool]) -> str:
     return "列表中曲目均为日服限定歌曲" if all(flags) else "列表中包含日服限定歌曲"
 
 
+SINGLE_JP_NOTE = "此歌曲为日服限定"
+"""单曲卡面的日服限定标注（查歌卡与随机曲两消费方共用单源，勿再各持一份）。"""
+
+
+def chart_of_color(
+    song: Song, level_index: "LevelIndex", *, prefer: "SongType" = SongType.DX
+):
+    """指定难度的谱面对象：优先 ``prefer`` 侧、缺失回退另一侧（查分语境惯例
+    DX 优先；提示文案语境传 ``prefer=SongType.STANDARD``）。两侧都无返回
+    None。"""
+    fallback = SongType.STANDARD if prefer == SongType.DX else SongType.DX
+    return song.get_difficulty(prefer, level_index) or song.get_difficulty(
+        fallback, level_index
+    )
+
+
 async def cn_song_map(songs: "list[Song]") -> dict[int, Song | None]:
     """根 id → 国服视图曲对象（国服无此曲为 None）：逐曲「日服限定」判定的共用查询。
 

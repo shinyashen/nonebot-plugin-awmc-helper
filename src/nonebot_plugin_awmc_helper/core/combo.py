@@ -257,7 +257,7 @@ _PLAN_WORD: "dict[RateType, str]" = {
     RateType.AA: "aa",
     RateType.A: "a",
 }
-"""RATE 档 → 进度卡 plan 词（对齐既有 PLANS 键，提示文案回放用户口径）。"""
+"""RATE 档 → 进度卡 plan 词（提示文案回放用户口径）。"""
 
 
 def _fc_checker(minimum: FCType):

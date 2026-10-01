@@ -6,11 +6,11 @@ from nonebot.permission import SUPERUSER
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .sheet import (
-    _plate_shape,
+    plate_shape,
     combo_progress_card,
     combo_score_list_card,
-    _plate_completion_sheet,
-    _plate_progress_overview,
+    plate_completion_sheet,
+    plate_progress_overview,
 )
 from ...constants import DEFAULT_THEME
 from ...core.help import CommandSpec, help_registry
@@ -30,8 +30,6 @@ from ...core.songs import song_service
 from ...core.store import UserBinding
 from ...core.utils import parse_page, slow_notice, handle_errors
 from ...core.plates import (
-    PLATE_KINDS,
-    PLATE_KIND_ALIAS_CHARS,
     norm_plate,
     is_valid_plate,
     plate_kinds_hint,
@@ -40,16 +38,6 @@ from ...core.binding import SessionQueryBinding, at_tolerant
 from ...core.sources import Capability
 from ...core.render.tools import text_image_bytes
 from ...core.render.rating_table import draw_rating_table_cond
-
-# 牌种正则（牌种并集取自 core.plates 单源；正则交替最长优先，
-# 防将来新增牌种被单字牌种遮蔽；繁体/和制牌种字一并入交替）
-PLATE_KIND_ALT = "|".join(
-    sorted((*PLATE_KINDS, *PLATE_KIND_ALIAS_CHARS), key=len, reverse=True)
-)
-
-LEVEL_RE = r"([0-9]+\+?)"
-DS_RE = r"([0-9]+(?:\.[0-9]+)?\+?)"
-PLAN_RE = r"(sssp|sss|ssp|ss|sp|s|ap|fcp|fc|fsp|fs|fdx)"
 
 # 表格条件化统一入口（P2-c 收编：定数表/完成表尾缀并入，触发文本逐字不变；
 # 类别词/页码为尾缀附带参数）
@@ -90,7 +78,7 @@ async def _(
 
     # 牌形状回认：进度（无类别）与完成表；定数表无牌子语义不回认
     if suffix != "定数表" and category is None:
-        shape = _plate_shape(cond_text)
+        shape = plate_shape(cond_text)
         if shape is not None:
             version, kind = norm_plate(shape[0]), norm_plate(shape[1])
             if not is_valid_plate(version, kind):
@@ -101,9 +89,9 @@ async def _(
                 plates = await score_service.get_plates(
                     binding, f"{version}{kind}", notify_slow=slow_notice()
                 )
-                await _plate_progress_overview(binding, plates, version, kind, page)
+                await plate_progress_overview(binding, plates, version, kind, page)
             else:
-                await _plate_completion_sheet(binding, version, kind, page)
+                await plate_completion_sheet(binding, version, kind, page)
             return
 
     # 中文尾缀（进度/完成表/定数表）排除纯数字闲聊，裸数字等级/定数一律

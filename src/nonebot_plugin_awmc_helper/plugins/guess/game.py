@@ -11,8 +11,8 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core import store
 from ...config import plugin_config
 from ...constants import GENRE_TO_ZH, version_zh
-from ...core.songs import song_service
-from ...core.types import Song, SongType
+from ...core.songs import song_service, chart_of_color
+from ...core.types import Song, SongType, LevelIndex
 from ...core.utils import group_id_of
 from ...core.render import song as song_render
 from ...core.render.cover import crop_cover_randomly
@@ -60,8 +60,8 @@ class GuessGame:
 
     def _build_hints(self) -> list[str]:
         options = [
-            f"它的 Expert 难度是 {self._level(2)}",
-            f"它的 Master 难度是 {self._level(3)}",
+            f"它的 Expert 难度是 {self._level(LevelIndex.EXPERT)}",
+            f"它的 Master 难度是 {self._level(LevelIndex.MASTER)}",
             f"它的分类是 {GENRE_TO_ZH.get(self.song.genre, self.song.genre.value)}",
             f"它的版本是 {version_zh(self.song.version)}",
             f"它的曲师是 {self.song.artist}",
@@ -78,10 +78,8 @@ class GuessGame:
     def _is_dx(self) -> bool:
         return any(d.type == SongType.DX for d in self.song.get_difficulties())
 
-    def _level(self, index: int) -> str:
-        d = self.song.get_difficulty(
-            SongType.STANDARD, index
-        ) or self.song.get_difficulty(SongType.DX, index)
+    def _level(self, index: LevelIndex) -> str:
+        d = chart_of_color(self.song, index, prefer=SongType.STANDARD)
         return d.level if d else "无"
 
     def next_hint(self) -> str | None:

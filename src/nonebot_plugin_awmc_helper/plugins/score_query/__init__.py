@@ -17,4 +17,4 @@ __plugin_meta__ = PluginMetadata(
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
 )
 
-from .matchers import b50, ap50, ginfo, minfo  # noqa: F401
+from .matchers import b50, ap50, ginfo, minfo, combo50  # noqa: F401

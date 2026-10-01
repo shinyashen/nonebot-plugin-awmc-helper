@@ -173,9 +173,16 @@ async def songs(db):
     ],
 )
 def test_tokenizer_rules(text: str, kinds: list[str]):
-    """规则表逐条正例：kind 序列即词法形态（同层最长、层小优先）。"""
+    """规则表逐条正例：kind 序列即词法形态（同层最长、层小优先）。
+
+    开头清谱师动态规则：本文件若在其他加载了完整曲库的测试（tables 等，
+    会触发 ensure_designer_rules）之后运行，进程级层 1 规则会把「鸟加」等
+    兼任谱师别名的条件词抢走——词法正例必须在裸规则表上断言。
+    """
+    from nonebot_plugin_awmc_helper.core import combo
     from nonebot_plugin_awmc_helper.core.combo import tokenize
 
+    combo.set_designer_rules(())
     assert [t.kind for t in tokenize(text)] == kinds
 
 
@@ -715,7 +722,7 @@ def test_plan_of_matches_legacy_checkers():
     def probe(checker, ach=90.0, fc=None, fs=None):
         return checker(ach, fc, fs)
 
-    # fc 族：包含式（FC/FCP/AP/APP 全算），与旧 _plan_checker("fc") 同
+    # fc 族：包含式（FC/FCP/AP/APP 全算），与旧判型管线（已删）同口径
     checker, plan, kind = plan_of(parse_combo("fc"))
     assert (plan, kind) == ("fc", "fc")
     assert probe(checker, fc=FCType.FC)
@@ -807,23 +814,23 @@ async def test_combo_chart_entries_heuristic(db, songs):
     assert isinstance(await combo_chart_entries(parse_combo("雪辉dx")), ComboEmpty)
 
 
-def test_plate_shape():
+def testplate_shape():
     """牌子形状检测：牌组合文本 → (版本, 牌种)；非牌形状 → None。
 
     形状与合法性两段式——「真将」形状成立但牌单无此牌，由调用方拒绝
     （保持旧「没有找到牌子」文案），不落入条件分解。
     """
     from nonebot_plugin_awmc_helper.core.plates import norm_plate, is_valid_plate
-    from nonebot_plugin_awmc_helper.plugins.tables.sheet import _plate_shape
+    from nonebot_plugin_awmc_helper.plugins.tables.sheet import plate_shape
 
-    assert _plate_shape("祝将") == ("祝", "将")
-    assert _plate_shape("舞神") == ("舞", "神")
-    assert _plate_shape("樱舞舞") == ("樱", "舞舞")
-    assert _plate_shape("暁極") == ("暁", "極")  # 形状层不归一
-    assert _plate_shape("辉") is None  # 无牌种
-    assert _plate_shape("东方") is None  # 非牌文本
+    assert plate_shape("祝将") == ("祝", "将")
+    assert plate_shape("舞神") == ("舞", "神")
+    assert plate_shape("樱舞舞") == ("樱", "舞舞")
+    assert plate_shape("暁極") == ("暁", "極")  # 形状层不归一
+    assert plate_shape("辉") is None  # 无牌种
+    assert plate_shape("东方") is None  # 非牌文本
     # 合法性校验（归一后按牌单例外表）
-    ver, kind = _plate_shape("暁極")
+    ver, kind = plate_shape("暁極")
     assert (norm_plate(ver), norm_plate(kind)) == ("晓", "极")
     assert is_valid_plate(norm_plate("暁"), norm_plate("極"))
     assert not is_valid_plate("真", "将")  # 真无将

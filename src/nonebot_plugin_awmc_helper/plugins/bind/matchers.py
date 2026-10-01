@@ -24,6 +24,7 @@ from ...core.binding import (
     QQ_PLATFORMS,
     SERVICE_LXNS,
     SERVICE_DIVINGFISH,
+    BindingError,
     session_keys,
     binding_service,
     pending_bindings,
@@ -393,7 +394,7 @@ async def _(session: Session = UniSession()):
 
 
 @set_provider.handle()
-@handle_errors("设置失败，请稍后再试")
+@handle_errors("设置失败，请稍后再试", except_with_message=(BindingError,))
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = message.extract_plain_text().strip()
     service = {"0": SERVICE_DIVINGFISH, "1": SERVICE_LXNS, "2": SERVICE_NET}.get(arg)
@@ -403,10 +404,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         ).finish(at_sender=True)
     platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
-    try:
-        await binding_service.set_service(binding, service)
-    except Exception as e:
-        await UniMessage.text(f" {e}").finish(at_sender=True)
+    await binding_service.set_service(binding, service)
     await UniMessage.text(f" 数据源已切换为{SERVICE_ZH.get(service, service)}").finish(
         at_sender=True
     )

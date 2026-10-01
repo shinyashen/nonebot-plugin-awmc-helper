@@ -2,8 +2,9 @@
 
 主插件入口（官方《嵌套插件》结构）：
 - 核心服务在 ``core/``（唯一允许 import maimai_py 的地方）；
-- 全部用户指令在 ``plugins/`` 下的子插件中，按官方机制 ``nonebot.load_plugins`` 加载，
-  可用 ``awmc_disabled_plugins`` 配置按目录名停用。
+- 全部用户指令在 ``plugins/`` 下的子插件中，经 ``nonebot.load_plugin(完整模块名)``
+  逐个加载（不用 ``load_plugins(目录)``——其模块名按 CWD 推导，pip 安装后
+  ValueError，见 plugin_loader 注释），可用 ``awmc_disabled_plugins`` 配置停用。
 """
 
 from pathlib import Path

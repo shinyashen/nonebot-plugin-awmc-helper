@@ -13,19 +13,18 @@ import random as _random
 from nonebot import on_regex, on_command
 from nonebot.params import RegexGroup
 from nonebot.plugin import PluginMetadata
-from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import ZH_TO_GENRE, COLOR_TO_LEVEL_INDEX
 from ...core.calc import min_ds_of_ra, rise_candidates
 from ...core.help import CommandSpec, help_registry
 from ...core.score import UserScoreError, score_service
-from ...core.songs import song_service
+from ...core.songs import SINGLE_JP_NOTE, song_service
 from ...core.store import UserBinding
 from ...core.types import Song, Genre, SongType, ScoreExtend
 from ...core.utils import slow_notice, handle_errors
 from ...core.binding import SessionBinding
-from ...core.chart_card import chart_card_bytes
+from ...core.chart_card import chart_card_bytes, resolve_card_view
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.random_song",
@@ -48,32 +47,20 @@ mai_what_rise = on_command(
     "mai什么加分", aliases={"mai什么推分", "mai什么上分"}, block=True
 )
 
-_JP_ONLY_NOTE = "此歌曲为日服限定"
-"""随机结果国服缺席时的标注（与 music_query 查歌卡同措辞；两子插件不互
-import，文案各持一份，改动需同步）。"""
-
 
 async def _card_bytes(song: Song, binding: UserBinding) -> tuple[bytes, str]:
-    """出卡路由（L-5 拍板）：数据源为日服视图（现即 NET）的用户曲对象取日服
-    视图（缺失回退原对象）+ jp 卡（日服口径渲染、不嵌国服 B50——NET 成绩
-    id 形状与 CN 视图 B50 消费侧失配）；其余绑定原样出卡。视图判定走
-    score_service.view_of（数据源注册表单源）。
-
-    日服限定标注与路由**解耦**：只按「该曲是否国服缺席」（cn_song_map
-    同口径的 by_id 判定）拼接，NET 用户随到国服在架曲不弹提示。
-    返回 ``(图, 日服限定提示)``。
+    """出卡：路由经 core ``resolve_card_view`` 单源（L-5 拍板）；日服限定
+    标注只按「该曲是否国服缺席」拼接（与路由解耦，NET 用户随到国服在架曲
+    不弹提示）。返回 ``(图, 日服限定提示)``。
     """
-    if score_service.view_of(binding.service) == "jp":
-        song = (await song_service.jp_by_id(song.id)) or song
-        note = _JP_ONLY_NOTE if await song_service.by_id(song.id) is None else ""
-        return await chart_card_bytes(song, binding, jp=True), note
-    return await chart_card_bytes(song, binding), ""
+    card_song, jp = await resolve_card_view(song, binding)
+    note = SINGLE_JP_NOTE if jp and await song_service.by_id(song.id) is None else ""
+    return await chart_card_bytes(card_song, binding, jp=jp), note
 
 
 @random_chart.handle()
 @handle_errors("随机失败，请稍后再试")
 async def _(
-    session: Session = UniSession(),
     binding: UserBinding = SessionBinding(),
     groups: tuple = RegexGroup(),
 ):
@@ -105,7 +92,6 @@ async def _(
 @genre_random.handle()
 @handle_errors("随机失败，请稍后再试")
 async def _(
-    session: Session = UniSession(),
     binding: UserBinding = SessionBinding(),
     groups: tuple = RegexGroup(),
 ):
@@ -129,7 +115,7 @@ async def _(
 
 @mai_what.handle()
 @handle_errors("随机失败，请稍后再试")
-async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
+async def _(binding: UserBinding = SessionBinding()):
     got = await song_service.random(
         exclude_utage=True, jp=score_service.view_of(binding.service) == "jp"
     )
@@ -144,7 +130,7 @@ async def _(session: Session = UniSession(), binding: UserBinding = SessionBindi
 
 @mai_what_rise.handle()
 @handle_errors("推荐失败，请稍后再试", except_with_message=(UserScoreError,))
-async def _(session: Session = UniSession(), binding: UserBinding = SessionBinding()):
+async def _(binding: UserBinding = SessionBinding()):
     """mai什么加分：NB 版 get_mai_what 语义——基于 B50 末位 RA 反推定数区间随机推荐单曲。
 
     未绑定 / B50 拉取失败 / 无候选时退化为普通随机曲目（与原版行为一致）。
