@@ -45,6 +45,10 @@ _REQUEST_HEADERS = {
 # 配信順リスト根页（MAGiCAL；页内互链全部前代リスト，可自发现全曲页面编号）
 LIST_ROOT_IDS = [1011740]
 INVENTORY_KV = "gamerch_page_inventory"
+# 譜面製作者一覧：別名義声明只存在于这三页（EXPERT 两页无声明、合作・不明页
+# 是非人节，2026-10-01 调研定稿，见 local/reference/designer-alias-notes.md §3）
+ALIAS_SOURCE_IDS = (534017, 1003533, 534036)
+ALIAS_GRAPH_KV = "designer_alias_graph"
 _MAX_LIST_PAGES = 30
 _FETCH_DELAY = 0.5
 # 难度行 Lv 单元格形状：3 / 13+ / 14?（宴谱行带 kanji 前缀，不会 fullmatch）
@@ -449,3 +453,75 @@ async def apply_fill() -> tuple[int, bool]:
         f"{summary.get('changed', 0)}）"
     )
     return summary.get("applied", 0), bool(summary.get("changed"))
+
+
+# 譜面製作者一覧的分节标题 wiki 编辑不统一（534035 用 h3 其余 h2），兼容 2~4 级
+_SECTION_HEADINGS = ("h2", "h3", "h4")
+_ALIAS_DECL_RE = re.compile(r"別名義((?:「[^」]+」)+)")
+# 非「人」节（合作・不明页的谱面清单节；三声明页不含，防御性保留）
+_NON_PERSON_SECTIONS = {"合作", "不明", "maimai TEAM"}
+
+
+def parse_alias_graph(html: str) -> dict[str, list[str]]:
+    """譜面製作者一覧页 → 归一化前（原始串）的 节主名 → 別名義列表。
+
+    只提取结构化声明（``別名義「A」「B」``）；表内名義变体不在此处（属
+    curated 取证范围，见 designer-alias-notes.md §5）。非人节跳过。
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    h1 = soup.find("h1", class_="content-head")
+    if h1 is None or "譜面製作者一覧" not in h1.get_text(strip=True):
+        raise ValueError("页面不是譜面製作者一覧（H1 校验失败），wiki 版式可能已变")
+    main = soup.select_one("body .main")
+    if main is None:
+        return {}
+    graph: dict[str, list[str]] = {}
+    for h in main.find_all(_SECTION_HEADINGS):
+        name = h.get_text(strip=True)
+        if not name or name in _NON_PERSON_SECTIONS:
+            continue
+        # 节内到下一同级分节标题为止的首个表格前文本＝声明所在区
+        for node in h.find_all_next():
+            if node.name in _SECTION_HEADINGS or node.name == "table":
+                break
+            text = node.get_text(" ", strip=True)
+            if not text:
+                continue
+            for m in _ALIAS_DECL_RE.finditer(text):
+                aliases = re.findall(r"「([^」]+)」", m.group(1))
+                if aliases:
+                    graph.setdefault(name, []).extend(aliases)
+    return graph
+
+
+async def build_alias_graph(http, *, max_age: int) -> dict[str, list[str]]:
+    """三页声明 → 归一化前 别名图（kv 持久化，TTL 同页面缓存）。
+
+    返回值为原始串映射（主名/别名均未归一，调用方负责 normalize）；
+    抓取/解析失败时抛异常，由调用方决定降级。
+    """
+    prev_raw = await store.kv_get(ALIAS_GRAPH_KV)
+    prev: dict = {}
+    if prev_raw:
+        try:
+            prev = json.loads(prev_raw)
+        except ValueError:
+            prev = {}
+    fetched_at = float(prev.get("__fetched_at__", 0))
+    if fetched_at and max_age > 0 and time.time() - fetched_at < max_age * 3600:
+        return {k: v for k, v in prev.items() if not k.startswith("__")}
+
+    graph: dict[str, list[str]] = {}
+    for page_id in ALIAS_SOURCE_IDS:
+        html = await fetch_page_text(http, f"{WIKI_BASE}{page_id}", max_age=max_age)
+        for name, aliases in parse_alias_graph(html).items():
+            graph.setdefault(name, [])
+            for a in aliases:
+                if a not in graph[name]:
+                    graph[name].append(a)
+    payload: dict[str, object] = dict(graph)
+    payload["__fetched_at__"] = time.time()
+    await store.kv_set(ALIAS_GRAPH_KV, json.dumps(payload, ensure_ascii=False))
+    n_alias = sum(len(v) for v in graph.values())
+    logger.info(f"songdb: gamerch 別名義图 {len(graph)} 人 {n_alias} 别名")
+    return graph
