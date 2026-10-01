@@ -27,7 +27,11 @@ from ...core.plates import (
 )
 from ...core.binding import service_display
 from ...core.sources import Capability
-from ...core.render.score import DrawScore, score_list_height
+from ...core.render.score import (
+    DrawScore,
+    score_list_page,
+    score_list_height,
+)
 from ...core.render.plate_progress import plate_progress_bytes
 
 _LEVEL_ORDER = {lv: i for i, lv in enumerate(LEVEL_LIST)}
@@ -258,8 +262,7 @@ async def combo_progress_card(
         )
     elif category in ("已完成", "未完成"):
         data = completed if category == "已完成" else unfinished
-        total_pages = max(1, -(-(len(data)) // 80))
-        real = min(max(page, 1), total_pages)
+        total_pages, real = score_list_page(len(data), page)
         display = data[(real - 1) * 80 : real * 80]
         y_size = played_rows(len(display)) * 109
         card = DrawScore(240 + y_size + 120, service=service)

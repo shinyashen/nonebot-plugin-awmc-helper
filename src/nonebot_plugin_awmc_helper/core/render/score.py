@@ -35,6 +35,19 @@ from .table_layout import (
 _DEFAULT_TEXT_COLOR = TEXT_BLUE
 
 
+SCORE_LIST_PER_PAGE = 80
+"""分数列表每页行数（tables 条件列表与第三方扩展共用）。"""
+SCORE_LIST_HEAD_HEIGHT = 280
+"""分数列表画布头部固定高度（总高 = 头部 + :func:`score_list_height`）。"""
+
+
+def score_list_page(total: int, page: int) -> "tuple[int, int]":
+    """分数列表翻页钳制 → (end_page, real_page)（80/页口径单源，
+    主插件条件列表与导分插件 pc 列表共用）。"""
+    end_page = max(1, -(-total // SCORE_LIST_PER_PAGE))
+    return end_page, min(max(page, 1), end_page)
+
+
 def score_list_height(total: int, page: int, end_page: int) -> int:
     """分数列表行卡区高度（NB 版式算式，tables 分数列表与第三方扩展共用）。
 
