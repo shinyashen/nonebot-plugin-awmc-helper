@@ -743,14 +743,27 @@ class SongService:
         ]
 
     async def by_note_designer(self, designer: str, scope: Scope = "cn") -> list[Song]:
-        """谱师查歌（任意谱面谱师名匹配，大小写不敏感）。"""
-        kw = designer.lower()
-        return [
-            s
-            for s in await self._songs_of_scope(scope)
-            # 谱师缺省（真实数据 SD 低难度常无谱师）按「0 即 -」约定参与匹配
-            if any((d.note_designer or "-").lower() == kw for d in s.get_difficulties())
-        ]
+        """谱师查歌（等价类包含式，designer-alias-notes.md §6.2）。
+
+        查询先过 QUERY_ALIASES 解析（中文昵称/单字，显式语境专用）→ 等价类
+        needle 集（本名/別名義/curated 名义串），任一 needle 整串包含于
+        note_designer 即命中；精确命中排前。用户可见行为变化：由旧版
+        「实名精确相等」扩展为等价类包含式（Q55 拍板）。
+        """
+        from .designer import match as _designer_match
+        from .designer import build_needles as _build_needles
+
+        needles = _build_needles(designer)
+        exact: list[Song] = []
+        partial: list[Song] = []
+        for s in await self._songs_of_scope(scope):
+            names = [(d.note_designer or "").strip() for d in s.get_difficulties()]
+            if any(_designer_match(n, needles) for n in names if n and n != "-"):
+                if any(n.lower() == designer.lower() for n in names):
+                    exact.append(s)
+                else:
+                    partial.append(s)
+        return exact + partial
 
     async def random(
         self,

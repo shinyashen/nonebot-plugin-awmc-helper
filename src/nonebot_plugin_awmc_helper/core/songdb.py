@@ -1681,6 +1681,13 @@ async def refresh_all(
                 extra_summary["gamerch_applied"] = g_applied
         except Exception:
             logger.exception("songdb: gamerch 补充失败（不影响规范表）")
+    # 谱师別名義图（L1）：随刷新路径顺带抓取（唯一抓取时机；词表/匹配纯读）
+    try:
+        from . import designer
+
+        await designer.get_alias_graph(fetch=True)
+    except Exception:
+        logger.exception("songdb: gamerch 別名義图抓取失败（不影响规范表）")
     # 归并在外部源之后：本轮由外部源创建的曲即可清理对应 pending 行
     try:
         await flush_pending()

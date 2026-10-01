@@ -120,6 +120,47 @@ async def test_alias_title_duplicate_filtered(songs):
 
 
 @pytest.mark.asyncio
+async def test_by_note_designer_alias_class(songs):
+    """谱师查歌等价类包含式（designer-alias-notes §6.2，Q55 拍板的行为变化）。
+
+    样例库谱师＝はっぴー（SD EX）/某S氏（SD MAS）/まぐランド（默认）；
+    L1 图经 use_memo 注入（等价 onungbus 曲库快照三页解析结果的子集）。
+    """
+    from mocks import seed_service
+
+    from nonebot_plugin_awmc_helper.core import designer
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await seed_service(song_service, list(songs))
+    try:
+        designer.use_memo({"はっぴー": ["緑風 犬三郎", "原田ひろゆき"]})
+        # 本名精确命中（exact 排前语义：全量本名曲集合）
+        got = await song_service.by_note_designer("はっぴー")
+        assert got
+        assert all(
+            any((d.note_designer or "") == "はっぴー" for d in s.get_difficulties())
+            for s in got
+        )
+        # 查询别名（中文昵称）命中同一批
+        got2 = await song_service.by_note_designer("哈皮")
+        assert {s.id for s in got2} == {s.id for s in got}
+        # 声明别名（L1 马甲）命中同一批——旧版精确匹配命不中的行为
+        got3 = await song_service.by_note_designer("緑風 犬三郎")
+        assert {s.id for s in got3} == {s.id for s in got}
+        # 假名脚本折叠：片假名输入命中平假名本名
+        got4 = await song_service.by_note_designer("ハッピー")
+        assert {s.id for s in got4} == {s.id for s in got}
+        # 单字查询别名（显式语境）：「狗」→ はっぴー
+        got5 = await song_service.by_note_designer("狗")
+        assert {s.id for s in got5} == {s.id for s in got}
+        # 未知名 → 空结果不抛
+        assert await song_service.by_note_designer("存在しない譜面師") == []
+    finally:
+        designer.use_memo({})  # 还原无 L1 图状态，防污染同 worker 后续用例
+        song_service._ready.clear()
+
+
+@pytest.mark.asyncio
 async def test_filters(songs):
     from nonebot_plugin_awmc_helper.core.songs import song_service
 

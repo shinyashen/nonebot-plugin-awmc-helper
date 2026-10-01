@@ -49,6 +49,8 @@ from .score import score_service
 from .songs import song_service
 from .plates import norm_plate, version_code_of
 from .songdb import State, ensure_ongeki_titles
+from .designer import match as _designer_match
+from .designer import build_needles as _designer_needles
 from ..constants import normalize_text
 
 # ---------------------------------------------------------------- 模型
@@ -567,7 +569,9 @@ def set_designer_rules(rules: "tuple[_Rule, ...]") -> None:
     _EXTRA_RULES = rules
 
 
-def _designer_rules_of(designers: "set[str]") -> "tuple[_Rule, ...]":
+def _designer_rules_of(
+    designers: "set[str]", allow_single: "frozenset[str] | set[str]" = frozenset()
+) -> "tuple[_Rule, ...]":
     """谱师实名集 → 层 1 动态规则（归一去重、长度降序 alternation）。
 
     注册口径：合作谱串（「A×B」形态）按合作符拆分出原子实名一并注册——
@@ -575,6 +579,10 @@ def _designer_rules_of(designers: "set[str]") -> "tuple[_Rule, ...]":
     任意相邻实名）；归一后 ≥2 字符（单字实名不注册——与难度色/条件原子
     碰撞且误触发面大）。⚠️ 只拆明确的合作符 ×/✕，不拆 ASCII 字母
     （防「box」类英文名误拆）。
+
+    ``allow_single``：豁免 ≥2 字限制的白名单（QUERY_ALIASES 的单字查询
+    别名，如「翠」「卢」——用户裁定入表：combo50 整串锚定语境下误触发
+    面窄；自动注册的实名仍维持 ≥2 字）。
     """
     names: "set[str]" = set()
     for designer in designers:
@@ -583,7 +591,10 @@ def _designer_rules_of(designers: "set[str]") -> "tuple[_Rule, ...]":
         for part in re.split(r"[×✕]", normalized):
             if len(part) >= 2:
                 names.add(part.strip())
-    ordered = sorted((n for n in names if len(n) >= 2), key=len, reverse=True)
+    singles = {normalize_text(s) for s in allow_single if len(normalize_text(s)) == 1}
+    ordered = sorted(
+        (n for n in names if len(n) >= 2 or n in singles), key=len, reverse=True
+    )
     if not ordered:
         return ()
     return (
@@ -602,16 +613,30 @@ async def ensure_designer_rules() -> None:
     曲库未就绪时跳过（非阻塞窥探）——冷启动窗口谱师词暂不生效，任一查询
     加载曲库后的下一条消息起生效；不在闲聊路径上触发曲库加载。实名取
     CN/JP 视图并集（两视图谱师名差异极小，并集一次覆盖）。
+    词表另含：QUERY_ALIASES 查询别名（中文昵称/单字，designer-alias-notes
+    §9；单字条目入表是用户裁定——combo50 整串锚定使误触发面窄）与 L1
+    别名图（gamerch 別名義，best-effort 不阻塞；curated 名义串大多已在
+    曲库值域内，缺席者经查询别名/实名包含式仍可达）。
     """
     if not song_service.is_loaded():
         return
+    from . import designer as _designer_mod
+
     designers: "set[str]" = set()
     for songs in (await song_service.get_all(), await song_service.jp_all()):
         for song in songs:
             for diff in song.get_difficulties():
                 if diff.note_designer:
                     designers.add(diff.note_designer)
-    set_designer_rules(_designer_rules_of(designers))
+    designers.update(_designer_mod.QUERY_ALIASES)
+    graph = await _designer_mod.get_alias_graph()
+    if graph:
+        designers.update(graph)
+        for aliases in graph.values():
+            designers.update(aliases)
+    # 单字查询别名豁免 ≥2 字限制（用户裁定，见 _designer_rules_of 文档）
+    singles = {a for a in _designer_mod.QUERY_ALIASES if len(normalize_text(a)) == 1}
+    set_designer_rules(_designer_rules_of(designers, allow_single=singles))
 
 
 def tokenize(text: str, *, numeric_level: bool = False) -> "list[Token]":
@@ -1072,16 +1097,19 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
         elif t.kind == "fit":
             conds.append(_fit_cond())
         elif t.kind == "designer":
-            # S-10 谱师：命中归一名按「包含式」匹配谱面 note_designer
-            # （覆盖合作谱「A×B」形态；短名已在注册侧过滤）
+            # S-10 谱师：查询名 → 等价类 needle 集（本名/別名義/curated 名义
+            # 串 + 假名折叠变体，core/designer.py），任一 needle 整串包含于
+            # note_designer 即命中（覆盖合作串与马甲；词表侧已含别名，
+            # token 值可能是昵称「翠」或实名「サファ太」，统一经 needles 解析）
             name: str = t.value
+            needles = _designer_needles(name)
             conds.append(
                 Cond(
                     CondType.DESIGNER,
                     key=f"designer:{name}",
                     label=t.text,
-                    chart=lambda s, d, _cur, _n=name: (
-                        _n in normalize_text(d.note_designer or "")
+                    chart=lambda s, d, _cur, _ns=frozenset(needles): _designer_match(
+                        d.note_designer or "", _ns
                     ),
                     value=name,
                     single_chart=True,
