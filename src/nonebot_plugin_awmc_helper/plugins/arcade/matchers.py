@@ -217,9 +217,11 @@ async def _(
     # 按命中的指令/别名分流添加与删除（CommandArg 不含指令词，不能按参数
     # 文本判断动词——「删除机厅别名 X」的参数只有「X」）
     if "删除" in "".join(command):
-        if not args:
-            await UniMessage.text(" 格式：删除机厅别名 <别名>").finish(at_sender=True)
-        ok = await store.remove_arcade_alias_by_name(args[0].strip())
+        # 参数整段即别名（与添加侧 args[1] 保留完整余词对称——多词别名
+        # 加得上也删得掉）
+        if not text:
+            await UniMessage.text("格式：删除机厅别名 <别名>").finish(at_sender=True)
+        ok = await store.remove_arcade_alias_by_name(text.strip())
         await UniMessage.text(" 已删除别名" if ok else "未找到该别名").finish(
             at_sender=True
         )

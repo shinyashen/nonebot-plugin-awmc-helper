@@ -425,6 +425,10 @@ async def test_delete_arcade_alias(app: App, arcade_enabled):
 
     await _run(app, am.arcade_alias_set, "删除机厅别名 Game", "已删除别名")
     assert "Game" not in [a.alias for a in await store.get_arcade_aliases(10000)]
+    # 多词别名加得上删得掉（与添加侧保留完整余词对称，复审补）
+    await store.add_arcade_alias(10000, "My Arcade")
+    await _run(app, am.arcade_alias_set, "删除机厅别名 My Arcade", "已删除别名")
+    assert "My Arcade" not in [a.alias for a in await store.get_arcade_aliases(10000)]
     # 删除不存在的别名
     await _run(app, am.arcade_alias_set, "删除机厅别名 Game", "未找到该别名")
     # 添加路径不受影响：首参数叫「删除」也照常按店名添加
