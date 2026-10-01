@@ -133,8 +133,9 @@ def draw_rating_table(
         entries,
         theme=theme,
         lv15=(level == "15"),
-        header_text=f"Level. {level}",
+        header_text=level,
         header_prefix="Level.",
+        suffix="完成表",
         checker=checker,
     )
 
@@ -146,14 +147,16 @@ def draw_rating_table_cond(
     entries: list[tuple[Song, SongDifficulty]],
     *,
     header_text: str,
+    header_prefix: "str | None" = None,
     theme: str = DEFAULT_THEME,
     checker: "Callable[[Any, Any, Any], bool] | None" = None,
     by_level: bool = True,
 ) -> bytes:
     """条件化完成表（P2-c）：调用方提供现算/文件底图，成绩按谱面键集过滤。
 
-    ``header_text``：标题大字（单等级条件传 "Level. {level}" 保收编等价，
-    其余传条件 label 串——规范化显示，评级档大写）；无 Level. 前缀。
+    ``header_text``：标题大字（单等级条件传等级串配 ``header_prefix="Level."``
+    ——「Level. xx」整段日文字体口径，2026-10-01；其余传条件 label 串——
+    规范化显示，评级档大写，无 Level. 前缀）。
     ``checker``：同 :func:`draw_rating_table`。``by_level`` 必须与**底图
     实际分组**一致（调用方按 single_level 是否为 None 传入）：跨等级条件
     底图=标级大类（True）；「单等级+判型」混合条件（如 14+sss+完成表）
@@ -173,7 +176,8 @@ def draw_rating_table_cond(
         theme=theme,
         lv15=False,
         header_text=header_text,
-        header_prefix=None,
+        header_prefix=header_prefix,
+        suffix="完成表",
         checker=checker,
         by_level=by_level,
     )
@@ -189,6 +193,7 @@ def _draw_rating_core(
     lv15: bool,
     header_text: str,
     header_prefix: "str | None" = "Level.",
+    suffix: str = "",
     checker: "Callable[[Any, Any, Any], bool] | None" = None,
     by_level: bool = False,
 ) -> bytes:
@@ -199,6 +204,7 @@ def _draw_rating_core(
     （底图原样）；``checker=None`` 回退旧 ≥100 分界。lv15 大格分支保持
     Hoshino 惯例不画底。``by_level``：条件版（跨等级）底图按标级大类分组 →
     盖章同序（``group_by_level``）；单等级版走 ``group_by_ds`` 定数节。
+    ``suffix``：表型说明（「完成表」，随表头居中，2026-10-01 QoL）。
     """
     dr = ImageDraw.Draw(im)
     combo_mode = plan in ("fc", "fcp", "ap")
@@ -224,9 +230,11 @@ def _draw_rating_core(
             stats.add_sync(score.fs)
 
     # 标题 + 统计头（普通分支坐标；lv15 由模板自身布局承载，统计同位）
-    # 条件版无 Level. 前缀（QoL：多余前缀去除）
+    # 条件版无 Level. 前缀（QoL：多余前缀去除）；表型说明随表头居中
     title_y = 160
-    table_template.draw_level_header(dr, header_text, title_y, prefix=header_prefix)
+    table_template.draw_level_header(
+        dr, header_text, title_y, prefix=header_prefix, suffix=suffix
+    )
 
     im.alpha_composite(assets.pic("complete.png"), (251, 190))
     dr.text(

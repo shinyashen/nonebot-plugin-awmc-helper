@@ -495,37 +495,46 @@ async def draw_plate_table_with_fallback(
 
 
 def draw_level_header(
-    dr: ImageDraw.ImageDraw, level: str, y: int, *, prefix: "str | None" = "Level."
+    dr: ImageDraw.ImageDraw,
+    level: str,
+    y: int,
+    *,
+    prefix: "str | None" = "Level.",
+    suffix: str = "",
 ) -> None:
-    """完成表「Level. {level}」大字表头（rating_table/table_template 共用）。
+    """完成表/定数表大字表头（rating_table/table_template 共用）。
 
     两版式 y 有意错位（普通分支统计头不同），由调用方传入。
     ``prefix=None`` 为条件化表头（P2-c）：无 Level. 前缀、直接画条件串，
-    超 4 显示字降字号防溢出。
+    超 4 显示字降字号防溢出。``suffix``：表型说明（「完成表」/「定数表」，
+    2026-10-01 QoL——标题位原本只承载 Level./条件串，表型无处说明）。
+
+    字体口径（2026-10-01 用户拍板）：「Level. xx」整段日文字体（RODIN，
+    数字原为 RODIN，P2-c 曾误改 HAN）；条件串与表型说明统一中文字体
+    （HAN——Rodin 无简中字形）。整块标题按实测宽度水平居中于画布中轴
+    700（原左起 495 固定位，长条件串头重脚轻）。
     """
+    parts: "list[tuple[str, Any]]" = []
     if prefix:
+        parts.append((prefix, font(70, FONT_RODIN)))
+        parts.append((level, font(100 if _width(level) <= 4 else 60, FONT_RODIN)))
+    else:
+        parts.append((level, font(100 if _width(level) <= 4 else 60, FONT_HAN)))
+    if suffix:
+        parts.append((f" {suffix}", font(70, FONT_HAN)))
+    total = sum(dr.textlength(text, font=fnt) for text, fnt in parts)
+    x = 700 - total / 2
+    for text, fnt in parts:
         dr.text(
-            (495, y),
-            prefix,
-            font=font(70, FONT_RODIN),
+            (x, y),
+            text,
+            font=fnt,
             fill=FONT_BLUE,
             anchor="ld",
             stroke_width=8,
             stroke_fill=(255, 255, 255, 255),
         )
-        x = 750
-    else:
-        x = 495
-    dr.text(
-        (x, y),
-        level,
-        # 值文本 = 条件串（含中文）：中文字体（Rodin 无简中字形无 fallback）
-        font=font(100 if _width(level) <= 4 else 60, FONT_HAN),
-        fill=FONT_BLUE,
-        anchor="ld",
-        stroke_width=8,
-        stroke_fill=(255, 255, 255, 255),
-    )
+        x += dr.textlength(text, font=fnt)
 
 
 def _width(text: str) -> int:
@@ -566,7 +575,7 @@ async def rating_table_text_bytes(
     """
     im = await rating_table_base_image(entries, level)
     dr = ImageDraw.Draw(im)
-    draw_level_header(dr, level, 220)
+    draw_level_header(dr, level, 220, suffix="定数表")
     return image_to_bytes(scale_output(im))
 
 
@@ -576,5 +585,5 @@ async def rating_table_cond_text_bytes(
     """条件化定数表（P2-c）：底图按条件谱面集现算（不落盘）、条件串表头。"""
     im = await rating_table_base_image(entries)
     dr = ImageDraw.Draw(im)
-    draw_level_header(dr, header_text, 220, prefix=None)
+    draw_level_header(dr, header_text, 220, prefix=None, suffix="定数表")
     return image_to_bytes(scale_output(im))

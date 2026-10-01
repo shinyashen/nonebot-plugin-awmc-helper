@@ -165,13 +165,16 @@ async def _(
         )
     else:
         im = await table_template.rating_table_base_image(entries, single_level)
-        table_header = f"Level. {single_level}" if single_level else header
         png = draw_rating_table_cond(
             im,
             plan,
             scores.scores,
             entries,
-            header_text=table_header,
+            # 单等级表头 = Level. 前缀 + 等级（「Level. xx」整段日文字体口径，
+            # 2026-10-01）；条件版 = 规范化条件串，无前缀。表型说明「完成表」
+            # 由渲染层补并整体居中
+            header_text=single_level if single_level else header,
+            header_prefix="Level." if single_level else None,
             theme=theme,
             checker=checker,
             # 盖章分组与底图一致：单等级+判型混合（14+sss+完成表）底图为

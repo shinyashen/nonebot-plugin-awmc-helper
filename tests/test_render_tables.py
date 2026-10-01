@@ -166,3 +166,46 @@ async def test_rating_template_draw_offloads_loop(songs, monkeypatch, tmp_path):
     assert draw_threads, "绘制入口未被调用"
     assert all(t != loop_thread for t in draw_threads), "绘制跑在事件循环线程内"
     assert ticks_during_draw > 0, "绘制期间事件循环未调度其它协程"
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_level_header_suffix_centered(monkeypatch):
+    """表头 QoL（2026-10-01）：表型说明（定数表/完成表）随表头整体水平居中；
+    「Level. xx」整段日文字体（RODIN），条件串与后缀统一中文字体（HAN）。
+    font() 进程级 lru_cache 同参同对象，按 is 断言字体口径。"""
+    from PIL import Image as PILImage
+    from PIL import ImageDraw
+
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.render.fonts import (
+        FONT_HAN,
+        FONT_RODIN,
+        font,
+    )
+
+    dr = ImageDraw.Draw(PILImage.new("RGBA", (1400, 400)))
+    drawn: list[tuple[tuple, str, object]] = []
+    orig_text = ImageDraw.ImageDraw.text
+
+    def spy(self, xy, text, *a, **kw):
+        drawn.append((xy, str(text), kw.get("font")))
+        return orig_text(self, xy, text, *a, **kw)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy)
+
+    # 单等级（13定数表）：Level. 前缀 + 等级（RODIN）+ 表型说明（HAN）
+    table_template.draw_level_header(dr, "13", 220, suffix="定数表")
+    assert [t for _, t, _ in drawn] == ["Level.", "13", " 定数表"]
+    assert drawn[0][2] is font(70, FONT_RODIN)
+    assert drawn[1][2] is font(100, FONT_RODIN)
+    assert drawn[2][2] is font(70, FONT_HAN)
+    total = sum(dr.textlength(t, font=f) for _, t, f in drawn)
+    assert abs(drawn[0][0][0] - (700 - total / 2)) < 1.0  # 块居中于画布中轴
+
+    # 条件版（东方定数表）：无 Level. 前缀，条件串与后缀全 HAN
+    drawn.clear()
+    table_template.draw_level_header(dr, "东方", 220, prefix=None, suffix="定数表")
+    assert [t for _, t, _ in drawn] == ["东方", " 定数表"]
+    assert drawn[0][2] is font(100, FONT_HAN)
+    assert drawn[1][2] is font(70, FONT_HAN)
