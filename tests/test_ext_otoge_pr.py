@@ -165,3 +165,40 @@ async def test_pr_list_anonymous_without_token(otoge_pr, monkeypatch):
     monkeypatch.setattr(plugin_config, "awmc_github_token", None)
     await otoge_pr.list_open_song_prs()
     assert "authorization" not in route.calls.last.request.headers
+
+
+def test_parse_multi_collision_markers(otoge_pr):
+    """2026-09-30 PR #1206 head 实测形态：连续/嵌套/空侧标记（105 行）。
+
+    三段式无法匹配，剥标记行后两侧数据内容应完整保留。
+    """
+    broken = """[
+  {
+    "title": "Old Song",
+    "date": "NEW"
+  },
+  {
+    "title": "XODUS",
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+    "sort": "713",
+>>>>>>> Stashed changes
+=======
+    "sort": "714",
+>>>>>>> Stashed changes
+    "date_added": "20260925"
+  },
+  {
+    "title": "Empty Side",
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+    "date": "NEW"
+  }
+]"""
+    parsed = otoge_pr.parse_music_ex(broken)
+    assert parsed is not None
+    entries, layer = parsed
+    assert layer == "markers"
+    titles = {e["title"] for e in entries}
+    assert {"Old Song", "XODUS", "Empty Side"} <= titles

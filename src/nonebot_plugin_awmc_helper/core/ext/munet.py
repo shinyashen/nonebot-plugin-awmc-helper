@@ -467,6 +467,12 @@ async def run_batch_supplement() -> dict:
         result["merge"] = {
             k: summary.get(k) for k in ("applied", "changed") if k in summary
         }
+        # 累计留痕已入库曲 id：重建删除判定的「MuNET 在列」信号
+        # （munet-alias-notes §七——otoge 侧回滚不应导致已入库曲被误删）
+        known = await store.kv_get("munet_batch_ids")
+        merged_ids = set(known) if isinstance(known, list) else set()
+        merged_ids |= set(docs_by_base)
+        await store.kv_set("munet_batch_ids", sorted(merged_ids))
     if alias_items:
         result["aliases"] = await store.upsert_song_aliases("munet", alias_items)
     try:

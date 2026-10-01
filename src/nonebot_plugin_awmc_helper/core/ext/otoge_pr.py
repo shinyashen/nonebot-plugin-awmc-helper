@@ -10,7 +10,6 @@ L3 段级抢救兜底；任一层不可解析即放弃该分支（宁缺毋滥�
 
 import re
 import json
-from dataclasses import field, dataclass
 
 import httpx
 from nonebot import logger
@@ -28,16 +27,11 @@ _BRANCH_PREFIX = "maimai/update-"
 _MARKER_BLOCK = re.compile(
     r"<<<<<<<[^\n]*\n(.*?)\n?=======\n(.*?)\n?>>>>>>>[^\n]*\n?", re.S
 )
-
-
-@dataclass
-class PrSnapshot:
-    """单个 PR 分支的解析结果。"""
-
-    number: int
-    branch: str
-    entries: list[dict] = field(default_factory=list)
-    layer: str = ""  # strict / markers / salvage
+# 标记行本身（不含内容）：stash pop 多重撞车时产生连续/嵌套/空侧标记
+# （2026-09-30 PR #1206 实测 105 行：`<<<<<<<` 三连同挂、`<<<<<<<` 直连
+# `>>>>>>>` 无 ours 侧、`=======` 与 `>>>>>>>` 交替续段），此时三段式无法
+# 匹配，直接剥掉所有标记行即可还原——数据内容全部还留在两侧之间。
+_MARKER_LINE = re.compile(r"^(?:<{7}|={7}|>{7}).*$", re.M)
 
 
 def _balanced_end(text: str, start: int) -> int | None:
@@ -68,9 +62,9 @@ def _balanced_end(text: str, start: int) -> int | None:
 def parse_music_ex(text: str) -> tuple[list[dict], str] | None:
     """music-ex.json 文本 → (条目列表, 解析层级)；完全不可解析 → None。
 
-    层级语义：strict（原样合法）；markers（git 冲突标记分段后合法）；salvage
-    （段级抢救——只保留能独立解析且带合法 title 的对象，被冲突切碎的对象会
-    丢失，故只作最后兜底，消费端以「条数 ≥ main」门校验）。
+    层级语义：strict（原样合法）；markers（冲突标记可三段式分段或整行剥离后
+    合法）；salvage（段级抢救——只保留能独立解析且带合法 title 的对象，被冲突
+    彻底切碎的对象会丢失，只作最后兜底，消费端以「条数 ≥ main」门校验）。
     """
     try:
         data = json.loads(text)
@@ -82,6 +76,16 @@ def parse_music_ex(text: str) -> tuple[list[dict], str] | None:
     if repaired != text:
         try:
             data = json.loads(repaired)
+        except ValueError:
+            data = None
+        if isinstance(data, list):
+            return [e for e in data if isinstance(e, dict)], "markers"
+    # 多重撞车形态（连续/嵌套/空侧标记）：三段式无能为力，剥所有标记行后
+    # 两侧数据内容都还在，实测可完整解析（PR #1206 head 1599 条含三新曲）
+    stripped = _MARKER_LINE.sub("", text)
+    if stripped != text:
+        try:
+            data = json.loads(stripped)
         except ValueError:
             data = None
         if isinstance(data, list):

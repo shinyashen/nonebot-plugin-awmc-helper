@@ -173,3 +173,26 @@ async def test_pending_titles_skip_over_attempts_threshold(db, monkeypatched_mun
     titles = await munet._pending_titles()
     assert "新鲜曲" in titles
     assert "超限曲" not in titles
+
+
+async def test_munet_ids_guard_against_otoge_rollback(db, monkeypatched_munet):
+    """otoge 侧回滚（三曲从现役表消失）后重建，MuNET 已入库曲不被误删。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.ext import munet
+
+    await songdb.rebuild(full_payloads())
+    await munet.run_batch_supplement()
+
+    # 模拟 otoge 回滚：现役表只剩旧曲（三曲从 PR/main 双双消失）
+    rollback = {
+        "maimaiinfo": make_all_data(),
+        "dschange": make_dschange(),
+        "otoge_db": make_otoge_live(),  # otoge main 本来就无三曲
+        "otoge_deleted": make_otoge_deleted(),
+        "lxns": make_lxns(),
+        "divingfish": make_divingfish(),
+    }
+    # 机台/extra 无三曲（服务器实况：magical.json 是旧快照）
+    await songdb.rebuild(rollback, extra_jp_ids=await songdb._munet_known_ids())
+    state = await songdb.State.load()
+    assert state.songs.get(BATCH_ENTRY_ID) is not None  # 不被回滚误删

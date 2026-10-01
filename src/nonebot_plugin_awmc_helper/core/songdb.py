@@ -1639,7 +1639,12 @@ async def refresh_all(
     except Exception:
         logger.exception("songdb: 外部补充源读取失败（不影响规范表重建）")
         extra_docs = []
-    result = await rebuild(payloads, extra_jp_ids=extra_jp_ids(extra_docs))
+    # MuNET 已知曲目 id 并入 JP 在列信号（§7.5-C'）：MuNET 在列 = 该曲真实在
+    # 日服运营——otoge 侧若发生数据回滚（2026-10-01 实测 PR 分支被重写致
+    # 三首 MAGiCAL 新曲从候选与在列信号同时消失、次日重建遭误删），已入库
+    # 曲目不随上游回滚丢失；重建后批次补充再从 MuNET 拉回字段。
+    munet_ids = await _munet_known_ids()
+    result = await rebuild(payloads, extra_jp_ids=extra_jp_ids(extra_docs) | munet_ids)
     logger.info(
         f"songdb：重建完成——曲 {result['songs']}、谱面组 {result['groups']}、"
         f"谱面 {result['charts']}（总耗时 {time.monotonic() - total_started:.1f}s）"
@@ -1985,6 +1990,19 @@ async def _load_extra_docs() -> list[tuple[str, str, dict]]:
 def extra_jp_ids(docs: list[tuple[str, str, dict]]) -> set[int]:
     """外部源文档给出的 id 集——JP 在列信号（apply_missing 删除判定用，§7.5-C）。"""
     return {int(key) for _n, _m, doc in docs for key in doc if str(key).isdigit()}
+
+
+async def _munet_known_ids() -> set[int]:
+    """MuNET 视角「日服真实在列」的规范表曲 id 集（批次补充成功入库过的曲）。
+
+    实现取巧：MuNET 入库曲的 `image_url` 由批次补充写入（otoge/机台源之外唯一
+    会给新曲写封面的信号），但 image_url 也可能来自 otoge——改用 kv 留痕：批次
+    补充每次合并的 id 集记 `munet_batch_ids`（累计并集），此处直接读。
+    """
+    raw = await store.kv_get("munet_batch_ids")
+    if not isinstance(raw, list):
+        return set()
+    return {int(x) for x in raw if isinstance(x, (int, float))}
 
 
 async def apply_external_sources(
