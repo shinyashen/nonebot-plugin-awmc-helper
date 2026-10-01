@@ -236,6 +236,32 @@ def ra_badge_num(rating: int, theme: str = DEFAULT_THEME) -> str:
     return "11"
 
 
+OLD_RA_THRESHOLD = [
+    (1000, "01"),
+    (2000, "02"),
+    (3000, "03"),
+    (4000, "04"),
+    (5000, "05"),
+    (6000, "06"),
+    (7000, "07"),
+    (8000, "08"),
+    (8500, "09"),
+]
+"""旧 rating 语境（FiNALE 口径 b40）的 DXRating 分段：每 1000 一档到 8000、
+8000–8499 归 09、≥8500 封顶 11 号——旧系数数值域低（单曲上限 ≈200），无
+10/12 号。取材用户 maimaiDX fork 合并上游前的 b40 实现（shinyashen/maimaiDX
+5d2cc02635「增加b40」引入、bc077f9d50「修复b40计算」未动此表）。"""
+
+
+def old_ra_badge_num(rating: int) -> str:
+    """b40 头部 DXRating 牌号（旧 rating 语境，与 :func:`ra_badge_num` 的
+    语境差异：无主题 12 号、无带星版式——fork 原样，恒标准 186×35 槽位）。"""
+    for limit, n in OLD_RA_THRESHOLD:
+        if rating < limit:
+            return n
+    return "11"
+
+
 def ra_star_num(rating: int) -> str:
     """circle 高 rating 星级文件号（rating ≥ 14000 前置由调用方保证）。
 
@@ -321,6 +347,7 @@ async def _draw_header(
     class_image: bytes | None = None,
     nameplate_image: bytes | None = None,
     force_trophy_name: bool = False,
+    layout: str = "b50",
 ) -> None:
     """头部落雪名片，元素与层级顺序照搬 Hoshino PlayerBest50.draw。
 
@@ -328,7 +355,8 @@ async def _draw_header(
     trophy_name/trophy_color（NET 首页称号与稀有度）、course_image/
     class_image（NET 官方段位认定/でらっクラス徽章图）、nameplate_image
     （NET 收藏品页装备中姓名框图）注入身份；仅在 player 缺失/无对应字段时
-    生效。边框 NET 收藏品页有但本卡版式不渲染，不采集。
+    生效。边框 NET 收藏品页有但本卡版式不渲染，不采集。``layout``：与
+    成绩行版式联动（b40 → 头部徽章走旧 rating 语境分段）。
     """
     pic = assets.static_path() / "mai" / "pic"
     im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (14, 60))
@@ -366,19 +394,22 @@ async def _draw_header(
         icon_img = assets.get(pic / "UI_Icon_509506.png")
     im.alpha_composite(icon_img.resize((120, 120)), (305, 65))
 
-    # DXRating 段位徽章 + rating 数字（circle 高 rating 用带星版式）
+    # DXRating 段位徽章 + rating 数字（circle 高 rating 用带星版式）；
+    # b40 旧 rating 语境：分段表不同（old_ra_badge_num）且无带星版式（fork 原样）
     badge_size, star_img = (186, 35), None
     num_x, num_y, num_gap, num_size = 520, 80, 15, (17, 20)
-    if theme == "circle" and rating >= 14000:
-        badge_size = (170, 35)
-        star_img = assets.pic(
-            f"UI_CMN_DXRating_Star_{ra_star_num(rating)}.png", theme
-        ).resize((21, 35))
-        num_x, num_y, num_gap, num_size = 515, 82, 13, (14, 17)
+    if layout == "b40":
+        badge_num = old_ra_badge_num(rating)
+    else:
+        badge_num = ra_badge_num(rating, theme)
+        if theme == "circle" and rating >= 14000:
+            badge_size = (170, 35)
+            star_img = assets.pic(
+                f"UI_CMN_DXRating_Star_{ra_star_num(rating)}.png", theme
+            ).resize((21, 35))
+            num_x, num_y, num_gap, num_size = 515, 82, 13, (14, 17)
     im.alpha_composite(
-        assets.pic(f"UI_CMN_DXRating_{ra_badge_num(rating, theme)}.png", theme).resize(
-            badge_size
-        ),
+        assets.pic(f"UI_CMN_DXRating_{badge_num}.png", theme).resize(badge_size),
         (435, 72),
     )
     if star_img is not None:
@@ -588,6 +619,7 @@ async def draw_b50_nb(
         class_image=class_image,
         nameplate_image=nameplate_image,
         force_trophy_name=force_trophy_name,
+        layout=layout,
     )
 
     # 成绩行：b35 从 y=235、b15 从 y=1085（Hoshino 布局，几何见 table_layout）；

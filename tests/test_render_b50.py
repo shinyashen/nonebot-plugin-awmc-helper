@@ -107,6 +107,44 @@ def test_ra_badge_num_thresholds():
     assert ra_badge_num(17000, "circle") == "11"
 
 
+def test_old_ra_badge_num_thresholds():
+    """b40 旧 rating 语境分段（fork shinyashen/maimaiDX 5d2cc02635 原表）：
+    每 1000 一档到 8000、8000–8499 归 09、≥8500 封顶 11 号，无主题/星级差异。"""
+    from nonebot_plugin_awmc_helper.core.render.best50 import old_ra_badge_num
+
+    assert old_ra_badge_num(999) == "01"
+    assert old_ra_badge_num(1000) == "02"
+    assert old_ra_badge_num(6999) == "07"
+    assert old_ra_badge_num(7000) == "08"
+    assert old_ra_badge_num(7999) == "08"
+    assert old_ra_badge_num(8000) == "09"
+    assert old_ra_badge_num(8499) == "09"
+    assert old_ra_badge_num(8500) == "11"
+    # 旧系数语境 rating 再高（circle 主题同理）也不进现行 12 号/星级档
+    assert old_ra_badge_num(16000) == "11"
+
+
+@pytest.mark.asyncio
+async def test_b40_layout_passes_layout_to_header(monkeypatch):
+    """layout 透传 _draw_header：b40 版式联动头部旧分段徽章（默认 b50 不受影响）。"""
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.render import best50
+
+    captured: dict = {}
+
+    async def fake_header(im, draw, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(best50, "_draw_header", fake_header)
+    scores = [_score(199, SongType.DX)]
+
+    await best50.draw_b50_nb("t", 250, 250, 0, scores, [], layout="b40")
+    assert captured["layout"] == "b40"
+    await best50.draw_b50_nb("t", 250, 250, 0, scores, [])
+    assert captured["layout"] == "b50"
+
+
 def test_ra_star_num_matches_hoshino():
     from nonebot_plugin_awmc_helper.core.render.best50 import ra_star_num
 
