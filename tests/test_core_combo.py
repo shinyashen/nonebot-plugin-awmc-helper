@@ -157,6 +157,7 @@ async def songs(db):
         ("真超檄", ["version"]),
         ("雪辉", ["version"]),
         ("暁", ["version"]),  # 繁体/和制牌字归一
+        ("宴", ["version"]),  # 裸宴 = 版本 token（歧义在装配层中止）
         ("绿", ["diff"]),
         ("黄", ["diff"]),
         ("红", ["diff"]),
@@ -208,14 +209,22 @@ def test_parse_silent():
 
 
 def test_parse_ambiguity():
-    """裸紫/白 → 歧义中止；紫代/白谱/紫将（牌绑定）豁免。"""
+    """裸紫/白/宴 → 歧义中止；显式组合（代/谱/牌绑定）豁免。"""
     from nonebot_plugin_awmc_helper.core.combo import ComboAmbiguity, parse_combo
 
     assert isinstance(parse_combo("紫"), ComboAmbiguity)
     assert isinstance(parse_combo("白"), ComboAmbiguity)
+    utage = parse_combo("宴")
+    assert isinstance(utage, ComboAmbiguity)
+    # 宴的引导文案指向宴谱/宴代（2026-10-01 与紫白同口径）
+    assert "宴谱50" in utage.message
+    assert "宴代50" in utage.message
     assert not isinstance(parse_combo("紫代"), ComboAmbiguity)
     assert not isinstance(parse_combo("白谱"), ComboAmbiguity)
     assert not isinstance(parse_combo("紫将"), ComboAmbiguity)
+    assert not isinstance(parse_combo("宴代"), ComboAmbiguity)
+    assert not isinstance(parse_combo("宴谱"), ComboAmbiguity)
+    assert not isinstance(parse_combo("宴将"), ComboAmbiguity)
 
 
 def test_parse_version_segment():
@@ -254,6 +263,11 @@ def test_parse_plate_binding():
     assert [c.ctype for c in parse_combo("紫极")] == [
         CondType.VERSION,
         CondType.COMBO,
+    ]
+    # 宴牌绑定（2026-10-01 宴与紫白同口径）：宴将 = 宴版本 ∩ 将
+    assert [c.ctype for c in parse_combo("宴将")] == [
+        CondType.VERSION,
+        CondType.RATE,
     ]
     # 「者」不构成独立条件词：霸者50 退化为 ≥A 档
     assert [c.ctype for c in parse_combo("霸者")] == [CondType.RATE]

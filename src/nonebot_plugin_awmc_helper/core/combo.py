@@ -5,8 +5,8 @@
 线性条件装配）→ :func:`run_combo`（曲库谱面键集 → 全量成绩过滤 → 组装）→
 渲染层。子插件只消费结果，不触碰解析/谓词（硬性架构规则 1/2）。
 
-- **输出四态**：``list[Cond]``（出图）/ :class:`ComboAmbiguity`（裸紫/白
-  歧义提示，不出图）/ ``None``（零条件或纯数字串——**静默不回话**，
+- **输出四态**：``list[Cond]``（出图）/ :class:`ComboAmbiguity`（裸紫/白/
+  宴歧义提示，不出图）/ ``None``（零条件或纯数字串——**静默不回话**，
   ``^(.+?)50$`` 松匹配下以 50 结尾的闲聊不是本 bot 的消息）/ :class:`ComboEmpty`
   （谱面集空，文案终止）。
 - **组合语义**：同 CondType OR、跨型 AND；版本字（S-1）/世代（S-3）/新旧
@@ -141,7 +141,7 @@ class Cond:
 
 @dataclass
 class ComboAmbiguity:
-    """歧义中止（裸紫/白）：整条查询不出图，回引导文案（§9.4）。"""
+    """歧义中止（裸紫/白/宴）：整条查询不出图，回引导文案（§9.4）。"""
 
     message: str
 
@@ -290,7 +290,8 @@ def conds_title(conds: "list[Cond]") -> str:
 # P1 未注册：谱师别名（P2 动态）、回到过去「舞萌dxYYYY」（P3，层 1 预留）。
 
 # S-6 分类词（长词在前防前缀吞噬；口语别名本地补表）。⚠️ 不收单字「烤」
-# （误触发面大）；「宴」不进分类表——它是版本字（宴=双代），宴谱场景由
+# （误触发面大）；「宴」不进分类表——它是版本字（宴=双代），裸宴已按
+# 紫白同口径歧义中止（宴谱/宴代显式消解，2026-10-01），宴谱场景由
 # 「宴谱/宴会场」全称承担。
 _GENRE_WORDS: tuple[tuple[str, Genre], ...] = (
     ("音击中二", Genre.オンゲキCHUNITHM),
@@ -386,6 +387,12 @@ _AMBIGUITY_HINT = (
     "「{ch}」有歧义：查{ch}谱（难度）请用「{ch}谱50」，查{ch}代（版本）请用「{ch}代50」"
 )
 """裸紫/白的歧义引导文案（§9.4：不猜语义不出图）。"""
+
+_AMBIGUITY_HINT_UTAGE = (
+    "「宴」有歧义：查宴谱（宴会场谱面）请用「宴谱50」，查宴代（版本）请用「宴代50」"
+)
+"""裸宴的歧义引导文案：宴既是版本字（宴牌/宴代）也是宴谱限定词，
+口径同裸紫/白（2026-10-01 QoL）；宴牌组合（宴将50）走牌绑定不受影响。"""
 
 
 @dataclass(frozen=True)
@@ -1058,14 +1065,17 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
         nxt = tokens[i + 1] if i + 1 < len(tokens) else None
         if t.kind == "version":
             chars, dai = t.value
-            if len(chars) == 1 and chars[0] in ("紫", "白") and not dai:
-                # 裸紫/白（段长 1 且无「代」）：右邻牌种字 → 牌绑定（歧义豁免）；
-                # 否则中止。「紫代/白谱」等显式组合在层 1 已消解，不受影响
+            if len(chars) == 1 and chars[0] in ("紫", "白", "宴") and not dai:
+                # 裸紫/白/宴（段长 1 且无「代」）：右邻牌种字 → 牌绑定（歧义
+                # 豁免，2026-10-01 起宴与紫白同口径）；否则中止。「紫代/白谱/
+                # 宴代/宴谱」等显式组合在层 1/层 2 已消解，不受影响
                 if nxt is not None and nxt.kind == "kind" and nxt.value in _KIND_CONDS:
                     conds.append(_version_cond(chars, False))
                     conds.append(_KIND_CONDS[nxt.value])
                     i += 2
                     continue
+                if chars[0] == "宴":
+                    return ComboAmbiguity(_AMBIGUITY_HINT_UTAGE)
                 return ComboAmbiguity(_AMBIGUITY_HINT.format(ch=chars[0]))
             conds.append(_version_cond(chars, dai))
         elif t.kind == "kind":
