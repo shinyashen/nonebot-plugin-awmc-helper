@@ -9,3 +9,4 @@ extend-ignore-re = [
 calcuate = "calcuate"  # maimai_py 上游方法名 _calcuate_dx_star
 FOT = "FOT"            # 字体厂商前缀（FOT-NewRodin Pro）
 GAM = "GAM"            # 素材文件名前缀（UI_GAM_Gauge_DXScoreIcon）
+INFP = "INFP"          # 谱师实名 tag（はっぴー(INFP)，otoge-db MBTI 主题曲署名）
