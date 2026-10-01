@@ -1156,3 +1156,4 @@ async def test_render_combo_b40_trophy_and_rating(monkeypatch):
         assert captured["force_trophy_name"] is True
         assert captured["rating_b35"] == 4000  # 分区小计保持底分口径
         assert captured["rating_b15"] == 1000
+        assert captured["layout"] == "b40"  # 收窄版式（行距 125/b15 起 941）

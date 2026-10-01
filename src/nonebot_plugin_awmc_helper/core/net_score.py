@@ -337,7 +337,13 @@ net_score_service = NetScoreService()
 
 
 async def net_best50_card(
-    bests, binding, *, sub_of=None, flat: bool = False, label: str = ""
+    bests,
+    binding,
+    *,
+    sub_of=None,
+    flat: bool = False,
+    label: str = "",
+    layout: str = "b50",
 ) -> bytes:
     """NET B50 系卡面（主插件 b50/ap50/条件50 共用；业务装配在 core、渲染保持
     纯绘制——原在 render.best50，是 render 目录唯一反向依赖业务层的函数）。
@@ -347,7 +353,7 @@ async def net_best50_card(
     でらっクラス/名牌素材并发落盘注入。调用方负责抓取提示（needs_fetch）
     与成绩拉取——本函数只做身份装配 + 渲染。``flat=True`` 走条件50 flat 版式；
     ``label`` 为条件50 的称号条口径文案（非空时强制覆盖数据源称号，
-    2026-10-01 QoL）。
+    2026-10-01 QoL）；``layout`` 透传拆分版式（b40=收窄版式，2026-10-02）。
     """
     from .render import jp_cover
     from .binding import binding_service
@@ -380,5 +386,6 @@ async def net_best50_card(
         bests.rating_b15,
         bests.scores_b35,
         bests.scores_b15,
+        layout=layout,
         **common,
     )

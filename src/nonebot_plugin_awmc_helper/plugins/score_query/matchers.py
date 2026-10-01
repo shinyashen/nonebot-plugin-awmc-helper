@@ -267,11 +267,14 @@ async def _render_combo(result, binding, output=None) -> bytes:
         label = f"{result.title} · {len(result.scores)} 条 · 合计 RA {result.total_ra}"
     dan = B40_DAN_SCORE if output is OutputKind.B40 else 0
     head_rating = result.bests.rating + dan
+    render_layout = "b40" if output is OutputKind.B40 else "b50"
     if score_service.view_of(binding.service) == "jp":
         bests = result.bests
         if dan:
             bests = replace(bests, rating=head_rating)
-        return await net_best50_card(bests, binding, flat=result.flat, label=label)
+        return await net_best50_card(
+            bests, binding, flat=result.flat, label=label, layout=render_layout
+        )
     player = await score_service.get_player(binding)
     if result.flat:
         return await b50_render.best50_flat_bytes(
@@ -297,6 +300,7 @@ async def _render_combo(result, binding, output=None) -> bytes:
         theme=binding.theme or DEFAULT_THEME,
         trophy_name=label,
         force_trophy_name=True,  # 条件口径覆盖数据源称号（QoL）
+        layout=render_layout,
     )
 
 

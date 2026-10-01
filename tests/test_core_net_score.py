@@ -962,3 +962,45 @@ async def test_b50_at_net_target(app: App, db, net_service, jp_view, monkeypatch
     # 窗口缓存按目标键控
     _, from_cache = await net_service.get_scores(binding)
     assert from_cache
+
+
+@pytest.mark.asyncio
+async def test_net_best50_card_layout_passthrough(monkeypatch):
+    """net_best50_card 的 layout 透传拆分版式（b40 收窄版式，2026-10-02）；
+    条件口径 label 直接作称号条（NET 链路 player=None，数据源称号不干扰）。"""
+    from types import SimpleNamespace
+
+    from maimai_py import PlayerBests
+
+    from nonebot_plugin_awmc_helper.core import net_score as ns_mod
+    from nonebot_plugin_awmc_helper.core.render import best50 as b50mod
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    captured: dict = {}
+
+    async def fake_bytes(_name, _rating, _b35, _b15, _s35, _s15, **kwargs):
+        captured.update(kwargs)
+        return b"png"
+
+    async def fake_assets(_player):
+        return {}
+
+    monkeypatch.setattr(b50mod, "best50_bytes", fake_bytes)
+    monkeypatch.setattr(ns_mod.net_score_service, "player_of", lambda _b: None)
+    monkeypatch.setattr(jp_cover, "net_player_assets", fake_assets)
+
+    bests = PlayerBests(
+        rating=5000,
+        rating_b35=4000,
+        rating_b15=1000,
+        scores_b35=[],
+        scores_b15=[],
+    )
+    binding = SimpleNamespace(
+        platform="web", user_id="u", service="net", net_sega_id=None, theme=None
+    )
+    await ns_mod.net_best50_card(
+        bests, binding, label="底分: 5000 + 段位分: 2100", layout="b40"
+    )
+    assert captured["layout"] == "b40"
+    assert captured["trophy_name"] == "底分: 5000 + 段位分: 2100"

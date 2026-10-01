@@ -508,3 +508,32 @@ async def test_flat_label_forces_trophy(monkeypatch):
     await best50.draw_b50_flat("tester", 250, [_score(199, SongType.DX)], label=label)
     assert captured["force_trophy_name"] is True
     assert captured["trophy_name"] == best50.truncate_hoshino(label, 36)
+
+
+def test_b40_layout_geometry():
+    """b40 版式几何（用户拍板 2026-10-02）：行距 125、b15 起 941（25 区底
+    844 + 区间 97 区分区块）、末行底 1300——彩虹上半遮进行卡、下段留作装饰。"""
+    from nonebot_plugin_awmc_helper.core.render.best50 import (
+        B40_B15_TOP,
+        B40_ROW_STEP,
+    )
+
+    assert B40_ROW_STEP == 125
+    b25_bottom = 235 + 4 * B40_ROW_STEP + 109
+    assert b25_bottom == 844
+    assert B40_B15_TOP == b25_bottom + 97  # 区间间隙 97
+    assert B40_B15_TOP + 2 * B40_ROW_STEP + 109 == 1300  # 末行底
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_b40_layout_render_smoke():
+    """b40 版式冒烟：layout="b40" 出图尺寸与标准卡一致、PNG 合法。"""
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.render.best50 import draw_b50_nb
+
+    scores = [_score(1000 + i, SongType.DX) for i in range(25)]
+    new_scores = [_score(2000 + i, SongType.DX) for i in range(15)]
+    im = await draw_b50_nb("tester", 5000, 4000, 1000, scores, new_scores, layout="b40")
+    assert im.size == (1400, 1600)

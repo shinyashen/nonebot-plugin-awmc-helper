@@ -71,6 +71,13 @@ RA_THRESHOLD = [
     (15000, "10"),
 ]
 
+B40_ROW_STEP = 125
+"""b40 版式行距（行间 16）：行卡区收窄换取 25/15 区间间隙（用户拍板 2026-10-02）。"""
+
+B40_B15_TOP = 941
+"""b40 版式 b15 区起点：25 区底 844 + 区间 97；末行底 941+2×125+109=1300，
+彩虹（底图拱 990–1380）上半遮进行卡、下段留作装饰（karenbot-combo-notes §13.2）。"""
+
 
 DIFF_BG = {
     LevelIndex.BASIC: "b50_score_basic.png",
@@ -550,6 +557,7 @@ async def draw_b50_nb(
     nameplate_image: bytes | None = None,
     sub_of: Callable[[ScoreExtend], str | None] | None = None,
     force_trophy_name: bool = False,
+    layout: str = "b50",
 ) -> Image.Image:
     """NB 版 B50 大图（player 携带落雪名片信息，service 为绑定源键）。
 
@@ -557,6 +565,8 @@ async def draw_b50_nb(
     为 NET 数据源身份注入（player 缺失或对应字段缺失时生效）；
     ``sub_of`` 透传成绩行副行钩子（pc50 等变体替换「定数 -> 单曲Ra」）；
     ``force_trophy_name``：trophy_name（条件50/40 口径串）强制覆盖数据源称号。
+    ``layout``：``"b50"`` 标准 35/15 版式（默认）；``"b40"`` = 25/15 行距 125、
+    b15 起 941 的收窄版式（行数少、区间分开，见 B40_ROW_STEP/B40_B15_TOP）。
     """
     im = assets.canvas("b50.png", theme)
     draw = ImageDraw.Draw(im)
@@ -580,12 +590,16 @@ async def draw_b50_nb(
         force_trophy_name=force_trophy_name,
     )
 
-    # 成绩行：b35 从 y=235、b15 从 y=1085（Hoshino 布局，几何见 table_layout）
-    for data, initial_y in ((scores_b35, 235), (scores_b15, 1085)):
+    # 成绩行：b35 从 y=235、b15 从 y=1085（Hoshino 布局，几何见 table_layout）；
+    # b40 版式（layout="b40"）= 5+3 行、行距 125、b15 起 941（区间间隙 97 区分
+    # 区块，末行底 1300——彩虹作下半装饰，用户拍板 2026-10-02）
+    b15_top = B40_B15_TOP if layout == "b40" else 1085
+    row_step = B40_ROW_STEP if layout == "b40" else SCORE_ROW_GAP
+    for data, initial_y in ((scores_b35, 235), (scores_b15, b15_top)):
         for num, score in enumerate(data):
             row, col = divmod(num, SCORE_ROW_COLS)
             x = SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP
-            y = initial_y + row * SCORE_ROW_GAP
+            y = initial_y + row * row_step
             draw_score_row(im, draw, x, y, score, theme, sub_of=sub_of)
 
     service_name = SERVICE_DISPLAY.get(service or "", "")
