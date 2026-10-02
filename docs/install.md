@@ -50,8 +50,7 @@ AWMC_STATIC_PATH=/abs/path/to/static   # 素材包目录（必填）
 
 | 能力 | 需要的配置 |
 |---|---|
-| 曲库加载（落雪源） | 无（公开接口） |
-| ginfo 曲线统计 | `AWMC_DIVINGFISH_DEVELOPER_TOKEN` |
+| 曲库加载（多源规范表管线） | 无（公开数据源；可选 `AWMC_GITHUB_TOKEN` 提高 otoge-db PR 预读限额） |
 | 落雪好友码查询 | `AWMC_LXNS_DEVELOPER_TOKEN` |
 | 绑定落雪（OAuth） | `AWMC_LXNS_CLIENT_ID` / `AWMC_LXNS_CLIENT_SECRET` / `AWMC_LXNS_REDIRECT_URI` |
 | 别名推送 | `AWMC_ALIAS_PUSH=true`（默认） |
@@ -65,13 +64,14 @@ python bot.py
 启动日志依次出现：
 
 - `Succeeded to load plugin "nonebot_plugin_awmc_helper:…"`（各子插件）
-- `曲库加载完成，共 N 首`（联网拉取曲库；失败时降级为上次快照并告警）
+- `曲库加载完成：国服 N 首，日服 M 首`（联网构建曲库；失败时降级为上次快照并告警）
 
 ## 6. 数据与维护
 
 - 全部运行时数据在 localstore 数据目录的 `awmc.db`（SQLite），
   备份该文件即备份全部状态（含用户 Token，注意权限）；
-- 曲库每日 4 点自动刷新，排卡人数同点清零；
+- 曲库每日 4:05 自动全量重建（国服更新按 `AWMC_CN_POLL_MINUTES` 轮询增量触发），
+  排卡人数每日 4 点清零；
 - 升级插件后建议 `uv lock --upgrade-package maimai-py` 跟进数据层新版本。
 
 ## 7. 常见问题

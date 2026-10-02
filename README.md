@@ -34,7 +34,7 @@ NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名�
 | bind | `绑定水鱼` / `绑定落雪` / `数据源` / `主题` | 查分器绑定与设置 |
 | music_query | `查歌` / `定数查歌` / `bpm查歌` / `曲师查歌` / `谱师查歌` / `<别名>是什么歌` / `id <数字>` | 曲库查询 |
 | alias | `<名称>有什么别名` / `添加别名` / `同意别名` / `当前投票` / `开启别名推送` | 别名查询、申请与推送 |
-| score_query | `b50` / `ap50` / `minfo <曲>` / `ginfo <难度><曲>` | 查分 |
+| score_query | `b50` / `b40` / `条件50` / `ap50` / `minfo <曲>` / `ginfo <难度><曲>` | 查分 |
 | score_tools | `分数线 紫799 100` / `我要上20分` / `查看排名` | 分数线/推分/水鱼 RA 排名 |
 | tables | `<等级>定数表` / `13fc完成表` / `真将完成表` / `13fc进度` / `13+分数列表` / `牌子条件` | 完成度表格 |
 | random_song | `来个紫13+` / `随个dx14` / `mai什么` | 随机谱面 |
@@ -131,6 +131,19 @@ NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名�
 | `awmc_arcade_max_delta` | 否 | `30` | 机厅人数单次变更上限 |
 | `awmc_arcade_enabled` | 否 | `false` | 排卡默认态（群可 `开启/关闭排卡` 覆盖；默认关规避宽正则误触） |
 | `awmc_startup_tasks` | 否 | `true` | 启动时执行后台任务（曲库预热、别名 SSE）；测试/CI 置 `false` |
+| `awmc_proxy` | 否 | 无 | 智能代理地址（如 `http://127.0.0.1:7796`）：国外站代理优先、国内站直连优先，失败自动互为回退；空 = 不启用 |
+| `awmc_foreign_hosts` | 否 | `[]` | 追加的「国外站」host 后缀（内置 GitHub 系） |
+| `awmc_cn_poll_minutes` | 否 | `60` | 国服曲库轮询间隔（分钟，0=禁用）；检测到国服更新自动重建规范表并刷新运行时 |
+| `awmc_auto_templates` | 否 | `true` | 检测到国服更新后自动重建定数表/完成表底图 |
+| `awmc_update_notify` | 否 | `true` | 检测到国服更新后向 SUPERUSER 私聊推送通知 |
+| `awmc_extra_song_sources` | 否 | `[]` | 外部补充源（标准 JSON 路径或 URL，仅补日服侧数据；可加 `::fill`/`::override` 后缀指定合并模式，默认 override） |
+| `awmc_gamerch_fill` | 否 | `true` | gamerch wiki 运行时补充（仅补规范表空字段，稳态零抓取） |
+| `awmc_gamerch_max_age` | 否 | `24` | gamerch 页面磁盘缓存 TTL（小时） |
+| `awmc_github_token` | 否 | 无 | GitHub API 访问令牌（otoge-db 自动化 PR 预读等；配置后限额 5000 次/小时） |
+| `awmc_munet_batch` | 否 | `false` | MuNET current_jp 版本批次补充（每日管线内 title-diff 候选，需显式开启） |
+| `awmc_munet_alias_days` | 否 | `0` | MuNET 别名全量走查刷新间隔（天，0=禁用） |
+| `awmc_net_cooldown_minutes` | 否 | `15` | 日服 NET 数据源 per-user 查询冷却（分钟，0=禁用） |
+| `awmc_lxns_keepalive` | 否 | `true` | 落雪令牌每日保活（refresh_token 30 天不刷新即失效；每日 4:30 续期一次） |
 
 ## 🎉 使用
 
@@ -146,8 +159,8 @@ NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名�
 
 - 运行时数据（绑定、群开关、本地别名、机厅、数据快照）统一存放在
   localstore 数据目录下的 `awmc.db`（SQLite）；
-- 用户的查分器凭据（水鱼 Import-Token、落雪个人 token）同样只落盘于该数据库，
-  请妥善保管服务器与数据目录的访问权限；
+- 用户的查分器凭据（水鱼 OAuth/Import-Token、落雪个人 token、日服 SEGA 密码）
+  同样只落盘于该数据库，请妥善保管服务器与数据目录的访问权限；
 - 曲库数据每次刷新成功后快照入库，断网时自动降级为上次快照。
 
 ## 扩展本插件

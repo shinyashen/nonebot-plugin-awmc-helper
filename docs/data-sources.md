@@ -7,11 +7,16 @@
 
 | 服务 | 用途 | 鉴权方式 |
 |---|---|---|
-| 水鱼查分器（diving-fish） | 曲库、玩家/B50、全量成绩、曲线统计、RA 排行 | OAuth 机密客户端（部署级）；用户凭据见下表 |
-| 落雪查分器（lxns） | 曲库（含物量）、玩家/成绩、AP 数据 | 开发者 Token（部署级）；个人 Token / 好友码（用户级） |
+| 水鱼查分器（diving-fish） | 玩家/B50、全量成绩、成绩写入（导分）、曲线统计、RA 排行 | OAuth 机密客户端（部署级）；用户凭据见下表 |
+| 落雪查分器（lxns） | 玩家/成绩、CN 骨架回填、曲库（含物量）、AP 数据 | 开发者 Token（部署级）；个人 Token / 好友码（用户级） |
 | 柚子（yuzuchan） | 别名读取、别名申请/投票、别名推送 | 无 |
 | 华立（wahlap） | 机厅 location 数据 | 无 |
 | maimai でらっくす NET（日服官方） | 日服 B50（maimaidx.jp） | SEGA ID + 密码（用户级） |
+
+曲库不依赖单一服务：插件以**多源规范表管线**构建（国服骨架 = 水鱼/落雪双源、
+日服全集 = maimaiinfo + otoge-db、补充源 = gamerch wiki / MuNET /
+`awmc_extra_song_sources` 外部 JSON），均为公开数据；每日自动重建，
+国服更新自动触发（详见 [架构说明](architecture.md)「数据层」）。
 
 ## 水鱼绑定
 
