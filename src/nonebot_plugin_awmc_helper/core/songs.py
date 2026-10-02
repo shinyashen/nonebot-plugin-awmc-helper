@@ -352,9 +352,10 @@ class SongService:
         经 maimai_py provider 通道走正规 ``client.songs``：``_configure`` 自动
         种子化 ids/tracks/versions 缓存（B35/B15 拆分与牌子进度依赖）。
         下方 stale 单曲键清理是**硬规则 10（禁止手动触碰 client._cache）的
-        唯一豁免点**——by_id 直读单曲键、上游换 provider 不清命名空间
-        （待议，tech-debt §一），整库替换后 stale 键会让 by_id 命中已移除
-        的曲；仅测试夹具调用，生产路径零使用。
+        唯一豁免点**——by_id 直读单曲键，而上游 ``MaimaiSongs._configure``
+        在换 provider 时不清 songs/tracks 命名空间残留键（已提请上游讨论，
+        未落地），整库替换后 stale 键会让 by_id 命中已移除的曲；仅测试夹具
+        调用，生产路径零使用。
         """
         cache = client._cache
         old_ids: list[int] = await cache.get("ids", namespace="songs") or []
