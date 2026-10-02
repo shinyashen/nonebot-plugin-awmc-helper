@@ -10,7 +10,7 @@ from ...core.songs import cn_song_map, list_jp_note
 from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart
 from ...core.songdb import PendingSong
-from ...core.chart_card import chart_card_bytes
+from ...core.chart_card import JP_ONLY_NOTE, chart_card_bytes
 
 
 def _reply(text: str) -> UniMessage:
@@ -19,8 +19,6 @@ def _reply(text: str) -> UniMessage:
 
 
 NOT_FOUND = "没有找到这样的乐曲。\n※ 如果是别名请使用「XXX是什么歌」指令进行查询哦。"
-JP_ONLY_NOTE = "此歌曲为日服限定"
-"""单结果命中的日服限定标注；多结果列表用 core ``list_jp_note`` 的列表级措辞。"""
 
 
 async def _banquet_card(song, utage_diff=None, jp: bool = False) -> bytes:

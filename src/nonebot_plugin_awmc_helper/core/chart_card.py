@@ -7,11 +7,12 @@ Hoshino/NB 的 ``draw_chart_info`` 语义：绑定且能拉到 B50 时嵌入成�
 
 from nonebot import logger
 from maimai_py import Song, SongType
+from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .score import UserScoreError, score_service
-from .songs import song_service
+from .songs import cn_song_map, song_service, entries_list_text
 from .render import nb_chart
-from ..constants import DEFAULT_THEME
+from ..constants import DEFAULT_THEME, UTAGE_ID_BASE
 
 
 async def resolve_card_view(song: Song, binding=None) -> "tuple[Song, bool]":
@@ -90,3 +91,73 @@ def binding_service_ident(binding):
     from .binding import binding_service
 
     return binding_service.identifier_or_none(binding)
+
+
+JP_ONLY_NOTE = "此歌曲为日服限定"
+"""单结果命中的日服限定标注（「是什么歌」系回复单源；多结果列表用
+core ``list_jp_note`` 的列表级措辞）。"""
+
+
+async def song_lookup_reply(
+    entries, binding, *, extra_note: str | None = None
+) -> UniMessage:
+    """谱面类型条目 → 「是什么歌」同款回复（多子插件共用，文案单源）。
+
+    单条目出谱面卡（宴谱条目出宴会卡，日服限定宿主保留 JP 对象）、多条目出
+    条目列表（cn_song_map 逐条标注日服限定）；``extra_note`` 追加在末尾
+    （如分数线无难度色时的缺失提示），不改变既有文案与顺序。
+
+    返回 UniMessage 不发送，调用方自行 ``finish``——music_query
+    「<名称>是什么歌」与 score_tools「分数线」无难度色回退共用本函数。
+    """
+    cn_songs = await cn_song_map([s for _, s, _ in entries])
+    flags = [cn_songs[s.id] is None for _, s, _ in entries]
+    if len(entries) == 1:
+        entry_id, song, prefer = entries[0]
+        if entry_id >= UTAGE_ID_BASE:
+            # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；该张可能日服限定
+            # （国服宿主曲无此 diff_id）——保留 JP 宿主对象画日服卡
+            from .render import jp_cover
+
+            await jp_cover.ensure(song.id)
+            cn_song = cn_songs[song.id]
+            cn_diff = (
+                next(
+                    (
+                        d
+                        for d in cn_song.get_difficulties(SongType.UTAGE)
+                        if getattr(d, "diff_id", None) == entry_id
+                    ),
+                    None,
+                )
+                if cn_song is not None
+                else None
+            )
+            if cn_song is not None and cn_diff is not None:
+                song, utage_diff, jp = cn_song, cn_diff, False
+            else:
+                jp = True
+                utage_diff = next(
+                    (
+                        d
+                        for d in song.get_difficulties(SongType.UTAGE)
+                        if getattr(d, "diff_id", None) == entry_id
+                    ),
+                    None,
+                )
+            diffs = [utage_diff] if utage_diff is not None else None
+            png = nb_chart.song_chart_banquet_info(song, diffs, jp=jp)
+        else:
+            song = cn_songs[song.id] or song
+            card_song, jp_card = await resolve_card_view(song, binding)
+            jp = flags[0]
+            png = await chart_card_bytes(card_song, binding, prefer, jp or jp_card)
+        msg = UniMessage.text(f" {JP_ONLY_NOTE}") if jp else UniMessage()
+        text = "您要找的是不是这首？"
+        if extra_note:
+            text += f"\n{extra_note}"
+        return msg.image(raw=png).text(text)
+    hint = "※ 请使用「id xxxxx」查询指定谱面"
+    if extra_note:
+        hint += f"\n{extra_note}"
+    return UniMessage.text(" " + entries_list_text(entries, flags, hint=hint))

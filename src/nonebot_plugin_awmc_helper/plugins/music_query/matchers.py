@@ -9,7 +9,6 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .render import (
     NOT_FOUND,
-    JP_ONLY_NOTE,
     _reply,
     _banquet_card,
     _render_query_result,
@@ -21,15 +20,19 @@ from .resolve import (
     _resolve_raw_id,
     parse_range_args,
 )
-from ...constants import UTAGE_ID_BASE, display_song_id
+from ...constants import display_song_id
 from ...core.help import CommandSpec, help_registry
-from ...core.songs import cn_song_map, song_service, entries_list_text
+from ...core.songs import song_service
 from ...core.store import UserBinding
-from ...core.types import SongType
 from ...core.utils import handle_errors
 from ...core.render import song as song_render
 from ...core.binding import SessionBinding
-from ...core.chart_card import chart_card_bytes, resolve_card_view
+from ...core.chart_card import (
+    JP_ONLY_NOTE,
+    chart_card_bytes,
+    resolve_card_view,
+    song_lookup_reply,
+)
 
 search = on_regex(r"(?i)^(定数|bpm|曲师|谱师)?查歌\s?(.*)", block=True)
 # 无 ^ 锚是**有意沿用** Hoshino 功能基准的宽松形态（末尾「是什么歌」即触发，
@@ -126,53 +129,10 @@ async def _(
         "※ 可以使用「添加别名」指令给该乐曲添加别名\n"
         "※ 如果是歌名的一部分，请使用「查歌」指令查询哦。"
     )
+    # 条目 → 回复单源在 core song_lookup_reply（分数线无难度色回退共用）
     entries = await song_service.entries_for_name(name)
-    # 逐条目回查国服视图：日服限定判定与国服对象回取共用一份 map（core 单源）
-    cn_songs = await cn_song_map([s for _, s, _ in entries])
-    flags = [cn_songs[s.id] is None for _, s, _ in entries]
-    if len(entries) == 1:
-        _entry_id, song, card_prefer = entries[0]
-        jp = flags[0]
-        cn_song = cn_songs[song.id]
-        if _entry_id >= UTAGE_ID_BASE:
-            # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；只画命中的那张。
-            # 该张可能日服限定（国服宿主曲无此 diff_id，如悪戯センセーション
-            # 宴[奏]）——保留 JP 宿主对象画日服卡，不回取国服对象
-            cn_diff = (
-                next(
-                    (
-                        d
-                        for d in cn_song.get_difficulties(SongType.UTAGE)
-                        if getattr(d, "diff_id", None) == _entry_id
-                    ),
-                    None,
-                )
-                if cn_song is not None
-                else None
-            )
-            if cn_song is not None and cn_diff is not None:
-                song, utage_diff, jp = cn_song, cn_diff, False
-            else:
-                jp = True
-                utage_diff = next(
-                    (
-                        d
-                        for d in song.get_difficulties(SongType.UTAGE)
-                        if getattr(d, "diff_id", None) == _entry_id
-                    ),
-                    None,
-                )
-            png = await _banquet_card(song, utage_diff, jp)
-        else:
-            song = cn_song or song
-            card_song, jp_card = await resolve_card_view(song, binding)
-            png = await chart_card_bytes(card_song, binding, card_prefer, jp or jp_card)
-        # 顺序：at → 日服标注 → 卡片 → 提示语（文本不以换行开头）
-        msg = _reply(JP_ONLY_NOTE) if jp else UniMessage()
-        await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
     if entries:
-        msg = entries_list_text(entries, flags, hint="※ 请使用「id xxxxx」查询指定谱面")
-        await _reply(msg).finish(at_sender=True)
+        await (await song_lookup_reply(entries, binding)).finish(at_sender=True)
 
     # 柚子投票中提示（网络失败静默跳过）
     vote_msg = await _vote_hint(name)

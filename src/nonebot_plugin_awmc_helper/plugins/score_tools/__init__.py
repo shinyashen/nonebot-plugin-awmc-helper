@@ -1,12 +1,13 @@
 """awmc.score_tools：分数线 / 推分推荐 / 水鱼 RA 排名。
 
-指令（对齐原版）：
-- `分数线 <难度色><id> <线>` / `分数线 帮助`
+指令：
+- `分数线 <难度色><id/别名/曲名> <线>` / `分数线 帮助`（图片出分数线计算卡，
+  2026-10-10 升级：查歌解析链 + 等效 GREAT TAP 口径，原「难度色+id」连写
+  形态兼容）
 - `我要上N分` / `我要在<等级>上加N分` / `mai什么加分`（带推分后缀）
 - `查看排名 [页|用户名]` / `我的排名`
 """
 
-import re
 import math
 import time
 
@@ -16,17 +17,26 @@ from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Message
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from .resolve import split_args
 from ...core.ext import divingfish as df_ext
-from ...constants import LEVEL_INDEX_ZH, COLOR_TO_LEVEL_INDEX
-from ...core.calc import score_line, min_ds_of_ra, rise_recommend, rise_candidates
+from ...constants import UTAGE_ID_BASE
+from ...core.calc import (
+    score_line,
+    min_ds_of_ra,
+    rise_recommend,
+    rise_candidates,
+)
 from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
 from ...core.score import UserScoreError, score_service
-from ...core.songs import song_service, chart_of_color
+from ...core.songs import cn_song_map, song_service, chart_of_color, entries_list_text
 from ...core.store import UserBinding
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
 from ...core.binding import SessionBinding, service_display
 from ...core.sources import Capability
+from ...core.chart_card import resolve_card_view, song_lookup_reply
 from ...core.render.tools import text_image_bytes
+
+_COLOR_HINT = "※ 分数线需指定难度色：分数线 <绿/黄/红/紫/白><id/别名> <线>"
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.score_tools",
@@ -47,30 +57,131 @@ my_rating_ranking = on_command("我的排名", block=True)
 
 @score_line_cmd.handle()
 @handle_errors()
-async def _(message: Message = CommandArg()):
+async def _(
+    binding: UserBinding = SessionBinding(),
+    message: Message = CommandArg(),
+):
     args = message.extract_plain_text().strip()
     if args in ("帮助", ""):
         # 文案单源：渲染注册表里的「分数线」详情页（旧 SCORE_LINE_HELP 已迁入）
         entry = page_entries(help_registry, CommandPage(spec=_score_line_spec))[0]
         assert isinstance(entry, str)  # 指令详情页恒为纯文本节点
         await UniMessage.text(entry).finish(at_sender=True)
-    m = re.search(r"([绿黄红紫白])\s?([0-9]+)", args)
-    if not m:
-        await UniMessage.text(" 格式错误，输入「分数线 帮助」以查看帮助信息").finish(
+    level_index, candidates, line = split_args(args)
+    if level_index is None or line is None:
+        await UniMessage.text(
+            " 格式错误：分数线 <难度色><id/别名/曲名> <线>\n"
+            "例：分数线 紫799 100.5（难度色：绿黄红紫白）"
+        ).finish(at_sender=True)
+
+    # 难度色归属决策（服务器合并别名库实证：358 条颜色开头别名中 22 条剥色
+    # 后命中异曲，如 绿9→ケロ⑨destiny、白银→銀のめぐり——剥色命中不可盲信）：
+    # 剥色/整串两候选都解析后按根 id 交集判定——
+    #   都命中且有交集 → 首字符是难度色，用剥色结果按色过滤谱面；
+    #   都命中但无交集 / 仅整串命中 → 首字符属于别名（如 白雪、绿9），
+    #     用整串结果走「是什么歌」同款回复 + 缺色提示；
+    #   仅剥色命中 → 首字符是难度色（紫琪露诺 形态）。
+    # 数字候选（紫799）按 id 解析优先（旧「色+id」格式兼容，id 无别名歧义）。
+    resolved: tuple | None = None
+    hit_stripped = False
+
+    async def _pick_chart(entries, line_index):
+        """条目按难度色过滤 → 唯一 (曲, 类型, jp, None) 或列表文案（多谱）。"""
+        from ...core.types import SongType
+
+        by_key: dict[tuple, tuple] = {}
+        for entry_id, entry_song, entry_type in entries:
+            if entry_id >= UTAGE_ID_BASE:
+                continue  # 宴谱条目不参与（无难度色）
+            prefer = entry_type or SongType.DX
+            if chart_of_color(entry_song, line_index, prefer=prefer) is None:
+                continue  # 该类型无此难度的谱面
+            by_key.setdefault(
+                (entry_song.id, entry_type), (entry_song, entry_type, False, None)
+            )
+        if len(by_key) == 1:
+            return next(iter(by_key.values())), None
+        songs = [s for _, s, _ in entries]
+        cn_songs = await cn_song_map(songs)
+        flags = [cn_songs[s.id] is None for s in songs]
+        return None, entries_list_text(
+            entries,
+            flags,
+            hint="※ 请使用「分数线 <难度色><id> <线>」指定谱面",
+        )
+
+    async def _no_color_reply(entries):
+        """无难度色但有命中：「是什么歌」同款回复 + 缺色提示（回复单源复用）。"""
+        msg = await song_lookup_reply(entries, binding, extra_note=_COLOR_HINT)
+        await msg.finish(at_sender=True)
+
+    async def _same_song(entries_a, entries_b) -> bool:
+        """两组条目是否存在同曲（根 id 交集，别名按根 id 合并）。"""
+        ids_a = {s.id for _, s, _ in entries_a}
+        ids_b = {s.id for _, s, _ in entries_b}
+        return bool(ids_a & ids_b)
+
+    if level_index is not None and candidates and candidates[0]:
+        stripped, full = candidates[0], candidates[-1]
+        if stripped.isdigit():
+            # 数字候选按 id 解析优先（旧「色+id」格式兼容）；未命中回退整串
+            # （绿9 类别名剥色后是数字、id 不存在，整串才是真别名）
+            found = await song_service.resolve_raw_chart(int(stripped))
+            if found is not None:
+                song, _shape, jp, utage_diff = found
+                resolved, hit_stripped = (song, None, jp, utage_diff), True
+            elif full != stripped:
+                entries = await song_service.entries_for_name(full, cn_title=False)
+                if entries:
+                    await _no_color_reply(entries)
+        else:
+            stripped_entries = await song_service.entries_for_name(
+                stripped, cn_title=False
+            )
+            full_entries = await song_service.entries_for_name(full, cn_title=False)
+            if stripped_entries and full_entries:
+                if await _same_song(stripped_entries, full_entries):
+                    # 同曲：首字符是难度色（白阳炎 → 阳+白），按色过滤谱面；
+                    # 该色无谱面/双谱歧义 → 列条目引导指定 id
+                    chart, list_msg = await _pick_chart(stripped_entries, level_index)
+                    if chart is not None:
+                        resolved, hit_stripped = chart, True
+                    else:
+                        await UniMessage.text(" " + list_msg).finish(at_sender=True)
+                else:
+                    # 色字属于别名（绿9/白银 类冲突）：整串优先、无难度色
+                    await _no_color_reply(full_entries)
+            elif stripped_entries:
+                chart, list_msg = await _pick_chart(stripped_entries, level_index)
+                if chart is not None:
+                    resolved, hit_stripped = chart, True
+                else:
+                    await UniMessage.text(" " + list_msg).finish(at_sender=True)
+            elif full_entries:
+                await _no_color_reply(full_entries)
+    else:
+        full = candidates[-1] if candidates else ""
+        entries = (
+            await song_service.entries_for_name(full, cn_title=False) if full else []
+        )
+        if entries:
+            await _no_color_reply(entries)
+    if resolved is None and not hit_stripped:
+        await UniMessage.text(
+            f" 未找到「{'」或「'.join(candidates)}」对应的乐曲，可用「查歌」确认后再试"
+        ).finish(at_sender=True)
+
+    song, prefer, jp, utage_diff = resolved
+    if utage_diff is not None:
+        await UniMessage.text(" 宴会场谱面没有难度色，不支持分数线查询").finish(
             at_sender=True
         )
-    level_index = COLOR_TO_LEVEL_INDEX[m.group(1)]
-    chart_id = int(m.group(2))
-    try:
-        line = float(args.split()[-1])
-    except ValueError:
-        await UniMessage.text(" 格式错误，输入「分数线 帮助」以查看帮助信息").finish(
-            at_sender=True
-        )
-    song = await song_service.by_id(chart_id)
-    if song is None:
-        await UniMessage.text(f" 未找到ID为「{chart_id}」的乐曲").finish(at_sender=True)
-    diff = chart_of_color(song, level_index)
+    # NET 等日服视图用户换日服曲对象出卡（定数/版本口径一致，与查歌卡同路由）
+    card_song, jp_card = await resolve_card_view(song, binding)
+    from ...core.types import SongType
+
+    prefer_type = SongType.STANDARD if prefer == SongType.STANDARD else None
+    diff = chart_of_color(card_song, level_index, prefer=prefer_type or SongType.DX)
     if diff is None:
         await UniMessage.text(" 该乐曲没有这个等级").finish(at_sender=True)
     result = score_line(diff, line)
@@ -78,15 +189,17 @@ async def _(message: Message = CommandArg()):
         await UniMessage.text(" 分数线参数有误（应为 0-100 之间）").finish(
             at_sender=True
         )
-    msg = (
-        f"{song.title}「{LEVEL_INDEX_ZH[level_index]}」\n"
-        f"分数线「{line}%」\n允许的最多「TAP」「GREAT」数量为\n"
-        f"「{result['tap_great']:.2f}」(每个-{result['per_tap_pct']:.4f}%),\n"
-        f"「BREAK」50落(一共「{result['breaks']}」个)\n"
-        f"等价于「{result['break_50_tap']:.3f}」个「TAP」"
-        f"「GREAT」(-{result['break_50_pct']:.4f}%)"
+    from ...core.render.score_line import score_line_card
+
+    png = score_line_card(
+        card_song,
+        diff,
+        line,
+        result,
+        theme=binding.theme or "prism_plus",
+        jp=jp or jp_card,
     )
-    await UniMessage.text(" " + msg).finish(at_sender=True)
+    await UniMessage.image(raw=png).finish(at_sender=True)
 
 
 @rise_score.handle()
@@ -192,21 +305,22 @@ async def _(binding: UserBinding = SessionBinding()):
 _score_line_spec = CommandSpec(
     matcher=score_line_cmd,
     name="分数线",
-    brief="查询指定谱面达标分数线允许的容错",
+    brief="查询指定谱面达标分数线允许的容错（图片出卡）",
     detail=(
-        "此功能为查找某首歌分数线设计。\n"
-        "命令格式：分数线「难度+歌曲id」「分数线」\n"
-        "命令将返回分数线允许的「TAP」「GREAT」容错，\n"
-        "以及「BREAK」50落等价的「TAP」「GREAT」数。\n"
-        "以下为「TAP」「GREAT」的对应表：\n"
+        "此功能为查询某谱面达到目标达成率的容错。\n"
+        "命令格式：分数线「难度色」「id/别名/曲名」「分数线」\n"
+        "难度色：绿/黄/红/紫/白（与查询键可连写，如 紫799 / 紫琪露诺）。\n"
+        "输出「等效 GREAT TAP 数」：1 个 = 1 个 TAP 从 Critical Perfect\n"
+        "掉到 GREAT 的损失（100 基础分），总预算与旧版「允许的 TAP GREAT\n"
+        "数量」同值；判定表覆盖全部音符类型与 BREAK 七档\n"
+        "（50落/100落/G-1/G-2/G-3/GOOD/MISS，含 CP 额外分折算）。\n"
+        "对应表（等效 GREAT TAP）：\n"
         "        GREAT / GOOD / MISS\n"
-        "TAP         1 / 2.5  / 5\n"
-        "HOLD        2 / 5    / 10\n"
-        "SLIDE       3 / 7.5  / 15\n"
-        "TOUCH       1 / 2.5  / 5\n"
-        "BREAK       5 / 12.5 / 25 (外加200落)"
+        "TAP·TOUCH  1 / 2.5  / 5\n"
+        "HOLD       2 / 5    / 10\n"
+        "SLIDE      3 / 7.5  / 15"
     ),
-    example="分数线 紫799 100",
+    example="分数线 紫799 100.5",
 )
 
 help_registry.declare(

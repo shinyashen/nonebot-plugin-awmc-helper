@@ -7,6 +7,7 @@ maimai_py 本体是纯库，可顶层导入。
 
 import dataclasses
 
+import pytest
 from maimai_py import Score, RateType, SongType, LevelIndex, ScoreExtend
 
 
@@ -141,7 +142,14 @@ def test_bests_empty_input():
 
 
 def test_score_line_formula():
-    """分数线公式对拍原版：紫799（DX Master）100% 线。"""
+    """分数线公式（2026-10-02 专栏口径重写）：预算与原版 tap_great 同值。
+
+    样例（构造物量）：total=475000、bonus_total=2000；每 1 额外分折算
+    per_bonus = 475000/(2000×10000) = 0.002375 个等效 GREAT TAP。
+    七档期望值 = (2500-基础分)/100 + (100-额外分)×per_bonus：
+    50落 0.585625 / 100落 1.17125 / G-1 5.855 / G-2 10.855 / G-3 13.355 /
+    GOOD 15.8325 / MISS 24.75。
+    """
     from mocks import make_diff
 
     from nonebot_plugin_awmc_helper.core.calc import score_line
@@ -152,9 +160,26 @@ def test_score_line_formula():
     result = score_line(diff, 100)
     total = 700 * 500 + 100 * 1000 + 100 * 1500 + 100 * 500 + 20 * 2500
     assert result is not None
-    assert result["total"] == total
-    assert result["tap_great"] == total * 1 / 10000
+    assert result["total_basic"] == total
+    assert result["total_bonus"] == 20 * 100
+    assert result["budget"] == total * 1 / 10000  # 与原版 tap_great 同值
     assert result["breaks"] == 20
+    per_bonus = total / (2000 * 10000)
+    rows = dict(result["break_rows"])
+    assert rows["50落"] == (2500 - 2500) / 100 + (100 - 75) * per_bonus
+    assert rows["100落"] == (2500 - 2500) / 100 + (100 - 50) * per_bonus
+    assert rows["G-1"] == (2500 - 2000) / 100 + (100 - 40) * per_bonus
+    assert rows["G-2"] == (2500 - 1500) / 100 + (100 - 40) * per_bonus
+    assert rows["G-3"] == (2500 - 1250) / 100 + (100 - 40) * per_bonus
+    assert rows["GOOD"] == (2500 - 1000) / 100 + (100 - 30) * per_bonus
+    assert rows["MISS"] == (2500 - 0) / 100 + (100 - 0) * per_bonus
+    # 单调递增（50落 < 100落 < G-1 < G-2 < G-3 < GOOD < MISS）
+    values = [v for _, v in result["break_rows"]]
+    assert values == sorted(values)
+    # 可加性：等效数折算的达成率损失 = 基础/额外两通道直算值（专栏口径）
+    g3 = rows["G-3"]
+    direct = 1250 * 100 / total + 60 * 1 / 2000
+    assert g3 * 10000 / total == pytest.approx(direct)
 
     assert score_line(diff, 101.5) is None  # 非法线
     assert score_line(diff, -1) is None
