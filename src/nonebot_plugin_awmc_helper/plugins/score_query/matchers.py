@@ -428,6 +428,12 @@ help_registry.declare(
             aliases=("B50",),
             capability=Capability.B50,
             brief="B50 成绩大图（带参数=水鱼用户名代查，@某人=代查）",
+            detail=(
+                "格式：b50 [@某人|水鱼用户名]\n"
+                "带参数=水鱼公开代查（无需绑定）；@某人 代查优先用对方绑定，"
+                "对方未绑定时 QQ 平台回退水鱼按 QQ 公开查询。\n"
+                "水鱼公开查询凭据优先级：绑定用户名 > QQ 号。"
+            ),
         ),
         CommandSpec(
             matcher=b40,
@@ -435,6 +441,11 @@ help_registry.declare(
             aliases=("B40",),
             capability=Capability.SCORES_ALL,
             brief="无条件全量 b40（旧系数 FiNALE 口径，头部含段位分 2100）",
+            detail=(
+                "裸 b40 = 全部成绩按旧系数重算（恒拆 25+15），"
+                "头部称号条固定「底分 + 段位分 2100」；\n"
+                "带条件的旧系数卡（nb40、dx2022b40 等）见「条件50」。"
+            ),
         ),
         CommandSpec(
             matcher=ap50,
@@ -442,6 +453,7 @@ help_registry.declare(
             aliases=("AP50",),
             capability=Capability.SCORES_ALL,
             brief="AP-only best50（全 AP 成绩组装出图）",
+            detail="格式：ap50 [@某人]；等价「神50」，只统计 AP/AP+ 的 best50。",
         ),
         CommandSpec(
             matcher=combo50,
@@ -470,7 +482,12 @@ help_registry.declare(
             aliases=("Minfo", "MINFO", "info", "Info", "INFO"),
             capability=Capability.MINFO,
             brief="单曲成绩卡（ID/曲名/别名定位，@某人代查）",
-            detail="格式：minfo <曲目ID|曲名|别名>；未绑定时降级纯谱面卡。",
+            detail=(
+                "格式：minfo <ID|曲名|别名> [@某人]\n"
+                "曲名/别名同时命中标准谱与 DX 谱时列出两条 id，"
+                "写 minfo dx<别名> 可直接看 DX 谱；\n"
+                "要看的谱面没有任何难度成绩时提示「尚未游玩过该曲目」。"
+            ),
         ),
         CommandSpec(
             matcher=ginfo,
