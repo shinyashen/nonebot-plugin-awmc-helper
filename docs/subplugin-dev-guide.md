@@ -87,9 +87,9 @@ plugins/
 越过口径（引入独立域，或体量自然增长）时，在**下次触碰该插件时**按本约定
 拆分即可，不要求专门开重构轮次。
 
-> 现状（2026-09-25）：12 个内置子插件中 music_query / guess / tables /
-> arcade / alias / score_query 已按三层拆分；base / songdb / fortune /
-> random_song / score_tools / bind 按豁免保持单文件。
+> 现状（2026-10-02 更新）：12 个内置子插件中 music_query / guess / tables /
+> arcade / alias / score_query / bind 已按三层拆分；base / songdb / fortune /
+> random_song / score_tools 按豁免保持单文件。
 
 ## 硬性规则
 

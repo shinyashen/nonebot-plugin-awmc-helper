@@ -21,7 +21,7 @@ NoneBot2 的「舞萌DX」(maimaiDX) 街机音游辅助插件：查歌、别名�
 - **功能基准**：[Yuri-YuzuChaN/maimaiDX](https://github.com/Yuri-YuzuChaN/maimaiDX)
   （HoshinoBot 版），包括 NoneBot 版没有的「机厅排卡」模块；
 - **数据层**：[TrueRou/maimai.py](https://github.com/TrueRou/maimai.py)（PyPI `maimai-py`）
-  统一曲目/成绩模型与多查分器对接；水鱼 / 落雪 / 柚子三源；
+  统一曲目/成绩模型与多查分器对接；水鱼 / 落雪 / 日服 NET（查分）、柚子（别名）；
 - **架构**：主插件提供核心服务（core），每个功能是独立子插件（plugins/），
   按 NoneBot 官方《嵌套插件》机制加载，可通过 `awmc_disabled_plugins` 独立停用。
 
