@@ -124,6 +124,7 @@ def test_old_ra_badge_num_thresholds():
     assert old_ra_badge_num(16000) == "11"
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_b40_layout_passes_layout_to_header(monkeypatch):
     """layout 透传 _draw_header：b40 版式联动头部旧分段徽章（默认 b50 不受影响）。"""
