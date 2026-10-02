@@ -65,6 +65,14 @@ def rate_of(achievement: float) -> str:
     return RATE_TO_ZH[RateType._from_achievement(achievement)]
 
 
+def achievement_cap(diff: SongDifficulty) -> int:
+    """谱面达成率上限（百分点）：buddy 宴谱 202（200 基础 + 2 额外，左右
+    机台合计），其余 101（100 基础 + 1 额外）。"""
+    if diff.type == SongType.UTAGE and bool(getattr(diff, "is_buddy", False)):
+        return 202
+    return 101
+
+
 def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     """分数线容错计算（2026-10-02 按专栏口径重写，替代原版复刻公式）。
 
@@ -73,19 +81,22 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     （额外分仅 BREAK 有，满分 = break 数×100）。
 
     「等效 GREAT TAP」= 1 个 TAP 从 Critical Perfect 掉到 GREAT 的损失
-    （100 基础分）。总预算 = 基础满分×(101-线)/10000，与原版「允许的
+    （100 基础分）。总预算 = 基础满分×(上限-线)/10000，与原版「允许的
     TAP GREAT 数」同值（口径兼容）；基础分损失 Δb → Δb/100，额外分损失
-    Δx → Δx×基础满分/(额外满分×10000)，两通道严格可加。
+    Δx → Δx×基础满分/(额外满分×10000)，两通道严格可加。上限见
+    :func:`achievement_cap`（buddy 宴谱 202，物量字段即左右机台合计值）。
 
     BREAK 判定档位（CP 基础 2500+额外 100 为满分基准，不列）：
     P-1/P-2 的显示名用玩家通俗称法「50落/100落」（用户拍板，不望文生义）。
 
     返回 dict：``total_basic`` / ``total_bonus`` / ``budget``（等效 GREAT
-    TAP 预算）/ ``breaks`` / ``break_rows``（(档名, 等效数) 列表）。
-    ``line`` 非法（超出 (0, 101]）或谱面无 BREAK / 基础分为 0 返回 None。
+    TAP 预算）/ ``breaks`` / ``cap`` / ``buddy`` / ``break_rows``
+    （(档名, 等效数) 列表）。``line`` 非法（超出 (0, cap]）或谱面无
+    BREAK / 基础分为 0 返回 None。
     """
-    reduce_pct = 101 - line
-    if reduce_pct <= 0 or reduce_pct >= 101:
+    cap = achievement_cap(diff)
+    reduce_pct = cap - line
+    if reduce_pct <= 0 or reduce_pct >= cap:
         return None
     total = (
         diff.tap_num * 500
@@ -111,6 +122,8 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
         "total_bonus": bonus_total,
         "budget": reduce_pct * total / 10000,
         "breaks": diff.break_num,
+        "cap": cap,
+        "buddy": cap == 202,
         "break_rows": break_rows,
     }
 

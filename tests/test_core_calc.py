@@ -185,6 +185,28 @@ def test_score_line_formula():
     assert score_line(diff, -1) is None
 
 
+def test_score_line_utage_buddy_cap():
+    """buddy 宴谱上限 202（200 基础 + 2 额外）：线可到 202，预算按 202-线。"""
+    from mocks import make_utage
+
+    from nonebot_plugin_awmc_helper.core.calc import score_line, achievement_cap
+
+    utage = make_utage(is_buddy=True)
+    assert achievement_cap(utage) == 202
+    total = 58 * 500 + 217 * 1000 + 27 * 1500 + 0 * 500 + 7 * 2500
+    result = score_line(utage, 101.5)  # 普通谱非法线，buddy 合法
+    assert result is not None
+    assert result["budget"] == (202 - 101.5) * total / 10000
+    assert result["cap"] == 202
+    assert result["buddy"] is True
+    assert score_line(utage, 202) is None  # 满线无容错
+    assert score_line(utage, 202.5) is None  # 超上限
+    # 非 buddy 宴谱口径同普通谱（上限 101）
+    solo = make_utage(is_buddy=False)
+    assert achievement_cap(solo) == 101
+    assert score_line(solo, 101.5) is None
+
+
 def test_compute_rating_consistent_with_library():
     """RA 计算与 maimai-py ScoreCoefficient 一致。"""
     from maimai_py.utils import ScoreCoefficient

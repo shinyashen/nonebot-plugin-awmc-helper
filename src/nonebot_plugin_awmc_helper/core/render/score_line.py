@@ -37,6 +37,8 @@ _DARK = (90, 88, 108, 255)
 _GRAY = (120, 118, 138, 255)
 _WHITE = (255, 255, 255, 255)
 _HEADER_PURPLE = (129, 122, 246, 255)
+_UTAGE_COLOR = (210, 57, 174, 255)
+"""宴谱主题色（对齐宴会谱面卡底图的紫描边取色）。"""
 _CARD_ALPHA = 195
 # 斑马纹（奇偶行透明度区分，用户定稿 80/120）；合成式叠加透出底图淡彩
 _ROW_ALPHA_ODD = 80
@@ -190,7 +192,8 @@ def score_line_card(
         anchor="lm",
     )
     genre = GENRE_TO_ZH.get(song.genre, song.genre.value)
-    draw.text((530, 370), genre, font=font(21, FONT_NUM), fill=_GRAY, anchor="lm")
+    # 分类行用中文字体（Torus 无 CJK 字形，东方Project 等会缺字）
+    draw.text((530, 370), genre, font=font(21), fill=_GRAY, anchor="lm")
     draw.text(
         (392, 408),
         f"ID {chart_display_id(song, diff)}",
@@ -198,32 +201,62 @@ def score_line_card(
         fill=_DARK,
         anchor="lm",
     )
-    type_abbr = "DX" if diff.type == SongType.DX else "SD"
-    if badge := assets.type_badge(type_abbr, (80, 30)):
-        im.alpha_composite(badge, (530, 408 - 12))
-    draw.text((624, 408), f"{type_abbr} 谱面", font=font(18), fill=_GRAY, anchor="lm")
+    is_utage = diff.type == SongType.UTAGE
+    if is_utage:
+        # 宴谱徽章：药丸形（两头整半圆）白边 + 宴色填充 + 宴汉字（日文字体，
+        # 对齐宴会卡的紫描边配色），替代 DX/SD 圆标的位置
+        kanji = getattr(diff, "kanji", "") or "宴"
+        draw.rounded_rectangle(
+            (530, 396, 610, 426),
+            radius=15,
+            fill=_UTAGE_COLOR,
+            outline=_WHITE,
+            width=2,
+        )
+        draw.text(
+            (570, 411),
+            kanji,
+            font=font(20 if len(kanji) == 1 else 15, FONT_RODIN),
+            fill=_WHITE,
+            anchor="mm",
+        )
+        draw.text((624, 408), "宴谱面", font=font(18), fill=_GRAY, anchor="lm")
+    else:
+        type_abbr = "DX" if diff.type == SongType.DX else "SD"
+        if badge := assets.type_badge(type_abbr, (80, 30)):
+            im.alpha_composite(badge, (530, 408 - 12))
+        draw.text(
+            (624, 408), f"{type_abbr} 谱面", font=font(18), fill=_GRAY, anchor="lm"
+        )
 
-    # 难度徽章（底边 = 封面底缘 436）：Re:Master 浅紫底深紫字（对齐歌曲行卡
-    # b50_score_remaster 配色），其余难度彩底白字
-    if li == LevelIndex.ReMASTER:
+    # 难度徽章（底边 = 封面底缘 436）：宴谱用宴色；Re:Master 浅紫底深紫字
+    # （对齐歌曲行卡 b50_score_remaster 配色）；其余难度彩底白字
+    if is_utage:
+        badge_fill = _UTAGE_COLOR
+        badge_text = _WHITE
+        # 日文字体无简体「场」，用官方日文写法「宴会場」
+        diff_name, lv_text = "宴会場", f"Lv {diff.level}"
+    elif li == LevelIndex.ReMASTER:
         badge_fill = (230, 197, 255, 255)
         badge_text = ID_TEXT_COLORS[li.value]
+        diff_name, lv_text = DIFF_DISPLAY_NAMES[li.value], f"Lv {diff.level_value:.1f}"
     else:
         badge_fill = ID_TEXT_COLORS[li.value]
         badge_text = _WHITE
+        diff_name, lv_text = DIFF_DISPLAY_NAMES[li.value], f"Lv {diff.level_value:.1f}"
     bx0, by0, bx1, by1 = 830, 336, 1090, 436
     draw.rounded_rectangle((bx0, by0, bx1, by1), 22, fill=badge_fill)
     bcx = (bx0 + bx1) // 2
     draw.text(
         (bcx, by0 + 32),
-        DIFF_DISPLAY_NAMES[li.value],
+        diff_name,
         font=font(26, FONT_RODIN),
         fill=badge_text,
         anchor="mm",
     )
     draw.text(
         (bcx, by0 + 72),
-        f"Lv {diff.level_value:.1f}",
+        lv_text,
         font=font(26, FONT_NUM),
         fill=badge_text,
         anchor="mm",
@@ -266,6 +299,15 @@ def score_line_card(
         fill=_GRAY,
         anchor="lm",
     )
+    if result.get("buddy"):
+        # 双人宴谱：上限 202、物量为左右机台合计（用户要求的提醒口径）
+        draw.text(
+            (360, 684),
+            "双人宴谱：达成率上限 202%（200 基础 + 2 额外）；物量为左右机台合计",
+            font=font(18),
+            fill=_UTAGE_COLOR,
+            anchor="lm",
+        )
 
     # ---- 判定损失表卡 ----------------------------------------------------
     _card(im, (60, 730, 1140, 1290))

@@ -221,6 +221,157 @@ async def test_score_line_digits_fallback_to_full_query(app: App, songs):
     )
 
 
+def _utage_host(**utage_kw):
+    """宴谱宿主：蛸チルノ（快照真实物量），别名「蛸」供宴前缀按名查找。"""
+    from mocks import make_song, make_utage
+
+    return make_song(
+        199,
+        "チルノのパーフェクトさんすう教室",
+        aliases=["蛸"],
+        utage=[make_utage(**utage_kw)],
+    )
+
+
+def _utage_kw_for_card(**overrides):
+    """与 _utage_host 默认一致的宴谱构造参数（期望图与实际发送同源）。"""
+    from mocks import make_utage
+
+    return make_utage(**overrides)
+
+
+def _utage_card(utage_diff, line: float = 100.0, jp: bool = False):
+    from nonebot_plugin_awmc_helper.core.calc import score_line
+    from nonebot_plugin_awmc_helper.core.render.score_line import score_line_card
+
+    result = score_line(utage_diff, line)
+    assert result is not None
+    from mocks import make_song
+
+    song = make_song(
+        199, "チルノのパーフェクトさんすう教室", aliases=["蛸"], utage=[utage_diff]
+    )
+    return score_line_card(song, utage_diff, line, result, jp=jp)
+
+
+@pytest.mark.asyncio
+async def test_score_line_utage_direct_id(app: App, db):
+    """6 位宴谱 diff_id 直查（无色无前缀）：diff_id 即完整规格，直接出卡。"""
+    from mocks import seed_service
+
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await seed_service(song_service, [_utage_host()])
+    await _assert_image_reply(
+        app,
+        score_tools.score_line_cmd,
+        "分数线 100199 100",
+        lambda: _utage_card(_utage_kw_for_card()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_score_line_utage_prefix_single(app: App, db):
+    """宴前缀 + 别名：唯一宴谱直出卡。"""
+    from mocks import make_utage, seed_service
+
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    utage = make_utage()
+    await seed_service(song_service, [_utage_host()])
+    await _assert_image_reply(
+        app, score_tools.score_line_cmd, "分数线 宴蛸 100", lambda: _utage_card(utage)
+    )
+
+
+@pytest.mark.asyncio
+async def test_score_line_utage_prefix_multi_lists_ids(app: App, db):
+    """宴前缀 + 多宴谱（GDP 类）：候选列表只列宴谱 diff_id。"""
+    from mocks import make_song, make_utage, seed_service
+
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.core.songs import (
+        cn_song_map,
+        song_service,
+        entries_list_text,
+    )
+
+    host = make_song(
+        199,
+        "チルノのパーフェクトさんすう教室",
+        aliases=["蛸"],
+        utage=[
+            make_utage(diff_id=100199, kanji="蛸"),
+            make_utage(diff_id=100901, kanji="宴"),
+        ],
+    )
+    await seed_service(song_service, [host])
+    chosen = [(100199, host, None), (100901, host, None)]
+    cn_songs = await cn_song_map([host])
+    jp = cn_songs[host.id] is None
+    expected = entries_list_text(
+        chosen,
+        [jp, jp],
+        hint="※ 请使用「分数线 宴<id> <线>」指定谱面",
+    )
+    await _assert_reply(app, score_tools.score_line_cmd, "分数线 宴蛸 100", expected)
+
+
+@pytest.mark.asyncio
+async def test_score_line_utage_prefix_none_hints(app: App, songs):
+    """宴前缀命中无宴谱的曲：给出「没有宴谱」提示。"""
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+
+    await _assert_reply(
+        app,
+        score_tools.score_line_cmd,
+        "分数线 宴会员制餐厅 100",
+        "该乐曲没有宴谱",
+    )
+
+
+@pytest.mark.asyncio
+async def test_score_line_white_missing_hint(app: App, songs):
+    """色前缀命中但该难度不存在（8 号无白谱）：给出「没有 Re:Master 谱」提示。"""
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+
+    await _assert_reply(
+        app,
+        score_tools.score_line_cmd,
+        "分数线 白会员制餐厅 100",
+        "该乐曲没有Re:Master谱",
+    )
+
+
+@pytest.mark.asyncio
+async def test_score_line_utage_buddy_card(app: App, db):
+    """buddy 宴谱：202 上限口径出卡（物量字段即左右机台合计，直算）。"""
+    from mocks import seed_service
+
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    kw = {
+        "diff_id": 100902,
+        "kanji": "協",
+        "is_buddy": True,
+        "tap_num": 649,
+        "hold_num": 76,
+        "slide_num": 53,
+        "touch_num": 164,
+        "break_num": 10,
+    }
+    await seed_service(song_service, [_utage_host(**kw)])
+    await _assert_image_reply(
+        app,
+        score_tools.score_line_cmd,
+        "分数线 100902 101.5",
+        lambda: _utage_card(_utage_kw_for_card(**kw), 101.5),
+    )
+
+
 @pytest.mark.asyncio
 async def test_score_line_missing_color_feedback(app: App, db):
     """无难度色但有命中：复用「是什么歌」同款回复（谱面卡）+ 缺色提示。
