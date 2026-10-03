@@ -33,6 +33,7 @@ def _entry(**overrides):
                 "kind": 0,
                 "designer": "-",
                 "utageId": 0,
+                "optJapan": "A000",
                 "releaseTime": "2012-09-13T00:00:00+00:00",
                 "tapCount": 113,
                 "holdCount": 13,
@@ -111,6 +112,73 @@ def test_entry_to_doc_sd(munet):
     assert sheet["contents"][0]["level"] == [6.0]  # constants 末值（快照语义）
     assert sheet["date"] == 20120913
     assert "notes" in sheet["contents"][0]
+
+
+def test_entry_to_doc_jp_confirmed_writes_version(munet):
+    """日服在役条目（optJapan 非空）：addVersion 推导组版本码。"""
+    entry = _entry(id=2700, addVersion=27)
+    entry["charts"] = [{**_entry()["charts"][0], "kind": 1}]
+    _base, doc = munet.entry_to_doc(entry)
+    assert doc["sheets"]["dx"]["version"] == 27000
+    assert doc["sheets"]["dx"]["date"] == 20120913
+
+
+def test_entry_to_doc_intl_first_omits_version_and_date(munet):
+    """国际服先行条目（optJapan 空，OV3RCLOCK 形状）：addVersion 是国际服批次码
+    （26→CiRCLE PLUS），不得写日侧组版本；releaseTime 同为国际服日期，不采信。"""
+    entry = _entry(id=2024, addVersion=26)
+    entry["charts"] = [{**_entry()["charts"][0], "kind": 1, "optJapan": ""}]
+    _base, doc = munet.entry_to_doc(entry)
+    sheet = doc["sheets"]["dx"]
+    assert "version" not in sheet
+    assert "date" not in sheet
+    assert sheet["contents"]  # 谱面内容照常转换（物量/定数与区域无关）
+
+
+def test_entry_to_doc_otoge_fact_overrides(munet):
+    """otoge 事实（日服权威 version/release）优先于 MuNET 推导值。"""
+    entry = _entry(id=2024, addVersion=26)
+    entry["charts"] = [{**_entry()["charts"][0], "kind": 1, "optJapan": ""}]
+    fact = {"version": 27002, "date": 261002}
+    _base, doc = munet.entry_to_doc(entry, otoge_fact=fact)
+    assert doc["sheets"]["dx"]["version"] == 27002
+    assert doc["sheets"]["dx"]["date"] == 261002
+
+
+def test_entry_to_doc_utage_version_unaffected(munet):
+    """宴为日服独占：独立宴谱条目不做在役确认，addVersion 照常写组版本。"""
+    entry = _entry(id=2500, genre=107, addVersion=13)
+    entry["charts"] = [
+        {
+            "difficulty": 0,
+            "kind": 0,
+            "designer": "-",
+            "utageId": 10,
+            "optJapan": "",
+            "tapCount": 10,
+            "holdCount": 2,
+            "slideCount": 1,
+            "touchCount": 0,
+            "breakCount": 1,
+        }
+    ]
+    _base, doc = munet.entry_to_doc(entry)
+    assert doc["sheets"] == {"utage": {"version": 20000}}
+
+
+def test_otoge_fact_validation(munet):
+    assert munet._otoge_fact({"version": "27002", "release": "261002"}) == {
+        "version": 27002,
+        "date": 261002,
+    }
+    # date 走 dx 规则 release ‖ date_updated ‖ date_added
+    assert munet._otoge_fact({"version": 27000, "date_added": 20260917}) == {
+        "version": 27000,
+        "date": 20260917,
+    }
+    assert munet._otoge_fact({"version": "abc"}) is None
+    assert munet._otoge_fact({"version": 30000}) is None  # FUTURE 占位不计
+    assert munet._otoge_fact({}) is None
 
 
 def test_entry_to_doc_dx_only_uses_base_id(munet):

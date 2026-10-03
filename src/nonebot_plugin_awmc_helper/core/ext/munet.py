@@ -181,14 +181,20 @@ def _entry_kind(entry: dict) -> str | None:
 
 
 def entry_to_doc(
-    entry: dict, *, image_url: str | None = None
+    entry: dict, *, image_url: str | None = None, otoge_fact: dict | None = None
 ) -> tuple[int, dict] | None:
     """MuNET 条目 → 01 标准 JSON 片段（(规范表曲 id, doc)）；不可转换 → None。
 
     - 只产日侧字段（version_cn 由合并层拒写保证）；定数取 constants[] 末值
       （单元素 =「当前定数」快照语义，§7.5-C）；
+    - 组版本/日期只在条目确认日服在役（谱面 ``optJapan`` 非空）时由 addVersion
+      推导——addVersion 跟随条目所在区域的当期版本批次，国际服先行曲拿到的是
+      国际服码（OV3RCLOCK 实测 addVersion 26 → CiRCLE PLUS，日服实为 MAGiCAL），
+      误写日侧组版本且 fill/基础源都不覆盖会永久滞留；otoge 事实（PR 预读/
+      现役表的日服权威 version/release）优先于 MuNET 推导值；
     - 宴谱内容不转换：MuNET utageId 无法映射规范表 level_id，宴字段由 otoge-db
-      提供（独立宴谱条目仍建曲与组版本，别名照常收割）；
+      提供（独立宴谱条目仍建曲与组版本，别名照常收割）；宴为日服独占，其组
+      版本不做在役确认；
     - buddy（協）谱物量恒 0（无左右分工），不产 notes 留给 otoge-db。
     """
     music_id = int(entry["id"])
@@ -215,6 +221,14 @@ def entry_to_doc(
     if kind != "utage":
         contents: list[dict] = []
         earliest: int | None = None
+        jp_confirmed = any(
+            not c.get("utageId") and c.get("optJapan")
+            for c in entry.get("charts") or []
+        )
+        fact = otoge_fact or {}
+        version = fact.get("version")
+        if version is None and code is not None and jp_confirmed:
+            version = code
         for chart in entry.get("charts") or []:
             if chart.get("utageId"):
                 continue
@@ -247,10 +261,13 @@ def entry_to_doc(
             contents.append(content)
         if contents:
             sheet: dict[str, Any] = {}
-            if code is not None:
-                sheet["version"] = code
-            if earliest is not None:
-                sheet["date"] = earliest
+            if version is not None:
+                sheet["version"] = version
+            date = fact.get("date")
+            if date is None and earliest is not None and jp_confirmed:
+                date = earliest  # 国际服先行条目的 releaseTime 是国际服日期，不采信
+            if date is not None:
+                sheet["date"] = date
             sheet["contents"] = contents
             sheets[kind] = sheet
     elif code is not None:
@@ -259,6 +276,33 @@ def entry_to_doc(
         return None
     doc["sheets"] = sheets
     return music_id % DX_ID_OFFSET, doc
+
+
+def _otoge_fact(item: dict) -> dict | None:
+    """otoge 条目 → 日服权威版本/日期事实（值域校验，供批次文档与既有曲校正）。
+
+    - version 裸批次码直接采信（与 songdb._otoge_version 同口径，如 MAGiCAL
+      期中 27002）；DX 轴范围外（老框 <10000 或 FUTURE 占位 30000）不产事实；
+    - date 按 dx 规则 ``release ‖ date_updated ‖ date_added``（YYMMDD 六位原样，
+      song-db-design §3；release 语义即追加/复活日，SD 组同样适用）；
+    - otoge title join 全程按标题对齐，上游字段缺失/脏值宁可放弃（宁缺毋滥）。
+    """
+    try:
+        version = int(item.get("version"))
+    except (TypeError, ValueError):
+        return None
+    if not 10000 <= version < 30000:
+        return None
+    fact: dict[str, int] = {"version": version}
+    for key in ("release", "date_updated", "date_added"):
+        try:
+            date = int(item.get(key))
+        except (TypeError, ValueError):
+            continue
+        if date:
+            fact["date"] = date
+            break
+    return fact
 
 
 def harvest_aliases(entries: list[dict]) -> dict[int, list[str]]:
@@ -388,6 +432,55 @@ async def _pending_titles() -> list[str]:
     return titles
 
 
+async def _correct_existing_versions(facts: dict[str, dict]) -> list[int]:
+    """既有曲版本/日期校正：MuNET 曾入库的曲按 otoge 日服权威值覆写。
+
+    批次建曲时写入的组版本可能是 MuNET 侧口径（国际服先行曲拿到国际服批次
+    码，2026-10-03 OV3RCLOCK 实测 26500≠日服 27002），而合并层 fill 与日侧
+    基础源（apply_jp/_fill_row_from_otoge）对既有组版本都只填空不覆盖，错误
+    值会永久滞留——此处对 ``munet_batch_ids`` 在列且 otoge 事实不同的曲走
+    override 文档显式校正（经 apply_external_sources，指纹/底图联动一致）。
+    只动 sd/dx 组：宴为日服独占，MuNET addVersion 无国际服先行问题。
+    """
+    if not facts:
+        return []
+    from .. import songdb
+
+    munet_ids = set(await store.kv_get("munet_batch_ids") or [])
+    if not munet_ids:
+        return []
+    rows = await store.song_group_facts(sorted(munet_ids))
+    by_title: dict[str, int] = {}
+    for sid, info in rows.items():
+        if info["title"]:
+            by_title.setdefault(songdb.norm_title(info["title"]), sid)
+    corrections: dict[str, dict] = {}
+    for title, fact in facts.items():
+        sid = by_title.get(songdb.norm_title(title))
+        if sid is None:
+            continue
+        patch = {k: v for k in ("version", "date") if (v := fact.get(k)) is not None}
+        if not patch:
+            continue
+        for kind in ("sd", "dx"):
+            group = rows[sid]["groups"].get(kind)
+            # 有差异才写：override 文档只在真实偏差时产生，稳态零合并
+            if group and any(group.get(k) != v for k, v in patch.items()):
+                sheet = corrections.setdefault(str(sid), {"sheets": {}})["sheets"]
+                sheet[kind] = dict(patch)
+    if not corrections:
+        return []
+    await songdb.apply_external_sources(
+        preloaded=[("munet", "override", corrections)], force=True
+    )
+    corrected_ids = [int(sid) for sid in corrections]
+    logger.info(
+        f"MuNET 批次：既有曲版本校正 {len(corrected_ids)} 首"
+        f"（{corrected_ids}，otoge 权威值覆写）"
+    )
+    return corrected_ids
+
+
 async def run_batch_supplement() -> dict:
     """current_jp 批次内新增歌曲补充：otoge 视角 title-diff → 拉取合并。
 
@@ -410,6 +503,7 @@ async def run_batch_supplement() -> dict:
     # 成员判断走 set（全库曲名 × 候选集的 `not in` 否则是数百万次线性比较）
     canonical_titles = set(await store.list_song_titles())
     images: dict[str, str] = {}
+    facts: dict[str, dict] = {}
     try:
         pr_entries = await otoge_pr.load_open_pr_entries()
     except Exception as e:
@@ -418,10 +512,17 @@ async def run_batch_supplement() -> dict:
     for entry in pr_entries:
         if entry.get("image_url"):
             images[entry["title"]] = entry["image_url"]
+        # PR 分支领先 main（日服当期批次），先到先得
+        if (fact := _otoge_fact(entry)) and entry.get("title"):
+            facts.setdefault(entry["title"], fact)
+    live_entries = await ext_otoge.fetch_music_ex()
+    for item in live_entries:
+        if (fact := _otoge_fact(item)) and item.get("title"):
+            facts.setdefault(item["title"], fact)
     titles = [e["title"] for e in pr_entries if e["title"] not in canonical_titles]
     titles.extend(
         e["title"]
-        for e in await ext_otoge.fetch_music_ex()
+        for e in live_entries
         if e.get("title") and e["title"] not in canonical_titles
     )
     titles.extend(await _pending_titles())
@@ -455,7 +556,9 @@ async def run_batch_supplement() -> dict:
             for root, aliases in harvest_aliases([payload]).items():
                 alias_items.setdefault(root, []).extend(aliases)
             converted = entry_to_doc(
-                payload, image_url=images.get(str(payload.get("name")))
+                payload,
+                image_url=images.get(str(payload.get("name"))),
+                otoge_fact=facts.get(str(payload.get("name"))),
             )
             if converted is None:
                 continue
@@ -484,6 +587,9 @@ async def run_batch_supplement() -> dict:
         merged_ids = set(known) if isinstance(known, list) else set()
         merged_ids |= set(docs_by_base)
         await store.kv_set("munet_batch_ids", sorted(merged_ids))
+    corrected = await _correct_existing_versions(facts)
+    if corrected:
+        result["corrected"] = corrected
     if alias_items:
         result["aliases"] = await store.upsert_song_aliases("munet", alias_items)
     try:

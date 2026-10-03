@@ -532,6 +532,36 @@ async def list_song_titles() -> set[str]:
     return {row.title for row in rows if row.title}
 
 
+async def song_group_facts(song_ids: list[int]) -> dict[int, dict]:
+    """指定曲的标题与 sd/dx 组版本/日期现值（MuNET 批次既有曲校正用）。
+
+    返回 ``{song_id: {"title": str, "groups": {kind: {"version", "date"}}}}``；
+    只取 sd/dx（宴组不参与 MuNET 批次校正），库中不存在的曲不返回。
+    """
+    async with session() as db:
+        song_rows = (
+            await db.exec(select(SongRow).where(col(SongRow.id).in_(song_ids)))
+        ).all()
+        group_rows = (
+            await db.exec(
+                select(SongSheetGroup).where(
+                    col(SongSheetGroup.song_id).in_(song_ids),
+                    col(SongSheetGroup.kind).in_(("sd", "dx")),
+                )
+            )
+        ).all()
+    out: dict[int, dict] = {
+        row.id: {"title": row.title, "groups": {}} for row in song_rows
+    }
+    for group in group_rows:
+        if (info := out.get(group.song_id)) is not None:
+            info["groups"][group.kind] = {
+                "version": group.version,
+                "date": group.date,
+            }
+    return out
+
+
 async def upsert_song_aliases(source: str, items: dict[int, list[str]]) -> int:
     """增量写入远端别名快照（不整源替换，已存在的 (song_id, alias) 跳过）。
 

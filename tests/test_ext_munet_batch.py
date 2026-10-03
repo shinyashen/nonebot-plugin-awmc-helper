@@ -104,8 +104,8 @@ async def test_batch_supplement_creates_songs_and_aliases(db, monkeypatched_mune
     assert row.title == "物語はここから"
     group = state.groups.get((BATCH_ENTRY_ID, "dx"))
     assert group is not None
-    assert group.version == 27000  # addVersion 27 → 日服码
-    assert group.date is None  # 真实 MuNET 条目无 releaseTime，日期留给 otoge
+    assert group.version == 27000  # addVersion 27 → 日服码（otoge 事实同值）
+    assert group.date == 260917  # otoge 现役表 release 事实随建曲直接写入
     chart = state.chart(BATCH_ENTRY_ID, "dx", 3)
     assert chart.designer == "Luxizhel"  # MuNET 实测谱师
     assert (chart.notes_tap, chart.notes_slide, chart.notes_break) == (564, 80, 68)
@@ -118,7 +118,7 @@ async def test_batch_supplement_creates_songs_and_aliases(db, monkeypatched_mune
     aliases = await store.load_song_aliases(["munet"])
     assert aliases[BATCH_ENTRY_ID] == ["物语", "舞萌皇帝"]
 
-    # 下一轮重建：otoge title join 充实日期（真实 release 260917）
+    # 下一轮重建：otoge title join 与已写入值一致（日期建曲时已按事实落定）
     await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
     assert state.groups[(BATCH_ENTRY_ID, "dx")].date == 260917
@@ -196,3 +196,112 @@ async def test_munet_ids_guard_against_otoge_rollback(db, monkeypatched_munet):
     await songdb.rebuild(rollback, extra_jp_ids=await songdb._munet_known_ids())
     state = await songdb.State.load()
     assert state.songs.get(BATCH_ENTRY_ID) is not None  # 不被回滚误删
+
+
+async def test_batch_corrects_poisoned_version(db, monkeypatched_munet, monkeypatch):
+    """既有曲版本校正（2026-10-03 OV3RCLOCK 实况）：批次建曲写入国际服批次码
+    后，otoge 权威值（PR 预读）出现时经 override 通道纠正（fill/基础源都只填
+    空，不校正会永久滞留）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.ext import munet, otoge_pr
+
+    await songdb.rebuild(full_payloads())
+    await munet.run_batch_supplement()
+    # 模拟国际服先行曲误写：组版本退化为国际服码（addVersion 26 → CiRCLE PLUS）
+    state = await songdb.State.load()
+    state.groups[(BATCH_ENTRY_ID, "dx")].version = 26500
+    await state.save()
+
+    async def fake_pr():
+        # 真实 PR #1213 口径：MAGiCAL 期中 27002 + release 261002
+        return [
+            {
+                "title": "物語はここから",
+                "image_url": BATCH_COVER,
+                "version": "27002",
+                "release": "261002",
+            }
+        ]
+
+    monkeypatch.setattr(otoge_pr, "load_open_pr_entries", fake_pr)
+    result = await munet.run_batch_supplement()
+    assert result["corrected"] == [BATCH_ENTRY_ID]
+    state = await songdb.State.load()
+    group = state.groups[(BATCH_ENTRY_ID, "dx")]
+    assert group.version == 27002
+    assert group.date == 261002
+
+    # 稳态：值已一致，下一轮不再产生校正
+    second = await munet.run_batch_supplement()
+    assert "corrected" not in second
+
+
+async def test_batch_intl_first_song_uses_otoge_fact(
+    db, monkeypatched_munet, monkeypatch
+):
+    """国际服先行曲建曲（OV3RCLOCK 形状）：optJapan 空的条目不写 MuNET 版本码
+    （26→26500），otoge PR 事实在场时按日服权威值建曲（day-0 正确版本）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.ext import munet, otoge_pr
+
+    intl_entry = {
+        "id": 2024,
+        "name": "OV3RCLOCK",
+        "artist": "Alicemetix",
+        "bpm": 118,
+        "genre": 105,
+        "addVersion": 26,
+        "version": 26506,
+        "aliases": [],
+        "charts": [
+            {
+                "difficulty": 3,
+                "kind": 1,
+                "designer": "",
+                "utageId": 0,
+                "optJapan": "",
+                "optInternational": "A031",
+                "playableArea": 2,
+                "releaseTime": None,
+                "tapCount": 685,
+                "holdCount": 40,
+                "slideCount": 91,
+                "touchCount": 24,
+                "breakCount": 87,
+                "constants": [{"version": 26, "constant": 14.8}],
+            }
+        ],
+    }
+
+    async def fake_search(query):
+        if query == "OV3RCLOCK":
+            return [dict(intl_entry)]
+        return []
+
+    async def fake_by_id(music_id):
+        return dict(intl_entry) if music_id == 2024 else None
+
+    async def fake_pr():
+        return [
+            {
+                "title": "OV3RCLOCK",
+                "image_url": "360427dd3d2c96ca.png",
+                "version": "27002",
+                "release": "261002",
+            }
+        ]
+
+    monkeypatch.setattr(munet, "search_music", fake_search)
+    monkeypatch.setattr(munet, "fetch_music_by_id", fake_by_id)
+    monkeypatch.setattr(otoge_pr, "load_open_pr_entries", fake_pr)
+
+    await songdb.rebuild(full_payloads())
+    result = await munet.run_batch_supplement()
+    assert result["entries"] == 1
+    state = await songdb.State.load()
+    row = state.songs.get(2024)
+    assert row is not None
+    assert row.title == "OV3RCLOCK"
+    group = state.groups[(2024, "dx")]
+    assert group.version == 27002  # otoge 事实，而非 MuNET 国际服码 26500
+    assert group.date == 261002
