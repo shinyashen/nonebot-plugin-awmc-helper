@@ -119,6 +119,30 @@ class TestNeedles:
             assert norm_of("七味星人") in needles, (q, needles)
             assert norm_of("超七味星人") in needles, (q, needles)
 
+    def test_等价类_LuxizheLemon(self, alias_graph):
+        """LuxizheLemon⇒Luxizhel＋じゃこレモン（用户裁定 2026-10-03，
+        OV3RCLOCK MASTER 实名署名）：两侧成员查询都注入复合名义串 needle。"""
+        from nonebot_plugin_awmc_helper.core import designer
+
+        for q in ("Luxizhel", "BELiZHEL", "卢", "じゃこレモン", "柠檬", "🍋"):
+            needles = designer.build_needles(q, alias_graph)
+            assert designer.match("LuxizheLemon", needles), q
+
+    def test_查询合成名义串展开成员(self, alias_graph):
+        """CURATED 名义串本身做查询 → 展开成员等价类（resolve_class L3 步），
+        使 LuxizheLemon/るしえる 等合成串查询命中成员实名署名。"""
+        from nonebot_plugin_awmc_helper.core import designer
+
+        needles = designer.build_needles("LuxizheLemon", alias_graph)
+        assert norm_of("Luxizhel") in needles
+        assert norm_of("じゃこレモン") in needles
+        # 成员实名署名照常命中；同成员的 curated 合成串经反向注入也命中
+        assert designer.match("Luxizhel", needles)
+        needles_rushi = designer.build_needles("るしえる", alias_graph)
+        assert norm_of("Luxizhel") in needles_rushi
+        assert designer.match("Luxizhel", needles_rushi)
+        assert designer.match("Safazhel", needles_rushi)
+
     def test_等价类_はっぴー(self, alias_graph):
         from nonebot_plugin_awmc_helper.core import designer
 

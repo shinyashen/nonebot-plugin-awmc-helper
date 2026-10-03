@@ -74,6 +74,10 @@ CURATED: dict[str, tuple[str, ...]] = {
     "Safata.Hz": ("サファ太", "シチミヘルツ"),  # Hz=シチミヘルツ（用户判读）
     "Safata.GHz": ("サファ太", "シチミヘルツ"),
     "LuxiHertz": ("Luxizhel", "シチミヘルツ"),
+    "LuxizheLemon": (
+        "Luxizhel",
+        "じゃこレモン",
+    ),  # Luxizhe 词干+Lemon（用户裁定 2026-10-03；OV3RCLOCK MAS 实名）
     "SHICHIMI☆CAT": ("シチミヘルツ",),  # namu.wiki 佐证单人；☆CAT≠ぴちネコ
     "SAFARi☆CAT": ("サファ太",),
     "safaTAmago": ("サファ太", "玉子豆腐"),
@@ -187,6 +191,10 @@ def resolve_class(name: str) -> "set[str]":
                 members.add(nm)
                 members.update(_norm(a) for a in aliases)
                 break
+    # curated 名义串本身做查询 → 展开成员等价类（文档声称的 L3 步；使
+    # LuxizheLemon/るしえる 等合成串查询命中成员实名署名，2026-10-03 补齐）
+    if n in _NORM_CURATED:
+        members.update(_NORM_CURATED[n][1])
     # curated 成员名也把自身声明别名并入（如 はっぴー 的緑風 犬三郎在 L1 图中）
     return members
 
