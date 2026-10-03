@@ -332,11 +332,16 @@ def _draw_level(
     精灵图每格横裁左右空白（保格高，数字基线一致）；LV 裁边后底对齐数字底
     （再上移 LEVEL_LV_RAISE 光学校正），+ 裁边后顶对齐数字顶；块整体在
     ``left_x`` 处统一左对齐（跨卡 LV 列对齐，右缘随位数浮动）。
+
+    等级串非「数字[+]」形（削除曲 fallback "-" 等）整块跳过不画。
     """
+    digits_text = song.level.removesuffix("+")
+    if not digits_text.isdigit():
+        return
     sheet = dan_asset(f"UI_NUM_MLevel_{song.level_index + 1:02d}.png")
     scale = LEVEL_DIGIT_H / (sheet.height / 4)
     digits = []
-    for ch in song.level.removesuffix("+"):
+    for ch in digits_text:
         d = _trim_horizontal(_cell(sheet, int(ch)))
         digits.append(d.resize((round(d.width * scale), LEVEL_DIGIT_H), Image.LANCZOS))
     lv = _trim_fit(_cell(sheet, LV_CELL), LEVEL_LV_H)

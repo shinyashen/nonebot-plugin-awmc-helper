@@ -229,6 +229,69 @@ class SongChartLevel(SQLModel, table=True):
     level_value: float | None = None  # 宴为标级推导值（+/无+ → .7/.0）
 
 
+class DanCourse(SQLModel, table=True):
+    """段位表（gallery.yaml 解析入库）：一个版本一张普通/真段位表。"""
+
+    __tablename__ = "dan_course"  # type: ignore[reportGeneralTypeIssues]
+
+    gallery_id: str = Field(primary_key=True)  # magical-dan / circle-plus-dan-intl…
+    kind: str = Field(index=True)  # normal / shin（random 段位不建 course）
+    version: int = Field(index=True)  # maimai_py Version 码
+
+
+class DanGrade(SQLModel, table=True):
+    """段位（一个段位表内的一段）：段名 + 血量规则五元组。"""
+
+    __tablename__ = "dan_grade"  # type: ignore[reportGeneralTypeIssues]
+
+    gallery_id: str = Field(primary_key=True)
+    dan_id: str = Field(primary_key=True)  # 段位种名 id（1dan..ura_kaiden）
+    sort: int = Field(index=True)  # 段位序（初段 0 起依官方顺序）
+    name_ja: str  # 日文正名（初段…裏皆伝）
+    life: int  # 初始血量
+    damage_great: int  # GREAT 扣血
+    damage_good: int  # GOOD 扣血
+    damage_miss: int  # MISS 扣血
+    clear_bonus: int  # 每曲 CLEAR 回复
+
+
+class DanSheet(SQLModel, table=True):
+    """段位课题曲：gallery sheetExpr 三段键 + 规范表 join 结果。
+
+    ``song_id`` 为 JP 视图曲 id，标题无法对上（削除曲等）为 NULL——渲染层
+    仅标题展示 + 默认封面兜底。
+    """
+
+    __tablename__ = "dan_sheet"  # type: ignore[reportGeneralTypeIssues]
+
+    gallery_id: str = Field(primary_key=True)
+    dan_id: str = Field(primary_key=True)
+    idx: int = Field(primary_key=True)  # 曲序 0..3
+    title: str  # gallery 原题（日服原题）
+    kind: str  # std / dx
+    difficulty: str  # basic..remaster
+    song_id: int | None = Field(default=None, index=True)
+
+
+class DanRandom(SQLModel, table=True):
+    """随机段位档位（全版本同值，单表即全量）：显示等级区间 + 实测定数区间。"""
+
+    __tablename__ = "dan_random"  # type: ignore[reportGeneralTypeIssues]
+
+    dan_id: str = Field(primary_key=True)  # random_expert_1..4 / random_master_1..4
+    difficulty: str  # expert / master
+    name_ja: str  # 初級/中級/上級/超上級
+    level_range: str  # 显示等级区间原文（"14~14+"）
+    ds_lo: float  # 定数区间下缘
+    ds_hi: float  # 定数区间上缘
+    ds_source: str  # measured（BUDDiES 时代社区实测）/ derived（标级跨度推导）
+    life: int
+    damage_great: int
+    damage_good: int
+    damage_miss: int
+    clear_bonus: int
+
+
 class SongAlias(SQLModel, table=True):
     """远端别名持久化快照（yuzu/lxns 拉取后整源替换）：离线重启时兜底可用。"""
 
