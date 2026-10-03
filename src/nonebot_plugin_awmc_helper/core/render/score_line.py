@@ -191,8 +191,8 @@ def score_line_card(
         fill=_DARK,
         anchor="lm",
     )
-    genre = GENRE_TO_ZH.get(song.genre, song.genre.value)
     # 分类行用中文字体（Torus 无 CJK 字形，东方Project 等会缺字）
+    genre = GENRE_TO_ZH.get(song.genre) or song.genre.value or "-"
     draw.text((530, 370), genre, font=font(21), fill=_GRAY, anchor="lm")
     draw.text(
         (392, 408),

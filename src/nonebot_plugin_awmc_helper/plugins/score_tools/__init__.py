@@ -29,9 +29,15 @@ from ...core.calc import (
 )
 from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
 from ...core.score import UserScoreError, score_service
-from ...core.songs import cn_song_map, song_service, chart_of_color, entries_list_text
+from ...core.songs import (
+    ChartEntry,
+    cn_song_map,
+    song_service,
+    chart_of_color,
+    entries_list_text,
+)
 from ...core.store import UserBinding
-from ...core.types import Song, SongType
+from ...core.types import Song, SongType, SongDifficultyUtage
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
 from ...core.binding import SessionBinding, service_display
 from ...core.sources import Capability
@@ -100,9 +106,10 @@ async def _(
         return bool(songs) and info is None
 
     async def _pick_chart(entries, line_index):
-        """条目按难度色过滤 → (唯一谱面或 None, 列表文案或 None, 是否有该色谱面)。
+        """条目按难度色过滤 → (唯一谱面或 None, 列表文案, 是否有该色谱面)。
 
-        空谱面（has=False）时调用方再判色字是否属于别名（白雪 类）。"""
+        列表文案仅在多谱命中（has=True）时非空；空谱面（has=False）时调用方
+        再判色字是否属于别名（白雪 类）。"""
         by_key: dict[tuple, tuple] = {}
         for entry_id, entry_song, entry_type in entries:
             if entry_id >= UTAGE_ID_BASE:
@@ -114,7 +121,7 @@ async def _(
                 (entry_song.id, entry_type), (entry_song, entry_type, False, None)
             )
         if len(by_key) == 1:
-            return next(iter(by_key.values())), None, True
+            return next(iter(by_key.values())), "", True
         if by_key:
             songs = [s for _, s, _ in entries]
             cn_songs = await cn_song_map(songs)
@@ -128,7 +135,7 @@ async def _(
                 ),
                 True,
             )
-        return None, None, False
+        return None, "", False
 
     async def _no_color_reply(entries):
         """无难度色但有命中：「是什么歌」同款回复 + 缺色提示（回复单源复用）。"""
@@ -143,29 +150,32 @@ async def _(
 
     async def _no_chart_hint():
         """色前缀命中但该难度谱面不存在（如无白谱）。"""
+        assert level_index is not None  # 仅色路径调用
         await UniMessage.text(
             f" 该乐曲没有{DIFF_DISPLAY_NAMES[level_index.value]}谱"
         ).finish(at_sender=True)
 
     async def _resolve_song_utage(song: Song, jp: bool):
         """曲对象 → 宴谱解析：唯一宴谱直出，多宴谱列 diff_id，无宴谱提示。"""
-        uts = song.get_difficulties(SongType.UTAGE)
+        uts = [
+            d
+            for d in song.get_difficulties(SongType.UTAGE)
+            if isinstance(d, SongDifficultyUtage)
+        ]
         if not uts:
             await UniMessage.text(" 该乐曲没有宴谱").finish(at_sender=True)
         if len(uts) == 1:
             return (song, None, jp, uts[0])
-        entries = [(getattr(d, "diff_id", 0), song, None) for d in uts]
+        entries: list[ChartEntry] = [(d.diff_id, song, None) for d in uts]
         entries.sort(key=lambda e: e[0])
         cn_songs = await cn_song_map([song])
         flags = [cn_songs[song.id] is None]
-        await UniMessage.text(
-            " "
-            + entries_list_text(
-                entries,
-                flags,
-                hint="※ 请使用「分数线 宴<id> <线>」指定谱面",
-            )
-        ).finish(at_sender=True)
+        list_msg = entries_list_text(
+            entries,
+            flags,
+            hint="※ 请使用「分数线 宴<id> <线>」指定谱面",
+        )
+        await UniMessage.text(" " + list_msg).finish(at_sender=True)
 
     if is_utage:
         # 宴模式：剥色/整串候选 → 曲 → 宴谱组（唯一直出 / 多谱列 diff_id）
@@ -325,6 +335,7 @@ async def _(
         await UniMessage.image(raw=png).finish(at_sender=True)
     # NET 等日服视图用户换日服曲对象出卡（定数/版本口径一致，与查歌卡同路由）
     card_song, jp_card = await resolve_card_view(song, binding)
+    assert level_index is not None  # 宴谱已提前出卡，此处必为色路径
 
     prefer_type = SongType.STANDARD if prefer == SongType.STANDARD else None
     diff = chart_of_color(card_song, level_index, prefer=prefer_type or SongType.DX)
