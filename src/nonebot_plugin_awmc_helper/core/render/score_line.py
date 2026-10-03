@@ -329,11 +329,19 @@ def score_line_card(
         fill=CIRCLE_PINK if theme == "circle" else (249, 62, 172, 255),
         anchor="lm",
     )
+    # 物量摘要：World's end 级别的物量串很长，按实测宽度自适应缩字号
+    # （可用宽 ~740px：360 → 卡右缘 1140 减余量），下限 14
+    note_text = (
+        f"TAP {notes[0]} · HOLD {notes[1]} · SLIDE {notes[2]} · TOUCH {notes[3]}"
+        f" · BREAK {notes[4]}　(基础分 {result['total_basic']:,})"
+    )
+    note_size = 20
+    while note_size > 14 and draw.textlength(note_text, font=font(note_size)) > 730:
+        note_size -= 1
     draw.text(
         (360, 656),
-        f"TAP {notes[0]} · HOLD {notes[1]} · SLIDE {notes[2]} · TOUCH {notes[3]}"
-        f" · BREAK {notes[4]}　(基础分 {result['total_basic']:,})",
-        font=font(20),
+        note_text,
+        font=font(note_size),
         fill=_GRAY,
         anchor="lm",
     )
