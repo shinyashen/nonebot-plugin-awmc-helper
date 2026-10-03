@@ -276,6 +276,8 @@ async def test_score_line_circle_theme_draws_card(app: App, songs):
 
 
 @pytest.mark.asyncio
+@requires_assets
+@pytest.mark.asyncio
 async def test_score_line_utage_direct_id(app: App, db):
     """6 位宴谱 diff_id 直查（无色无前缀）：diff_id 即完整规格，直接出卡。"""
     from mocks import seed_service

@@ -207,6 +207,22 @@ def test_score_line_utage_buddy_cap():
     assert score_line(solo, 101.5) is None
 
 
+def test_rate_type_of_utage_buddy_double_threshold():
+    """buddy 宴谱评级阈值 ×2（SSS+=201/SSS=200）：按线一半查普通档位。"""
+    from mocks import make_utage
+    from maimai_py import RateType
+
+    from nonebot_plugin_awmc_helper.core.calc import rate_type_of
+
+    buddy = make_utage(is_buddy=True)
+    solo = make_utage(is_buddy=False)
+    assert rate_type_of(buddy, 201) is RateType.SSSP
+    assert rate_type_of(buddy, 200) is RateType.SSS
+    assert rate_type_of(buddy, 199) is RateType.SSP
+    assert rate_type_of(buddy, 100.5) is not RateType.SSSP  # 普通口径会误判
+    assert rate_type_of(solo, 100.5) is RateType.SSSP  # 非 buddy 照常
+
+
 def test_compute_rating_consistent_with_library():
     """RA 计算与 maimai-py ScoreCoefficient 一致。"""
     from maimai_py.utils import ScoreCoefficient

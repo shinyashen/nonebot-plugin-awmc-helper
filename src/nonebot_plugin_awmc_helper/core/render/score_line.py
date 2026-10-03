@@ -303,7 +303,9 @@ def score_line_card(
 
     # ---- 目标线卡 --------------------------------------------------------
     _card(im, (60, 490, 1140, 710))
-    rank_img = assets.rate_badge_of_achievement(line, theme, size=(204, 96))
+    from ..calc import rate_type_of
+
+    rank_img = assets.rate_badge(rate_type_of(diff, line), theme, size=(204, 96))
     if rank_img is not None:
         im.alpha_composite(rank_img, (110, 586 - 48))
     draw.text((360, 528), "目标达成率", font=font(22), fill=_GRAY, anchor="lm")

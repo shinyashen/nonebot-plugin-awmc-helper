@@ -73,6 +73,14 @@ def achievement_cap(diff: SongDifficulty) -> int:
     return 101
 
 
+def rate_type_of(diff: SongDifficulty, line: float) -> "RateType":
+    """谱面线对应的评级枚举：buddy 宴谱评级阈值 ×2（SSS+=201/SSS=200，
+    依此类推），即按线的一半查普通档位；其余谱面按线直查。"""
+    if diff.type == SongType.UTAGE and bool(getattr(diff, "is_buddy", False)):
+        return RateType._from_achievement(line / 2)
+    return RateType._from_achievement(line)
+
+
 def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     """分数线容错计算（2026-10-02 按专栏口径重写，替代原版复刻公式）。
 
