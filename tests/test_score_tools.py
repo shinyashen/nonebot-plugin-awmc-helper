@@ -10,6 +10,7 @@ import base64
 from pathlib import Path
 
 import pytest
+from mocks import requires_assets
 from nonebug import App
 
 
@@ -151,6 +152,7 @@ async def _assert_image_reply(
         ctx.should_finished()
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_score_line_command_draws_card(app: App, songs):
     """「分数线 紫199 100」：图片出分数线计算卡（旧「色+id」连写兼容，DX 优先）。"""
@@ -161,6 +163,7 @@ async def test_score_line_command_draws_card(app: App, songs):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_score_line_alias_unique_after_color_filter(app: App, songs):
     """颜色+别名连写出卡：8 号 SD-only，红（EXPERT）过滤后唯一 → 出卡。"""
@@ -254,6 +257,7 @@ def _utage_card(utage_diff, line: float = 100.0, jp: bool = False):
     return score_line_card(song, utage_diff, line, result, jp=jp)
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_score_line_utage_direct_id(app: App, db):
     """6 位宴谱 diff_id 直查（无色无前缀）：diff_id 即完整规格，直接出卡。"""
@@ -271,6 +275,7 @@ async def test_score_line_utage_direct_id(app: App, db):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_score_line_utage_prefix_single(app: App, db):
     """宴前缀 + 别名：唯一宴谱直出卡。"""
@@ -345,6 +350,7 @@ async def test_score_line_white_missing_hint(app: App, songs):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_score_line_utage_buddy_card(app: App, db):
     """buddy 宴谱：202 上限口径出卡（物量字段即左右机台合计，直算）。"""
@@ -372,6 +378,7 @@ async def test_score_line_utage_buddy_card(app: App, db):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_score_line_missing_color_feedback(app: App, db):
     """无难度色但有命中：复用「是什么歌」同款回复（谱面卡）+ 缺色提示。
@@ -411,6 +418,7 @@ async def test_score_line_missing_color_feedback(app: App, db):
     )
 
 
+@requires_assets
 @pytest.mark.asyncio
 async def test_score_line_color_alias_conflict_prefers_full(app: App, db):
     """剥色命中异曲的冲突：整串命中优先、色字属于别名（绿9 形态）。
