@@ -258,6 +258,23 @@ def _utage_card(utage_diff, line: float = 100.0, jp: bool = False):
 
 
 @requires_assets
+@requires_assets
+@pytest.mark.asyncio
+async def test_score_line_circle_theme_draws_card(app: App, songs):
+    """circle 主题出卡：粉底图 + 粉系表头（用户绑定主题跟随渲染）。"""
+    song, diff = _dx_199_master()
+    from nonebot_plugin_awmc_helper.core.calc import score_line
+
+    result = score_line(diff, 100)
+    assert result is not None
+    from nonebot_plugin_awmc_helper.core.render.score_line import score_line_card
+
+    png = score_line_card(song, diff, 100, result, theme="circle")
+    # circle 主题：底图为 circle/b50.png 缩放（与 prism 渐变底不同源）
+    assert png != score_line_card(song, diff, 100, result, theme="prism_plus")
+    assert png.startswith(b"\x89PNG")
+
+
 @pytest.mark.asyncio
 async def test_score_line_utage_direct_id(app: App, db):
     """6 位宴谱 diff_id 直查（无色无前缀）：diff_id 即完整规格，直接出卡。"""

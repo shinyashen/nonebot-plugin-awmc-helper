@@ -1,6 +1,6 @@
 """分数线计算卡（2026-10-10 新版式，草稿定稿移植）。
 
-PRiSM 渐变底（:func:`generate_prism_bg`，best50 同体系）+ 三段白色半透
+双主题（prism_plus 渐变底 / circle 粉底图，best50 同体系）+ 三段白色半透
 圆角卡：歌曲信息 / 目标线与总预算 / 判定损失表。数值由
 :func:`~nonebot_plugin_awmc_helper.core.calc.score_line` 按专栏口径计算
 （等效 GREAT TAP；BREAK 七档含额外分通道折算）。
@@ -32,19 +32,53 @@ from ...constants import (
     chart_display_id,
 )
 
-# 行卡文字用深灰（渐变底上蓝紫系正文色对比不足，草稿定稿取色）
+# 行卡文字用深灰（半透白卡上对比稳定，双主题共用）
 _DARK = (90, 88, 108, 255)
 _GRAY = (120, 118, 138, 255)
 _WHITE = (255, 255, 255, 255)
-_HEADER_PURPLE = (129, 122, 246, 255)
 _UTAGE_COLOR = (210, 57, 174, 255)
-"""宴谱主题色（对齐宴会谱面卡底图的紫描边取色）。"""
+"""宴谱主题色（对齐宴会谱面卡底图的紫描边取色，双主题共用）。"""
 _CARD_ALPHA = 195
 # 斑马纹（奇偶行透明度区分，用户定稿 80/120）；合成式叠加透出底图淡彩
 _ROW_ALPHA_ODD = 80
 _ROW_ALPHA_EVEN = 120
 
 W, H = 1200, 1400
+
+
+def _theme_style(theme: str) -> dict:
+    """主题配色单源：正文/强调色对齐 :func:`theme_text_color`，表头、标题
+    描边、分隔线随主题取色（prism 蓝紫系 / circle 粉系）。"""
+    if theme == "circle":
+        return {
+            "accent": CIRCLE_PINK,
+            "title_stroke": (214, 31, 130, 255),
+            "header": CIRCLE_PINK,
+            "divider": (246, 214, 226, 255),
+        }
+    return {
+        "accent": TEXT_BLUE,
+        "title_stroke": (159, 141, 250, 255),
+        "header": (129, 122, 246, 255),
+        "divider": (220, 216, 240, 255),
+    }
+
+
+def _theme_bg(theme: str) -> Image.Image:
+    """主题底图：prism_plus 程序渐变（generate_prism_bg）；circle 用主题
+    b50.png 大底图（1400×1600 RGB）缩放到画布尺寸。"""
+    if theme == "circle":
+        im = assets.pic("b50.png", theme).convert("RGBA")
+        im = im.resize((W, H), Image.Resampling.LANCZOS)
+        # 底图自带的游乐园装饰带（下部 ~1129-1400）会干扰页脚文字：
+        # 叠一层向下渐隐的粉白，装饰淡出、署名可读
+        fade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        fade_draw = ImageDraw.Draw(fade)
+        for y in range(1120, H):
+            alpha = min(235, int((y - 1120) * 235 / (H - 1120)))
+            fade_draw.line(((0, y), (W, y)), fill=(255, 235, 245, alpha))
+        return Image.alpha_composite(im, fade)
+    return generate_prism_bg(H, width=W)
 
 
 def _card(im: Image.Image, box: tuple[int, int, int, int]) -> None:
@@ -82,16 +116,17 @@ def _table(
     row_h: int = 64,
     header_size: int = 24,
     body_size: int = 26,
+    header_fill: tuple = (129, 122, 246, 255),
 ) -> int:
-    """紫头表格：head_x 行头列左对齐、col_xs 数值列居中（均相对 box 左缘）。
+    """主题色头表格：head_x 行头列左对齐、col_xs 数值列居中（均相对 box 左缘）。
 
     返回结束 y。行高 ``row_h``，逐行底色取 ``row_alphas`` 循环。"""
     x0, y0, w, _ = box
     hh = 56
     head_h = hh + 12
     draw = ImageDraw.Draw(im)
-    draw.rounded_rectangle((x0, y0, x0 + w, y0 + head_h), 16, fill=_HEADER_PURPLE)
-    draw.rectangle((x0, y0 + hh - 14, x0 + w, y0 + head_h), fill=_HEADER_PURPLE)
+    draw.rounded_rectangle((x0, y0, x0 + w, y0 + head_h), 16, fill=header_fill)
+    draw.rectangle((x0, y0 + hh - 14, x0 + w, y0 + head_h), fill=header_fill)
     draw.text(
         (x0 + head_x, y0 + head_h // 2),
         header[0],
@@ -152,10 +187,11 @@ def score_line_card(
         diff.break_num,
     )
     li = diff.level_index
-    im = generate_prism_bg(H, width=W)
+    style = _theme_style(theme)
+    im = _theme_bg(theme)
     draw = ImageDraw.Draw(im)
 
-    # 标题行：logo 左上 + 白字紫描边大标题
+    # 标题行：logo 左上 + 主题描边大标题（prism 紫描边 / circle 白描边）
     im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (40, 24))
     draw.text(
         (600, 84),
@@ -164,7 +200,7 @@ def score_line_card(
         fill=_WHITE,
         anchor="mm",
         stroke_width=4,
-        stroke_fill=(159, 141, 250, 255),
+        stroke_fill=style["title_stroke"],
     )
 
     # ---- 歌曲信息卡 ------------------------------------------------------
@@ -276,7 +312,7 @@ def score_line_card(
     draw.text((360, 586), pct_text, font=f_big, fill=_DARK, anchor="lm")
     # 分隔线按数字实测宽度定位（与 % 保持间距，不随位数变化贴字）
     line_x = round(360 + draw.textlength(pct_text, font=f_big)) + 34
-    draw.line((line_x, 528, line_x, 624), fill=(220, 216, 240, 255), width=3)
+    draw.line((line_x, 528, line_x, 624), fill=style["divider"], width=3)
     draw.text(
         (line_x + 20, 528),
         "允许损失（等效 GREAT TAP 数）",
@@ -288,7 +324,7 @@ def score_line_card(
         (line_x + 20, 582),
         f"约 {result['budget']:.2f} 个",
         font=font(48),
-        fill=CIRCLE_PINK,
+        fill=CIRCLE_PINK if theme == "circle" else (249, 62, 172, 255),
         anchor="lm",
     )
     draw.text(
@@ -315,7 +351,7 @@ def score_line_card(
         (100, 772),
         "各判定损失的等效 GREAT TAP 数",
         font=font(26, FONT_HAN),
-        fill=TEXT_BLUE,
+        fill=style["accent"],
         anchor="lm",
     )
     from ..calc import NOTE_JUDGES
@@ -331,6 +367,7 @@ def score_line_card(
             for name, v in NOTE_JUDGES
         ],
         row_alphas=[_ROW_ALPHA_ODD, _ROW_ALPHA_EVEN, _ROW_ALPHA_ODD],
+        header_fill=style["header"],
     )
     _table(
         im,
@@ -342,6 +379,7 @@ def score_line_card(
         row_alphas=[_ROW_ALPHA_ODD],
         header_size=22,
         body_size=24,
+        header_fill=style["header"],
     )
 
     # ---- 底部说明 + 署名 -------------------------------------------------
@@ -358,7 +396,7 @@ def score_line_card(
         (600, 1340),
         credit_text(),
         font=font(20, FONT_RODIN),
-        fill=TEXT_BLUE,
+        fill=style["accent"],
         anchor="mm",
         stroke_width=3,
         stroke_fill=_WHITE,
