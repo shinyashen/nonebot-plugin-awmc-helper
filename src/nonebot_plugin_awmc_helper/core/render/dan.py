@@ -81,7 +81,12 @@ class DanSongCard:
     ds: str  # 定数展示（"15.0"）
     charter: str
     bpm: str
-    base_score: str  # 底分字段展示原文（"0 (+0)"）
+    base_score: str
+    # 底分字段展示原文（如 "570 (+128)"）。语义（2026-10-04 用户定案）：
+    # 底分 = 玩家该谱当前单曲 RA；(+N) = 打到 100.5000% 时按
+    # nb_chart.new_best_score 计的 B50 净提升——best_list 须传完整 B50
+    # （b35+b15，段位课题曲常为新曲）；负提升显示 +0。本字段只收展示串，
+    # 数值由查询层按上述口径计算后格式化传入。
     achievement: float  # 达成率 0~101
     song_id: int | None = None
     cover: Image.Image | None = None
