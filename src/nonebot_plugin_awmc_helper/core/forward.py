@@ -111,28 +111,18 @@ async def try_send_forward(
                     },
                 }
             )
+        # 群/私聊仅 api 名与定位参数不同，单调用点组装（message/messages
+        # 双参数同时下发以最大兼容，协议端忽略不认识的参数）
         if group_id is not None:
-            await asyncio.wait_for(
-                bot.call_api(
-                    "send_group_forward_msg",
-                    group_id=int(group_id),
-                    message=nodes,
-                    messages=nodes,
-                ),
-                timeout=FORWARD_SEND_TIMEOUT,
-            )
+            api, params = "send_group_forward_msg", {"group_id": int(group_id)}
         elif user_id is not None:
-            await asyncio.wait_for(
-                bot.call_api(
-                    "send_private_forward_msg",
-                    user_id=int(user_id),
-                    message=nodes,
-                    messages=nodes,
-                ),
-                timeout=FORWARD_SEND_TIMEOUT,
-            )
+            api, params = "send_private_forward_msg", {"user_id": int(user_id)}
         else:
             return False
+        await asyncio.wait_for(
+            bot.call_api(api, **params, message=nodes, messages=nodes),
+            timeout=FORWARD_SEND_TIMEOUT,
+        )
         return True
     except Exception:
         logger.warning("合并转发发送失败或超时（降级为普通消息）", exc_info=True)

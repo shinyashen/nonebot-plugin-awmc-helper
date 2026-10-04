@@ -21,6 +21,9 @@ from . import store, utils
 from ..config import plugin_config
 from .binding import binding_service
 
+# 逐个续期之间的节流间隔（秒）：避免瞬时并发 grant 打上游
+_GRANT_THROTTLE_SECONDS = 1.0
+
 
 async def lxns_keepalive() -> tuple[str, int]:
     """对全部持有 refresh_token 的绑定逐个续期一次。
@@ -40,7 +43,7 @@ async def lxns_keepalive() -> tuple[str, int]:
             dead_users.append(
                 b.user_id if b.user_id.isdigit() else f"{b.platform}:{b.user_id}"
             )
-        await asyncio.sleep(1)
+        await asyncio.sleep(_GRANT_THROTTLE_SECONDS)
     summary = (
         f"落雪令牌保活完成：成功 {counts['refreshed']} 个，"
         f"需重新绑定 {counts['dead']} 个，暂时跳过 {counts['skip']} 个"

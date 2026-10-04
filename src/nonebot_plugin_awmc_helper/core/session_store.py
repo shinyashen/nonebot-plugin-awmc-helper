@@ -80,7 +80,3 @@ class TtlSessionStore(Generic[K, S]):
     def discard(self, key: K) -> None:
         """静默结束会话（无会话时无操作）。"""
         self._sessions.pop(key, None)
-
-    def clear(self) -> None:
-        """清空全部会话（测试隔离用）。"""
-        self._sessions.clear()

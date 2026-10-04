@@ -216,16 +216,16 @@ class HelpRegistry:
         self._block_index[key] = block
         for spec in block.commands:
             self._commands[id(spec.matcher)] = spec
-            for key in (spec.name, *spec.aliases):
-                existed = self._name_index.get(key)
+            for cmd_key in (spec.name, *spec.aliases):
+                existed = self._name_index.get(cmd_key)
                 if existed is not None and existed is not spec:
                     logger.warning(
-                        f"帮助注册表：指令名「{key}」冲突"
+                        f"帮助注册表：指令名「{cmd_key}」冲突"
                         f"（{existed.name} @ {self._plugin_of(existed)} 与 "
                         f"{spec.name} @ {plugin}），保留先注册者"
                     )
                     continue
-                self._name_index[key] = spec
+                self._name_index[cmd_key] = spec
 
     def declare_guide(self, guide: Guide) -> None:
         """注册一条指南；key/别名建索引，重名按先注册保留。
@@ -256,6 +256,7 @@ class HelpRegistry:
     # ---- 查询 API ----
 
     def spec_of(self, matcher: "Matcher | type[Matcher]") -> CommandSpec | None:
+        """注册表内省 API：供子插件/测试查询自身声明，非指令链路。"""
         return self._commands.get(id(matcher))
 
     def _plugin_of(self, spec: CommandSpec) -> str:
@@ -289,7 +290,7 @@ class HelpRegistry:
         spec = self._name_index.get(query)
         if spec is not None and (include_hidden or not spec.hidden):
             return CommandPage(spec=spec)
-        # 类别（key 或别名：标题同键；大小写不敏感仅对 ASCII 名义）
+        # 类别（key 或标题同名精确匹配）
         for cat in self.categories.values():
             if query == cat.key or query == cat.title:
                 return CategoryPage(category=cat, include_hidden=include_hidden)
@@ -325,16 +326,11 @@ class GuidePage:
 
 
 @dataclass
-class ManagePage:
-    """超管专属：全部 hidden 指令清单。"""
-
-
-@dataclass
 class NotFoundPage:
     query: str
 
 
-Page = OverviewPage | CategoryPage | CommandPage | GuidePage | ManagePage | NotFoundPage
+Page = OverviewPage | CategoryPage | CommandPage | GuidePage | NotFoundPage
 
 
 # ---------------------------------------------------------------- 页面装配
@@ -498,12 +494,6 @@ def page_entries(reg: HelpRegistry, page: Page) -> "list[str | UniMessage]":
         return _command_blocks(reg, page.spec)
     if isinstance(page, GuidePage):
         return _guide_entries(reg, page.guide)
-    if isinstance(page, ManagePage):
-        manage = _manage_blocks(reg)
-        entries: "list[str | UniMessage]" = (
-            [manage] if manage else ["（无 hidden 指令）"]
-        )
-        return entries
     raise ValueError(
         f"page_entries 不支持 {type(page).__name__}（NotFoundPage 由调用方处理）"
     )

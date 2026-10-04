@@ -143,8 +143,6 @@ def slow_notice(text: str = " 比预期时间要长，再稍等一下…"):
     """
 
     async def notify() -> None:
-        from nonebot_plugin_alconna.uniseg import UniMessage
-
         try:
             await UniMessage.text(text).send(at_sender=True)
         except Exception:
@@ -191,8 +189,6 @@ async def ensure_group_admin(session, bot, event, *, feature: str) -> str:
     （finish 抛 MatcherException 终止 handler，不返回）。``feature`` 用于
     群聊文案（如「猜歌开关」）。
     """
-    from nonebot_plugin_alconna.uniseg import UniMessage
-
     group_id = group_id_of(session)
     if group_id is None:
         await UniMessage.text(f" {feature}仅群聊可用").finish(at_sender=True)

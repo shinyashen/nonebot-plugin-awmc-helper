@@ -293,11 +293,11 @@ class DanRandom(SQLModel, table=True):
 
 
 class SongAlias(SQLModel, table=True):
-    """远端别名持久化快照（yuzu/lxns 拉取后整源替换）：离线重启时兜底可用。"""
+    """远端别名持久化快照（yuzu/lxns/munet 拉取后整源替换）：离线重启时兜底可用。"""
 
     __tablename__ = "song_alias"  # type: ignore[reportGeneralTypeIssues]
 
-    source: str = Field(primary_key=True)  # yuzu / lxns
+    source: str = Field(primary_key=True)  # 键域 = core.provider.ALIAS_SOURCES
     song_id: int = Field(primary_key=True)
     alias: str = Field(primary_key=True)
 
@@ -381,6 +381,9 @@ async def init_db() -> None:
 
 
 _MIGRATE_COLUMNS: dict[str, dict[str, str]] = {
+    # ⚠️ 维护契约（与模型定义双份维护）：给已有模型新增**简单列**时，必须
+    # 同步在此登记对应的 ADD COLUMN DDL——create_all 只对不存在的表生效，
+    # 不登记则生产旧库永远缺列（无自动迁移框架，属生产库风险的刻意取舍）
     # 旧库无 lxns_refresh_token 列（落雪 OAuth 刷新令牌，2026-09-22 起落库）
     "user_binding": {
         "lxns_refresh_token": (
@@ -424,6 +427,36 @@ def session() -> AsyncSession:
     return AsyncSession(get_engine(), expire_on_commit=False)
 
 
+async def _delete_row(model: type[SQLModel], *conds: Any) -> bool:
+    """「查行 → 删 → 提交」DAO 底座：命中删除返回 True，未命中 False。
+
+    带级联的删除（如 delete_arcade）留在各自函数体内——级联必须与主行
+    同一事务提交，不并入本助手。
+    """
+    async with session() as db:
+        row = (await db.exec(select(model).where(*conds))).first()
+        if row is None:
+            return False
+        await db.delete(row)
+        await db.commit()
+        return True
+
+
+async def _add_if_absent(model: type[SQLModel], *conds: Any, row: SQLModel) -> bool:
+    """「exists → 否则 add」DAO 底座：已存在返回 False，否则写入提交返回 True。
+
+    保持既有先查询后写入的语义，不用 on_conflict_do_nothing（sqlite 方言
+    风险最小；唯一约束仍兜底并发双写）。
+    """
+    async with session() as db:
+        exists = (await db.exec(select(model).where(*conds))).first()
+        if exists:
+            return False
+        db.add(row)
+        await db.commit()
+        return True
+
+
 # ---------------------------------------------------------------------------
 # 通用 CRUD
 # ---------------------------------------------------------------------------
@@ -459,19 +492,9 @@ async def save_binding(binding: UserBinding) -> None:
 
 
 async def delete_binding(platform: str, user_id: str) -> bool:
-    async with session() as db:
-        binding = (
-            await db.exec(
-                select(UserBinding).where(
-                    UserBinding.platform == platform, UserBinding.user_id == user_id
-                )
-            )
-        ).first()
-        if binding is None:
-            return False
-        await db.delete(binding)
-        await db.commit()
-        return True
+    return await _delete_row(
+        UserBinding, UserBinding.platform == platform, UserBinding.user_id == user_id
+    )
 
 
 async def get_group_switch(group_id: str, feature: str) -> bool | None:
@@ -512,19 +535,12 @@ async def set_group_switch(group_id: str, feature: str, enabled: bool) -> None:
 
 async def add_local_alias(song_id: int, alias: str, created_by: str) -> bool:
     """添加本地别名，重复返回 False。"""
-    async with session() as db:
-        exists = (
-            await db.exec(
-                select(LocalAlias).where(
-                    LocalAlias.song_id == song_id, LocalAlias.alias == alias
-                )
-            )
-        ).first()
-        if exists:
-            return False
-        db.add(LocalAlias(song_id=song_id, alias=alias, created_by=created_by))
-        await db.commit()
-        return True
+    return await _add_if_absent(
+        LocalAlias,
+        LocalAlias.song_id == song_id,
+        LocalAlias.alias == alias,
+        row=LocalAlias(song_id=song_id, alias=alias, created_by=created_by),
+    )
 
 
 async def get_local_aliases() -> list[LocalAlias]:
@@ -803,7 +819,10 @@ async def update_arcade_count(
     ``updated_by``/``touch``：默认记录操作人与时间；传 None/False 可只改数值
     （如管理侧改机台数不产生「最近上报人」语义）。
     """
-    column = col({"person": Arcade.person, "machines": Arcade.machines}[field])
+    fields_map = {"person": Arcade.person, "machines": Arcade.machines}
+    if field not in fields_map:
+        raise ValueError(f"未知更新字段：{field}")
+    column = col(fields_map[field])
     if mode == "inc":
         expr = column + amount
     elif mode == "dec":
@@ -879,27 +898,7 @@ async def delete_arcade(arcade_id: int) -> bool:
 
 
 async def remove_arcade_alias_by_name(alias: str) -> bool:
-    async with session() as db:
-        row = (
-            await db.exec(select(ArcadeAlias).where(ArcadeAlias.alias == alias))
-        ).first()
-        if row is None:
-            return False
-        await db.delete(row)
-        await db.commit()
-        return True
-
-
-async def get_arcade_aliases(arcade_id: int) -> list[ArcadeAlias]:
-    """按机厅取别名（生产已被 get_arcade_aliases_by_ids 取代，当前仅测试消费）。"""
-    async with session() as db:
-        return list(
-            (
-                await db.exec(
-                    select(ArcadeAlias).where(ArcadeAlias.arcade_id == arcade_id)
-                )
-            ).all()
-        )
+    return await _delete_row(ArcadeAlias, ArcadeAlias.alias == alias)
 
 
 async def get_arcade_aliases_by_ids(arcade_ids: set[int]) -> list[ArcadeAlias]:
@@ -919,15 +918,11 @@ async def get_arcade_aliases_by_ids(arcade_ids: set[int]) -> list[ArcadeAlias]:
 
 
 async def add_arcade_alias(arcade_id: int, alias: str) -> bool:
-    async with session() as db:
-        exists = (
-            await db.exec(select(ArcadeAlias).where(ArcadeAlias.alias == alias))
-        ).first()
-        if exists:
-            return False
-        db.add(ArcadeAlias(arcade_id=arcade_id, alias=alias))
-        await db.commit()
-        return True
+    return await _add_if_absent(
+        ArcadeAlias,
+        ArcadeAlias.alias == alias,
+        row=ArcadeAlias(arcade_id=arcade_id, alias=alias),
+    )
 
 
 async def get_subscriptions(group_id: str) -> list[int]:
@@ -943,33 +938,20 @@ async def get_subscriptions(group_id: str) -> list[int]:
 
 
 async def subscribe(group_id: str, arcade_id: int) -> None:
-    async with session() as db:
-        exists = (
-            await db.exec(
-                select(ArcadeSubscription).where(
-                    ArcadeSubscription.group_id == group_id,
-                    ArcadeSubscription.arcade_id == arcade_id,
-                )
-            )
-        ).first()
-        if not exists:
-            db.add(ArcadeSubscription(group_id=group_id, arcade_id=arcade_id))
-            await db.commit()
+    await _add_if_absent(
+        ArcadeSubscription,
+        ArcadeSubscription.group_id == group_id,
+        ArcadeSubscription.arcade_id == arcade_id,
+        row=ArcadeSubscription(group_id=group_id, arcade_id=arcade_id),
+    )
 
 
 async def unsubscribe(group_id: str, arcade_id: int) -> None:
-    async with session() as db:
-        row = (
-            await db.exec(
-                select(ArcadeSubscription).where(
-                    ArcadeSubscription.group_id == group_id,
-                    ArcadeSubscription.arcade_id == arcade_id,
-                )
-            )
-        ).first()
-        if row:
-            await db.delete(row)
-            await db.commit()
+    await _delete_row(
+        ArcadeSubscription,
+        ArcadeSubscription.group_id == group_id,
+        ArcadeSubscription.arcade_id == arcade_id,
+    )
 
 
 async def reset_all_persons(operator: str = "自动清零") -> int:

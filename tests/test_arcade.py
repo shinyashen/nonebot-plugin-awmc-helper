@@ -412,8 +412,10 @@ async def test_find_arcade_ambiguous_lists_candidates(app: App, arcade_enabled):
     # 终止而非误操作：新别名未写入任何一店
     assert await store.get_arcade(10000) is not None
     assert await store.get_arcade(20001) is not None
-    assert "别名x" not in [a.alias for a in await store.get_arcade_aliases(10000)]
-    assert await store.get_arcade_aliases(20001) == []
+    assert "别名x" not in [
+        a.alias for a in await store.get_arcade_aliases_by_ids({10000})
+    ]
+    assert await store.get_arcade_aliases_by_ids({20001}) == []
 
 
 @pytest.mark.asyncio
@@ -424,11 +426,15 @@ async def test_delete_arcade_alias(app: App, arcade_enabled):
     from nonebot_plugin_awmc_helper.plugins.arcade import matchers as am
 
     await _run(app, am.arcade_alias_set, "删除机厅别名 Game", "已删除别名")
-    assert "Game" not in [a.alias for a in await store.get_arcade_aliases(10000)]
+    assert "Game" not in [
+        a.alias for a in await store.get_arcade_aliases_by_ids({10000})
+    ]
     # 多词别名加得上删得掉（与添加侧保留完整余词对称，复审补）
     await store.add_arcade_alias(10000, "My Arcade")
     await _run(app, am.arcade_alias_set, "删除机厅别名 My Arcade", "已删除别名")
-    assert "My Arcade" not in [a.alias for a in await store.get_arcade_aliases(10000)]
+    assert "My Arcade" not in [
+        a.alias for a in await store.get_arcade_aliases_by_ids({10000})
+    ]
     # 删除不存在的别名
     await _run(app, am.arcade_alias_set, "删除机厅别名 Game", "未找到该别名")
     # 添加路径不受影响：首参数叫「删除」也照常按店名添加
@@ -443,4 +449,4 @@ async def test_delete_arcade_alias(app: App, arcade_enabled):
         "添加机厅别名 删除 别名y",
         "已为「删除」添加别名「别名y」",
     )
-    assert "别名y" in [a.alias for a in await store.get_arcade_aliases(20002)]
+    assert "别名y" in [a.alias for a in await store.get_arcade_aliases_by_ids({20002})]

@@ -10,7 +10,11 @@ from maimai_py import Song, SongType
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .score import UserScoreError, score_service
-from .songs import cn_song_map, song_service, entries_list_text
+
+# 单结果命中的日服限定标注：再导出 core.songs 的单源（random_song 直连
+# 同名常量），plugins 层消费方经本模块 import 不动
+from .songs import SINGLE_JP_NOTE as JP_ONLY_NOTE
+from .songs import cn_song_map, song_service, utage_diff_of, entries_list_text
 from .render import nb_chart
 from ..constants import DEFAULT_THEME, UTAGE_ID_BASE
 
@@ -60,8 +64,10 @@ async def chart_card_bytes(
         if ident is not None:
             try:
                 bests = await score_service.get_b50(binding)
-                prefer_sd = prefer_type == SongType.STANDARD and bool(
-                    song.difficulties.standard
+                # 主类型判定单源 nb_chart.major_type_of（宴谱已在上方提前返回，
+                # 标准/DX 双空形态不可达，布尔派生与旧内联表达式等价）
+                prefer_sd = (
+                    nb_chart.major_type_of(song, prefer_type) == SongType.STANDARD
                 )
                 # b50 的 b35/b15 分段按谱面登场版本（旧版本→b35、当前版本→b15，
                 # SD/DX 均可，老曲补的 DX 谱也在 b35）：按谱面类型过滤拍平列表
@@ -93,11 +99,6 @@ def binding_service_ident(binding):
     return binding_service.identifier_or_none(binding)
 
 
-JP_ONLY_NOTE = "此歌曲为日服限定"
-"""单结果命中的日服限定标注（「是什么歌」系回复单源；多结果列表用
-core ``list_jp_note`` 的列表级措辞）。"""
-
-
 async def song_lookup_reply(
     entries, binding, *, extra_note: str | None = None
 ) -> UniMessage:
@@ -121,30 +122,12 @@ async def song_lookup_reply(
 
             await jp_cover.ensure(song.id)
             cn_song = cn_songs[song.id]
-            cn_diff = (
-                next(
-                    (
-                        d
-                        for d in cn_song.get_difficulties(SongType.UTAGE)
-                        if getattr(d, "diff_id", None) == entry_id
-                    ),
-                    None,
-                )
-                if cn_song is not None
-                else None
-            )
+            cn_diff = utage_diff_of(cn_song, entry_id) if cn_song is not None else None
             if cn_song is not None and cn_diff is not None:
                 song, utage_diff, jp = cn_song, cn_diff, False
             else:
                 jp = True
-                utage_diff = next(
-                    (
-                        d
-                        for d in song.get_difficulties(SongType.UTAGE)
-                        if getattr(d, "diff_id", None) == entry_id
-                    ),
-                    None,
-                )
+                utage_diff = utage_diff_of(song, entry_id)
             diffs = [utage_diff] if utage_diff is not None else None
             png = nb_chart.song_chart_banquet_info(song, diffs, jp=jp)
         else:

@@ -32,6 +32,7 @@ from .client import client, lxns_provider, yuzu_provider
 from .songdb import Scope
 from ..config import plugin_config
 from .provider import (
+    ALIAS_SOURCES,
     AwmcSongProvider,
     ListSongProvider,
     AwmcAliasProvider,
@@ -47,6 +48,9 @@ from ..constants import (
 
 SNAPSHOT_KEY = "songs_snapshot"
 CN_POLL_STATE_KEY = "cn_poll_state"
+
+# 重建 warnings 落日志的截断上限（完整清单在 refresh_all 返回值里，日志只提示前几条）
+_WARNINGS_LOG_MAX = 20
 
 # 曲库数据源组合（2026-09-22 数据入口统一，设计稿 §5.4）：
 # 曲库由规范表构造（CN 列；国服定数按 §5.3 推导、version_cn 为空的组不可见，
@@ -143,6 +147,40 @@ def prefer_type_from_raw_id(raw_id: int) -> SongType | None:
     return None if song_type == SongType.UTAGE else song_type
 
 
+def utage_diff_of(song: Song, diff_id: int) -> "SongDifficultyUtage | None":
+    """曲目 → 指定 diff_id 的**该张**宴谱（isinstance 口径，未命中 None）。
+
+    按机台内部 id 定位宴谱的单一实现：宿主曲可能挂多张宴谱（复刻活动），
+    遍历 ``difficulties.utage`` 以 ``SongDifficultyUtage`` 精确比对 diff_id；
+    core（songs/chart_card）与各调用方共用本函数，勿再各写 next/getattr 版本。
+    """
+    return next(
+        (
+            d
+            for d in song.get_difficulties(SongType.UTAGE)
+            if isinstance(d, SongDifficultyUtage) and d.diff_id == diff_id
+        ),
+        None,
+    )
+
+
+def _alias_lookup(
+    index: dict[str, set[int]], alias: str, extra_prefixes: set[str]
+) -> "tuple[set[int], tuple[str, str, str] | None]":
+    """别名索引「精确查 → 未命中剥一层谱面前后缀重查」的共用骨架（Q31）。
+
+    ``index`` 由调用方喂各自视图（CN 运行时索引 / JP 合并库索引）；返回
+    ``(命中 id 集, 剥离结果)``——重查未命中时 id 集为空、剥离结果原样返回，
+    是否作为 strip_info 交给上层由视图语义决定（CN 侧丢弃、JP 侧保留供
+    ``entries_for_name`` 的宴关键词兜底）。
+    """
+    ids = index.get(normalize_text(alias), set())
+    stripped = None if ids else strip_chart_prefix(alias, extra_prefixes=extra_prefixes)
+    if stripped:
+        ids = index.get(normalize_text(stripped[0]), set())
+    return ids, stripped
+
+
 ChartEntry = tuple[int, Song, "SongType | None"]
 """谱面类型条目：(展示 id, 宿主曲, 卡片主类型偏好)；宴条目偏好为 None。"""
 
@@ -162,6 +200,9 @@ def chart_entries(song: Song) -> list[ChartEntry]:
     if song.difficulties.standard:
         entries.append((song.id, song, SongType.STANDARD))
     if song.difficulties.dx:
+        # 根 id + DX_ID_OFFSET 与 maimai_py ``Song.get_divingfish_id`` /
+        # constants ``chart_display_id`` 的 DX 值同源；不直调该 API 是因
+        # DX 组缺 BASIC 谱时按 LevelIndex(0) 查找会抛 ValueError
         entries.append((song.id + DX_ID_OFFSET, song, SongType.DX))
     entries.extend(
         sorted(
@@ -200,7 +241,8 @@ def list_jp_note(flags: list[bool]) -> str:
 
 
 SINGLE_JP_NOTE = "此歌曲为日服限定"
-"""单曲卡面的日服限定标注（查歌卡与随机曲两消费方共用单源，勿再各持一份）。"""
+"""单曲卡面的日服限定标注单源：查歌卡经 chart_card 再导出为 ``JP_ONLY_NOTE``
+消费（「是什么歌」系回复），random_song 直连本名；勿再各持一份副本。"""
 
 
 def chart_of_color(
@@ -484,7 +526,7 @@ class SongService:
         """
         lib = getattr(self._alias_provider, "last_merged", None)
         if not lib:
-            lib = await store.load_song_aliases(["yuzu", "lxns", "munet"])
+            lib = await store.load_song_aliases(list(ALIAS_SOURCES))
         return lib
 
     async def jp_by_title_fuzzy(self, title: str) -> list[Song]:
@@ -539,14 +581,9 @@ class SongService:
             self._jp_kanji = jp_kanji
             self._jp_kanji_cache_fp = songdb.CURRENT_FINGERPRINT
         jp_kanji = self._jp_kanji
-        key = normalize_text(alias)
-        ids = index.get(key, set())
-        strip_info = None
-        if not ids:
-            stripped = strip_chart_prefix(alias, extra_prefixes=jp_kanji)
-            if stripped:
-                ids = index.get(normalize_text(stripped[0]), set())
-                strip_info = stripped
+        # 与 CN 侧共用的「精确查 → 剥一层重查」骨架（_alias_lookup）；
+        # JP 视图重查未命中时保留剥离信息（交 entries_for_name 宴关键词兜底）
+        ids, strip_info = _alias_lookup(index, alias, jp_kanji)
         return [jp[i] for i in sorted(ids) if i in jp], strip_info
 
     async def jp_by_id(self, song_id: int) -> Song | None:
@@ -574,10 +611,7 @@ class SongService:
         误出日服宴谱的国服卡。
         """
         cn_song = await self.by_id(song_id)
-        return cn_song is None or not any(
-            getattr(d, "diff_id", None) == diff_id
-            for d in cn_song.get_difficulties(SongType.UTAGE)
-        )
+        return cn_song is None or utage_diff_of(cn_song, diff_id) is None
 
     async def resolve_raw_chart(
         self, raw_id: int
@@ -623,29 +657,23 @@ class SongService:
         """
         await self.ensure_loaded()
 
-        def _host_diff(song: Song) -> "SongDifficultyUtage | None":
-            return next(
-                (
-                    d
-                    for d in song.get_difficulties(SongType.UTAGE)
-                    if isinstance(d, SongDifficultyUtage) and d.diff_id == diff_id
-                ),
-                None,
-            )
-
         if host_id := self._utage_index.get(diff_id):
             song = await self.by_id(host_id)
             # get_all 语义排除 disabled（落雪打标下架曲）
-            if song is not None and not song.disabled and (d := _host_diff(song)):
+            if (
+                song is not None
+                and not song.disabled
+                and (d := utage_diff_of(song, diff_id))
+            ):
                 return song, d
         # CN 未命中（宴曲多为日服限定）→ JP 视图索引；索引未随视图就绪
         # （测试替换视图等）时退化为线性兜底
         jp = await self._jp_songs_map()
         if host_id := self._jp_utage_index.get(diff_id):
-            if (song := jp.get(host_id)) and (d := _host_diff(song)):
+            if (song := jp.get(host_id)) and (d := utage_diff_of(song, diff_id)):
                 return song, d
         for song in jp.values():
-            if d := _host_diff(song):
+            if d := utage_diff_of(song, diff_id):
                 return song, d
         return None
 
@@ -685,15 +713,10 @@ class SongService:
         由此兜底命中（Q31）。
         """
         await self.ensure_loaded()
-        key = normalize_text(alias)
-        ids = self._alias_index.get(key, set())
-        if not ids:
-            stripped = strip_chart_prefix(alias, extra_prefixes=self._utage_kanji)
-            if stripped:
-                ids = self._alias_index.get(normalize_text(stripped[0]), set())
-                if ids:
-                    return await self._songs_of(ids), stripped
-        return await self._songs_of(ids), None
+        # 与 JP 侧共用的「精确查 → 剥一层重查」骨架（_alias_lookup）；
+        # CN 视图重查未命中时不返回剥离信息（仅命中时透传给调用方）
+        ids, stripped = _alias_lookup(self._alias_index, alias, self._utage_kanji)
+        return await self._songs_of(ids), (stripped if ids else None)
 
     async def _songs_of(self, ids: set[int]) -> list[Song]:
         result: list[Song] = []
@@ -1012,7 +1035,9 @@ async def _hourly_cn_poll() -> None:
         return_exceptions=True,
     )
     if isinstance(light, BaseException) or isinstance(df, BaseException):
-        logger.warning(f"国服轮询拉取失败，跳过本次检测：{light or df}")
+        # 只取异常侧打日志：light 为真值 dict（整个曲库载荷）时不能整包进日志
+        err = light if isinstance(light, BaseException) else df
+        logger.warning(f"国服轮询拉取失败，跳过本次检测：{err}")
         return
     lx_keys = _poll_keys(light.get("songs", []))
     df_keys: set[songdb.DetectKey] = set()
@@ -1054,7 +1079,7 @@ async def _on_cn_update(
     except Exception:
         logger.exception("规范表国服回填失败（继续后续动作）")
         result = {}
-    for warning in result.get("warnings", [])[:20]:
+    for warning in result.get("warnings", [])[:_WARNINGS_LOG_MAX]:
         logger.warning(f"songdb: {warning}")
     if not await song_service.refresh():
         logger.error("国服更新后运行时曲库刷新失败（保留旧运行时）")
@@ -1088,7 +1113,7 @@ async def full_refresh() -> dict:
             f"{result['charts']} 谱面 / {result['level_points']} 定数变化点，"
             f"删除 {result['removed']} 曲，国服当前版本 {result['cn_current_version']}"
         )
-        for warning in result.get("warnings", [])[:20]:
+        for warning in result.get("warnings", [])[:_WARNINGS_LOG_MAX]:
             logger.warning(f"songdb: {warning}")
         extra = result.get("extra") or {}
     except Exception:

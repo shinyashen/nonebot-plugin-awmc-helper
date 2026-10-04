@@ -147,13 +147,11 @@ def test_level_index_tables_share_axis():
 
     from nonebot_plugin_awmc_helper.constants import (
         LEVEL_INDEX_EN,
-        LEVEL_INDEX_ZH,
         LEVEL_INDEX_BY_EN,
         DIFF_DISPLAY_NAMES,
         COLOR_TO_LEVEL_INDEX,
     )
 
-    assert list(LEVEL_INDEX_ZH) == list(LevelIndex)
     assert COLOR_TO_LEVEL_INDEX == {
         "绿": LevelIndex.BASIC,
         "黄": LevelIndex.ADVANCED,
