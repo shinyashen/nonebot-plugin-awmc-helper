@@ -416,23 +416,16 @@ class DrawScore:
             )
             self._footer(pagemsg, design_bg_y=height - 133, text_y=height - 90, size=25)
         else:
-            # ⚠️ 本分支页脚不走 _footer（NB 原版差异，勿「顺手统一」）：
-            # design.png 贴 (200, height-113)、文案 (700, height-70) 25pt，
-            # 且**无署名行**——与 _footer 的 (200, height-133)/(700, height-90)
-            # + 底部署名不同；NB 基准该分支是否有意无署名未考证，统一前须先
-            # 确认基准（第六轮审查记录，改输出属视觉变更需另行裁决）
+            # NB 原版该分支缺底部署名行（design.png 与文案坐标为其自有口径
+            # -113/-70，不同于 completed 分支的 -133/-90），经产品确认属遗漏
+            # （2026-10-05），改走 _footer 传自有坐标补署名，其余输出不变
             self._section_title(77, "未游玩谱面", size=28)
             self._while_pic(data)
-            height = self._im.size[1]
-            self._im.alpha_composite(
-                assets.pic("design.png", self._theme), (200, height - 113)
-            )
-            ImageDraw.Draw(self._im).text(
-                (700, height - 70),
+            self._footer(
                 f"未游玩谱面共计「{len(data)}」个",
-                font=font(25, FONT_HAN),
-                fill=_DEFAULT_TEXT_COLOR,
-                anchor="mm",
+                design_bg_y=self._im.size[1] - 113,
+                text_y=self._im.size[1] - 70,
+                size=25,
             )
         return image_to_bytes(self._im)
 

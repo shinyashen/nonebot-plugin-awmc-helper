@@ -340,8 +340,8 @@ def score_line_card(
         (line_x + 20, 582),
         f"约 {result['budget']:.2f} 个",
         font=font(48),
-        # 两分支恒等（数字双主题恒粉强调色，第六轮审查裁决去三元）；
-        # 如需随主题 accent 变色属视觉变更，须产品确认后再动
+        # 双主题恒粉强调色：产品定案固定粉（2026-10-05 确认，随主题 accent
+        # 的历史三元系两分支同值笔误，已去）
         fill=CIRCLE_PINK,
         anchor="lm",
     )
