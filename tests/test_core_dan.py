@@ -302,3 +302,21 @@ def test_level_str_boundaries():
     assert _level_str(13.9) == "13+"
     assert _level_str(15.0) == "15"
     assert _level_str(7.0) == "7"
+
+
+def test_resolve_dan_id_aliases():
+    """段位别名解析：普通/真段位、随机档位（难度颜色替代/省略级/空格/大小写）。"""
+    from nonebot_plugin_awmc_helper.plugins.dan.matchers import _resolve_dan_id
+
+    assert _resolve_dan_id("十段") == "10dan"
+    assert _resolve_dan_id("裏皆伝") == "ura_kaiden"
+    assert _resolve_dan_id("里皆传") == "ura_kaiden"
+    assert _resolve_dan_id("MASTER 超上级") == "random_master_4"
+    assert _resolve_dan_id("紫超上") == "random_master_4"
+    assert _resolve_dan_id("master超上級") == "random_master_4"
+    assert _resolve_dan_id("红中级") == "random_expert_2"
+    assert _resolve_dan_id("EXPERT 上级") == "random_expert_3"
+    assert _resolve_dan_id("随机") == "random"
+    assert _resolve_dan_id("紫") is None  # 缺档名
+    assert _resolve_dan_id("超上级") is None  # 缺难度
+    assert _resolve_dan_id("不存在的段位") is None

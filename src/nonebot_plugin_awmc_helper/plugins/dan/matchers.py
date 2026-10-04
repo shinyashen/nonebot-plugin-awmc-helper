@@ -50,8 +50,12 @@ _DAN_ALIASES: dict[str, str] = {
     "裏皆伝": "ura_kaiden",
 }
 
-# 随机档位别名（简繁/有无空格/大小写统一在 _normalize 里处理）
-_RANDOM_DIFFS = {"expert": ("expert", "ex"), "master": ("master", "mas")}
+# 随机档位别名（简繁/有无空格/大小写/难度颜色替代统一在 _normalize 处理）
+# 难度颜色替代：expert=红、master=紫（与等级数字色号一致）
+_RANDOM_DIFFS = {
+    "expert": ("expert", "ex", "红"),
+    "master": ("master", "mas", "紫"),
+}
 
 dan_cmd = on_command("段位", block=True)
 dan_refresh = on_command("刷新段位", permission=SUPERUSER, block=True)
@@ -60,23 +64,23 @@ _NOT_LOADED = "段位数据尚未加载，请稍后再试或联系管理员「�
 
 
 def _normalize_dan_name(arg: str) -> str:
-    """段位名归一：去空白、繁→简档名、小写拉丁。"""
-    return arg.strip().replace(" ", "").replace("級", "级").lower()
+    """段位名归一：去空白、繁→简、小写拉丁、剥「级」字（档名可省略级）。"""
+    return arg.strip().replace(" ", "").replace("級", "级").replace("级", "").lower()
 
 
 def _resolve_dan_id(arg: str) -> str | None:
-    """段位别名 → 段位种名 id（随机档位如「MASTER 超上级」「master超級」同流程）。"""
+    """段位别名 → 段位种名 id（随机档位「MASTER 超上级」「紫超上」等同流程）。"""
     normalized = _normalize_dan_name(arg)
     if normalized in _DAN_ALIASES:
         return _DAN_ALIASES[normalized]
     if normalized in ("随机", "随机段位", "random"):
         return "random"  # 裸「随机」= 规则总览
-    # 随机档位：「难度 + 档名」连写/空格均可（MASTER超上级 / expert初级）
+    # 随机档位：「难度（可颜色替代）+ 档名（可省略级）」连写/空格均可
     for diff_key, prefixes in _RANDOM_DIFFS.items():
         for prefix in prefixes:
             if normalized.startswith(prefix):
                 for tier_no, tier in enumerate(dan.RANDOM_TIERS, 1):
-                    if normalized[len(prefix) :] == tier.replace("級", "级"):
+                    if normalized[len(prefix) :] == tier.rstrip("級级"):
                         return f"random_{diff_key}_{tier_no}"
     return None
 
