@@ -15,6 +15,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import dan
 from ...core.help import CommandSpec, help_registry
+from ...core.score import score_service
 from ...core.utils import user_id_of, group_id_of, handle_errors
 from ...core.binding import binding_service, resolve_session_query
 from ...core.forward import try_send_forward
@@ -161,12 +162,11 @@ async def _(
         if dan_id.startswith("random_"):
             gallery_id = None
         elif version_code is None:
-            # 默认表跟数据源 current_version：net=日服最新，其余/未绑定=国服现行
-            limit = (
-                None
-                if (binding is not None and binding.service == "net")
-                else await dan.cn_current_version()
+            # 默认表跟数据源视图：日服视图源=日服最新，其余/未绑定=国服现行
+            view = (
+                score_service.view_of(binding.service) if binding is not None else "cn"
             )
+            limit = None if view == "jp" else await dan.cn_current_version()
             gallery_id = await dan.latest_gallery_id(version_limit=limit)
         else:
             gallery_id = await dan.course_id_by_version(version_code)

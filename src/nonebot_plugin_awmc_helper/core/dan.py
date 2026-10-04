@@ -838,9 +838,12 @@ async def card_data(
     grade_row: store.DanGrade | store.DanRandom | None
     course: store.DanCourse | None = None
     jp_view = False  # 国服源查超出国服 current 的表 → fallback 日服视图
+    # 日服视图源（view_of 口径，勿散写 service 字面量）：段位表默认跟数据源
+    # 现行版本、抽曲区域随视图，日服源无国服 current 边界
+    jp_source = binding is not None and score_service.view_of(binding.service) == "jp"
     cn_current = await cn_current_version()
-    if binding is not None and binding.service == "net":
-        cn_current = 0  # 日服源无此边界
+    if jp_source:
+        cn_current = 0
     if dan_id.startswith("random_"):
         async with store.session() as db:
             grade_row = (
@@ -850,9 +853,9 @@ async def card_data(
             ).first()
         if grade_row is None:
             return None
-        # 抽曲：区域随数据源（net=日服，其余/未绑定=国服）；版本范围超出国服
-        # current 时 fallback 日服视图，候选为空属数据异常显式失败
-        jp_region = jp_view = binding is not None and binding.service == "net"
+        # 抽曲：区域随数据源视图（日服视图源=日服，其余/未绑定=国服）；版本
+        # 范围超出国服 current 时 fallback 日服视图，候选为空属数据异常显式失败
+        jp_region = jp_view = jp_source
         if not jp_region and version_code is not None and version_code > cn_current:
             jp_region = jp_view = True
         picks = [
@@ -969,7 +972,7 @@ async def card_data(
 
     # 奖励区版本 logo：视图与版本对齐（国服视图=国服版本标志、日服视图=
     # 日服版本标志、指定版本=对应标志）；素材缺失时 None 由渲染跳过
-    view_jp = (binding is not None and binding.service == "net") or jp_view
+    view_jp = jp_source or jp_view
     logo_version = course.version if course else version_code
     if logo_version is None:
         logo_version = (
