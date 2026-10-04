@@ -14,7 +14,6 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import dan
-from ...config import plugin_config
 from ...core.help import CommandSpec, help_registry
 from ...core.utils import user_id_of, group_id_of, handle_errors
 from ...core.binding import binding_service, resolve_session_query
@@ -83,14 +82,6 @@ def _resolve_dan_id(arg: str) -> str | None:
                     if normalized[len(prefix) :] == tier.rstrip("級级"):
                         return f"random_{diff_key}_{tier_no}"
     return None
-
-
-def _logo():
-    """奖励区版本 logo（国服区素材，缺失返回 None 由渲染跳过）。"""
-    from ...core.render.assets import assets
-
-    path = plugin_config.awmc_static_path / "mai" / "pic" / "dan" / "DX_2026_Logo.png"
-    return assets.get(path) if path.exists() else None
 
 
 async def _random_overview_text() -> str:
