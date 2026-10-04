@@ -8,16 +8,17 @@
 
 from nonebot import on_command
 from nonebot.params import CommandArg
-from nonebot.adapters import Event, Message
+from nonebot.adapters import Bot, Event, Message
 from nonebot.permission import SUPERUSER
-from nonebot_plugin_uninfo import UniSession
+from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...core import dan
 from ...config import plugin_config
 from ...core.help import CommandSpec, help_registry
-from ...core.utils import handle_errors
+from ...core.utils import user_id_of, group_id_of, handle_errors
 from ...core.binding import binding_service, resolve_session_query
+from ...core.forward import try_send_forward
 from ...core.render.dan import render_dan_card
 
 # 中文段位别名 → 段位种名 id（简繁/异写并入；跨版本查询暂只出当前版本）
@@ -75,7 +76,7 @@ def _resolve_dan_id(arg: str) -> str | None:
         for prefix in prefixes:
             if normalized.startswith(prefix):
                 for tier_no, tier in enumerate(dan.RANDOM_TIERS, 1):
-                    if normalized[len(prefix):] == tier.replace("級", "级"):
+                    if normalized[len(prefix) :] == tier.replace("級", "级"):
                         return f"random_{diff_key}_{tier_no}"
     return None
 
@@ -88,22 +89,50 @@ def _logo():
     return assets.get(path) if path.exists() else None
 
 
-async def _random_text() -> str:
-    """随机段位规则总览（8 档清单，含实测定数区间来源标注）。"""
+async def _random_overview_text() -> str:
+    """随机段位规则总览纯文本（合并转发不可用时的降级形态）。"""
     tiers = await dan.random_tiers()
     if not tiers:
         return _NOT_LOADED
-    lines = ["【随机段位认定】（四曲独立随机抽取，重复不回避）"]
+    header, blocks = _random_overview_blocks(tiers)
+    return "\n".join([header, *blocks, _RANDOM_TAIL])
+
+
+_RANDOM_TAIL = "通关奖励：1.5 倍奖励票；「段位 <档名>」查看单档段位卡"
+
+
+def _random_overview_blocks(tiers) -> tuple[str, list[str]]:
+    """随机段位总览拆块：头部一行 + 每档一块（转发的每节点一条）。"""
+    header = "【随机段位认定】（四曲独立随机抽取，重复不回避）"
+    blocks = []
     for t in sorted(tiers, key=lambda r: (r.difficulty != "expert", r.dan_id)):
         tag = "实测" if t.ds_source == "measured" else "推导"
-        lines.append(
+        blocks.append(
             f"{t.difficulty.upper()} {t.name_ja}：Lv {t.level_range}"
             f"（定数 {t.ds_lo}~{t.ds_hi}，{tag}）\n"
             f"❤{t.life} -{t.damage_great}/-{t.damage_good}/-{t.damage_miss}"
             f" 每曲 +{t.clear_bonus}"
         )
-    lines.append("通关奖励：1.5 倍奖励票；「段位 <档名>」查看单档段位卡")
-    return "\n".join(lines)
+    return header, blocks
+
+
+async def _finish_random_overview(bot: Bot, session: Session) -> None:
+    """随机段位总览：OB11 走合并转发（每档一节点），不支持/失败降级单条文本。"""
+    tiers = await dan.random_tiers()
+    if not tiers:
+        await UniMessage.text(_NOT_LOADED).finish(at_sender=True)
+    header, blocks = _random_overview_blocks(tiers)
+    group_id = group_id_of(session)
+    sent = await try_send_forward(
+        bot,
+        [header, *blocks, _RANDOM_TAIL],
+        group_id=group_id,
+        user_id=None if group_id else user_id_of(session),
+    )
+    if not sent:
+        await UniMessage.text("\n".join([header, *blocks, _RANDOM_TAIL])).finish(
+            at_sender=True
+        )
 
 
 async def _usable_binding(session, event: Event | None):
@@ -117,20 +146,21 @@ async def _usable_binding(session, event: Event | None):
 @dan_cmd.handle()
 @handle_errors("段位查询失败，请稍后再试")
 async def _(
+    bot: Bot,
     message: Message = CommandArg(),
-    session=UniSession(),
+    session: Session = UniSession(),
     event: Event | None = None,
 ):
     await dan.ensure_loaded()
     arg = message.extract_plain_text().strip()
 
     dan_id = _resolve_dan_id(arg)
-    if dan_id == "random":  # 裸「随机」= 8 档规则总览
-        await UniMessage.text(await _random_text()).finish(at_sender=True)
+    if dan_id == "random":  # 裸「随机」= 8 档规则总览（合并转发）
+        await _finish_random_overview(bot, session)
     if dan_id:
         binding = await _usable_binding(session, event)
-        gallery_id = None if dan_id.startswith("random_") else (
-            await dan.latest_gallery_id()
+        gallery_id = (
+            None if dan_id.startswith("random_") else (await dan.latest_gallery_id())
         )
         data = await dan.card_data(gallery_id, dan_id, binding)
         if data is None:
