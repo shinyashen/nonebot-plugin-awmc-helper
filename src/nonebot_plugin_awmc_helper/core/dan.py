@@ -553,9 +553,12 @@ def format_base_score(current_ra: int, gain: int | None) -> str:
 
 
 def _level_str(ds: float) -> str:
-    """定数 → 显示等级串（实证映射：N.0-N.5 → N，N.6-N.9 → N+）。"""
+    """定数 → 显示等级串（实证映射：N.0-N.5 → N，N.6-N.9 → N+）。
+
+    用十分位整数比较：浮点直接减会踩 14.6-14=0.5999… 的坑（14.6 误判 14）。
+    """
     base = int(ds)
-    return f"{base}+" if ds - base >= 0.6 else str(base)
+    return f"{base}+" if round(ds * 10) - base * 10 >= 6 else str(base)
 
 
 async def _chart_info(
@@ -593,9 +596,80 @@ async def _chart_info(
     return _level_str(ds), chart.designer or "-", str(song.bpm or "-"), ds
 
 
+async def _sample_random_sheets(
+    random_row: store.DanRandom,
+) -> list[tuple[int, str, str]]:
+    """按档位规则随机抽四首课题曲（独立抽取、可重复）。
+
+    候选 = JP 视图 sd/dx 谱面，定数（最新 carry-forward）落在档位区间内；
+    MASTER 档按游戏规则含 Re:MASTER（gamerch：FESTiVAL 起 MASTER 随机段位
+    也会选出 Re:MASTER 谱面），EXPERT 档仅 EXPERT。候选为空抛 ValueError。
+    """
+    import random as _random
+
+    from sqlmodel import select
+
+    level_ids = (
+        (2,) if random_row.difficulty == "expert" else (3, 4)
+    )  # master 含 Re:MASTER
+    async with store.session() as db:
+        rows = (
+            await db.exec(
+                select(
+                    store.SongChart.song_id,
+                    store.SongChart.kind,
+                    store.SongChart.level_id,
+                    store.SongChartLevel.level_value,
+                )
+                .join(
+                    store.SongSheetGroup,
+                    (store.SongSheetGroup.song_id == store.SongChart.song_id)
+                    & (store.SongSheetGroup.kind == store.SongChart.kind),
+                )
+                .join(
+                    store.SongChartLevel,
+                    (store.SongChartLevel.song_id == store.SongChart.song_id)
+                    & (store.SongChartLevel.kind == store.SongChart.kind)
+                    & (store.SongChartLevel.level_id == store.SongChart.level_id),
+                )
+                .where(
+                    store.SongSheetGroup.version.is_not(None),  # type: ignore[attr-defined]
+                    store.SongChart.kind.in_(("sd", "dx")),  # type: ignore[attr-defined]
+                    store.SongChart.level_id.in_(level_ids),  # type: ignore[attr-defined]
+                ),
+            )
+        ).all()
+    # 同谱面多版本定数行取最新（SQLModel select 多列返回 Row，逐列取）
+    latest: dict[tuple[int, str, int], float] = {}
+    for song_id, kind, level_id, value in rows:
+        key = (song_id, kind, level_id)
+        if value is not None and value > latest.get(key, 0.0):
+            latest[key] = value
+    candidates = [
+        (
+            song_id,
+            "std" if kind == "sd" else "dx",
+            {0: "basic", 1: "advanced", 2: "expert", 3: "master", 4: "remaster"}[
+                level_id
+            ],
+        )
+        for (song_id, kind, level_id), ds in latest.items()
+        if random_row.ds_lo <= ds <= random_row.ds_hi
+    ]
+    if not candidates:
+        raise ValueError(
+            f"随机段位 {random_row.dan_id} 无候选谱面"
+            f"（定数 {random_row.ds_lo}~{random_row.ds_hi}）"
+        )
+    return _random.choices(candidates, k=4)
+
+
 async def card_data(gallery_id: str, dan_id: str, binding=None) -> "DanCardData | None":
     """组装段位卡渲染输入：课题曲规范表信息 + 玩家成绩（可降级）。
 
+    ``dan_id`` 为 ``random_*`` 时走随机档位（DanRandom 表；按规则真实抽四首，
+    独立抽取可重复，不需要 ``gallery_id``）；普通/真段位从 DanGrade/DanSheet
+    取数（削除曲等 join 不到的行保留标题、其余 fallback）。
     ``binding`` 为空或成绩数据源不可用（UserScoreError）时走降级：达成率全
     0.0000%、底分「0」不带括号（与歌曲卡无数据一致）。返回 None = 库内无此
     段位数据（未刷新）。
@@ -609,20 +683,37 @@ async def card_data(gallery_id: str, dan_id: str, binding=None) -> "DanCardData 
     from .render.assets import assets as render_assets
     from .render.nb_chart import new_best_score
 
-    grade = await find_grade_row(gallery_id, dan_id)
-    if grade is None:
-        return None
-    async with store.session() as db:
-        sheets = (
-            await db.exec(
-                select(store.DanSheet)
-                .where(
-                    store.DanSheet.gallery_id == gallery_id,
-                    store.DanSheet.dan_id == dan_id,
+    grade_row: store.DanGrade | store.DanRandom | None
+    if dan_id.startswith("random_"):
+        async with store.session() as db:
+            grade_row = (
+                await db.exec(
+                    select(store.DanRandom).where(store.DanRandom.dan_id == dan_id)
                 )
-                .order_by(store.DanSheet.idx)
-            )
-        ).all()
+            ).first()
+        if grade_row is None:
+            return None
+        # 抽曲（候选为空属数据异常，显式失败）
+        picks = [
+            (song_id, kind, difficulty)
+            for song_id, kind, difficulty in await _sample_random_sheets(grade_row)
+        ]
+    else:
+        grade_row = await find_grade_row(gallery_id, dan_id)
+        if grade_row is None:
+            return None
+        async with store.session() as db:
+            sheets = (
+                await db.exec(
+                    select(store.DanSheet)
+                    .where(
+                        store.DanSheet.gallery_id == gallery_id,
+                        store.DanSheet.dan_id == dan_id,
+                    )
+                    .order_by(store.DanSheet.idx)
+                )
+            ).all()
+        picks = [(s.song_id, s.kind, s.difficulty, s.title) for s in sheets]
 
     # 玩家成绩：未绑定/数据源不可用统一降级（与歌曲卡无数据一致）
     score_map: dict[tuple, object] = {}
@@ -639,45 +730,54 @@ async def card_data(gallery_id: str, dan_id: str, binding=None) -> "DanCardData 
             logger.info(f"dan: 玩家成绩拉取失败，按无数据降级（{e}）")
 
     cards: list[DanSongCard] = []
-    for sheet in sheets:
-        song_type = SongType.STANDARD if sheet.kind == "std" else SongType.DX
-        level_index = DIFF_TO_LEVEL_INDEX[sheet.difficulty]
+    for entry in picks:
+        song_id, kind, difficulty, *rest = entry
+        title = rest[0] if rest else None
+        song_type = SongType.STANDARD if kind == "std" else SongType.DX
+        level_index = DIFF_TO_LEVEL_INDEX[difficulty]
         achievement, ra = 0.0, 0
         score = (
-            score_map.get((sheet.song_id, song_type.value, level_index))
-            if (sheet.song_id is not None)
+            score_map.get((song_id, song_type.value, level_index))
+            if song_id is not None
             else None
         )
-        if score is not None and sheet.song_id is not None:
+        if score is not None:
             achievement = score.achievements
             ra = int(score.dx_rating or 0)
         gain = None
         level, charter, bpm, ds = "-", "-", "-", 0.0
-        if sheet.song_id is not None:
-            level, charter, bpm, ds = await _chart_info(
-                sheet.song_id, sheet.kind, level_index
-            )
+        if song_id is not None:
+            level, charter, bpm, ds = await _chart_info(song_id, kind, level_index)
             if best_list is not None:
                 # 加分预测：目标 100.5%（ScoreCoefficient 内部封顶）的 B50 净提升
                 target_ra = int(ScoreCoefficient(100.5).ra(ds))
                 gain = max(
                     new_best_score(
-                        sheet.song_id, level_index, target_ra, best_list, song_type
+                        song_id, level_index, target_ra, best_list, song_type
                     ),
                     0,
                 )
+        if title is None and song_id is not None:
+            # 随机抽取行：标题取规范表原题
+            async with store.session() as db:
+                row = (
+                    await db.exec(
+                        select(store.SongRow).where(store.SongRow.id == song_id)
+                    )
+                ).first()
+            title = row.title if row else "-"
         cards.append(
             DanSongCard(
-                title=sheet.title,
-                kind=sheet.kind,
+                title=title or "-",
+                kind=kind,
                 level=level,
                 level_index=level_index,
-                ds=f"{ds:.1f}" if sheet.song_id is not None else "-",
+                ds=f"{ds:.1f}" if song_id is not None else "-",
                 charter=charter,
                 bpm=bpm,
-                base_score=format_base_score(ra, gain),
+                base_score=format_base_score(ra, gain) if song_id is not None else "-",
                 achievement=achievement,
-                song_id=sheet.song_id,
+                song_id=song_id,
             )
         )
 
@@ -686,11 +786,11 @@ async def card_data(gallery_id: str, dan_id: str, binding=None) -> "DanCardData 
     logo = render_assets.get(logo_path) if logo_path.exists() else None
     return DanCardData(
         dan_id=dan_id,
-        life=grade.life,
-        damage_great=grade.damage_great,
-        damage_good=grade.damage_good,
-        damage_miss=grade.damage_miss,
-        clear_bonus=grade.clear_bonus,
+        life=grade_row.life,
+        damage_great=grade_row.damage_great,
+        damage_good=grade_row.damage_good,
+        damage_miss=grade_row.damage_miss,
+        clear_bonus=grade_row.clear_bonus,
         songs=cards,
         logo=logo,
     )

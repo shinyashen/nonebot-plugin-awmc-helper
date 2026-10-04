@@ -1,9 +1,9 @@
 """awmc.dan 指令入口：段位查询 / 随机段位规则 / 手动刷新。
 
-段位名解析用内置中文别名表（初段..裏皆传、随机档位）；普通/真段位默认当前
-版本（version 最大的段位表）渲染卡片。未绑定/数据源不可用走降级（达成率
-0.0000%、底分无括号，与歌曲卡一致），因此绑定解析用 ``resolve_session_query``
-（不 finish），凭据不可用视同未绑定。
+段位名解析用内置中文别名表（初段..裏皆传、随机 8 档如「MASTER 超上级」）；
+普通/真/随机段位统一走段位卡流程（随机档位课题曲为四行「随机选曲」占位），
+未绑定/数据源不可用走降级（达成率 0.0000%、底分无括号，与歌曲卡一致），
+因此绑定解析用 ``resolve_session_query``（不 finish），凭据不可用视同未绑定。
 """
 
 from nonebot import on_command
@@ -49,24 +49,34 @@ _DAN_ALIASES: dict[str, str] = {
     "裏皆伝": "ura_kaiden",
 }
 
+# 随机档位别名（简繁/有无空格/大小写统一在 _normalize 里处理）
+_RANDOM_DIFFS = {"expert": ("expert", "ex"), "master": ("master", "mas")}
+
 dan_cmd = on_command("段位", block=True)
 dan_refresh = on_command("刷新段位", permission=SUPERUSER, block=True)
 
 _NOT_LOADED = "段位数据尚未加载，请稍后再试或联系管理员「刷新段位」"
 
 
+def _normalize_dan_name(arg: str) -> str:
+    """段位名归一：去空白、繁→简档名、小写拉丁。"""
+    return arg.strip().replace(" ", "").replace("級", "级").lower()
+
+
 def _resolve_dan_id(arg: str) -> str | None:
-    """段位别名 → 段位种名 id；随机档位（难度 + 档名任意组合/省略）亦在此解析。"""
-    arg = arg.strip()
-    if arg in _DAN_ALIASES:
-        return _DAN_ALIASES[arg]
-    tokens = arg.replace("级", "級").split()
-    diff = next((t for t in tokens if t.lower() in ("expert", "master")), None)
-    tier = next((t for t in tokens if t in dan.RANDOM_TIERS), None)
-    if arg in ("随机", "隨機", "random") or diff or tier:
-        diff = (diff or "master").lower()
-        tier = tier or dan.RANDOM_TIERS[3]
-        return f"random_{diff}_{dan.RANDOM_TIERS.index(tier) + 1}"
+    """段位别名 → 段位种名 id（随机档位如「MASTER 超上级」「master超級」同流程）。"""
+    normalized = _normalize_dan_name(arg)
+    if normalized in _DAN_ALIASES:
+        return _DAN_ALIASES[normalized]
+    if normalized in ("随机", "随机段位", "random"):
+        return "random"  # 裸「随机」= 规则总览
+    # 随机档位：「难度 + 档名」连写/空格均可（MASTER超上级 / expert初级）
+    for diff_key, prefixes in _RANDOM_DIFFS.items():
+        for prefix in prefixes:
+            if normalized.startswith(prefix):
+                for tier_no, tier in enumerate(dan.RANDOM_TIERS, 1):
+                    if normalized[len(prefix):] == tier.replace("級", "级"):
+                        return f"random_{diff_key}_{tier_no}"
     return None
 
 
@@ -79,7 +89,7 @@ def _logo():
 
 
 async def _random_text() -> str:
-    """随机段位规则文本（含实测定数区间来源标注）。"""
+    """随机段位规则总览（8 档清单，含实测定数区间来源标注）。"""
     tiers = await dan.random_tiers()
     if not tiers:
         return _NOT_LOADED
@@ -92,7 +102,7 @@ async def _random_text() -> str:
             f"❤{t.life} -{t.damage_great}/-{t.damage_good}/-{t.damage_miss}"
             f" 每曲 +{t.clear_bonus}"
         )
-    lines.append("通关奖励：1.5 倍奖励票")
+    lines.append("通关奖励：1.5 倍奖励票；「段位 <档名>」查看单档段位卡")
     return "\n".join(lines)
 
 
@@ -114,15 +124,18 @@ async def _(
     await dan.ensure_loaded()
     arg = message.extract_plain_text().strip()
 
-    if dan_id := _resolve_dan_id(arg):
-        if dan_id.startswith("random_"):
-            await UniMessage.text(await _random_text()).finish(at_sender=True)
+    dan_id = _resolve_dan_id(arg)
+    if dan_id == "random":  # 裸「随机」= 8 档规则总览
+        await UniMessage.text(await _random_text()).finish(at_sender=True)
+    if dan_id:
         binding = await _usable_binding(session, event)
-        data = await dan.card_data(await dan.latest_gallery_id(), dan_id, binding)
+        gallery_id = None if dan_id.startswith("random_") else (
+            await dan.latest_gallery_id()
+        )
+        data = await dan.card_data(gallery_id, dan_id, binding)
         if data is None:
             await UniMessage.text(_NOT_LOADED).finish(at_sender=True)
-        png = render_dan_card(data)
-        await UniMessage.image(raw=png).finish(at_sender=True)
+        await UniMessage.image(raw=render_dan_card(data)).finish(at_sender=True)
 
     if arg in ("", "列表", "帮助"):
         gallery_id = await dan.latest_gallery_id()
@@ -132,8 +145,8 @@ async def _(
         names = " / ".join(g.name_ja for g, _ in grades)
         await UniMessage.text(
             f"可用段位（当前版本）：{names}\n"
-            "「段位 <段位名>」查看段位表（绑定后含达成率/底分预测）；"
-            "「段位 随机」查看随机段位规则"
+            "随机段位：EXPERT/MASTER × 初級~超上級（如「段位 MASTER超上级」）；"
+            "「段位 随机」查看随机段位规则总览"
         ).finish(at_sender=True)
     await UniMessage.text("未识别的段位名；发送「段位」查看可用段位").finish(
         at_sender=True
@@ -159,7 +172,7 @@ help_registry.declare(
         CommandSpec(
             matcher=dan_cmd,
             name="段位",
-            brief="段位认定查询：段位 / 段位 <段位名> / 段位 随机",
+            brief="段位认定查询：段位 / 段位 <段位名>（含 MASTER超上级 等随机档位）",
         ),
         CommandSpec(
             matcher=dan_refresh,

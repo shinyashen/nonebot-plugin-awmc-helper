@@ -7,6 +7,7 @@ yaml 片段内联（真实快照口径构造：段名/规则/谱面行均与线�
 from pathlib import Path
 
 import pytest
+from mocks import requires_assets
 
 # 内联 fixture：MAGiCAL 段位表（初段/十段/裏皆伝三段即可）+ 随机段位一档 +
 # 海外版（应跳过）+ 朋友对战（应跳过）。谱面行取真实快照曲（PANDORA PARADOXXX）。
@@ -132,8 +133,8 @@ async def test_refresh_roundtrip_and_join(tmp_db):
     """入库 + join：命中曲回填 song_id；削除曲（无此曲名）置 None 不抛。"""
     from nonebot_plugin_awmc_helper.core import dan
     from nonebot_plugin_awmc_helper.core.store import (
-        SongChart,
         SongRow,
+        SongChart,
         SongSheetGroup,
     )
 
@@ -157,7 +158,8 @@ async def test_refresh_roundtrip_and_join(tmp_db):
     # 海外版/朋友对战不入库
     assert await dan.find_grade_row("magical-dan-intl", "1dan") is None
     tiers = await dan.random_tiers()
-    assert len(tiers) == 1 and tiers[0].dan_id == "random_master_4"
+    assert len(tiers) == 1
+    assert tiers[0].dan_id == "random_master_4"
 
 
 @pytest.mark.asyncio
@@ -200,16 +202,18 @@ async def test_card_data_degrades_without_binding(tmp_db):
     assert (data.life, data.damage_miss, data.clear_bonus) == (10, 10, 0)
     hit, miss = data.songs[0], data.songs[1]
     assert (hit.song_id, hit.achievement, hit.base_score) == (834, 0.0, "0")
-    assert hit.level == "14+" and hit.ds == "14.9"
+    assert hit.level == "14+"
+    assert hit.ds == "14.9"
     assert hit.charter == "PANDORA PARADOXXX"
-    assert miss.song_id is None and miss.level == "-" and miss.ds == "-"
+    assert miss.song_id is None
+    assert miss.level == "-"
+    assert miss.ds == "-"
 
 
 @pytest.mark.asyncio
+@requires_assets
 async def test_render_smoke_from_card_data(tmp_db):
     """card_data → render_dan_card 冒烟：渲染可执行（需本地素材包 static/）。"""
-    if not Path("static/mai/pic/jp/dan").exists():
-        pytest.skip("需本地素材包 static/（不入库），CI 无此环境")
     from nonebot_plugin_awmc_helper.core import dan
     from nonebot_plugin_awmc_helper.core.store import (
         SongRow,
@@ -245,3 +249,56 @@ async def test_render_smoke_from_card_data(tmp_db):
     await dan.refresh(text=FIXTURE)
     data = await dan.card_data("magical-dan", "ura_kaiden", binding=None)
     assert render_dan_card(data).startswith(b"\x89PNG")
+
+
+@pytest.mark.asyncio
+async def test_card_data_random_sampling(tmp_db):
+    """随机档位真实抽曲：候选限定档位定数区间（master 含 Re:MASTER），
+    独立抽取可重复、恒四行；区间外谱面不会出现。"""
+    from nonebot_plugin_awmc_helper.core import dan
+    from nonebot_plugin_awmc_helper.core.store import (
+        SongRow,
+        SongChart,
+        SongChartLevel,
+        SongSheetGroup,
+    )
+
+    async with tmp_db.session() as db:
+        # 候选：master 14.9 / remaster 14.8（区间内），master 14.0（区间外）
+        for sid, title, kind, lid, ds in (
+            (1818, "World's end BLACKBOX", "dx", 3, 14.9),
+            (834, "PANDORA PARADOXXX", "sd", 4, 14.8),
+            (1400, "区间外曲", "dx", 3, 14.0),
+        ):
+            db.add(SongRow(id=sid, title=title, bpm="150"))
+            db.add(SongSheetGroup(song_id=sid, kind=kind, version=27000))
+            db.add(SongChart(song_id=sid, kind=kind, level_id=lid, notes_tap=1))
+            db.add(
+                SongChartLevel(
+                    song_id=sid, kind=kind, level_id=lid, version=27000, level_value=ds
+                )
+            )
+        await db.commit()
+
+    await dan.refresh(text=FIXTURE)
+    data = await dan.card_data(None, "random_master_4")
+    assert data is not None
+    assert (data.life, data.damage_good, data.clear_bonus) == (100, 3, 10)
+    assert len(data.songs) == 4
+    allowed = {1818, 834}
+    assert all(s.song_id in allowed for s in data.songs)
+    assert all(s.ds in ("14.9", "14.8") for s in data.songs)
+    # 重复抽取消融：全部行同曲也合法（独立抽取），这里只断言数量与域
+    assert all(s.kind in ("std", "dx") for s in data.songs)
+
+
+def test_level_str_boundaries():
+    """定数→标级映射边界：N.5→N、N.6→N+（浮点 14.6-14 坑回归）。"""
+    from nonebot_plugin_awmc_helper.core.dan import _level_str
+
+    assert _level_str(14.5) == "14"
+    assert _level_str(14.6) == "14+"
+    assert _level_str(12.6) == "12+"
+    assert _level_str(13.9) == "13+"
+    assert _level_str(15.0) == "15"
+    assert _level_str(7.0) == "7"
