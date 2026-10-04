@@ -57,7 +57,7 @@ _RANDOM_DIFFS = {
     "master": ("master", "mas", "紫"),
 }
 
-dan_cmd = on_command("段位", block=True)
+dan_cmd = on_command("段位", aliases={"段位表"}, block=True)
 dan_refresh = on_command("刷新段位", permission=SUPERUSER, block=True)
 
 _NOT_LOADED = "段位数据尚未加载，请稍后再试或联系管理员「刷新段位」"

@@ -554,3 +554,148 @@ async def test_random_timepoint_ds(tmp_db, monkeypatch):
     data = await dan.card_data(None, "random_master_4", jp, version_code=24000)
     assert all(s.title == "改订降" for s in data.songs)
     assert all(s.ds == "14.8" for s in data.songs)
+
+
+@pytest.mark.asyncio
+async def test_side_aware_gain(tmp_db, monkeypatch):
+    """加分预测侧别：b35 域课题曲的入线线取 b35 最低（非全 B50 最低）。
+
+    课题曲当前 RA 312（未入 B50，b35 域）；b35 最低 315、b15 最低 310；
+    100.5% 目标 RA 314 → 314 < 315 进不了 b35 → +0（修复前拿 b15 入线
+    错得 +4）。"""
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.core import dan
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.store import (
+        SongChart,
+        SongChartLevel,
+        SongRow,
+        SongSheetGroup,
+    )
+
+    yaml_text = (
+        "- title: MAGiCAL 段位認定\n  id: magical-dan\n  sections:\n"
+        "    - title: 【十段】\n      description: ❤ 900｜-2/-2/-5｜+30\n"
+        "      sheets:\n        - 老曲X|dx|master\n"
+    )
+    async with tmp_db.session() as db:
+        db.add(SongRow(id=501, title="老曲X", bpm="150"))
+        db.add(
+            SongSheetGroup(
+                song_id=501,
+                kind="dx",
+                version=22000,
+                version_cn=22000,
+            )
+        )  # b35 域（< 25500）
+        db.add(SongChart(song_id=501, kind="dx", level_id=3, notes_tap=1))
+        db.add(
+            SongChartLevel(
+                song_id=501,
+                kind="dx",
+                level_id=3,
+                version=22000,
+                level_value=14.0,
+            )
+        )  # 100.5% RA ≈ 281……改定数让目标 RA 落 314
+        await db.commit()
+
+    binding = SimpleNamespace(service="divingfish")
+
+    async def _scores(*a, **k):
+        return SimpleNamespace(
+            scores=[
+                SimpleNamespace(
+                    id=501,
+                    type=SimpleNamespace(value="dx"),
+                    level_index=SimpleNamespace(value=3),
+                    achievements=95.0,
+                    dx_rating=312,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(score_service, "get_scores_all", _scores)
+
+    async def _b50(*a, **k):
+        return SimpleNamespace(
+            scores_b35=[
+                SimpleNamespace(
+                    id=999,
+                    type=SimpleNamespace(value="dx"),
+                    level_index=SimpleNamespace(value=3),
+                    dx_rating=315,
+                )
+            ],
+            scores_b15=[
+                SimpleNamespace(
+                    id=998,
+                    type=SimpleNamespace(value="dx"),
+                    level_index=SimpleNamespace(value=3),
+                    dx_rating=310,
+                )
+            ],
+            scores=[],
+        )
+
+    monkeypatch.setattr(score_service, "get_b50", _b50)
+
+    await dan.refresh(text=yaml_text)
+    data = await dan.card_data("magical-dan", "10dan", binding)
+    assert data is not None
+    card = data.songs[0]
+    assert card.base_score == "312"  # 314 < b35 入线 315 → 无加分括号
+    assert card.achievement == 95.0
+
+
+@pytest.mark.asyncio
+async def test_cn_source_beyond_current_falls_back_jp(tmp_db, monkeypatch):
+    """国服源查超出国服 current 的表：fallback 日服视图且不显示加分。"""
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.core import dan
+    from nonebot_plugin_awmc_helper.core.score import score_service
+    from nonebot_plugin_awmc_helper.core.store import (
+        SongChart,
+        SongChartLevel,
+        SongRow,
+        SongSheetGroup,
+    )
+
+    async with tmp_db.session() as db:
+        # 域内最高 version_cn=24500（CN current 即 24500）< 表版本 27000
+        db.add(SongRow(id=834, title="PANDORA PARADOXXX", bpm="150"))
+        db.add(
+            SongSheetGroup(
+                song_id=834,
+                kind="sd",
+                version=27000,
+                version_cn=24500,
+            )
+        )
+        db.add(SongChart(song_id=834, kind="sd", level_id=4, notes_tap=1))
+        db.add(
+            SongChartLevel(
+                song_id=834, kind="sd", level_id=4, version=27000, level_value=14.9
+            )
+        )
+        await db.commit()
+
+    binding = SimpleNamespace(service="divingfish")
+
+    async def _empty_scores(*a, **k):
+        return SimpleNamespace(scores=[])
+
+    async def _empty_b50(*a, **k):
+        return SimpleNamespace(scores_b35=[], scores_b15=[], scores=[])
+
+    monkeypatch.setattr(score_service, "get_scores_all", _empty_scores)
+    monkeypatch.setattr(score_service, "get_b50", _empty_b50)
+
+    await dan.refresh(text=FIXTURE)  # magical-dan 27000 > 24500
+    data = await dan.card_data("magical-dan", "ura_kaiden", binding)
+    assert data is not None
+    # 无括号（jp_view 下 gain 不计算）；song_id 仍正常 join
+    assert data.songs[0].base_score == "0"
+    assert data.songs[0].song_id == 834

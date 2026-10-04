@@ -670,11 +670,12 @@ def _level_str(ds: float) -> str:
 
 async def _chart_info(
     song_id: int, kind: str, level_index: int, version_code: int | None = None
-) -> tuple[str, str, str, float]:
-    """规范表单谱面展示信息：（显示等级, 谱师, BPM, 定数）。缺位以 - / 0 兜底。
+) -> tuple[str, str, str, float, int]:
+    """规范表单谱面展示信息：（显示等级, 谱师, BPM, 定数, 组登场版本）。
 
-    定数取 carry-forward：``version_code`` 给定时取该版本时点值（跨版本段位
-    卡显示/加分预测统一时点口径，随心配 S-2 改进先例），None 取最新。
+    缺位以 - / 0 兜底。定数取 carry-forward：``version_code`` 给定时取该
+    版本时点值（跨版本段位卡显示/加分预测统一时点口径，随心配 S-2 改进
+    先例），None 取最新。组登场版本供 B50 侧别（b35/b15）判定。
     """
     from sqlmodel import select
 
@@ -702,11 +703,26 @@ async def _chart_info(
         level_rows = (
             await db.exec(select(store.SongChartLevel).where(*level_clauses))
         ).all()
+        group = (
+            await db.exec(
+                select(store.SongSheetGroup).where(
+                    store.SongSheetGroup.song_id == song_id,
+                    store.SongSheetGroup.kind == db_kind,
+                )
+            )
+        ).first()
     if song is None or chart is None or not level_rows:
-        return "-", "-", "-", 0.0
+        return "-", "-", "-", 0.0, 0
     latest = max(level_rows, key=lambda r: r.version)
     ds = latest.level_value or 0.0
-    return _level_str(ds), chart.designer or "-", str(song.bpm or "-"), ds
+    chart_version = group.version or 0 if group else 0
+    return (
+        _level_str(ds),
+        chart.designer or "-",
+        str(song.bpm or "-"),
+        ds,
+        chart_version,
+    )
 
 
 async def _sample_random_sheets(
@@ -815,12 +831,16 @@ async def card_data(
     from maimai_py.utils import ScoreCoefficient
 
     from .score import UserScoreError, score_service
+    from .render import nb_chart
     from .render.dan import DanCardData, DanSongCard
-    from .render.assets import assets as render_assets
     from .render.nb_chart import new_best_score
 
     grade_row: store.DanGrade | store.DanRandom | None
     course: store.DanCourse | None = None
+    jp_view = False  # 国服源查超出国服 current 的表 → fallback 日服视图
+    cn_current = await cn_current_version()
+    if binding is not None and binding.service == "net":
+        cn_current = 0  # 日服源无此边界
     if dan_id.startswith("random_"):
         async with store.session() as db:
             grade_row = (
@@ -830,9 +850,11 @@ async def card_data(
             ).first()
         if grade_row is None:
             return None
-        # 抽曲：区域随数据源（net=日服，其余/未绑定=国服），候选为空属数据
-        # 异常显式失败
-        jp_region = binding is not None and binding.service == "net"
+        # 抽曲：区域随数据源（net=日服，其余/未绑定=国服）；版本范围超出国服
+        # current 时 fallback 日服视图，候选为空属数据异常显式失败
+        jp_region = jp_view = binding is not None and binding.service == "net"
+        if not jp_region and version_code is not None and version_code > cn_current:
+            jp_region = jp_view = True
         picks = [
             (song_id, kind, difficulty)
             for song_id, kind, difficulty in await _sample_random_sheets(
@@ -851,6 +873,8 @@ async def card_data(
                     )
                 )
             ).first()
+            if course is not None and course.version > cn_current:
+                jp_view = True
             sheets = (
                 await db.exec(
                     select(store.DanSheet).where(
@@ -866,15 +890,14 @@ async def card_data(
 
     # 玩家成绩：未绑定/数据源不可用统一降级（与歌曲卡无数据一致）
     score_map: dict[tuple, ScoreExtend] = {}
-    best_list: list | None = None
+    bests: object | None = None
     if binding is not None:
         try:
             all_scores = (await score_service.get_scores_all(binding)).scores
             score_map = {
                 (s.id, s.type.value, s.level_index.value): s for s in all_scores
             }
-            bests = await score_service.get_b50(binding)
-            best_list = list(bests.scores)  # 完整 B50（b35+b15，入线线才不失真）
+            bests = await score_service.get_b50(binding)  # b35/b15 侧别按曲选
         except UserScoreError as e:
             logger.info(f"dan: 玩家成绩拉取失败，按无数据降级（{e}）")
 
@@ -898,18 +921,25 @@ async def card_data(
         if song_id is not None:
             # 版本时效性：普通/真段位用段位表所属版本的时点定数（默认表=
             # 数据源现行版本）；随机档位无版本归属，无前缀即现行
-            level, charter, bpm, ds = await _chart_info(
+            level, charter, bpm, ds, chart_version = await _chart_info(
                 song_id,
                 kind,
                 level_index,
                 course.version if course else version_code,
             )
-            if best_list is not None:
-                # 加分预测：目标 100.5%（ScoreCoefficient 内部封顶）的 B50 净提升
+            if bests is not None and not jp_view:  # 日服 fallback 不显示加分
+                # 加分预测：目标 100.5%（ScoreCoefficient 内部封顶）的 B50 净
+                # 提升。入线线按谱面登场版本选 B50 侧别（b35/b15，口径同歌曲
+                # 卡 chart_card）——b35 域课题曲不能拿 b15 的最低分当入线线
+                side_best = (
+                    bests.scores_b15
+                    if nb_chart.is_new_chart(chart_version)
+                    else bests.scores_b35
+                )
                 target_ra = int(ScoreCoefficient(100.5).ra(ds))
                 gain = max(
                     new_best_score(
-                        song_id, level_index, target_ra, best_list, song_type
+                        song_id, level_index, target_ra, side_best, song_type
                     ),
                     0,
                 )
@@ -937,9 +967,15 @@ async def card_data(
             )
         )
 
-    # 奖励区版本 logo（国服区素材，缺失 None 由渲染跳过）
-    logo_path = render_assets.static_path() / "mai" / "pic" / "dan" / "DX_2026_Logo.png"
-    logo = render_assets.get(logo_path) if logo_path.exists() else None
+    # 奖励区版本 logo：视图与版本对齐（国服视图=国服版本标志、日服视图=
+    # 日服版本标志、指定版本=对应标志）；素材缺失时 None 由渲染跳过
+    view_jp = (binding is not None and binding.service == "net") or jp_view
+    logo_version = course.version if course else version_code
+    if logo_version is None:
+        logo_version = (
+            Version.MAIMAI_DX_MAGICAL.value if view_jp else await cn_current_version()
+        )
+    logo = nb_chart.version_image(logo_version, jp=view_jp)
     return DanCardData(
         dan_id=dan_id,
         life=grade_row.life,
