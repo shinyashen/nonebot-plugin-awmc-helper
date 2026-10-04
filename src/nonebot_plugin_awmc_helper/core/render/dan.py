@@ -17,8 +17,8 @@
 - 等级数字色号 = 难度序 +1（绿黄红紫白），宴谱 10 暂不用；
 - 扣血红字 / 回复绿字（FOT-NewRodin 日文字体）；
 - 类型徽章（``pic/SD.png``/``pic/DX.png``，static 既有）移入标题蓝胶囊条
-  右端（h20，曲名截断避让）；卡框烤入的「でらっくスコア」字样由底部白条
-  的白矩形（恰好盖字）清除，白条左绘信息行、槽 pill 上居中绘底分。
+  右端（h20，曲名截断避让）；卡框素材已去除烤入的「でらっくスコア」字样，
+  底部白条左绘信息行、槽 pill 上居中绘底分。
 
 版式坐标均为像素实测值（素材/画布坐标系见各常量注释），调整前先跑
 ``local/scratch/render_dan_preview.py`` 出三样式样张比对。
@@ -158,8 +158,7 @@ ACHV_PCT_FONT, ACHV_PCT_GAP = 22, 5
 LEVEL_LEFT, LEVEL_CENTER_Y, LEVEL_DIGIT_H = 525, 72, 55
 LEVEL_LV_H, LEVEL_PLUS_H, LEVEL_LV_RAISE = 22, 16, 4  # LV 底对齐后整体再上移 4
 
-# 底部信息行（卡框 asset 坐标）：白矩形恰好盖住烤入的「でらっくスコア」
-STRIP_COVER_RECT = (506, 113, 586, 132)
+# 底部信息行（卡框 asset 坐标；新卡框已无烤入的「でらっくスコア」字样）
 STRIP_INFO_X, STRIP_INFO_RIGHT, STRIP_INFO_Y = 146, 495, 122  # 与标签 A 对齐
 STRIP_INFO_SIZES = (14, 12, 10)  # 超宽逐级降字号，仍超才省略
 BASE_SCORE_RIGHT, BASE_SCORE_Y, BASE_SCORE_FONT = 565, 122, 15
@@ -180,7 +179,7 @@ RECOVERY_BAR_POS, RECOVERY_NUM_POS = (368, 868), (571, 882)
 # 右下奖励列：组中心 x、各元素纵坐标（整组已按用户定稿左移/下移）
 REWARD_CENTER = 851
 LOGO_BOX, LOGO_TOP = (166, 96), 683
-BONUS_WIDTH, BONUS_TOP = 140, 785
+BONUS_WIDTH, BONUS_TOP = 190, 780
 TICKET_WIDTH, TICKET_BOTTOM = 176, 900  # 底部与绿横幅底部（y=900）平齐
 PLATE_BOX, PLATE_TOP = (166, 74), 815
 
@@ -365,10 +364,8 @@ def _draw_level(
 
 def _draw_strip(card: Image.Image, song: DanSongCard) -> None:
     """底部：色带左段绘信息行（定数/谱师/BPM，超宽降字号仍超才省略）；右段
-    白色槽 pill 内的白矩形恰好盖住烤入的「でらっくスコア」字样，底分居中
-    落在槽 pill 上。"""
+    白色槽 pill 上居中绘底分（卡框烤字已由素材更新移除，无需遮罩）。"""
     draw = ImageDraw.Draw(card)
-    draw.rectangle(STRIP_COVER_RECT, fill=(255, 255, 255, 255))
     info = f"定数: {song.ds} 谱师: {song.charter} BPM: {song.bpm}"
     for size in STRIP_INFO_SIZES:
         info_font = font(size, FONT_HAN)
