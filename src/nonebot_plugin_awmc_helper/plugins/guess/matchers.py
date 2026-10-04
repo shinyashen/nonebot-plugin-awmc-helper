@@ -8,9 +8,8 @@ from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .game import GUESS_FEATURE, _games, _reveal, _game_of, _start_game, _handle_answer
-from ...core import store
 from ...core.help import CommandSpec, help_registry
-from ...core.utils import group_id_of, handle_errors, ensure_group_admin
+from ...core.utils import group_id_of, handle_errors, apply_group_switch
 
 guess = on_command("猜歌", block=True)
 guess_pic = on_command("猜曲绘", block=True)
@@ -40,11 +39,7 @@ guess_answer = on_message(rule=Rule(_is_guess_answer), priority=0, block=False)
 
 @guess_answer.handle()
 @handle_errors()
-async def _(bot: Bot, event: Event):
-    from nonebot_plugin_uninfo import get_session
-
-    session = await get_session(bot, event)
-    assert session is not None
+async def _(bot: Bot, event: Event, session: Session = UniSession()):
     await _handle_answer(session, event.get_plaintext())
 
 
@@ -78,9 +73,15 @@ async def _(
     session: Session = UniSession(),
     groups: tuple = RegexGroup(),
 ):
-    group_id = await ensure_group_admin(session, bot, event, feature="猜歌开关")
     enabled = groups[0] == "开启"
-    await store.set_group_switch(group_id, GUESS_FEATURE, enabled)
+    group_id = await apply_group_switch(
+        session,
+        bot,
+        event,
+        switch_key=GUESS_FEATURE,
+        enabled=enabled,
+        feature="猜歌开关",
+    )
     if not enabled:
         game = _game_of(group_id)
         if game is not None:

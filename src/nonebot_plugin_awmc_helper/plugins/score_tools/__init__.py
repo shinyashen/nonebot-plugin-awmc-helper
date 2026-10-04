@@ -19,7 +19,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .resolve import split_args
 from ...core.ext import divingfish as df_ext
-from ...constants import UTAGE_ID_BASE, DIFF_DISPLAY_NAMES
+from ...constants import DEFAULT_THEME, UTAGE_ID_BASE, DIFF_DISPLAY_NAMES
 from ...core.calc import (
     score_line,
     min_ds_of_ra,
@@ -45,6 +45,9 @@ from ...core.chart_card import resolve_card_view, song_lookup_reply
 from ...core.render.tools import text_image_bytes
 
 _COLOR_HINT = "※ 分数线需指定难度色：分数线 <绿/黄/红/紫/白><id/别名> <线>"
+
+_RANKING_PAGE_SIZE = 50
+"""水鱼 RA 排行榜页大小（帮助文案「50/页」口径同源）。"""
 
 __plugin_meta__ = PluginMetadata(
     name="awmc.score_tools",
@@ -183,6 +186,8 @@ async def _(
         if stripped.isdigit():
             found = await song_service.resolve_raw_chart(int(stripped))
             if found is None:
+                # 「对应乐曲 + 查歌提示」本地变体：键可带色/宴前缀非纯 id，
+                # 不套 core.utils.song_not_found_text 的「ID为」标准句（措辞单源见彼处）
                 await UniMessage.text(
                     f" 未找到「{full}」对应的乐曲，可用「查歌」确认后再试"
                 ).finish(at_sender=True)
@@ -318,7 +323,7 @@ async def _(
         ).finish(at_sender=True)
 
     song, prefer, jp, utage_diff = resolved
-    theme = binding.theme or "prism_plus"
+    theme = binding.theme or DEFAULT_THEME
     from ...core.render.score_line import score_line_card
 
     if utage_diff is not None:
@@ -428,12 +433,12 @@ async def _(message: Message = CommandArg()):
     if args and not args.isdigit():
         await UniMessage.text(" 未在查分器排行榜中找到该玩家。").finish(at_sender=True)
     page = parse_page(args)
-    page_data, total = paginate(users, page, 50)
+    page_data, total = paginate(users, page, _RANKING_PAGE_SIZE)
     if not page_data:
         await UniMessage.text(f" 页码超出范围（共 {total} 页）").finish(at_sender=True)
     lines = [f"水鱼 RA 排行榜（第 {page}/{total} 页，共 {len(users)} 人）"]
     lines += [
-        f"{(page - 1) * 50 + i + 1:5d}  {u.username[:16]}  {u.ra}"
+        f"{(page - 1) * _RANKING_PAGE_SIZE + i + 1:5d}  {u.username[:16]}  {u.ra}"
         for i, u in enumerate(page_data)
     ]
     png = text_image_bytes("\n".join(lines), size=22)

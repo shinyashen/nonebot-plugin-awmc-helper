@@ -17,6 +17,9 @@ from ...core.forward import is_ob11, ob11_text, ob11_available, try_send_forward
 PUSH_FEATURE = "alias_push"
 """群级开关键：推送分发（本模块）与 开关指令（matchers）共用。"""
 
+_PUSH_GROUP_INTERVAL = 5
+"""群间风控间隔（秒）：单 bot 内逐群串行发送的 sleep 步长。"""
+
 
 async def push_apply(push: yuzu_ext.AliasPush) -> None:
     if not push.status:
@@ -72,4 +75,4 @@ async def _push_to_groups(bot, group_list, text: str, default: bool) -> None:
                 await bot.send_group_msg(group_id=int(gid), message=ob11_text(text))
             except Exception:
                 logger.exception(f"别名推送到群 {gid} 失败")
-        await asyncio.sleep(5)
+        await asyncio.sleep(_PUSH_GROUP_INTERVAL)

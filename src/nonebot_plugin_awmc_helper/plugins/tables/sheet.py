@@ -40,6 +40,29 @@ from ...core.render.plate_progress import plate_progress_bytes
 _LEVEL_ORDER = {lv: i for i, lv in enumerate(LEVEL_LIST)}
 """标级 → 序号（替代循环内 LEVEL_LIST.index 的 O(n) 查找）。"""
 
+# ---- 条件化进度（NB DrawScore 版式移植）几何口径 ----
+# 数值均来自 NB 版 DrawScore 版式原值，只许整组对齐上游调整，勿单点改动
+_PROGRESS_MIN_ROWS = 4
+"""已游玩段最少行数（空段也保留网格占位）。"""
+_PROGRESS_PLAYED_PER_ROW = 5
+"""已游玩行卡每行槽位数。"""
+_PROGRESS_PLAYED_ROW_HEIGHT = 109
+"""已游玩行卡单行高度（px）。"""
+_PROGRESS_NOTPLAYED_ROW_HEIGHT = 65
+"""未游玩网格单行高度（px）。"""
+_PROGRESS_NOTPLAYED_PER_ROW = 20
+"""未游玩网格每行条数。"""
+_PROGRESS_NOTPLAYED_LIMIT = 100
+"""三段总览未游玩网格展示条数上限。"""
+_PROGRESS_SECTION_HEAD = 140
+"""三段总览各段区头高度（px）。"""
+_PROGRESS_PLAYED_LIMIT_FULL = 60
+"""三段总览仅完成（无未完成/未游玩）时完成段展示上限（NB 同款放宽）。"""
+_PROGRESS_PLAYED_LIMIT = 30
+"""三段总览完成/未完成段常规展示上限。"""
+_WU_PLATE_PAGE_BOUNDARY = "13"
+"""舞/霸牌子按等级 13 分界分页（NB 同款）。"""
+
 
 async def plate_completion_sheet(binding, version: str, kind: str, page: int) -> None:
     """完成表（NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条）。"""
@@ -135,7 +158,7 @@ async def plate_progress_overview(
         slot.sort(key=lambda x: -x[2])
 
     # 槽节倒序（Re:MASTER → Basic，NB 同款）；舞/霸按等级 13 分界分页（NB 同款）
-    boundary = _LEVEL_ORDER["13"]
+    boundary = _LEVEL_ORDER[_WU_PLATE_PAGE_BOUNDARY]
     slots = []
     for li in range(slot_count):
         items_full = remained_by_slot[li]
@@ -248,14 +271,33 @@ async def combo_progress_card(
     service = service_display(binding)
 
     def played_rows(count: int) -> int:
-        return max(4, -(-count // 5))
+        return max(_PROGRESS_MIN_ROWS, -(-count // _PROGRESS_PLAYED_PER_ROW))
 
     if category is None:
-        # 三段总览（comp_limit 语义对齐 NB：仅完成时放宽到 60）
-        comp_limit = 60 if not unfinished and not notplayed else 30
-        c_y = played_rows(len(completed[:comp_limit])) * 109 + 140
-        u_y = played_rows(len(unfinished[:30])) * 109 + 140
-        n_y = max(4, -(-len(notplayed[:100]) // 20)) * 65 + 140
+        # 三段总览（展示上限语义对齐 NB：仅完成时放宽）
+        comp_limit = (
+            _PROGRESS_PLAYED_LIMIT_FULL
+            if not unfinished and not notplayed
+            else _PROGRESS_PLAYED_LIMIT
+        )
+        c_y = (
+            played_rows(len(completed[:comp_limit])) * _PROGRESS_PLAYED_ROW_HEIGHT
+            + _PROGRESS_SECTION_HEAD
+        )
+        u_y = (
+            played_rows(len(unfinished[:_PROGRESS_PLAYED_LIMIT]))
+            * _PROGRESS_PLAYED_ROW_HEIGHT
+            + _PROGRESS_SECTION_HEAD
+        )
+        shown_notplayed = notplayed[:_PROGRESS_NOTPLAYED_LIMIT]
+        n_y = (
+            max(
+                _PROGRESS_MIN_ROWS,
+                -(-len(shown_notplayed) // _PROGRESS_NOTPLAYED_PER_ROW),
+            )
+            * _PROGRESS_NOTPLAYED_ROW_HEIGHT
+            + _PROGRESS_SECTION_HEAD
+        )
         card = DrawScore(150 + c_y + u_y + n_y, service=service)
         # 条件形态文案：level=规范化条件串（评级档大写）、plan 后缀置空
         # （避免「14+sss+SSSP」连串）、页脚达标线=条件 label（SSS+ 而非
@@ -275,7 +317,7 @@ async def combo_progress_card(
         data = completed if category == "已完成" else unfinished
         total_pages, real = score_list_page(len(data), page)
         display = data[(real - 1) * SCORE_LIST_PER_PAGE : real * SCORE_LIST_PER_PAGE]
-        y_size = played_rows(len(display)) * 109
+        y_size = played_rows(len(display)) * _PROGRESS_PLAYED_ROW_HEIGHT
         card = DrawScore(240 + y_size + 120, service=service)
         png = card.draw_category(
             "completed" if category == "已完成" else "unfinished",
@@ -284,7 +326,10 @@ async def combo_progress_card(
             total_pages,
         )
     else:
-        y_size = max(4, -(-len(notplayed) // 20)) * 65
+        y_size = (
+            max(_PROGRESS_MIN_ROWS, -(-len(notplayed) // _PROGRESS_NOTPLAYED_PER_ROW))
+            * _PROGRESS_NOTPLAYED_ROW_HEIGHT
+        )
         card = DrawScore(max(240 + y_size + 120, 600), service=service)
         png = card.draw_category("notplayed", notplayed)
     await UniMessage.image(raw=png).finish(at_sender=True)

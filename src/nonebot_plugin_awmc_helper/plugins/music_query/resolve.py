@@ -8,9 +8,6 @@ DX 展示 id 回查与形状推类型，查分 minfo 共用）；别名/曲名 �
 
 from nonebot import logger
 
-from ...core.songs import song_service
-from ...core.types import Song, SongType, SongDifficultyUtage
-
 
 def _split_page(args: list[str]) -> tuple[str, int]:
     """末尾为纯数字时视为页数，其余整体作为关键词（支持含空格）。"""
@@ -47,13 +44,6 @@ def parse_range_args(a_list: list[str], label: str) -> "tuple[float, float, int]
             f"{label}查歌「最小{label}」「最大{label}」「页数」"
         )
     return v1, v2, page
-
-
-async def _resolve_raw_id(
-    raw_id: int,
-) -> tuple[Song, SongType | None, bool, SongDifficultyUtage | None] | None:
-    """数字 id 解析（薄包装）：单源实现在 core ``resolve_raw_chart``。"""
-    return await song_service.resolve_raw_chart(raw_id)
 
 
 async def _vote_hint(name: str) -> str | None:

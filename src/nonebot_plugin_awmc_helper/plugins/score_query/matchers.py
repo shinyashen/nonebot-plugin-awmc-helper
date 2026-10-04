@@ -28,10 +28,16 @@ from ...core.songs import (
     song_service,
     chart_of_color,
     entries_list_text,
+    chart_entries_many,
     prefer_type_from_raw_id,
 )
 from ...core.types import SongType, LevelIndex
-from ...core.utils import slow_notice, handle_errors, player_display_name
+from ...core.utils import (
+    slow_notice,
+    handle_errors,
+    player_display_name,
+    song_not_found_text,
+)
 from ...core.render import info as info_render
 from ...core.render import stats as stats_render
 from ...core.render import best50 as b50_render
@@ -72,7 +78,7 @@ async def _resolve_song(key: str):
         # 其余获得日服兜底（JP-only 曲不再直接「未找到」）
         hit = await song_service.resolve_raw_chart(int(key))
         if hit is None:
-            await UniMessage.text(f" 未找到ID为「{key}」的乐曲").finish(at_sender=True)
+            await UniMessage.text(f" {song_not_found_text(key)}").finish(at_sender=True)
         song, _prefer, jp, utage_diff = hit
         if utage_diff is not None:
             await UniMessage.text(" 宴谱没有游玩统计").finish(at_sender=True)
@@ -88,10 +94,15 @@ async def _resolve_song(key: str):
     if not songs:
         await UniMessage.text(f" 没有找到「{key}」对应的乐曲").finish(at_sender=True)
     if len(songs) > 1:
-        msg = f"找到{len(songs)}首相关乐曲：\n"
-        msg += "".join(f"{s.id}：{s.title}\n" for s in songs[:10])
-        msg += "※ 请使用「ginfo <ID>」指定曲目"
-        await UniMessage.text(msg.rstrip(" \n")).finish(at_sender=True)
+        # 多命中列表与查歌「是什么歌」同源（core entries_list_text：谱面 id +
+        # 日服限定标注 + 截断说明；曾手拼曲级 id 列表与 core 格式漂移）
+        entries = chart_entries_many(songs)
+        cn_songs = await cn_song_map([s for _, s, _ in entries])
+        flags = [cn_songs[s.id] is None for _, s, _ in entries]
+        text = entries_list_text(
+            entries, flags, hint="※ 请使用「ginfo <ID>」指定曲目", limit=10
+        )
+        await UniMessage.text(f" {text}").finish(at_sender=True)
     return songs[0]
 
 
@@ -111,7 +122,7 @@ async def _minfo_entries(key: str, scope: Scope) -> "list[ChartEntry]":
             else await song_service.by_id(raw_id)
         )
         if song is None:
-            await UniMessage.text(f" 未找到ID为「{key}」的乐曲").finish(at_sender=True)
+            await UniMessage.text(f" {song_not_found_text(key)}").finish(at_sender=True)
         return [(raw_id, song, prefer_type_from_raw_id(raw_id))]
     entries = await song_service.entries_for_name(
         key, scope=scope, cn_title=scope == "cn"
@@ -160,6 +171,30 @@ async def _minfo_net(key: str, binding) -> None:
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
+async def _render_b50(
+    player,
+    bests,
+    *,
+    service: str,
+    qqid: int | None = None,
+    theme: str = DEFAULT_THEME,
+) -> bytes:
+    """b50 渲染收敛：水鱼代查与绑定分支 9 实参中 7 个相同，仅身份可选参数
+    分流（代查无 qqid；theme 调用方自定，缺省即默认主题）。"""
+    return await b50_render.best50_bytes(
+        player_name=player_display_name(player),
+        rating=bests.rating,
+        rating_b35=bests.rating_b35,
+        rating_b15=bests.rating_b15,
+        scores_b35=bests.scores_b35,
+        scores_b15=bests.scores_b15,
+        player=player,
+        qqid=qqid,
+        service=service,
+        theme=theme,
+    )
+
+
 @b50.handle()
 @handle_errors("查询失败，请稍后再试", except_with_message=(UserScoreError,))
 async def _(
@@ -171,16 +206,7 @@ async def _(
     if username:  # 水鱼公开代查：b50 <水鱼用户名>（extract_plain_text 丢弃 at 段，
         # 纯 at 触发下方绑定链；对齐 Hoshino 的参数取法）
         player, bests = await score_service.get_b50_by_username(username)
-        png = await b50_render.best50_bytes(
-            player_name=player_display_name(player),
-            rating=bests.rating,
-            rating_b35=bests.rating_b35,
-            rating_b15=bests.rating_b15,
-            scores_b35=bests.scores_b35,
-            scores_b15=bests.scores_b15,
-            player=player,
-            service="divingfish",
-        )
+        png = await _render_b50(player, bests, service="divingfish")
     else:
         binding = await query_binding(
             session,
@@ -199,16 +225,11 @@ async def _(
             notify_slow = slow_notice()
             player = await score_service.get_player(binding, notify_slow=notify_slow)
             bests = await score_service.get_b50(binding, notify_slow=notify_slow)
-            png = await b50_render.best50_bytes(
-                player_name=player_display_name(player),
-                rating=bests.rating,
-                rating_b35=bests.rating_b35,
-                rating_b15=bests.rating_b15,
-                scores_b35=bests.scores_b35,
-                scores_b15=bests.scores_b15,
-                player=player,
-                qqid=binding_service.qq_of(binding),
+            png = await _render_b50(
+                player,
+                bests,
                 service=binding.service,
+                qqid=binding_service.qq_of(binding),
                 theme=binding.theme or DEFAULT_THEME,
             )
     await UniMessage.image(raw=png).finish(at_sender=True)

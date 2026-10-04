@@ -16,6 +16,7 @@ from nonebot import logger
 from nonebot.adapters import Bot
 from nonebot_plugin_alconna.uniseg import UniMessage, FallbackStrategy
 
+from .utils import user_id_of, group_id_of
 from ..config import NICKNAME
 
 try:  # OneBot v11 可用时提供合并转发能力
@@ -127,3 +128,23 @@ async def try_send_forward(
     except Exception:
         logger.warning("合并转发发送失败或超时（降级为普通消息）", exc_info=True)
         return False
+
+
+async def try_send_forward_session(
+    bot: Bot,
+    entries: Sequence["str | UniMessage"],
+    session,
+) -> bool:
+    """按会话场景发送合并转发：群聊取群 id、私聊取用户 id（uninfo 谓词单源）。
+
+    各子插件此前在调用点内联的「group_id 判定 + user_id 回退」三处重复
+    收编本助手，内部转发 :func:`try_send_forward`，返回值语义不变
+    （非 OB11 适配器/发送失败返回 False 由调用方降级）。
+    """
+    group_id = group_id_of(session)
+    return await try_send_forward(
+        bot,
+        entries,
+        group_id=group_id,
+        user_id=None if group_id is not None else user_id_of(session),
+    )

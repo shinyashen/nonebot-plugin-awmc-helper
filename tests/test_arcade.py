@@ -450,3 +450,46 @@ async def test_delete_arcade_alias(app: App, arcade_enabled):
         "已为「删除」添加别名「别名y」",
     )
     assert "别名y" in [a.alias for a in await store.get_arcade_aliases_by_ids({20002})]
+
+
+@pytest.mark.asyncio
+async def test_set_arcade_requires_admin(app: App, arcade_enabled):
+    """修改机厅加群管门禁（对齐 Hoshino 基准 priv.ADMIN）：成员拒绝。"""
+    from nonebot_plugin_awmc_helper.plugins import arcade
+
+    await _run(
+        app,
+        arcade.arcade_set,
+        "修改机厅 游戏厅 数量 8",
+        "权限不足：仅群管理员可用",
+        role="member",
+        session_fetches=2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_arcade_duplicate_rejected(app: App, arcade_enabled, monkeypatch):
+    """添加机厅重名拒绝（对齐 Hoshino 基准 search_fullname 已存在即拒）；
+    不重名时自定义 id 自 10000 段自增（CUSTOM_ARCADE_ID_BASE 单源）。"""
+    import nonebot
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import arcade
+
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+    await _run(
+        app,
+        arcade.arcade_add,
+        "添加机厅 游戏厅 某路 9 号 3",
+        "机厅「游戏厅」已存在，无法添加",
+    )
+    # 未落新行：名为「游戏厅」的机厅仍只有 id 10000 一家
+    same_name = [a for a in await store.get_all_arcades() if a.name == "游戏厅"]
+    assert [a.id for a in same_name] == [10000]
+    # 重名按精确匹配：模糊词不误伤，正常添加走自增 id 段
+    await _run(
+        app,
+        arcade.arcade_add,
+        "添加机厅 游戏厅二号店 某路 9 号 3",
+        "已添加机厅「游戏厅二号店」（ID 10001）",
+    )

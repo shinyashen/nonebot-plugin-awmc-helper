@@ -1,5 +1,7 @@
 """表格指令入口：定数表 / 完成表 / 进度 / 牌子 / 分数列表 / 底图更新。"""
 
+from collections.abc import Callable, Awaitable
+
 from nonebot import on_regex, on_command, on_fullmatch
 from nonebot.params import RegexGroup
 from nonebot.permission import SUPERUSER
@@ -220,17 +222,34 @@ async def _():
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
+async def _run_template_update(
+    notice: str,
+    refresh: Callable[[], Awaitable[tuple[int, list[str]]]],
+    done_fmt: str,
+) -> None:
+    """「更新定数表/完成表」双胞胎 handler 的共用控制流：进度提示 → 预渲染
+    → 完成回执（``done_fmt`` 以 total/extra 填充，文案差异留调用方）。
+
+    进度提示必须用 send：finish 会抛 FinishedException 终止 handler，
+    后续逻辑不再执行。
+    """
+    await UniMessage.text(notice).send(at_sender=True)
+    total, failed = await refresh()
+    extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
+    await UniMessage.text(done_fmt.format(total=total, extra=extra)).finish(
+        at_sender=True
+    )
+
+
 @update_rating.handle()
 @handle_errors("生成底图失败")
 async def _():
     from ...core.render import table_template
 
-    # 进度提示必须用 send：finish 会抛 FinishedException 终止 handler，后续逻辑不再执行
-    await UniMessage.text(" 正在生成定数表底图，请稍候……").send(at_sender=True)
-    total, failed = await table_template.refresh_all_rating_tables(song_service)
-    extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
-    await UniMessage.text(f" 定数表底图生成完成（{total} 谱面次）{extra}。").finish(
-        at_sender=True
+    await _run_template_update(
+        " 正在生成定数表底图，请稍候……",
+        lambda: table_template.refresh_all_rating_tables(song_service),
+        " 定数表底图生成完成（{total} 谱面次）{extra}。",
     )
 
 
@@ -239,14 +258,10 @@ async def _():
 async def _():
     from ...core.render import table_template
 
-    # 进度提示必须用 send：finish 会抛 FinishedException 终止 handler，后续逻辑不再执行
-    await UniMessage.text(" 正在生成完成表底图，需要一些时间，请稍候……").send(
-        at_sender=True
-    )
-    total, failed = await table_template.refresh_all_plate_tables(song_service)
-    extra = f"；失败 {len(failed)} 项：{'、'.join(failed)}" if failed else ""
-    await UniMessage.text(f" 完成表底图生成完成（{total} 谱面次）{extra}。").finish(
-        at_sender=True
+    await _run_template_update(
+        " 正在生成完成表底图，需要一些时间，请稍候……",
+        lambda: table_template.refresh_all_plate_tables(song_service),
+        " 完成表底图生成完成（{total} 谱面次）{extra}。",
     )
 
 

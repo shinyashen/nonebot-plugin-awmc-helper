@@ -16,13 +16,14 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from . import net
 from ...core.ext import lxns as lxns_ext
 from ...core.ext import divingfish as df_ext
-from ...constants import SERVICE_ZH
+from ...constants import SERVICE_ZH, THEME_CIRCLE, THEME_PRISM_PLUS
 from ...core.help import CommandSpec, help_registry
 from ...core.utils import handle_errors, is_private_session
 from ...core.binding import (
     SERVICE_NET,
     QQ_PLATFORMS,
     SERVICE_LXNS,
+    LXNS_PENDING_TTL,
     SERVICE_DIVINGFISH,
     BindingError,
     session_keys,
@@ -30,6 +31,13 @@ from ...core.binding import (
     pending_bindings,
 )
 from ...core.sources import command_hints
+
+# 落雪好友码位数区间（纯数字直绑判定，实测口径）
+_FRIEND_CODE_MIN_DIGITS = 9
+_FRIEND_CODE_MAX_DIGITS = 12
+# 水鱼设备码授权 expires_in 缺失时的兜底有效期（秒；设备码流默认 20 分钟，
+# 本地会话窗与之取小，见 df_bind handler）
+_DF_DEVICE_CODE_FALLBACK_TTL = 1200
 
 # 水鱼 OAuth 设备码绑定文案（对齐 Hoshino oauth_message.py 措辞）
 DIVINGFISH_NO_SESSION_MSG = "请先发送「绑定水鱼」获取授权链接，完成授权后再发送确认码。"
@@ -188,11 +196,14 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
             device = await df_ext.device_authorize(ref[4:], label)
         except df_ext.ExtError as e:
             await UniMessage.text(f" 水鱼授权发起失败：{e}").finish(at_sender=True)
-        expires_in = int(device.get("expires_in", 1200))
+        expires_in = int(device.get("expires_in", _DF_DEVICE_CODE_FALLBACK_TTL))
         # 本地会话窗与服务端有效期取小：服务端更短时提前过期，
         # 免得用户在死会话里反复回填（服务端兜底靠 invalid_grant）
         pending_bindings.start(
-            platform, user_id, "divingfish", ttl=min(1200, expires_in)
+            platform,
+            user_id,
+            "divingfish",
+            ttl=min(_DF_DEVICE_CODE_FALLBACK_TTL, expires_in),
         )
         link = device.get("verification_uri_complete") or device.get(
             "verification_uri", ""
@@ -296,9 +307,10 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = message.extract_plain_text().strip()
     if not arg:
         if lxns_ext.oauth_configured():
-            pending_bindings.start(platform, user_id, "lxns")
+            pending_bindings.start(platform, user_id, "lxns", ttl=LXNS_PENDING_TTL)
             await UniMessage.text(
-                "请点击以下链接完成落雪授权（授权码 90 秒内有效）：\n"
+                "请点击以下链接完成落雪授权"
+                f"（授权码 {LXNS_PENDING_TTL} 秒内有效）：\n"
                 f"{lxns_ext.build_authorize_url()}\n\n"
                 "完成后请直接把授权码回复给我（无需任何前缀）"
             ).finish(at_sender=True)
@@ -309,7 +321,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         ).finish(at_sender=True)
     # 带参数直绑：好友码（纯数字）或个人 Token
     binding = await binding_service.ensure(platform, user_id)
-    if arg.isdigit() and 9 <= len(arg) <= 12:
+    if arg.isdigit() and _FRIEND_CODE_MIN_DIGITS <= len(arg) <= _FRIEND_CODE_MAX_DIGITS:
         await binding_service.bind_lxns(binding, token=None, friend_code=int(arg))
         await UniMessage.text(
             f" 已绑定落雪好友码 {arg}（需要部署配置开发者 Token 才能查询）"
@@ -415,12 +427,14 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = message.extract_plain_text().strip()
     if arg not in ("0", "1"):
-        await UniMessage.text(" 用法：主题 <0|1>（0 = prism_plus，1 = circle）").finish(
-            at_sender=True
-        )
+        await UniMessage.text(
+            f" 用法：主题 <0|1>（0 = {THEME_PRISM_PLUS}，1 = {THEME_CIRCLE}）"
+        ).finish(at_sender=True)
     platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
-    await binding_service.set_theme(binding, "prism_plus" if arg == "0" else "circle")
+    await binding_service.set_theme(
+        binding, THEME_PRISM_PLUS if arg == "0" else THEME_CIRCLE
+    )
     await UniMessage.text(" 主题已切换").finish(at_sender=True)
 
 
@@ -450,7 +464,9 @@ async def _(session: Session = UniSession()):
             if len(shown) > 4
             else "日服 NET：已绑定"
         )
-    lines.append(f"主题：{'prism_plus' if binding.theme == 'prism_plus' else 'circle'}")
+    # 与 set_theme 同口径归一展示（theme 缺失回落 circle，保持原行为）
+    theme = THEME_PRISM_PLUS if binding.theme == THEME_PRISM_PLUS else THEME_CIRCLE
+    lines.append(f"主题：{theme}")
     await UniMessage.text("\n".join(lines)).finish(at_sender=True)
 
 
@@ -497,8 +513,10 @@ help_registry.declare(
             aliases=("绑定lx", "lxbind"),
             brief="落雪 OAuth 授权或好友码/Token 直绑",
             detail=(
-                "无参发起落雪授权，授权码 90 秒内直接回复给 bot 即可；\n"
-                "带参直绑好友码（9-12 位数字）或个人 Token。"
+                f"无参发起落雪授权，授权码 {LXNS_PENDING_TTL} 秒内"
+                "直接回复给 bot 即可；\n"
+                f"带参直绑好友码（{_FRIEND_CODE_MIN_DIGITS}-"
+                f"{_FRIEND_CODE_MAX_DIGITS} 位数字）或个人 Token。"
             ),
         ),
         CommandSpec(
@@ -532,7 +550,7 @@ help_registry.declare(
             matcher=set_theme,
             name="主题",
             brief="切换成绩卡主题",
-            detail="格式：主题 <0|1>（prism_plus/circle）。",
+            detail=f"格式：主题 <0|1>（{THEME_PRISM_PLUS}/{THEME_CIRCLE}）。",
         ),
         CommandSpec(
             matcher=my_bind,

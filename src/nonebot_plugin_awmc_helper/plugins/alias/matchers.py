@@ -19,9 +19,10 @@ from ...core.utils import (
     user_id_of,
     group_id_of,
     handle_errors,
-    ensure_group_admin,
+    apply_group_switch,
+    song_not_found_text,
 )
-from ...core.forward import is_ob11, try_send_forward
+from ...core.forward import is_ob11, try_send_forward_session
 from ...core.render.tools import text_image_bytes
 
 NOT_FOUND_ALIAS = " 未找到此歌曲\n可以使用「添加别名」指令给该乐曲添加别名"
@@ -84,13 +85,7 @@ async def _finish_multi_forward(
     仅 OB11 走合并转发（core/forward 统一构造，与别名推送同口径）；
     适配器不支持或协议端发送失败返回 False，由调用方降级为普通消息。
     """
-    group_id = group_id_of(session)
-    return await try_send_forward(
-        bot,
-        [header, *blocks],
-        group_id=group_id,
-        user_id=None if group_id else user_id_of(session),
-    )
+    return await try_send_forward_session(bot, [header, *blocks], session)
 
 
 async def _parse_alias_args(message: Message, usage: str) -> tuple[int, str]:
@@ -108,7 +103,7 @@ async def _parse_alias_args(message: Message, usage: str) -> tuple[int, str]:
         await song_service.by_id(song_id) is None
         and await song_service.jp_by_id(song_id) is None
     ):
-        await UniMessage.text(f" 未找到ID为「{song_id}」的曲目").finish(at_sender=True)
+        await UniMessage.text(f" {song_not_found_text(song_id)}").finish(at_sender=True)
     return song_id, alias_name
 
 
@@ -260,10 +255,16 @@ async def _(
     groups: tuple = RegexGroup(),
 ):
     action = groups[0]
-    group_id = await ensure_group_admin(session, bot, event, feature="别名推送开关")
-
     enabled = action == "开启"
-    await store.set_group_switch(group_id, PUSH_FEATURE, enabled)
+    await apply_group_switch(
+        session,
+        bot,
+        event,
+        switch_key=PUSH_FEATURE,
+        enabled=enabled,
+        feature="别名推送开关",
+    )
+
     if enabled and not plugin_config.awmc_alias_push:
         # 群级显式开启覆盖部署默认值（推送分发按 get_switch 群级优先），
         # 部署关默认只影响「未显式设置」的群，勿再误导为收不到

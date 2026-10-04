@@ -13,7 +13,13 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core import store
 from ...config import plugin_config
 from ...core.help import CommandSpec, help_registry
-from ...core.utils import user_id_of, group_id_of, handle_errors, ensure_group_admin
+from ...core.utils import (
+    user_id_of,
+    group_id_of,
+    handle_errors,
+    apply_group_switch,
+    ensure_group_admin,
+)
 from ...core.render.tools import text_image_bytes
 
 SEARCH_PREFIXES = (
@@ -53,6 +59,12 @@ def _op_mode(op: str) -> str:
 
 ARCADE_FEATURE = "arcade"
 """group_switch 表中的排卡特征名。"""
+
+CUSTOM_ARCADE_ID_BASE = 10000
+"""自定义机厅 id 段下限（≥ 此值内部自增：与官方段隔离，不撞未来官方新 id）。"""
+
+_SEARCH_IMAGE_THRESHOLD = 5
+"""查找结果超此条数转图片发送（防刷屏；帮助文案「≥5 条转图」口径同源）。"""
 
 
 async def _arcade_enabled(session: Session = UniSession()) -> bool:
@@ -158,9 +170,15 @@ async def _(
     session: Session = UniSession(),
     groups: tuple = RegexGroup(),
 ):
-    group_id = await ensure_group_admin(session, bot, event, feature="排卡开关")
     enabled = groups[0] == "开启"
-    await store.set_group_switch(group_id, ARCADE_FEATURE, enabled)
+    await apply_group_switch(
+        session,
+        bot,
+        event,
+        switch_key=ARCADE_FEATURE,
+        enabled=enabled,
+        feature="排卡开关",
+    )
     state = "开启" if enabled else "关闭"
     await UniMessage.text(f" 已{state}本群排卡").finish(at_sender=True)
 
@@ -176,9 +194,19 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     name, address, count_raw, *aliases = args
     if not count_raw.isdigit():
         await UniMessage.text(" 机台数量需为数字").finish(at_sender=True)
+    # 重名拒绝（对齐 Hoshino 基准 search_fullname 已存在即拒）：官方同步与
+    # 手工录入可能并存，重名会让 _find_arcade 精确命中歧义
+    if any(a.name == name for a in await store.get_arcades_by_name(name)):
+        await UniMessage.text(f" 机厅「{name}」已存在，无法添加").finish(at_sender=True)
     arcades = await store.get_all_arcades()
-    # 自定义 id 段（≥10000）内部自增：与官方段隔离，不撞未来官方新 id
-    new_id = max((a.id for a in arcades if a.id >= 10000), default=9999) + 1
+    # 自定义 id 段内部自增：与官方段隔离，不撞未来官方新 id
+    new_id = (
+        max(
+            (a.id for a in arcades if a.id >= CUSTOM_ARCADE_ID_BASE),
+            default=CUSTOM_ARCADE_ID_BASE - 1,
+        )
+        + 1
+    )
     arcade = store.Arcade(
         id=new_id,
         name=name,
@@ -242,7 +270,14 @@ async def _(
 
 @arcade_set.handle()
 @handle_errors("修改失败")
-async def _(message: Message = CommandArg()):
+async def _(
+    bot: Bot,
+    event: Event,
+    session: Session = UniSession(),
+    message: Message = CommandArg(),
+):
+    # 群管门禁（对齐 Hoshino 基准 priv.ADMIN：机厅信息维护非人人可用）
+    await ensure_group_admin(session, bot, event, feature="修改机厅")
     parts = message.extract_plain_text().strip().split()
     if len(parts) != 3 or parts[1] != "数量":
         await UniMessage.text(" 格式：修改机厅 <店名|ID> 数量 <数量>").finish(
@@ -316,7 +351,7 @@ async def _(message: Message = CommandArg()):
     if not found:
         await UniMessage.text(" 没有这样的机厅哦").finish(at_sender=True)
     result = [" 为您找到以下机厅："] + [_arcade_msg(a) for a in found]
-    if len(found) < 5:
+    if len(found) < _SEARCH_IMAGE_THRESHOLD:
         await UniMessage.text("\n==========\n".join(result)).finish(at_sender=True)
     await UniMessage.image(raw=text_image_bytes("\n".join(result))).finish(
         at_sender=True
@@ -451,7 +486,9 @@ help_registry.declare(
             aliases=("新增机厅",),
             scope="SUPERUSER",
             hidden=True,
-            brief="添加机厅信息（自定义 id 自 10000 起自增）",
+            brief=(
+                f"添加机厅信息（自定义 id 自 {CUSTOM_ARCADE_ID_BASE} 起自增，重名拒绝）"
+            ),
             detail="格式：添加机厅 <店名> <地址> <机台数量> [别称...]",
         ),
         CommandSpec(
@@ -474,7 +511,8 @@ help_registry.declare(
             matcher=arcade_set,
             name="修改机厅",
             aliases=("编辑机厅",),
-            brief="修改机厅机台数",
+            scope="群管",
+            brief="修改机厅机台数（群管）",
             detail="格式：修改机厅 <店名|ID> 数量 <数量>",
         ),
         CommandSpec(

@@ -58,6 +58,14 @@ async def _card_bytes(song: Song, binding: UserBinding) -> tuple[bytes, str]:
     return await chart_card_bytes(card_song, binding, jp=jp), note
 
 
+async def _finish_chart_card(song: Song, binding: UserBinding) -> None:
+    """随机结果收尾三连（出卡 → 日服限定提示拼头 → 出图 finish），
+    四个随机指令共用（Hoshino/NB 同设计：随机结果渲染通常的谱面卡）。"""
+    png, note = await _card_bytes(song, binding)
+    msg = UniMessage.text(f" {note}") if note else UniMessage()
+    await msg.image(raw=png).finish(at_sender=True)
+
+
 @random_chart.handle()
 @handle_errors("随机失败，请稍后再试")
 async def _(
@@ -83,10 +91,7 @@ async def _(
             at_sender=True
         )
     song, _diff = got
-    # Hoshino/NB 同设计：随机结果渲染通常的谱面卡（draw_chart_info 语义）
-    png, note = await _card_bytes(song, binding)
-    msg = UniMessage.text(f" {note}") if note else UniMessage()
-    await msg.image(raw=png).finish(at_sender=True)
+    await _finish_chart_card(song, binding)
 
 
 @genre_random.handle()
@@ -108,9 +113,7 @@ async def _(
             at_sender=True
         )
     song, _diff = got
-    png, note = await _card_bytes(song, binding)
-    msg = UniMessage.text(f" {note}") if note else UniMessage()
-    await msg.image(raw=png).finish(at_sender=True)
+    await _finish_chart_card(song, binding)
 
 
 @mai_what.handle()
@@ -122,10 +125,7 @@ async def _(binding: UserBinding = SessionBinding()):
     if got is None:
         await UniMessage.text(" 曲库为空，请稍后再试").finish(at_sender=True)
     song, _diff = got
-    # Hoshino/NB 同设计：mai什么 同样渲染通常的谱面卡
-    png, note = await _card_bytes(song, binding)
-    msg = UniMessage.text(f" {note}") if note else UniMessage()
-    await msg.image(raw=png).finish(at_sender=True)
+    await _finish_chart_card(song, binding)
 
 
 @mai_what_rise.handle()
@@ -147,9 +147,7 @@ async def _(binding: UserBinding = SessionBinding()):
         if got is None:
             await UniMessage.text(" 曲库为空，请稍后再试").finish(at_sender=True)
         song, _diff = got
-    png, note = await _card_bytes(song, binding)
-    msg = UniMessage.text(f" {note}") if note else UniMessage()
-    await msg.image(raw=png).finish(at_sender=True)
+    await _finish_chart_card(song, binding)
 
 
 async def _pick_rise_song(scores: list[ScoreExtend], jp: bool = False):

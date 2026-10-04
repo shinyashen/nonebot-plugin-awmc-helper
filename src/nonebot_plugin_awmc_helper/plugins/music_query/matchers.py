@@ -17,14 +17,13 @@ from .render import (
 from .resolve import (
     _vote_hint,
     _split_page,
-    _resolve_raw_id,
     parse_range_args,
 )
 from ...constants import display_song_id
 from ...core.help import CommandSpec, help_registry
 from ...core.songs import song_service
 from ...core.store import UserBinding
-from ...core.utils import handle_errors
+from ...core.utils import handle_errors, song_not_found_text
 from ...core.render import song as song_render
 from ...core.binding import SessionBinding
 from ...core.chart_card import (
@@ -141,7 +140,7 @@ async def _(
 
     # 纯数字 → ID（查分器 id 形状推断谱面类型：≤4 位 SD、5 位 DX、6 位宴）
     if name.isdigit():
-        hit = await _resolve_raw_id(int(name))
+        hit = await song_service.resolve_raw_chart(int(name))
         if hit is not None:
             song, prefer, jp, utage_diff = hit
             card_song, jp_card = await resolve_card_view(song, binding)
@@ -157,9 +156,9 @@ async def _(
                 .finish(at_sender=True)
             )
     if idm := re.match(r"^id\s?([0-9]+)$", name, re.IGNORECASE):
-        hit = await _resolve_raw_id(int(idm.group(1)))
+        hit = await song_service.resolve_raw_chart(int(idm.group(1)))
         if hit is None:
-            await _reply(f"未找到ID为「{idm.group(1)}」的乐曲").finish(at_sender=True)
+            await _reply(song_not_found_text(idm.group(1))).finish(at_sender=True)
         song, prefer, jp_only, _utage_diff = hit
         card_song, jp_card = await resolve_card_view(song, binding)
         # 此别名入口不渲染宴会卡（与「id xxx」指令的口径差异属既有行为）
@@ -175,17 +174,17 @@ async def _(
     result = await song_service.by_title_fuzzy(name)
     if not result:
         await _reply(error_msg).finish(at_sender=True)
+    # 两支共用的「未找到但相似标题命中」前缀（差异仅在列表 vs 整图发送形态）
+    not_found_prefix = (
+        f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
+    )
     if len(result) <= 5:
-        msg = (
-            f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
-        )
+        msg = not_found_prefix
         msg += "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in result)
         msg += "※ 请使用「id xxxxx」查询指定曲目"
         await _reply(msg.rstrip("\n")).finish(at_sender=True)
     await (
-        _reply(
-            f"未找到别名为「{name}」的歌曲，但找到「{len(result)}」个相似标题的曲目：\n"
-        )
+        _reply(not_found_prefix)
         .image(raw=song_render.song_list_bytes(result, page))
         .finish(at_sender=True)
     )
@@ -198,11 +197,12 @@ async def _(
     match: Match[str] = RegexMatched(),
 ):
     _id = match.group(1)
-    # 数字 id 解析单源 _resolve_raw_id（6 位宴 diff_id 定位 / DX 展示 id 回查 /
-    # 形状推类型，与「是什么歌」别名入口同口径）
-    hit = await _resolve_raw_id(int(_id))  # 正则 ^id\s?([0-9]+)$ 保证恒为数字
+    # 数字 id 解析单源 core ``resolve_raw_chart``（6 位宴 diff_id 定位 / DX 展示
+    # id 回查 / 形状推类型，与「是什么歌」别名入口同口径）
+    # 正则 ^id\s?([0-9]+)$ 保证恒为数字
+    hit = await song_service.resolve_raw_chart(int(_id))
     if hit is None:
-        await _reply(f"未找到ID为「{_id}」的乐曲").finish(at_sender=True)
+        await _reply(song_not_found_text(_id)).finish(at_sender=True)
     song, card_prefer, jp, utage_diff = hit
     card_song, jp_card = await resolve_card_view(song, binding)
     png = (

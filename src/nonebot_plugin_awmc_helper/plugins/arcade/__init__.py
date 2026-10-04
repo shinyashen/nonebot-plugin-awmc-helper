@@ -3,10 +3,11 @@
 指令（对齐原版 maimaiDX排卡）：
 - `开启排卡 / 关闭排卡`（群管；排卡默认关，对齐原版 Service enable_on_default=False）
 - `舞萌帮助 排卡`（帮助入口，经主插件帮助系统，不设门禁）
-- `添加机厅 <店名> <地址> <机台数> [别称...]`（SUPERUSER，自定义 ID≥10000）
+- `添加机厅 <店名> <地址> <机台数> [别称...]`（SUPERUSER，自定义 ID 下限见
+  ``CUSTOM_ARCADE_ID_BASE``，重名拒绝）
 - `删除机厅 <店名>`（SUPERUSER）
 - `添加机厅别名 <店名|ID> <别名>` / `删除机厅别名 <别名>`
-- `修改机厅 <店名|ID> 数量 <数量>`
+- `修改机厅 <店名|ID> 数量 <数量>`（群管）
 - `订阅机厅 / 取消订阅机厅 <店名|ID>`、`查看订阅`
 - `查找机厅 <关键词>`（店名/地址/别称模糊，≥5 条转图）
 - `<店名|别称>设置/=/增加/加/+/减少/减/- <人数>[人|卡]`（人人可排，对齐原版；
@@ -39,6 +40,8 @@ __plugin_meta__ = PluginMetadata(
 
 from .sync import sync_and_reset
 from .matchers import (  # noqa: F401
+    # 自定义机厅 id 段单一事实源再导出（本包 docstring 引用其名）
+    CUSTOM_ARCADE_ID_BASE,
     arcade_add,
     arcade_del,
     arcade_set,

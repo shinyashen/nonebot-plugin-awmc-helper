@@ -13,45 +13,6 @@
 
 from nonebot.plugin import PluginMetadata
 
-from .matchers import (
-    unbind as unbind,
-)
-from .matchers import (
-    df_bind as df_bind,
-)
-from .matchers import (
-    df_code as df_code,
-)
-from .matchers import (
-    df_user as df_user,
-)
-from .matchers import (
-    lx_bind as lx_bind,
-)
-from .matchers import (
-    lx_code as lx_code,
-)
-from .matchers import (
-    my_bind as my_bind,
-)
-from .matchers import (
-    df_token as df_token,
-)
-from .matchers import (
-    net_bind as net_bind,
-)
-from .matchers import (
-    set_theme as set_theme,
-)
-from .matchers import (
-    set_provider as set_provider,
-)
-
-# matcher 导出：nonebug 按包属性取用
-from .matchers import (
-    bind_code_fill as bind_code_fill,
-)
-
 __plugin_meta__ = PluginMetadata(
     name="awmc.bind",
     description="舞萌DX 查分器绑定与个人设置",
@@ -63,4 +24,20 @@ __plugin_meta__ = PluginMetadata(
     ),
     type="application",
     homepage="https://github.com/shinyashen/nonebot-plugin-awmc-helper",
+)
+
+# matcher 导出（nonebug 按包属性取用；对齐其他拆分插件的装配形态）
+from .matchers import (  # noqa: F401
+    unbind,
+    df_bind,
+    df_code,
+    df_user,
+    lx_bind,
+    lx_code,
+    my_bind,
+    df_token,
+    net_bind,
+    set_theme,
+    set_provider,
+    bind_code_fill,
 )

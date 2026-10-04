@@ -196,3 +196,29 @@ async def ensure_group_admin(session, bot, event, *, feature: str) -> str:
     if not await group_admin()(bot, event):
         await UniMessage.text(" 权限不足：仅群管理员可用").finish(at_sender=True)
     return group_id
+
+
+async def apply_group_switch(
+    session, bot, event, *, switch_key: str, enabled: bool, feature: str
+) -> str:
+    """「群管门禁 → 群级开关写入」两连（各子插件开关 handler 共用），返回群 id。
+
+    ``feature`` 为门禁文案功能名（如「猜歌开关」），``switch_key`` 为
+    group_switch 表键（可与文案名不同，如 guess/arcade）；开关后的回复
+    文案各插件差异大，不强并、由调用方自留。
+    """
+    from . import store
+
+    group_id = await ensure_group_admin(session, bot, event, feature=feature)
+    await store.set_group_switch(group_id, switch_key, enabled)
+    return group_id
+
+
+def song_not_found_text(key: str) -> str:
+    """「未找到乐曲」标准文案单源（id 解析未命中的查歌/查分/别名消费点共用，
+    防措辞漂移）；``key`` 为用户输入的展示键（id 原样嵌入）。
+
+    score_tools 的「未找到「xx」对应的乐曲 + 查歌提示」变体因键可为别名/
+    带前缀串（非纯 id），保留本地写法并注释引用本函数对齐口径。
+    """
+    return f"未找到ID为「{key}」的乐曲"

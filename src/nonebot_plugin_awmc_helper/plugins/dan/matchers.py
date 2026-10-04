@@ -9,6 +9,7 @@
 from nonebot import on_command
 from nonebot.params import CommandArg
 from nonebot.adapters import Bot, Event, Message
+from nonebot.exception import FinishedException
 from nonebot.permission import SUPERUSER
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
@@ -16,9 +17,9 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from ...core import dan
 from ...core.help import CommandSpec, help_registry
 from ...core.score import score_service
-from ...core.utils import user_id_of, group_id_of, handle_errors
+from ...core.utils import handle_errors
 from ...core.binding import binding_service, resolve_session_query
-from ...core.forward import try_send_forward
+from ...core.forward import try_send_forward_session
 from ...core.render.dan import render_dan_card
 
 # 中文段位别名 → 段位种名 id（简繁/异写并入；跨版本查询暂只出当前版本）
@@ -85,15 +86,6 @@ def _resolve_dan_id(arg: str) -> str | None:
     return None
 
 
-async def _random_overview_text() -> str:
-    """随机段位规则总览纯文本（合并转发不可用时的降级形态）。"""
-    tiers = await dan.random_tiers()
-    if not tiers:
-        return _NOT_LOADED
-    header, blocks = _random_overview_blocks(tiers)
-    return "\n".join([header, *blocks, _RANDOM_TAIL])
-
-
 _RANDOM_TAIL = "通关奖励：1.5 倍奖励票；「段位 <档名>」查看单档段位卡"
 
 
@@ -113,22 +105,22 @@ def _random_overview_blocks(tiers) -> tuple[str, list[str]]:
 
 
 async def _finish_random_overview(bot: Bot, session: Session) -> None:
-    """随机段位总览：OB11 走合并转发（每档一节点），不支持/失败降级单条文本。"""
+    """随机段位总览：OB11 走合并转发（每档一节点），不支持/失败降级单条文本。
+
+    转发成功同样必须终止 handler：裸「随机」不走下方段位卡分支（曾漏 finish，
+    成功转发后继续落卡分支，card_data 对 dan_id="random" 必为 None，误报
+    「段位数据尚未加载」）。
+    """
     tiers = await dan.random_tiers()
     if not tiers:
         await UniMessage.text(_NOT_LOADED).finish(at_sender=True)
     header, blocks = _random_overview_blocks(tiers)
-    group_id = group_id_of(session)
-    sent = await try_send_forward(
-        bot,
-        [header, *blocks, _RANDOM_TAIL],
-        group_id=group_id,
-        user_id=None if group_id else user_id_of(session),
-    )
+    sent = await try_send_forward_session(bot, [header, *blocks, _RANDOM_TAIL], session)
     if not sent:
         await UniMessage.text("\n".join([header, *blocks, _RANDOM_TAIL])).finish(
             at_sender=True
         )
+    raise FinishedException
 
 
 async def _usable_binding(session, event: Event | None):

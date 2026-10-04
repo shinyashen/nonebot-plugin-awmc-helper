@@ -28,8 +28,8 @@ from ...core.help import (
     page_entries,
     help_registry,
 )
-from ...core.utils import user_id_of, group_id_of, handle_errors, is_private_session
-from ...core.forward import try_send_forward
+from ...core.utils import handle_errors, is_private_session
+from ...core.forward import try_send_forward_session
 from ...core.render.tools import text_image_bytes
 
 __plugin_meta__ = PluginMetadata(
@@ -62,10 +62,8 @@ async def _send_page(
     entries = page_entries(help_registry, page)
     if len(entries) == 1 and isinstance(entries[0], str):
         await UniMessage.text(entries[0]).finish(at_sender=True)
-    # 转发目标统一走 core uninfo 谓词（不再用 OB11 形状 getattr 双口径）
-    group_id = group_id_of(session)
-    user_id = None if group_id is not None else user_id_of(session)
-    if await try_send_forward(bot, entries, group_id=group_id, user_id=user_id):
+    # 转发目标（群聊群号/私聊用户号）判定与发送统一走 core 助手（uninfo 单源）
+    if await try_send_forward_session(bot, entries, session):
         await matcher.finish()
     await UniMessage.image(
         raw=text_image_bytes(page_text(help_registry, page), size=22)
