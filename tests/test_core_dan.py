@@ -568,9 +568,9 @@ async def test_side_aware_gain(tmp_db, monkeypatch):
     from nonebot_plugin_awmc_helper.core import dan
     from nonebot_plugin_awmc_helper.core.score import score_service
     from nonebot_plugin_awmc_helper.core.store import (
+        SongRow,
         SongChart,
         SongChartLevel,
-        SongRow,
         SongSheetGroup,
     )
 
@@ -657,9 +657,9 @@ async def test_cn_source_beyond_current_falls_back_jp(tmp_db, monkeypatch):
     from nonebot_plugin_awmc_helper.core import dan
     from nonebot_plugin_awmc_helper.core.score import score_service
     from nonebot_plugin_awmc_helper.core.store import (
+        SongRow,
         SongChart,
         SongChartLevel,
-        SongRow,
         SongSheetGroup,
     )
 
