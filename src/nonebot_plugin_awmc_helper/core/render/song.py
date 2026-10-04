@@ -11,7 +11,9 @@ from maimai_py import Song, SongType, LevelIndex
 
 from .fonts import FONT_HAN, FONT_MONO, FONT_RODIN, font
 from .tools import (
+    WHITE,
     TEXT_BLUE,
+    CELL_COVER_80,
     DIFF_TEXT_COLORS,
     fit_text,
     text_size,
@@ -24,7 +26,7 @@ from .tools import (
 )
 from ..utils import paginate
 from .assets import assets
-from .nb_chart import paste_version_logo
+from .nb_chart import major_type_of, paste_version_logo
 from ...constants import GENRE_TO_ZH, version_zh, display_song_id
 
 LEVEL_COLORS = {
@@ -105,7 +107,10 @@ def draw_song_card(song: Song, id_override: int | None = None) -> Image.Image:
     for diff in diffs:
         color = LEVEL_COLORS.get(diff.level_index, "#999")
         draw.rounded_rectangle((20, y, 132, y + row_h - 8), 8, fill=color)
-        type_abbr = "DX" if diff.type == SongType.DX else "SD"
+        # 单谱面类型缩写经 major_type_of 派生（diffs 已过滤为标准/DX 两型，
+        # 以谱面自身类型为偏好时判定结果与 diff.type 逐字等价）
+        is_sd = major_type_of(song, diff.type) == SongType.STANDARD
+        type_abbr = "SD" if is_sd else "DX"
         lvl_name = f"{type_abbr} {diff.level}"
         lvl_w = text_size(lvl_name, f_lvl)[0]
         draw.text((20 + (112 - lvl_w) // 2, y + 5), lvl_name, font=f_lvl, fill="#fff")
@@ -173,14 +178,18 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         y = start_y + row * y_gap
 
         im.alpha_composite(assets.pic("song_card.png"), (x, y))
-        im.alpha_composite(assets.cover(song.id).resize((80, 80)), (x + 10, y + 10))
+        im.alpha_composite(
+            assets.cover(song.id).resize(CELL_COVER_80), (x + 10, y + 10)
+        )
         paste_version_logo(im, song.version, (x + 315, y - 30, 104, 50))
         utage = song.get_difficulties(SongType.UTAGE)
         is_utage = bool(utage) and not (
             song.difficulties.standard or song.difficulties.dx
         )
         if not is_utage:
-            type_abbr = "DX" if song.difficulties.dx else "SD"
+            # 主类型单源（major_type_of）：DX 组优先、组空回落标准——
+            # 与原「DX if dx else SD」在非宴谱分支逐字等价
+            type_abbr = "SD" if major_type_of(song) == SongType.STANDARD else "DX"
             if badge := assets.type_badge(type_abbr, (40, 15)):
                 im.alpha_composite(badge, (x + 50, y + 75))
         im.alpha_composite(
@@ -229,11 +238,12 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
                 (x + 125, y + 105),
                 f"{utage[0].level_value}",
                 font=font(15, FONT_RODIN),
-                fill=(255, 255, 255, 255),
+                fill=WHITE,
                 anchor="mm",
             )
         else:
-            major = SongType.DX if song.difficulties.dx else SongType.STANDARD
+            # 主类型单源（major_type_of），同上：非宴谱分支逐字等价
+            major = major_type_of(song)
             for diff in song.get_difficulties():
                 if diff.type != major or diff.type == SongType.UTAGE:
                     continue
@@ -254,7 +264,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         fill=TEXT_BLUE,
         anchor="mm",
         stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
     draw.text(
         (500, height - 100),
@@ -263,7 +273,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         fill=TEXT_BLUE,
         anchor="mm",
         stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
     draw.text(
         (500, height - 30),
@@ -272,7 +282,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         fill=TEXT_BLUE,
         anchor="mm",
         stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
     return im
 

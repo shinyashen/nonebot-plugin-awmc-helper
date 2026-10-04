@@ -14,7 +14,7 @@ from maimai_py import Song, FCType, FSType, RateType, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_NUM, font
-from .tools import TEXT_BLUE, scale_output, image_to_bytes
+from .tools import WHITE, TEXT_BLUE, scale_output, image_to_bytes
 from .assets import assets
 from ...constants import (
     RATE_FILE,
@@ -115,7 +115,7 @@ def draw_rating_table(
     ``checker``：达标判定 ``(achievements, fc, fs) -> bool``（plan_of 产物），
     驱动盖章三态背景（QoL：达标白/不达标黑/未打无）；None 回退 ≥100 分界。
     """
-    path = table_template.rating_table_dir() / f"{level}.png"
+    path = table_template.rating_table_file(level)
     if not path.exists():
         return None
     im = Image.open(path).convert("RGBA")
@@ -242,7 +242,7 @@ def _draw_rating_core(
         fill=TEXT_BLUE,
         anchor="mm",
         stroke_width=5,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
     for n, key in enumerate(STATISTICS_KEYS[1:]):
         if n < 6:
@@ -257,7 +257,7 @@ def _draw_rating_core(
             fill=TEXT_BLUE,
             anchor="mm",
             stroke_width=2,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
 
     # 逐谱面盖章（按模板生成时的分组与排序：group_by_ds 降序 / lv15 特例）

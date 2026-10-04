@@ -9,13 +9,16 @@
 
 from PIL import Image, ImageDraw
 
-from .fonts import FONT_NUM, FONT_RODIN, font
+from .fonts import FONT_RODIN, font
 from .tools import (
+    WHITE,
     TEXT_BLUE,
     TITLE_BLUE,
+    CELL_COVER_80,
     ID_TEXT_COLORS,
     credit_text,
     image_to_bytes,
+    draw_cover_cell,
     generate_prism_bg,
     generate_frosted_card,
 )
@@ -55,7 +58,7 @@ def progress_header(
         fill=TEXT_BLUE,
         anchor="mm",
         stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
     draw.text(
         (1190, 240),
@@ -64,7 +67,7 @@ def progress_header(
         fill=TEXT_BLUE,
         anchor="rm",
         stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
 
 
@@ -118,7 +121,7 @@ def plate_progress_bytes(
             fill=color,
             anchor="lm",
             stroke_width=4,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
         dr.text(
             (700, start_y - 57),
@@ -127,7 +130,7 @@ def plate_progress_bytes(
             fill=color,
             anchor="mm",
             stroke_width=4,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
         dr.text(
             (1190, start_y - 57),
@@ -136,7 +139,7 @@ def plate_progress_bytes(
             fill=color,
             anchor="rm",
             stroke_width=2,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
 
         # 未达成封面网格（13 列；超过 51 个折叠显示剩余数）
@@ -156,14 +159,17 @@ def plate_progress_bytes(
                     anchor="lm",
                 )
                 break
-            im.alpha_composite(assets.cover(song_id).resize((80, 80)), (x, y))
-            im.alpha_composite(id_bg, (x - 5, y - 5))
-            dr.text(
-                (x + 56, y + 4),
-                str(song_id),
-                font=font(16, FONT_NUM),
-                fill=(255, 255, 255, 255),
-                anchor="mm",
+            draw_cover_cell(
+                im,
+                dr,
+                x,
+                y,
+                song_id=song_id,
+                id_text=str(song_id),
+                cover_size=CELL_COVER_80,
+                border=id_bg,
+                font_size=16,
+                fill=WHITE,
             )
         start_y += (max_row + 1) * _GAP + 100
 

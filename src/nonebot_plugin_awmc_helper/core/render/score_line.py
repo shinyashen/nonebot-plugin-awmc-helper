@@ -15,18 +15,22 @@ from maimai_py import SongType, LevelIndex, SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
-    TEXT_BLUE,
+    WHITE,
+    CHART_COVER,
     CIRCLE_PINK,
+    UTAGE_PURPLE,
     ID_TEXT_COLORS,
     credit_text,
     image_to_bytes,
+    theme_text_color,
     truncate_hoshino,
     generate_prism_bg,
 )
 from .assets import assets
-from .nb_chart import paste_version_logo
+from .nb_chart import LOGO_SIZE, major_type_of, paste_version_logo
 from ...constants import (
     GENRE_TO_ZH,
+    THEME_CIRCLE,
     DEFAULT_THEME,
     DIFF_DISPLAY_NAMES,
     chart_display_id,
@@ -35,9 +39,6 @@ from ...constants import (
 # 行卡文字用深灰（半透白卡上对比稳定，双主题共用）
 _DARK = (90, 88, 108, 255)
 _GRAY = (120, 118, 138, 255)
-_WHITE = (255, 255, 255, 255)
-_UTAGE_COLOR = (210, 57, 174, 255)
-"""宴谱主题色（对齐宴会谱面卡底图的紫描边取色，双主题共用）。"""
 _CARD_ALPHA = 195
 # 斑马纹（奇偶行透明度区分，用户定稿 80/120）；合成式叠加透出底图淡彩
 _ROW_ALPHA_ODD = 80
@@ -47,17 +48,17 @@ W, H = 1200, 1400
 
 
 def _theme_style(theme: str) -> dict:
-    """主题配色单源：正文/强调色对齐 :func:`theme_text_color`，表头、标题
-    描边、分隔线随主题取色（prism 蓝紫系 / circle 粉系）。"""
-    if theme == "circle":
+    """主题配色单源：accent 正文/强调色对齐 :func:`theme_text_color`（tools
+    单源引用），表头、标题描边、分隔线随主题取色（prism 蓝紫系 / circle 粉系）。"""
+    if theme == THEME_CIRCLE:
         return {
-            "accent": CIRCLE_PINK,
+            "accent": theme_text_color(theme),
             "title_stroke": (214, 31, 130, 255),
             "header": CIRCLE_PINK,
             "divider": (246, 214, 226, 255),
         }
     return {
-        "accent": TEXT_BLUE,
+        "accent": theme_text_color(theme),
         "title_stroke": (159, 141, 250, 255),
         "header": (129, 122, 246, 255),
         "divider": (220, 216, 240, 255),
@@ -67,7 +68,7 @@ def _theme_style(theme: str) -> dict:
 def _theme_bg(theme: str) -> Image.Image:
     """主题底图：prism_plus 程序渐变（generate_prism_bg）；circle 用主题
     b50.png 大底图（1400×1600 RGB）缩放到画布尺寸。"""
-    if theme == "circle":
+    if theme == THEME_CIRCLE:
         im = assets.pic("b50.png", theme).convert("RGBA")
         im = im.resize((W, H), Image.Resampling.LANCZOS)
         # 底图自带的游乐园装饰带（下部 ~1129-1400）会干扰页脚文字：
@@ -82,7 +83,14 @@ def _theme_bg(theme: str) -> Image.Image:
 
 
 def _card(im: Image.Image, box: tuple[int, int, int, int]) -> None:
-    """白色半透明圆角卡 + 柔和投影。"""
+    """白色半透明圆角卡 + 柔和投影。
+
+    ⚠️ 与 :func:`tools.generate_frosted_card` 是**两套独立投影参数**
+    （第六轮审查定案：不合并）：本卡投影 = 圆角 30 / 底色 (80,60,120,70) /
+    blur 8 / 有效偏移 (6,10)；frosted 卡 = 圆角 25 / (0,0,0,50) / blur 3 /
+    默认偏移 (10,10)。任一侧调参都只是各自卡面的视觉变更，不会连带另一侧
+    ——防止「以为单源改一处即可」造成另一卡面投影漂移。
+    """
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
     shadow = Image.new("RGBA", (w + 40, h + 40), (0, 0, 0, 0))
@@ -116,11 +124,14 @@ def _table(
     row_h: int = 64,
     header_size: int = 24,
     body_size: int = 26,
-    header_fill: tuple = (129, 122, 246, 255),
+    *,
+    header_fill: tuple,
 ) -> int:
     """主题色头表格：head_x 行头列左对齐、col_xs 数值列居中（均相对 box 左缘）。
 
-    返回结束 y。行高 ``row_h``，逐行底色取 ``row_alphas`` 循环。"""
+    返回结束 y。行高 ``row_h``，逐行底色取 ``row_alphas`` 循环。``header_fill``
+    必传（两处调用均显式传 ``style["header"]``；曾留 prism 头色默认值但从未
+    生效，徒增第二份字面量，2026-10-04 第六轮删除）。"""
     x0, y0, w, _ = box
     hh = 56
     head_h = hh + 12
@@ -131,7 +142,7 @@ def _table(
         (x0 + head_x, y0 + head_h // 2),
         header[0],
         font=font(header_size),
-        fill=_WHITE,
+        fill=WHITE,
         anchor="lm",
     )
     for cx, text in zip(col_xs, header[1:]):
@@ -139,7 +150,7 @@ def _table(
             (x0 + cx, y0 + head_h // 2),
             text,
             font=font(header_size),
-            fill=_WHITE,
+            fill=WHITE,
             anchor="mm",
         )
     y = y0 + head_h
@@ -192,12 +203,12 @@ def score_line_card(
     draw = ImageDraw.Draw(im)
 
     # 标题行：logo 左上 + 主题描边大标题（prism 紫描边 / circle 白描边）
-    im.alpha_composite(assets.pic("logo.png", theme).resize((249, 120)), (40, 24))
+    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (40, 24))
     draw.text(
         (600, 84),
         "分数线计算",
         font=font(52, FONT_HAN),
-        fill=_WHITE,
+        fill=WHITE,
         anchor="mm",
         stroke_width=4,
         stroke_fill=style["title_stroke"],
@@ -205,7 +216,7 @@ def score_line_card(
 
     # ---- 歌曲信息卡 ------------------------------------------------------
     _card(im, (60, 160, 1140, 470))
-    im.alpha_composite(assets.cover(song.id).resize((242, 242)), (100, 194))
+    im.alpha_composite(assets.cover(song.id).resize(CHART_COVER), (100, 194))
     draw.text(
         (390, 214),
         truncate_hoshino(song.title, 15),
@@ -245,20 +256,23 @@ def score_line_card(
         draw.rounded_rectangle(
             (530, 396, 610, 426),
             radius=15,
-            fill=_UTAGE_COLOR,
-            outline=_WHITE,
+            fill=UTAGE_PURPLE,
+            outline=WHITE,
             width=2,
         )
         draw.text(
             (570, 411),
             kanji,
             font=font(20 if len(kanji) == 1 else 15, FONT_RODIN),
-            fill=_WHITE,
+            fill=WHITE,
             anchor="mm",
         )
         draw.text((624, 408), "宴谱面", font=font(18), fill=_GRAY, anchor="lm")
     else:
-        type_abbr = "DX" if diff.type == SongType.DX else "SD"
+        # 分支已保证 diff.type 非宴（is_utage 为 False），major_type_of 以
+        # 谱面自身类型为偏好时与 diff.type 判定等价
+        is_sd = major_type_of(song, diff.type) == SongType.STANDARD
+        type_abbr = "SD" if is_sd else "DX"
         if badge := assets.type_badge(type_abbr, (80, 30)):
             im.alpha_composite(badge, (530, 408 - 12))
         draw.text(
@@ -268,8 +282,8 @@ def score_line_card(
     # 难度徽章（底边 = 封面底缘 436）：宴谱用宴色；Re:Master 浅紫底深紫字
     # （对齐歌曲行卡 b50_score_remaster 配色）；其余难度彩底白字
     if is_utage:
-        badge_fill = _UTAGE_COLOR
-        badge_text = _WHITE
+        badge_fill = UTAGE_PURPLE
+        badge_text = WHITE
         # 日文字体无简体「场」，用官方日文写法「宴会場」
         diff_name, lv_text = "宴会場", f"Lv {diff.level}"
     elif li == LevelIndex.ReMASTER:
@@ -278,7 +292,7 @@ def score_line_card(
         diff_name, lv_text = DIFF_DISPLAY_NAMES[li.value], f"Lv {diff.level_value:.1f}"
     else:
         badge_fill = ID_TEXT_COLORS[li.value]
-        badge_text = _WHITE
+        badge_text = WHITE
         diff_name, lv_text = DIFF_DISPLAY_NAMES[li.value], f"Lv {diff.level_value:.1f}"
     bx0, by0, bx1, by1 = 830, 336, 1090, 436
     draw.rounded_rectangle((bx0, by0, bx1, by1), 22, fill=badge_fill)
@@ -326,7 +340,9 @@ def score_line_card(
         (line_x + 20, 582),
         f"约 {result['budget']:.2f} 个",
         font=font(48),
-        fill=CIRCLE_PINK if theme == "circle" else (249, 62, 172, 255),
+        # 两分支恒等（数字双主题恒粉强调色，第六轮审查裁决去三元）；
+        # 如需随主题 accent 变色属视觉变更，须产品确认后再动
+        fill=CIRCLE_PINK,
         anchor="lm",
     )
     # 物量摘要：World's end 级别的物量串很长，按实测宽度自适应缩字号
@@ -351,7 +367,7 @@ def score_line_card(
             (360, 684),
             "双人宴谱：达成率上限 202%（200 基础 + 2 额外）；物量为左右机台合计",
             font=font(18),
-            fill=_UTAGE_COLOR,
+            fill=UTAGE_PURPLE,
             anchor="lm",
         )
 
@@ -409,6 +425,6 @@ def score_line_card(
         fill=style["accent"],
         anchor="mm",
         stroke_width=3,
-        stroke_fill=_WHITE,
+        stroke_fill=WHITE,
     )
     return image_to_bytes(im)

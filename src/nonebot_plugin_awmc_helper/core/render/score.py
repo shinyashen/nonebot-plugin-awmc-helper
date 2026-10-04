@@ -13,7 +13,9 @@ from maimai_py.models import SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
+    WHITE,
     TEXT_BLUE,
+    CELL_COVER_80,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     credit_text,
@@ -23,6 +25,7 @@ from .tools import (
 )
 from .assets import assets
 from .best50 import draw_score_row
+from .nb_chart import major_type_of
 from ...constants import DX_ID_OFFSET, LEVEL_INDEX_EN, chart_display_id
 from .table_layout import (
     SCORE_ROW_GAP,
@@ -102,9 +105,12 @@ class DrawScore:
                 assets.pic(f"rise_score_{LEVEL_INDEX_EN[li]}.png"), (x + 30, y)
             )
             self._im.alpha_composite(
-                assets.cover(song.id).resize((80, 80)), (x + 55, y + 41)
+                assets.cover(song.id).resize(CELL_COVER_80), (x + 55, y + 41)
             )
-            type_abbr = "DX" if diff.type == SongType.DX else "SD"
+            # 推分候选排除宴谱（calc.rise_recommend 口径），diff.type 恒标准/DX
+            # 两型——major_type_of 以谱面自身类型为偏好时与 diff.type 判定等价
+            is_sd = major_type_of(song, diff.type) == SongType.STANDARD
+            type_abbr = "SD" if is_sd else "DX"
             if badge := assets.type_badge(type_abbr, (60, 22)):
                 self._im.alpha_composite(badge, (x + 240, y + 114))
             # 旧成绩评级（Hoshino：无旧成绩不画旧章；未游玩推荐行不显示 D）
@@ -229,7 +235,7 @@ class DrawScore:
             fill=_DEFAULT_TEXT_COLOR,
             anchor="mm",
             stroke_width=2,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
         return image_to_bytes(self._im.crop((200, 0, 1200, total_height)))
 
@@ -307,7 +313,7 @@ class DrawScore:
                 fill=_DEFAULT_TEXT_COLOR,
                 anchor="rm",
                 stroke_width=2,
-                stroke_fill=(255, 255, 255, 255),
+                stroke_fill=WHITE,
             )
 
     def _footer(
@@ -331,7 +337,7 @@ class DrawScore:
             fill=_DEFAULT_TEXT_COLOR,
             anchor="mm",
             stroke_width=2,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
 
     def draw_plan(
@@ -410,6 +416,11 @@ class DrawScore:
             )
             self._footer(pagemsg, design_bg_y=height - 133, text_y=height - 90, size=25)
         else:
+            # ⚠️ 本分支页脚不走 _footer（NB 原版差异，勿「顺手统一」）：
+            # design.png 贴 (200, height-113)、文案 (700, height-70) 25pt，
+            # 且**无署名行**——与 _footer 的 (200, height-133)/(700, height-90)
+            # + 底部署名不同；NB 基准该分支是否有意无署名未考证，统一前须先
+            # 确认基准（第六轮审查记录，改输出属视觉变更需另行裁决）
             self._section_title(77, "未游玩谱面", size=28)
             self._while_pic(data)
             height = self._im.size[1]
@@ -461,6 +472,10 @@ class DrawScore:
             self.whiledraw(result, base_y + 140, sub_of=sub_of)
 
         height = self._im.size[1]
+        # ⚠️ 本页脚与 _footer 结构相同（design.png 底 + 文案 + 署名行）但纵坐标
+        # 全不同（本处 153/110/35 vs _footer 133/90/30——分数列表段高预算不同），
+        # 且字号 25pt 同 _footer、文案分两行绘制；NB 原版即两套坐标，勿合并，
+        # 合并须先逐坐标核对 NB 基准（第六轮审查记录）
         self._im.alpha_composite(
             assets.pic("design.png", self._theme), (200, height - 153)
         )
@@ -484,6 +499,6 @@ class DrawScore:
             fill=_DEFAULT_TEXT_COLOR,
             anchor="mm",
             stroke_width=2,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
         return image_to_bytes(self._im)

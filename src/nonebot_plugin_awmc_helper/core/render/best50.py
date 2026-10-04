@@ -33,6 +33,8 @@ from maimai_py import (
 from ..http import create_smart_client
 from .fonts import FONT_HAN, FONT_NUM, font
 from .tools import (
+    WHITE,
+    CELL_COVER_75,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
     credit_text,
@@ -48,10 +50,13 @@ from ...constants import (
     SYNC_FILE,
     COMBO_FILE,
     DX_ID_OFFSET,
+    THEME_CIRCLE,
     DEFAULT_THEME,
     SERVICE_DISPLAY,
 )
 from .table_layout import (
+    B50_B15_TOP,
+    B50_B35_TOP,
     SCORE_ROW_GAP,
     SCORE_ROW_COLS,
     SCORE_ROW_START_X,
@@ -228,7 +233,7 @@ def ra_badge_num(rating: int, theme: str = DEFAULT_THEME) -> str:
     for limit, n in RA_THRESHOLD:
         if rating < limit:
             return n
-    if theme == "circle":
+    if theme == THEME_CIRCLE:
         if rating < 16000:
             return "11"
         if rating < 17000:
@@ -402,7 +407,7 @@ async def _draw_header(
         badge_num = old_ra_badge_num(rating)
     else:
         badge_num = ra_badge_num(rating, theme)
-        if theme == "circle" and rating >= 14000:
+        if theme == THEME_CIRCLE and rating >= 14000:
             badge_size = (170, 35)
             star_img = assets.pic(
                 f"UI_CMN_DXRating_Star_{ra_star_num(rating)}.png", theme
@@ -510,7 +515,7 @@ def draw_score_row(
         im.alpha_composite(_utage_score_bg(), (x, y))
     else:
         im.alpha_composite(_score_row_bg(score.level_index), (x, y))
-    cover = assets.cover(cover_song_id(score)).resize((75, 75))
+    cover = assets.cover(cover_song_id(score)).resize(CELL_COVER_75)
     im.alpha_composite(cover, (x + 12, y + 12))
     type_abbr = "DX" if score.type == SongType.DX else "SD"
     if badge := assets.type_badge(type_abbr, (37, 14)):
@@ -568,6 +573,24 @@ def draw_score_row(
     )
 
 
+def _b50_footer(draw: ImageDraw.ImageDraw, theme: str, service: str | None) -> None:
+    """b50 系卡页脚（draw_b50_nb / draw_b50_flat 逐字共用的底部署名行）。
+
+    服务名经 SERVICE_DISPLAY 映射（未登记源留空省略「Data from …」句），
+    主题色正文（theme_text_color）+ 白描边，锚 (700, 1570) mm。
+    """
+    service_name = SERVICE_DISPLAY.get(service or "", "")
+    draw.text(
+        (700, 1570),
+        credit_text(service_name or None),
+        font=font(22, FONT_HAN),
+        fill=theme_text_color(theme),
+        anchor="mm",
+        stroke_width=5,
+        stroke_fill=WHITE,
+    )
+
+
 async def draw_b50_nb(
     player_name: str,
     rating: int,
@@ -622,29 +645,19 @@ async def draw_b50_nb(
         layout=layout,
     )
 
-    # 成绩行：b35 从 y=235、b15 从 y=1085（Hoshino 布局，几何见 table_layout）；
+    # 成绩行：b35/b15 分区锚点（Hoshino 布局，几何见 table_layout）；
     # b40 版式（layout="b40"）= 5+3 行、行距 125、b15 起 941（区间间隙 97 区分
     # 区块，末行底 1300——彩虹作下半装饰，用户拍板 2026-10-02）
-    b15_top = B40_B15_TOP if layout == "b40" else 1085
+    b15_top = B40_B15_TOP if layout == "b40" else B50_B15_TOP
     row_step = B40_ROW_STEP if layout == "b40" else SCORE_ROW_GAP
-    for data, initial_y in ((scores_b35, 235), (scores_b15, b15_top)):
+    for data, initial_y in ((scores_b35, B50_B35_TOP), (scores_b15, b15_top)):
         for num, score in enumerate(data):
             row, col = divmod(num, SCORE_ROW_COLS)
             x = SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP
             y = initial_y + row * row_step
             draw_score_row(im, draw, x, y, score, theme, sub_of=sub_of)
 
-    service_name = SERVICE_DISPLAY.get(service or "", "")
-    footer_color = theme_text_color(theme)
-    draw.text(
-        (700, 1570),
-        credit_text(service_name or None),
-        font=font(22, FONT_HAN),
-        fill=footer_color,
-        anchor="mm",
-        stroke_width=5,
-        stroke_fill=(255, 255, 255, 255),
-    )
+    _b50_footer(draw, theme, service)
     return im
 
 
@@ -715,16 +728,7 @@ async def draw_b50_flat(
             theme,
             sub_of=sub_of,
         )
-    service_name = SERVICE_DISPLAY.get(service or "", "")
-    draw.text(
-        (700, 1570),
-        credit_text(service_name or None),
-        font=font(22, FONT_HAN),
-        fill=theme_text_color(theme),
-        anchor="mm",
-        stroke_width=5,
-        stroke_fill=(255, 255, 255, 255),
-    )
+    _b50_footer(draw, theme, service)
     return im
 
 

@@ -21,13 +21,17 @@ from PIL import Image, ImageDraw
 from nonebot import logger
 from maimai_py import Song, SongType, SongDifficulty
 
-from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
+from .fonts import FONT_HAN, FONT_RODIN, font
 from .tools import (
+    WHITE,
     TITLE_BLUE,
+    CELL_COVER_75,
+    CELL_COVER_80,
     DIFF_TEXT_COLORS,
     credit_text,
     scale_output,
     image_to_bytes,
+    draw_cover_cell,
     generate_prism_bg,
     generate_frosted_card,
 )
@@ -63,6 +67,11 @@ FONT_BLUE = TITLE_BLUE
 
 def rating_table_dir() -> Path:
     return assets.static_path() / "mai" / "rating_table"
+
+
+def rating_table_file(level: str) -> Path:
+    """定数表底图文件路径单源（预渲染写出与查询读取共用，防手拼漂移）。"""
+    return rating_table_dir() / f"{level}.png"
 
 
 def plate_table_dir() -> Path:
@@ -119,7 +128,7 @@ def _rating_grid(
             fill=FONT_BLUE,
             anchor="lm",
             stroke_width=4,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
         max_row = 0
         for num, (song, diff) in enumerate(charts):
@@ -128,16 +137,17 @@ def _rating_grid(
             x = start_x + col * RATING_GRID_STEP
             y = start_y + row * RATING_GRID_STEP
             li = diff.level_index.value
-            im.alpha_composite(assets.cover(song.id).resize((75, 75)), (x, y))
-            im.alpha_composite(
-                assets.pic(f"border_{LEVEL_INDEX_EN[li]}.png"), (x - 5, y - 5)
-            )
-            dr.text(
-                (x + 56, y + 4),
-                str(chart_display_id(song, diff)),
-                font=font(13, FONT_NUM),
+            draw_cover_cell(
+                im,
+                dr,
+                x,
+                y,
+                song_id=song.id,
+                id_text=str(chart_display_id(song, diff)),
+                cover_size=CELL_COVER_75,
+                border=assets.pic(f"border_{LEVEL_INDEX_EN[li]}.png"),
+                font_size=13,
                 fill=DIFF_TEXT_COLORS[li],
-                anchor="mm",
             )
         start_y += (max_row + 1) * RATING_GRID_STEP + RATING_GROUP_GAP
     return im
@@ -207,7 +217,7 @@ def _rating_grid_15(
                 fill=FONT_BLUE,
                 anchor="mm",
                 stroke_width=8,
-                stroke_fill=(255, 255, 255, 255),
+                stroke_fill=WHITE,
             )
     return im
 
@@ -275,7 +285,7 @@ def _plate_grid(
             fill=FONT_BLUE,
             anchor="lm",
             stroke_width=4,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
         max_row = 0
         for num, (song, diff) in enumerate(charts):
@@ -284,19 +294,19 @@ def _plate_grid(
             x = PLATE_START_X + col * PLATE_COL_STEP
             y = start_y + row * PLATE_ROW_STEP
             is_rem = song.id in remaster_ids
-            im.alpha_composite(assets.cover(song.id).resize((80, 80)), (x, y))
-            im.alpha_composite(
-                assets.pic(
+            draw_cover_cell(
+                im,
+                dr,
+                x,
+                y,
+                song_id=song.id,
+                id_text=str(chart_display_id(song, diff)),
+                cover_size=CELL_COVER_80,
+                border=assets.pic(
                     "border_table_remaster.png" if is_rem else "border_table_base.png"
                 ),
-                (x - 5, y - 5),
-            )
-            dr.text(
-                (x + 56, y + 4),
-                str(chart_display_id(song, diff)),
-                font=font(16, FONT_NUM),
+                font_size=16,
                 fill=DIFF_TEXT_COLORS[4] if is_rem else DIFF_TEXT_COLORS[0],
-                anchor="mm",
             )
         start_y += (max_row + 1) * PLATE_ROW_STEP + PLATE_GROUP_GAP
     return im
@@ -324,7 +334,7 @@ async def generate_rating_template(level: str, song_service) -> int:
     entries = filter_level(await song_service.get_all(), level)
     if not entries:
         return 0
-    out = rating_table_dir() / f"{level}.png"
+    out = rating_table_file(level)
     out.parent.mkdir(parents=True, exist_ok=True)
     # 绘制段 CPU 密集（数百张封面加载/缩放），整体让出事件循环（L-6）；
     # 闭包只引用本协程局部变量，无跨线程共享可变状态
@@ -537,13 +547,20 @@ def draw_level_header(
             fill=FONT_BLUE,
             anchor="ld",
             stroke_width=8,
-            stroke_fill=(255, 255, 255, 255),
+            stroke_fill=WHITE,
         )
         x += dr.textlength(text, font=fnt)
 
 
 def _width(text: str) -> int:
-    """显示宽度粗算（全角 2 / 半角 1；标题字号选择用）。"""
+    """显示宽度粗算（全角 2 / 半角 1；标题字号选择用）。
+
+    ⚠️ 与 :func:`tools.column_width` 是**两套独立宽度口径**（第六轮审查定案：
+    不合并）——本函数按码点粗分（>0x2E7F 记全角 2），column_width 走 NB
+    _CHAR_WIDTHS 逐字宽表；换实现会改变「Level.」大字的 100pt/60pt 字号
+    切换点，属视觉变更。粗算口径仅此处表头字号选择用，截断类一律走
+    column_width 族。
+    """
     return sum(2 if ord(ch) > 0x2E7F else 1 for ch in text)
 
 
@@ -557,7 +574,7 @@ async def rating_table_base_image(
     低，现算 1-3s 可接受）。CPU 密集，整体在工作线程执行（L-6）。
     """
     if level:
-        path = rating_table_dir() / f"{level}.png"
+        path = rating_table_file(level)
         if path.exists():
             return Image.open(path).convert("RGBA")
         if level == "15":
@@ -568,6 +585,25 @@ async def rating_table_base_image(
     return await asyncio.to_thread(lambda: _rating_grid(entries, by_level=True))
 
 
+async def _rating_table_text_bytes(
+    entries: Sequence[tuple[Song, SongDifficulty]],
+    header: str,
+    level: "str | None" = None,
+) -> bytes:
+    """定数表文字版渲染孪生体合并实现（第六轮审查）。
+
+    ``level`` 非 None → 底图走该等级文件底图（缺失现算）且表头带
+    「Level.」前缀；None → 条件版（底图按 entries 现算、条件串直接作表头）。
+    现算分支 CPU 密集，整体在工作线程执行（L-6），故本函数为协程。
+    """
+    im = await rating_table_base_image(entries, level)
+    dr = ImageDraw.Draw(im)
+    draw_level_header(
+        dr, header, 220, prefix="Level." if level else None, suffix="定数表"
+    )
+    return image_to_bytes(scale_output(im))
+
+
 async def rating_table_text_bytes(
     level: str, entries: Sequence[tuple[Song, SongDifficulty]]
 ) -> bytes:
@@ -576,19 +612,18 @@ async def rating_table_text_bytes(
     底图存在时直接叠「Level. {level}」大字；缺失时按 NB 布局现算（不落盘）；
     最终按 NB 同款 0.8 缩放输出。坐标对 NB 1400 宽底图原生适配。
 
-    现算分支 CPU 密集，整体在工作线程执行（L-6），故本函数为协程。
+    签名保持 ``(level, entries)``——plugins/tables 直调（对外名兼容），
+    实现统一走 :func:`_rating_table_text_bytes`。
     """
-    im = await rating_table_base_image(entries, level)
-    dr = ImageDraw.Draw(im)
-    draw_level_header(dr, level, 220, suffix="定数表")
-    return image_to_bytes(scale_output(im))
+    return await _rating_table_text_bytes(entries, level, level=level)
 
 
 async def rating_table_cond_text_bytes(
     entries: Sequence[tuple[Song, SongDifficulty]], header_text: str
 ) -> bytes:
-    """条件化定数表（P2-c）：底图按条件谱面集现算（不落盘）、条件串表头。"""
-    im = await rating_table_base_image(entries)
-    dr = ImageDraw.Draw(im)
-    draw_level_header(dr, header_text, 220, prefix=None, suffix="定数表")
-    return image_to_bytes(scale_output(im))
+    """条件化定数表（P2-c）：底图按条件谱面集现算（不落盘）、条件串表头。
+
+    签名保持 ``(entries, header_text)``——plugins/tables 直调（对外名兼容），
+    实现统一走 :func:`_rating_table_text_bytes`。
+    """
+    return await _rating_table_text_bytes(entries, header_text)

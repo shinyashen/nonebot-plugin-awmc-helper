@@ -14,13 +14,20 @@ from maimai_py import Song, Genre, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import (
+    WHITE,
     credit_text,
     image_to_bytes,
     theme_text_color,
     truncate_hoshino,
 )
 from .assets import assets
-from .nb_chart import LOGO_SIZE, major_diffs, chart_version_of, paste_version_logo
+from .nb_chart import (
+    LOGO_SIZE,
+    major_diffs,
+    major_type_of,
+    chart_version_of,
+    paste_version_logo,
+)
 from ...constants import (
     SYNC_FILE,
     COMBO_FILE,
@@ -65,13 +72,12 @@ def song_play_data(
     genre_file = _GENRE_FILE.get(song.genre)
     if genre_file and (genre_img := assets.pic_optional(genre_file)):
         im.alpha_composite(genre_img, (100, 260))
-    # 类型徽章与版本 logo 均跟随卡片主类型
-    prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
-    major_type = (
-        SongType.STANDARD
-        if prefer_sd
-        else (SongType.DX if song.difficulties.dx else SongType.STANDARD)
-    )
+    # 类型徽章与版本 logo 均跟随卡片主类型（major_type_of 单源判定）；
+    # prefer_sd 从 major_type 派生——与原逐字判定的差异仅在「标准/DX 双空」
+    # 不可达形态（major_diffs 对其 TypeError），DX 组空时 chart_version_of
+    # 两取值同落标准组，逐像素一致
+    major_type = major_type_of(song, prefer_type)
+    prefer_sd = major_type == SongType.STANDARD
     # 版本 logo（等比适配槽位，项目内既定做法）：版本口径与查歌卡同源——
     # 主类型谱面组首谱面版本，组空/缺版本回落曲级（nb_chart.chart_version_of）
     paste_version_logo(im, chart_version_of(song, prefer_sd), (295, 205, 183, 90))
@@ -117,15 +123,19 @@ def song_play_data(
         im.alpha_composite(assets.pic(f"d_{num}.png"), (650, 235 + y))
         score = by_slot.get(level_index)
         diff = next(d for d in diffs if d.level_index == level_index)
+        # 定数小字为白色（NB DrawText 默认色），两分支逐字相同 → 分支前单次
+        # 绘制。z 序核验（2026-10-04 第六轮）：已玩分支其后的绘制（ra_dx 底、
+        # DX 星、DX 分、fcfs、连击/Sync 章、评级章、达成率文本）bbox 均不与
+        # (685, 251+y) 白字区域相交，提前绘制不被覆盖，逐像素等价
+        dr.text(
+            (685, level_y + y),
+            f"{diff.level_value}",
+            font=font(21, FONT_RODIN),
+            fill=WHITE,
+            anchor="mm",
+        )
         if score is None:
-            # 定数小字为白色（NB DrawText 默认色），「未游玩」才是主题色
-            dr.text(
-                (685, level_y + y),
-                f"{diff.level_value}",
-                font=font(21, FONT_RODIN),
-                fill=(255, 255, 255, 255),
-                anchor="mm",
-            )
+            # 「未游玩」才是主题色
             dr.text(
                 (800, 302 + y),
                 "未游玩",
@@ -170,13 +180,6 @@ def song_play_data(
             anchor="lm",
         )
         dr.text(
-            (685, level_y + y),
-            f"{diff.level_value}",
-            font=font(21, FONT_RODIN),
-            fill=(255, 255, 255, 255),
-            anchor="mm",
-        )
-        dr.text(
             (915, 283 + y),
             str(int(score.dx_rating or 0)),
             font=font(18, FONT_NUM),
@@ -200,6 +203,6 @@ def song_play_data(
         fill=color,
         anchor="mm",
         stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
     return image_to_bytes(im)

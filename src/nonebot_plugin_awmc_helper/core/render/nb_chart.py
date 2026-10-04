@@ -14,6 +14,9 @@ from maimai_py import Song, Version, SongType, ScoreExtend
 
 from .fonts import FONT_HAN, FONT_RODIN, font
 from .tools import (
+    WHITE,
+    CHART_COVER,
+    UTAGE_PURPLE,
     credit_text,
     image_to_bytes,
     theme_text_color,
@@ -116,6 +119,24 @@ def _major_type_diffs(song: Song, prefer_sd: bool) -> list:
     return diffs
 
 
+def major_type_of(song: Song, prefer_type: SongType | None = None) -> SongType:
+    """卡片主类型判定单源（SD/DX 缩写、类型徽章、prefer_sd 派生共用）。
+
+    语义与历史各消费点逐字重复的判定一致（2026-10-04 第六轮单源化）：
+
+    - ``prefer_type`` 为 STANDARD 且存在 standard 谱面 → STANDARD
+      （前缀「标准/标」搜索显示 SD 谱面）；
+    - 否则取主谱面组首谱面的类型（DX 组优先，组空回落标准组——
+      :func:`_major_type_diffs` 同一选取段）；
+    - 两组皆空（纯宴谱）回落 STANDARD（历史 else 分支口径；该形态在
+      各渲染入口本就不可达：major_diffs 对其直接 TypeError）。
+    """
+    if prefer_type == SongType.STANDARD and song.difficulties.standard:
+        return SongType.STANDARD
+    diffs = _major_type_diffs(song, False)
+    return diffs[0].type if diffs else SongType.STANDARD
+
+
 def chart_version_of(song: Song, prefer_sd: bool) -> int:
     """卡片主类型谱面组的登场版本（组内谱面版本一致，取首谱面，§2.3）。
 
@@ -191,6 +212,10 @@ def fit_version_logo(img: Image.Image, box: tuple[int, int] = (182, 90)) -> Imag
 LOGO_SIZE = (249, 120)
 """maimai 主 logo（logo.png）在头部名片的统一贴图尺寸。"""
 
+NEWSONG_BADGE_SIZE = (249, 120)
+"""「新曲だよ!」徽章（UI_CMN_TabTitle_NewSong.png）统一贴图尺寸
+（与 LOGO_SIZE 数值相同但语义独立，勿互相替代）。"""
+
 
 def paste_version_logo(
     im: Image.Image,
@@ -246,20 +271,26 @@ def song_chart_info(
     text_color = theme_text_color(theme)
 
     im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (65, 25))
-    prefer_sd = prefer_type == SongType.STANDARD and bool(song.difficulties.standard)
-    type_abbr = "SD" if prefer_sd else ("DX" if song.difficulties.dx else "SD")
+    # 主类型单源（major_type_of）：prefer_sd 从其派生。与原逐字判定
+    # （prefer_type==STANDARD and bool(standard)）的差异仅在「标准/DX 双空」
+    # 形态（原 False / 派生 True）——该形态 major_diffs 直接 TypeError，
+    # 渲染不可达；DX 组空时两种取值传给 chart_version_of/_display_card_id
+    # 同落标准组，结果逐像素一致
+    major_type = major_type_of(song, prefer_type)
+    prefer_sd = major_type == SongType.STANDARD
+    type_abbr = "SD" if major_type == SongType.STANDARD else "DX"
     chart_version = chart_version_of(song, prefer_sd)
     # 日服视图与国服新曲标无关：统一不渲染「新曲だよ!」徽章
     if is_new_chart(chart_version) and not jp:
         im.alpha_composite(
-            assets.pic("UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
+            assets.pic("UI_CMN_TabTitle_NewSong.png").resize(NEWSONG_BADGE_SIZE),
             (842, 100),
         )
     if cover_path is not None and cover_path.exists():
         cover = Image.open(cover_path).convert("RGBA")
     else:
         cover = assets.cover(song.id)
-    im.alpha_composite(cover.resize((242, 242)), (133, 197))
+    im.alpha_composite(cover.resize(CHART_COVER), (133, 197))
     paste_version_logo(im, chart_version, (800, 370, 182, 90), jp=jp)
     if badge := assets.type_badge(type_abbr, (80, 30)):
         im.alpha_composite(badge, (295, 410))
@@ -300,7 +331,7 @@ def song_chart_info(
 
     diffs = major_diffs(song, prefer_type)
     for index, diff in enumerate(diffs):
-        color = (255, 255, 255, 255)
+        color = WHITE
         spacing = 70 * index
         mr.text(
             (120, 590 + spacing),
@@ -396,7 +427,7 @@ def song_chart_info(
         fill=text_color,
         anchor="mm",
         stroke_width=3,
-        stroke_fill=(255, 255, 255, 255),
+        stroke_fill=WHITE,
     )
     return image_to_bytes(im)
 
@@ -416,8 +447,8 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     """
     im = assets.canvas("chart_info_enkaijou.png")
     mr = ImageDraw.Draw(im)
-    stroke = (210, 57, 174, 255)
-    white = (255, 255, 255, 255)
+    # 宴卡双主题色：紫描边（UTAGE_PURPLE，tools 单源）+ 白字
+    stroke = UTAGE_PURPLE
 
     utage_diffs = list(
         utage_diffs
@@ -454,15 +485,15 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     # 「新曲」标是国服当前版本口径：日服限定曲不渲染（对齐 song_chart_info）
     if is_new_chart(chart_version) and not jp:
         im.alpha_composite(
-            assets.pic("UI_CMN_TabTitle_NewSong.png").resize((249, 120)),
+            assets.pic("UI_CMN_TabTitle_NewSong.png").resize(NEWSONG_BADGE_SIZE),
             (950, 165),
         )
 
     # 曲绘 / 版本
-    im.alpha_composite(assets.cover(song.id).resize((242, 242)), (133, 246))
+    im.alpha_composite(assets.cover(song.id).resize(CHART_COVER), (133, 246))
     paste_version_logo(im, chart_version, (800, 415, 182, 90), jp=jp)
 
-    def t(pos, text, size, *, anchor="mm", sw=0, fill=white, han=False):
+    def t(pos, text, size, *, anchor="mm", sw=0, fill=WHITE, han=False):
         # 描边色对齐 Hoshino/NB 现行源码（紫 210,57,174,255）：曾按 NB 旧版
         # (0,0,0,0) 透明字面拍板黑描边，二库现行均为紫描边，按权威改回；
         # 简体字样（分类中文名等）走中文字体——FOT-NewRodin 为日文字体，
@@ -474,7 +505,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
             fill=fill,
             anchor=anchor,
             stroke_width=sw,
-            stroke_fill=(210, 57, 174, 255) if sw else None,
+            stroke_fill=stroke if sw else None,
         )
 
     # 标题 / 曲师 / BPM / ID / 分类（白字紫描边；截断规则同 song_chart_info）
@@ -538,7 +569,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
         fill=stroke,
         anchor="mm",
         stroke_width=3,
-        stroke_fill=white,
+        stroke_fill=WHITE,
     )
     return image_to_bytes(im)
 

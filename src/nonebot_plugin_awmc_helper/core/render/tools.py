@@ -6,17 +6,27 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from .fonts import FONT_HAN, font
+from .fonts import FONT_HAN, FONT_NUM, font
 from .assets import assets
 from ...config import NICKNAME
+from ...constants import THEME_CIRCLE
 
 DEFAULT_TEXT_SIZE = 28
 
+# 通用纯白（描边/白字/白底条；全渲染层裸写 (255,255,255,255) 处统一引用）
+WHITE = (255, 255, 255, 255)
 # PRiSM PLUS 蓝两档（素材包 UI 取色）：正文/计数蓝 与 大标题蓝
 TEXT_BLUE = (124, 129, 255, 255)
 TITLE_BLUE = (114, 188, 254, 255)
 # circle 主题主色（素材包 UI 取色）
 CIRCLE_PINK = (249, 62, 172, 255)
+# 宴谱主题紫（宴会卡描边/分数线卡宴谱徽章同源取色 210,57,174）
+UTAGE_PURPLE = (210, 57, 174, 255)
+
+# 封面格/卡片封面统一尺寸（单元格格内 75/80 两档、查歌系卡大封面 242）
+CELL_COVER_75 = (75, 75)
+CELL_COVER_80 = (80, 80)
+CHART_COVER = (242, 242)
 
 
 def theme_text_color(theme: str) -> tuple[int, int, int, int]:
@@ -24,15 +34,15 @@ def theme_text_color(theme: str) -> tuple[int, int, int, int]:
 
     nb_chart 查歌卡 / info 单曲卡 / best50 页脚共用，勿再手写三元式或配色表。
     """
-    return CIRCLE_PINK if theme == "circle" else TEXT_BLUE
+    return CIRCLE_PINK if theme == THEME_CIRCLE else TEXT_BLUE
 
 
 # 行卡文字/曲目 id 按难度配色（Hoshino AssetsImage 同源，三处渲染共用）
 DIFF_TEXT_COLORS = [
-    (255, 255, 255, 255),
-    (255, 255, 255, 255),
-    (255, 255, 255, 255),
-    (255, 255, 255, 255),
+    WHITE,
+    WHITE,
+    WHITE,
+    WHITE,
     (138, 0, 226, 255),
 ]
 ID_TEXT_COLORS = [
@@ -283,7 +293,11 @@ def generate_frosted_card(
     shadow_offset: tuple[int, int] = (10, 10),
     alpha: float = 0.4,
 ) -> Image.Image:
-    """在 im 的 box 区域叠一块圆角毛玻璃卡（NB 同源移植，牌子进度总览用）。"""
+    """在 im 的 box 区域叠一块圆角毛玻璃卡（NB 同源移植，牌子进度总览用）。
+
+    ⚠️ 投影参数与 score_line._card 是两套独立口径（圆角 25 / (0,0,0,50) /
+    blur 3 / 默认偏移 (10,10)，详见彼处注释），互不连带，调参须各自验证。
+    """
     if alpha < 0 or alpha > 1:
         raise ValueError("alpha 应在 0-1 之间")
     roi = im.crop(box)
@@ -311,6 +325,37 @@ def generate_frosted_card(
     temp_layer.paste(card, (box[0], box[1]), mask=mask)
 
     return Image.alpha_composite(im, temp_layer)
+
+
+def draw_cover_cell(
+    im: Image.Image,
+    dr: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    *,
+    song_id: int,
+    id_text: str,
+    cover_size: tuple[int, int],
+    border: Image.Image,
+    font_size: int,
+    fill: tuple[int, int, int, int],
+) -> None:
+    """封面格单元格三连：封面 resize → 难度框 border → id 小字。
+
+    完成表模板（定数表/牌子表网格）与牌子进度总览三处同构序列的公共实现；
+    坐标算式逐字保持原三处口径：封面贴 (x, y)、框贴 (x-5, y-5)、id 小字
+    锚 (x+56, y+4) mm、Torus（FONT_NUM）字体。``border`` 由调用方取图
+    （保留各处预载/内联取图的既有行为），封面尺寸用 CELL_COVER_75/80。
+    """
+    im.alpha_composite(assets.cover(song_id).resize(cover_size), (x, y))
+    im.alpha_composite(border, (x - 5, y - 5))
+    dr.text(
+        (x + 56, y + 4),
+        id_text,
+        font=font(font_size, FONT_NUM),
+        fill=fill,
+        anchor="mm",
+    )
 
 
 def text_image_bytes(text: str, size: int = DEFAULT_TEXT_SIZE) -> bytes:

@@ -154,13 +154,17 @@ def SessionQueryBinding(unbound_hint: str | None = None):
     return Depends(_get)
 
 
-_AT_RUN = r"(?:\s*\[CQ:at,[^\]]*\])*\s*"
-r"""消息串中可容忍的 at 段连排（段间/段后空白一并吞掉）。
+_AT_SEG = r"\s*\[CQ:at,[^\]]*\]"
+r"""单个 at 段（段前空白一并吞掉）。
 
 实测形状（2026-09-30 服务器日志）：QQ 客户端在 @ 之后自动留一个空格，
 消息串以「at 段 + 尾随空格」结束（``…[CQ:at,qq=..,name=..] ``）；段数据可带
 ``name=`` 键。``[^\]]*`` 对段内数据整体吞（nickname 的 ``]`` 已被 CQ 转义）。
 """
+
+_AT_RUN = rf"(?:{_AT_SEG})*\s*"
+r"""消息串中可容忍的 at 段连排（段间/段后空白一并吞掉），由 :data:`_AT_SEG`
+组合——段形状单源，``at_tolerant`` 锚点与 ``strip_at_segments`` 共用。"""
 
 
 def strip_at_segments(text: str) -> str:
@@ -171,7 +175,7 @@ def strip_at_segments(text: str) -> str:
     落入正则捕获的条件串，昵称里的条件字（雪/神/将…）会污染解析；头部/
     尾部 at 由 :func:`at_tolerant` 锚点吞掉，不经此函数。
     """
-    return re.sub(r"\s*\[CQ:at,[^\]]*\]", "", text)
+    return re.sub(_AT_SEG, "", text)
 
 
 def at_tolerant(pattern: str) -> str:
@@ -188,6 +192,24 @@ def at_tolerant(pattern: str) -> str:
     if pattern.endswith("$"):
         pattern = pattern[:-1] + _AT_RUN + "$"
     return pattern
+
+
+def _identifier_is_empty(ident: "PlayerIdentifier") -> bool:
+    """PlayerIdentifier 是否无任何可用键。maimai_py 私有方法（
+    ``PlayerIdentifier._is_empty``）不去依赖，本地等价实现：字段清单与
+    maimai_py models.py 同步（qq/username/friend_code/credentials/ref/sub
+    全 None 即空），上游加字段时需跟进。"""
+    return all(
+        v is None
+        for v in (
+            ident.qq,
+            ident.username,
+            ident.friend_code,
+            ident.credentials,
+            ident.ref,
+            ident.sub,
+        )
+    )
 
 
 def SessionBinding():
@@ -243,11 +265,21 @@ class PendingBindingStore:
     def start(
         self, platform: str, user_id: str, kind: str, ttl: int = LXNS_PENDING_TTL
     ) -> None:
+        now = time.monotonic()
         self._sessions.start(
             (platform, user_id),
-            PendingSession(kind=kind, expire_at=time.monotonic() + ttl),
+            PendingSession(kind=kind, expire_at=now + ttl),
         )
         self._expired.pop((platform, user_id), None)
+        # 顺带清扫提示窗外的副表残留（原仅 expired_recently 同键命中才删，
+        # 再未触发同键的过期条目会无限滞留；新开回填会话是天然清扫时机）
+        stale = [
+            key
+            for key, (_kind, at) in self._expired.items()
+            if now - at > self.EXPIRED_HINT_WINDOW
+        ]
+        for key in stale:
+            del self._expired[key]
 
     def any_active(self) -> bool:
         """是否可能存在待回填会话（O(1) 空表短路，透传内表判定）。
@@ -438,7 +470,7 @@ class BindingService:
                 qq=qq,
                 credentials=binding.lxns_token or None,
             )
-        if ident._is_empty():
+        if _identifier_is_empty(ident):
             if (
                 binding.service == SERVICE_DIVINGFISH
                 and binding.divingfish_import_token
@@ -457,14 +489,17 @@ class BindingService:
     def full_identifier(self, binding: UserBinding) -> PlayerIdentifier:
         """装配**全量成绩**查询键（scores/plates 等 records 类查询）。
 
-        10-01 后定稿（Q50）：按绑定标志**确定性路由**，零换票浪费、零回落阶梯——
+        10-01 后定稿（Q50）：按绑定标志**确定性路由**，零换票浪费、零回落阶梯。
+        水鱼侧 subject（OAuth ref 摘要）与 Import-Token 并存时的优先级路由表：
 
-        1. ``divingfish_oauth=1``（完成过设备码授权，consent 在手）→ OAuth
-           subject：全量/单曲/写全凭据，token 死了也不受影响；
-        2. 有 Import-Token → token：10-01 后仅剩全量只读一项能力，oauth=0 的
-           纯 token 用户直走（实测 27/28 存活），不做无谓的换票尝试；
-        3. 都无 → subject 尝试：仅 QQ 档的水鱼迁移快照或然命中（实测命中率低），
-           败则由 score 层单条可行动文案收口。
+        - ``divingfish_oauth=True``（完成过设备码授权，consent 在手）：
+          **subject ＞ token**——OAuth subject 全量/单曲/写全凭据，token 死了
+          也不受影响（分支 1 短路，不走 token）；
+        - ``divingfish_oauth=False``：**token ＞ subject**——10-01 后 token 仅剩
+          全量只读一项能力，纯 token 用户直走（实测 27/28 存活），不做无谓的
+          换票尝试（分支 2）；
+        - 两侧都缺：subject 尝试——仅 QQ 档的水鱼迁移快照或然命中（实测命中
+          率低），败则由 score 层单条可行动文案收口（分支 3）。
 
         不做跨凭据回落：token 已重置（400「导入token有误」）与未授权
         （consent_required）都是「重新授权 / 换绑 token」的文案场景。
