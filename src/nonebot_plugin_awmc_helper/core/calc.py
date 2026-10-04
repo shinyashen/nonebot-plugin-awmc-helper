@@ -81,6 +81,12 @@ def rate_of(achievement: float) -> str:
     return RATE_TO_ZH[RateType._from_achievement(achievement)]
 
 
+def level_value_match(a: float, b: float) -> bool:
+    """定数等值匹配（十分位 round 口径，S-9 防 14.5 浮点表示误差）。
+    权威口径：core.combo 定数条件与传分插件本地成绩过滤共用。"""
+    return round(a * 10) == round(b * 10)
+
+
 def achievement_cap(diff: SongDifficulty) -> int:
     """谱面达成率上限（百分点）：buddy 宴谱 202（200 基础 + 2 额外，左右
     机台合计），其余 101（100 基础 + 1 额外）。"""

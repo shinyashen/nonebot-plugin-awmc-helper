@@ -800,6 +800,92 @@ async def _sample_random_sheets(
     return _random.choices(candidates, k=4)
 
 
+async def _random_picks(
+    dan_id: str,
+    *,
+    jp_source: bool,
+    cn_current: int,
+    version_code: int | None = None,
+) -> "tuple[store.DanRandom, None, list[tuple[int, str, str]], bool] | None":
+    """随机档位取数：DanRandom 行 + 按档位规则真实抽四首 + 日服视图标志。
+
+    返回 (档位行, None, picks, jp_view)——第二位段位表行恒 None（随机档位
+    无版本归属），与 :func:`_grade_picks` 返回形状对齐供装配层统一解包；
+    库内无此档位返回 None。抽曲区域随数据源视图（日服视图源=日服，其余/
+    未绑定=国服），``version_code`` 范围超出国服 current 时 fallback 日服
+    视图（jp_view 同步置位，渲染侧不显示加分）。
+    """
+    from sqlmodel import select
+
+    async with store.session() as db:
+        grade_row = (
+            await db.exec(
+                select(store.DanRandom).where(store.DanRandom.dan_id == dan_id)
+            )
+        ).first()
+    if grade_row is None:
+        return None
+    jp_view = jp_source
+    if not jp_view and version_code is not None and version_code > cn_current:
+        jp_view = True
+    # 候选为空属数据异常，_sample_random_sheets 显式失败（ValueError）
+    picks = await _sample_random_sheets(
+        grade_row, version_code=version_code, jp_region=jp_view
+    )
+    return grade_row, None, picks, jp_view
+
+
+async def _grade_picks(
+    gallery_id: str | None,
+    dan_id: str,
+    *,
+    cn_current: int,
+) -> (
+    tuple[
+        store.DanGrade,
+        store.DanCourse | None,
+        list[tuple[int, str, str, str]],
+        bool,
+    ]
+    | None
+):
+    """普通/真段位取数：段位行 + 所属段位表 + 课题曲列表 + 日服视图标志。
+
+    返回 (段位行, 段位表行, picks, jp_view)；库内无此段位返回 None。段位表
+    版本超出国服 current（``cn_current`` 已按日服源归零）→ jp_view 置位
+    （渲染侧不显示加分、奖励区用日服版本 logo）；picks 按 sheet.idx 官方序，
+    削除曲等 join 不到 song_id 的行保留标题由装配层降级展示。
+    """
+    from sqlmodel import select
+
+    grade_row = await find_grade_row(gallery_id, dan_id)
+    if grade_row is None:
+        return None
+    course: store.DanCourse | None = None
+    jp_view = False
+    async with store.session() as db:
+        course = (
+            await db.exec(
+                select(store.DanCourse).where(store.DanCourse.gallery_id == gallery_id)
+            )
+        ).first()
+        if course is not None and course.version > cn_current:
+            jp_view = True
+        sheets = (
+            await db.exec(
+                select(store.DanSheet).where(
+                    store.DanSheet.gallery_id == gallery_id,
+                    store.DanSheet.dan_id == dan_id,
+                )
+            )
+        ).all()
+    picks = [
+        (s.song_id, s.kind, s.difficulty, s.title)
+        for s in sorted(sheets, key=lambda s: s.idx)
+    ]
+    return grade_row, course, picks, jp_view
+
+
 async def card_data(
     gallery_id: str | None,
     dan_id: str,
@@ -817,7 +903,7 @@ async def card_data(
     定数取段位表所属版本的时点值（版本时效性——默认表即数据源现行版本）。
     ``binding`` 为空或成绩数据源不可用（UserScoreError）时走降级：达成率全
     0.0000%、底分「0」不带括号（与歌曲卡无数据一致）。返回 None = 库内无此
-    段位数据（未刷新）。
+    段位数据（未刷新）。取数细节见 :func:`_random_picks` / :func:`_grade_picks`。
     """
     from sqlmodel import select
     from maimai_py.enums import SongType
@@ -828,9 +914,6 @@ async def card_data(
     from .render.dan import DanCardData, DanSongCard
     from .render.nb_chart import new_best_score
 
-    grade_row: store.DanGrade | store.DanRandom | None
-    course: store.DanCourse | None = None
-    jp_view = False  # 国服源查超出国服 current 的表 → fallback 日服视图
     # 日服视图源（view_of 口径，勿散写 service 字面量）：段位表默认跟数据源
     # 现行版本、抽曲区域随视图，日服源无国服 current 边界
     jp_source = binding is not None and score_service.view_of(binding.service) == "jp"
@@ -838,51 +921,17 @@ async def card_data(
     if jp_source:
         cn_current = 0
     if dan_id.startswith("random_"):
-        async with store.session() as db:
-            grade_row = (
-                await db.exec(
-                    select(store.DanRandom).where(store.DanRandom.dan_id == dan_id)
-                )
-            ).first()
-        if grade_row is None:
-            return None
-        # 抽曲：区域随数据源视图（日服视图源=日服，其余/未绑定=国服）；版本
-        # 范围超出国服 current 时 fallback 日服视图，候选为空属数据异常显式失败
-        jp_region = jp_view = jp_source
-        if not jp_region and version_code is not None and version_code > cn_current:
-            jp_region = jp_view = True
-        picks = [
-            (song_id, kind, difficulty)
-            for song_id, kind, difficulty in await _sample_random_sheets(
-                grade_row, version_code=version_code, jp_region=jp_region
-            )
-        ]
+        got = await _random_picks(
+            dan_id,
+            jp_source=jp_source,
+            cn_current=cn_current,
+            version_code=version_code,
+        )
     else:
-        grade_row = await find_grade_row(gallery_id, dan_id)
-        if grade_row is None:
-            return None
-        async with store.session() as db:
-            course = (
-                await db.exec(
-                    select(store.DanCourse).where(
-                        store.DanCourse.gallery_id == gallery_id
-                    )
-                )
-            ).first()
-            if course is not None and course.version > cn_current:
-                jp_view = True
-            sheets = (
-                await db.exec(
-                    select(store.DanSheet).where(
-                        store.DanSheet.gallery_id == gallery_id,
-                        store.DanSheet.dan_id == dan_id,
-                    )
-                )
-            ).all()
-        picks = [
-            (s.song_id, s.kind, s.difficulty, s.title)
-            for s in sorted(sheets, key=lambda s: s.idx)
-        ]
+        got = await _grade_picks(gallery_id, dan_id, cn_current=cn_current)
+    if got is None:
+        return None
+    grade_row, course, picks, jp_view = got
 
     # 玩家成绩：未绑定/数据源不可用统一降级（与歌曲卡无数据一致）
     score_map: dict[tuple, ScoreExtend] = {}

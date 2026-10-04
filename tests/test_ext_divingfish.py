@@ -10,6 +10,7 @@ BASE_DF = "https://www.diving-fish.com/api/maimaidxprober"
 async def test_rating_ranking():
     from nonebot_plugin_awmc_helper.core.ext import divingfish as df_ext
 
+    df_ext._ranking_cache_clear()  # 进程级缓存，用例前清防跨文件污染
     with respx.mock(assert_all_called=False) as m:
         m.get(f"{BASE_DF}/rating_ranking").respond(
             json=[
@@ -18,8 +19,13 @@ async def test_rating_ranking():
             ]
         )
         users = await df_ext.rating_ranking()
+        # TTL 内二次调用走缓存：不再发起请求（respx 未放行即触网必失败）
+        assert await df_ext.rating_ranking() is users
     assert users[0].username == "a"  # 降序
     assert users[0].ra == 15000
+    # 测试助手整体清空（清后命中失效，需重新拉取）
+    df_ext._ranking_cache_clear()
+    assert df_ext._RANKING_CACHE.get(df_ext._RANKING_CACHE_KEY) is None
 
 
 def test_jwt_payload_unverified_shared_helper():

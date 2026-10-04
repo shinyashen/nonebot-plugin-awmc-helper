@@ -50,6 +50,7 @@ from .calc import (
     build_bests,
     compute_rating,
     build_flat_bests,
+    level_value_match,
 )
 from .score import score_service
 from .songs import song_service
@@ -1088,189 +1089,9 @@ _KIND_CONDS: "dict[str, Cond]" = {
 
 # ---------------------------------------------------------------- 装配（assembler）
 # 全部邻接/上下文规则集中于此（§11.3）；未识别残片忽略（contains 语义）。
-
-
-def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
-    conds: "list[Cond]" = []
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
-        if t.kind == "version":
-            chars, dai = t.value
-            if len(chars) == 1 and chars[0] in ("紫", "白", "宴") and not dai:
-                # 裸紫/白/宴（段长 1 且无「代」）：右邻牌种字 → 牌绑定（歧义
-                # 豁免，2026-10-01 起宴与紫白同口径）；否则中止。「紫代/白谱/
-                # 宴代/宴谱」等显式组合在层 1/层 2 已消解，不受影响
-                if nxt is not None and nxt.kind == "kind" and nxt.value in _KIND_CONDS:
-                    conds.append(_version_cond(chars, False))
-                    conds.append(_KIND_CONDS[nxt.value])
-                    i += 2
-                    continue
-                if chars[0] == "宴":
-                    return ComboAmbiguity(_AMBIGUITY_HINT_UTAGE)
-                return ComboAmbiguity(_AMBIGUITY_HINT.format(ch=chars[0]))
-            conds.append(_version_cond(chars, dai))
-        elif t.kind == "kind":
-            if cond := _KIND_CONDS.get(t.value):
-                conds.append(cond)  # 「者」落单丢弃（S-11 内部谓词不暴露）
-        elif t.kind == "rate_mod":
-            # 纯/仅：绑定紧邻档位词 → 精确档变体；落单残片忽略
-            if nxt is not None and nxt.kind == "rate" and nxt.value in _RATE_GE:
-                conds.append(_rate_cond(nxt.value, exact=True))
-                i += 2
-                continue
-        elif t.kind == "rate":
-            if t.value in _RATE_GE:
-                conds.append(_rate_cond(t.value))
-        elif t.kind == "combo":
-            conds.append(_combo_cond(t.value))
-        elif t.kind == "sync":
-            conds.append(_sync_cond(t.value))
-        elif t.kind == "badge":
-            conds.append(_badge_cond(t.value))
-        elif t.kind == "star":
-            conds.append(_star_cond(t.value))
-        elif t.kind == "cun":
-            conds.append(_cun_cond())
-        elif t.kind == "kill":
-            conds.append(_kill_cond())
-        elif t.kind == "ideal":
-            conds.append(_ideal_cond())
-        elif t.kind == "fit":
-            conds.append(_fit_cond())
-        elif t.kind == "designer":
-            # S-10 谱师：查询名 → 等价类 needle 集（本名/別名義/curated 名义
-            # 串 + 假名折叠变体，core/designer.py），任一 needle 整串包含于
-            # note_designer 即命中（覆盖合作串与马甲；词表侧已含别名，
-            # token 值可能是昵称「翠」或实名「サファ太」，统一经 needles 解析）
-            name: str = t.value
-            needles = _designer_needles(name)
-            conds.append(
-                Cond(
-                    CondType.DESIGNER,
-                    key=f"designer:{name}",
-                    label=t.text,
-                    chart=lambda s, d, _cur, _ns=set(needles): _designer_match(
-                        d.note_designer or "", _ns
-                    ),
-                    value=name,
-                    single_chart=True,
-                )
-            )
-        elif t.kind == "diff":
-            li: LevelIndex = t.value
-            conds.append(
-                Cond(
-                    CondType.DIFF,
-                    key=f"diff:{li.name}",
-                    label=t.text,
-                    chart=lambda s, d, _cur, _li=li: d.level_index == _li,
-                    record=lambda s, _li=li: s.level_index == _li,
-                    value=li,
-                    single_chart=True,
-                )
-            )
-        elif t.kind == "level":
-            conds.append(_level_cond(t.value))
-        elif t.kind == "ds":
-            conds.append(_ds_cond(t.value))
-        elif t.kind == "genre":
-            g: Genre = t.value
-            conds.append(
-                Cond(
-                    CondType.GENRE,
-                    key=f"genre:{g.name}",
-                    label=t.text,
-                    chart=lambda s, d, _cur, _g=g: s.genre == _g,
-                    value=g,
-                )
-            )
-        elif t.kind == "genre_sub":
-            sub: str = t.value
-            conds.append(
-                Cond(
-                    CondType.GENRE_SUB,
-                    key=f"genre_sub:{sub}",
-                    label="音击" if sub == "ongeki" else "中二",
-                    chart=lambda s, d, _cur, _w=sub: _genre_sub_match(s, _w),
-                    value=sub,
-                )
-            )
-        elif t.kind == "era_year":
-            year_e: int = t.value
-            if year_e in ERA_YEAR_TO_CODE:
-                conds.append(_era_year_cond(year_e, t.text))
-            # 未收录年份（2000–2018 / 2027+）：残片忽略
-        elif t.kind == "era":
-            which: str = t.value
-            conds.append(
-                Cond(
-                    CondType.ERA,
-                    key=f"era:{which}",
-                    label="dx" if which == "dx" else "旧框",
-                    chart=(
-                        (
-                            lambda s, d, _cur: (
-                                (version_code_of(d) or 0) > Version.MAIMAI_FINALE.value
-                            )
-                        )
-                        if which == "dx"
-                        else (
-                            lambda s, d, _cur: (
-                                0
-                                < (version_code_of(d) or 0)
-                                <= Version.MAIMAI_FINALE.value
-                            )
-                        )
-                    ),
-                    value=which,
-                )
-            )
-        elif t.kind == "chart_type":
-            st: SongType = t.value
-            conds.append(
-                Cond(
-                    CondType.CHART_TYPE,
-                    key=f"ctype:{st.name}",
-                    label="dx谱" if st == SongType.DX else "标准",
-                    chart=lambda s, d, _cur, _st=st: d.type == _st,
-                    value=st,
-                )
-            )
-        elif t.kind == "newness":
-            which_n: str = t.value
-            conds.append(
-                Cond(
-                    CondType.NEWNESS,
-                    key=f"new:{which_n}",
-                    label="新版本" if which_n == "new" else "旧版本",
-                    chart=lambda s, d, cur, _w=which_n: (
-                        version_code_of(d) == cur
-                        if _w == "new"
-                        else version_code_of(d) != cur
-                    ),
-                    value=which_n,
-                )
-            )
-        elif t.kind == "utage":
-            conds.append(
-                Cond(
-                    CondType.UTAGE,
-                    key="utage",
-                    label="宴谱",
-                    chart=lambda s, d, _cur: d.type == SongType.UTAGE,
-                )
-            )
-        i += 1
-    # 同型同键去重（§9.0：同一 Cond 不重复计入），保持解析顺序
-    seen: set[tuple[CondType, str]] = set()
-    deduped: "list[Cond]" = []
-    for c in conds:
-        if (k := (c.ctype, c.key)) not in seen:
-            seen.add(k)
-            deduped.append(c)
-    return deduped or None
+# 装配表驱动：kind → 装配函数 ``(token, nxt) -> (产出, 前进 token 数)``，
+# 产出为 Cond 列表或歧义中止；跨 token 邻接（版本×牌种、纯/仅×档位）经
+# ``nxt`` 参数与 advance=2 与单 token 装配同构承接。
 
 
 def _era_year_cond(year: int, label: str) -> Cond:
@@ -1304,15 +1125,297 @@ def _level_cond(level: str) -> Cond:
 
 
 def _ds_cond(v: float) -> Cond:
-    """定数精确条件（S-9，一位小数整数比较防浮点尾差）。"""
+    """定数精确条件（S-9）：匹配口径单源 ``calc.level_value_match``。"""
     return Cond(
         CondType.DS,
         key=f"ds:{round(v * 10)}",
         label=f"{v:g}定数",
-        chart=lambda s, d, _cur, _v=v: round(d.level_value * 10) == round(_v * 10),
+        chart=lambda s, d, _cur, _v=v: level_value_match(d.level_value, _v),
         value=v,
         single_chart=True,
     )
+
+
+def _asm_version(t: Token, nxt: "Token | None"):
+    """版本字：裸紫/白/宴（段长 1 且无「代」）走牌绑定/歧义特判；其余按
+    连续段装一个版本 Cond。"""
+    chars, dai = t.value
+    if len(chars) == 1 and chars[0] in ("紫", "白", "宴") and not dai:
+        # 右邻牌种字 → 牌绑定（歧义豁免，2026-10-01 起宴与紫白同口径）；
+        # 否则中止。「紫代/白谱/宴代/宴谱」等显式组合在层 1/层 2 已消解，
+        # 不受影响
+        if nxt is not None and nxt.kind == "kind" and nxt.value in _KIND_CONDS:
+            return [_version_cond(chars, False), _KIND_CONDS[nxt.value]], 2
+        if chars[0] == "宴":
+            return ComboAmbiguity(_AMBIGUITY_HINT_UTAGE), 1
+        return ComboAmbiguity(_AMBIGUITY_HINT.format(ch=chars[0])), 1
+    return [_version_cond(chars, dai)], 1
+
+
+def _asm_kind(t: Token, nxt: "Token | None"):
+    cond = _KIND_CONDS.get(t.value)
+    return ([cond] if cond else []), 1  # 「者」落单丢弃（S-11 内部谓词不暴露）
+
+
+def _asm_rate_mod(t: Token, nxt: "Token | None"):
+    """纯/仅：绑定紧邻档位词 → 精确档变体；落单残片忽略。"""
+    if nxt is not None and nxt.kind == "rate" and nxt.value in _RATE_GE:
+        return [_rate_cond(nxt.value, exact=True)], 2
+    return [], 1
+
+
+def _asm_rate(t: Token, nxt: "Token | None"):
+    return ([_rate_cond(t.value)] if t.value in _RATE_GE else []), 1
+
+
+def _asm_combo(t: Token, nxt: "Token | None"):
+    return [_combo_cond(t.value)], 1
+
+
+def _asm_sync(t: Token, nxt: "Token | None"):
+    return [_sync_cond(t.value)], 1
+
+
+def _asm_badge(t: Token, nxt: "Token | None"):
+    return [_badge_cond(t.value)], 1
+
+
+def _asm_star(t: Token, nxt: "Token | None"):
+    return [_star_cond(t.value)], 1
+
+
+def _asm_cun(t: Token, nxt: "Token | None"):
+    return [_cun_cond()], 1
+
+
+def _asm_kill(t: Token, nxt: "Token | None"):
+    return [_kill_cond()], 1
+
+
+def _asm_ideal(t: Token, nxt: "Token | None"):
+    return [_ideal_cond()], 1
+
+
+def _asm_fit(t: Token, nxt: "Token | None"):
+    return [_fit_cond()], 1
+
+
+def _asm_designer(t: Token, nxt: "Token | None"):
+    # S-10 谱师：查询名 → 等价类 needle 集（本名/別名義/curated 名义串 +
+    # 假名折叠变体，core/designer.py），任一 needle 整串包含于 note_designer
+    # 即命中（覆盖合作串与马甲；词表侧已含别名，token 值可能是昵称「翠」
+    # 或实名「サファ太」，统一经 needles 解析）
+    name: str = t.value
+    needles = _designer_needles(name)
+    return (
+        [
+            Cond(
+                CondType.DESIGNER,
+                key=f"designer:{name}",
+                label=t.text,
+                chart=lambda s, d, _cur, _ns=set(needles): _designer_match(
+                    d.note_designer or "", _ns
+                ),
+                value=name,
+                single_chart=True,
+            )
+        ],
+        1,
+    )
+
+
+def _asm_diff(t: Token, nxt: "Token | None"):
+    li: LevelIndex = t.value
+    return (
+        [
+            Cond(
+                CondType.DIFF,
+                key=f"diff:{li.name}",
+                label=t.text,
+                chart=lambda s, d, _cur, _li=li: d.level_index == _li,
+                record=lambda s, _li=li: s.level_index == _li,
+                value=li,
+                single_chart=True,
+            )
+        ],
+        1,
+    )
+
+
+def _asm_level(t: Token, nxt: "Token | None"):
+    return [_level_cond(t.value)], 1
+
+
+def _asm_ds(t: Token, nxt: "Token | None"):
+    return [_ds_cond(t.value)], 1
+
+
+def _asm_genre(t: Token, nxt: "Token | None"):
+    g: Genre = t.value
+    return (
+        [
+            Cond(
+                CondType.GENRE,
+                key=f"genre:{g.name}",
+                label=t.text,
+                chart=lambda s, d, _cur, _g=g: s.genre == _g,
+                value=g,
+            )
+        ],
+        1,
+    )
+
+
+def _asm_genre_sub(t: Token, nxt: "Token | None"):
+    sub: str = t.value
+    return (
+        [
+            Cond(
+                CondType.GENRE_SUB,
+                key=f"genre_sub:{sub}",
+                label="音击" if sub == "ongeki" else "中二",
+                chart=lambda s, d, _cur, _w=sub: _genre_sub_match(s, _w),
+                value=sub,
+            )
+        ],
+        1,
+    )
+
+
+def _asm_era_year(t: Token, nxt: "Token | None"):
+    if t.value in ERA_YEAR_TO_CODE:
+        return [_era_year_cond(t.value, t.text)], 1
+    return [], 1  # 未收录年份（2000–2018 / 2027+）：残片忽略
+
+
+def _asm_era(t: Token, nxt: "Token | None"):
+    which: str = t.value
+    return (
+        [
+            Cond(
+                CondType.ERA,
+                key=f"era:{which}",
+                label="dx" if which == "dx" else "旧框",
+                chart=(
+                    (
+                        lambda s, d, _cur: (
+                            (version_code_of(d) or 0) > Version.MAIMAI_FINALE.value
+                        )
+                    )
+                    if which == "dx"
+                    else (
+                        lambda s, d, _cur: (
+                            0 < (version_code_of(d) or 0) <= Version.MAIMAI_FINALE.value
+                        )
+                    )
+                ),
+                value=which,
+            )
+        ],
+        1,
+    )
+
+
+def _asm_chart_type(t: Token, nxt: "Token | None"):
+    st: SongType = t.value
+    return (
+        [
+            Cond(
+                CondType.CHART_TYPE,
+                key=f"ctype:{st.name}",
+                label="dx谱" if st == SongType.DX else "标准",
+                chart=lambda s, d, _cur, _st=st: d.type == _st,
+                value=st,
+            )
+        ],
+        1,
+    )
+
+
+def _asm_newness(t: Token, nxt: "Token | None"):
+    which_n: str = t.value
+    return (
+        [
+            Cond(
+                CondType.NEWNESS,
+                key=f"new:{which_n}",
+                label="新版本" if which_n == "new" else "旧版本",
+                chart=lambda s, d, cur, _w=which_n: (
+                    version_code_of(d) == cur
+                    if _w == "new"
+                    else version_code_of(d) != cur
+                ),
+                value=which_n,
+            )
+        ],
+        1,
+    )
+
+
+def _asm_utage(t: Token, nxt: "Token | None"):
+    return (
+        [
+            Cond(
+                CondType.UTAGE,
+                key="utage",
+                label="宴谱",
+                chart=lambda s, d, _cur: d.type == SongType.UTAGE,
+            )
+        ],
+        1,
+    )
+
+
+_ASSEMBLERS: "dict[str, Callable[..., tuple[list[Cond] | ComboAmbiguity, int]]]" = {
+    "version": _asm_version,
+    "kind": _asm_kind,
+    "rate_mod": _asm_rate_mod,
+    "rate": _asm_rate,
+    "combo": _asm_combo,
+    "sync": _asm_sync,
+    "badge": _asm_badge,
+    "star": _asm_star,
+    "cun": _asm_cun,
+    "kill": _asm_kill,
+    "ideal": _asm_ideal,
+    "fit": _asm_fit,
+    "designer": _asm_designer,
+    "diff": _asm_diff,
+    "level": _asm_level,
+    "ds": _asm_ds,
+    "genre": _asm_genre,
+    "genre_sub": _asm_genre_sub,
+    "era_year": _asm_era_year,
+    "era": _asm_era,
+    "chart_type": _asm_chart_type,
+    "newness": _asm_newness,
+    "utage": _asm_utage,
+}
+
+
+def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
+    conds: "list[Cond]" = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        asm = _ASSEMBLERS.get(t.kind)
+        if asm is None:
+            i += 1  # 词法新增 kind 未接装配时的兜底：残片忽略（现状全在表内）
+            continue
+        out, advance = asm(t, nxt)
+        if isinstance(out, ComboAmbiguity):
+            return out
+        conds.extend(out)
+        i += advance
+    # 同型同键去重（§9.0：同一 Cond 不重复计入），保持解析顺序
+    seen: set[tuple[CondType, str]] = set()
+    deduped: "list[Cond]" = []
+    for c in conds:
+        if (k := (c.ctype, c.key)) not in seen:
+            seen.add(k)
+            deduped.append(c)
+    return deduped or None
 
 
 def parse_combo(

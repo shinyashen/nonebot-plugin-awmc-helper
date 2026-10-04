@@ -233,6 +233,26 @@ def test_compute_rating_consistent_with_library():
     assert compute_rating(13.5, 99.0) == ScoreCoefficient(99.0).ra(13.5)
 
 
+def test_level_value_match_boundaries():
+    """定数等值匹配（十分位 round 口径，S-9）：边界与浮点表示误差行为锁定。
+
+    - 13.5 精确相等命中；
+    - 13.55 → round(135.5…) = 136 ≠ 135，不与 13.5 混；
+    - 13.49 → round(134.9) = 135，十分位口径下与 13.5 同值命中；
+    - 14.5（二进制可精确表示）与其浮点近邻 14.499999999999998 一律命中
+      ——round 抹平表示误差，这正是 S-9 防「14.5定数」漏配的动机。
+    """
+    from nonebot_plugin_awmc_helper.core.calc import level_value_match
+
+    assert level_value_match(13.5, 13.5)
+    assert not level_value_match(13.55, 13.5)  # 136 vs 135
+    assert level_value_match(13.49, 13.5)  # 135 vs 135（十分位舍入同值）
+    assert level_value_match(14.5, 14.5)
+    assert level_value_match(14.5, 14.5 - 1e-15)  # 浮点尾差不翻车
+    assert not level_value_match(13.4, 13.5)
+    assert not level_value_match(14.0, 14.5)
+
+
 def test_rise_recommend_basic():
     """推分推荐：未入线曲目按目标档位给出提升。"""
     import dataclasses
