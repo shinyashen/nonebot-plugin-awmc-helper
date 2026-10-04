@@ -24,7 +24,7 @@ score-updater wechat_binding/play_count 族），空表无行、无实际影响�
 
 import json
 import sqlite3
-from typing import Any
+from typing import Any, cast
 from pathlib import Path
 from datetime import datetime
 
@@ -430,13 +430,18 @@ def _own_tables() -> dict[str, Table]:
     SQLModel 全局 metadata 三仓共享（见模块 docstring），自动迁移只对本
     模块定义的模型负责；兄弟仓的表由兄弟仓自己的初始化流程补列。
     """
-    return {
-        cls.__tablename__: cls.__table__
-        for cls in globals().values()
-        if isinstance(cls, type)
-        and issubclass(cls, SQLModel)
-        and cls.__module__ == __name__
-    }
+    tables: dict[str, Table] = {}
+    for cls in globals().values():
+        if (
+            isinstance(cls, type)
+            and issubclass(cls, SQLModel)
+            and cls.__module__ == __name__
+        ):
+            # __tablename__/__table__ 由 SQLModel 运行时注入，静态类型上
+            # 不可见，故经 getattr 取
+            name = getattr(cls, "__tablename__")
+            tables[name] = cast(Table, getattr(cls, "__table__"))
+    return tables
 
 
 def _sqlite_default_literal(value: Any) -> str | None:
@@ -472,7 +477,7 @@ def _column_default_sql(column: Column) -> str | None:
         return _sqlite_default_literal(arg)
     default = column.default
     if default is not None and getattr(default, "is_scalar", False):
-        return _sqlite_default_literal(default.arg)
+        return _sqlite_default_literal(getattr(default, "arg"))
     return None
 
 

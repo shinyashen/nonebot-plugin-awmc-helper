@@ -840,7 +840,8 @@ async def _grade_picks(
     tuple[
         store.DanGrade,
         store.DanCourse | None,
-        list[tuple[int, str, str, str]],
+        # song_id 对削除曲等标题对不上的行为 NULL（渲染层默认封面兜底）
+        list[tuple[int | None, str, str, str]],
         bool,
     ]
     | None

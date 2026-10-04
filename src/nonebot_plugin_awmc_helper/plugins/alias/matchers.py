@@ -103,7 +103,9 @@ async def _parse_alias_args(message: Message, usage: str) -> tuple[int, str]:
         await song_service.by_id(song_id) is None
         and await song_service.jp_by_id(song_id) is None
     ):
-        await UniMessage.text(f" {song_not_found_text(song_id)}").finish(at_sender=True)
+        await UniMessage.text(f" {song_not_found_text(str(song_id))}").finish(
+            at_sender=True
+        )
     return song_id, alias_name
 
 

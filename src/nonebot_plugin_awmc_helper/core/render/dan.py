@@ -385,10 +385,13 @@ def _draw_strip(card: Image.Image, song: DanSongCard) -> None:
     白色槽 pill 上居中绘底分（卡框烤字已由素材更新移除，无需遮罩）。"""
     draw = ImageDraw.Draw(card)
     info = f"定数: {song.ds} 谱师: {song.charter} BPM: {song.bpm}"
-    # STRIP_INFO_SIZES 非空常量，循环首轮即赋值（第六轮审查：删循环前死赋值）
+    # 兜底初值 = 最小字号（迭代序降字号，全超宽时循环终值与初值同款）：
+    # 循环自大向小找首个放得下的字号，basedpyright 需要确定绑定
+    info_font = font(STRIP_INFO_SIZES[-1], FONT_HAN)
     for size in STRIP_INFO_SIZES:
-        info_font = font(size, FONT_HAN)
-        if draw.textlength(info, font=info_font) <= STRIP_INFO_RIGHT - STRIP_INFO_X:
+        candidate = font(size, FONT_HAN)
+        if draw.textlength(info, font=candidate) <= STRIP_INFO_RIGHT - STRIP_INFO_X:
+            info_font = candidate
             break
     info = fit_text(info, info_font, STRIP_INFO_RIGHT - STRIP_INFO_X)
     draw.text(
