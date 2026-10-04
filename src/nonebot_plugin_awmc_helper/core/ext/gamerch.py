@@ -52,6 +52,13 @@ ALIAS_SOURCE_IDS = (534017, 1003533, 534036)
 ALIAS_GRAPH_KV = "designer_alias_graph"
 _MAX_LIST_PAGES = 30
 _FETCH_DELAY = 0.5
+# 反爬重试口径：只重试 202/403（反爬信号），404/500 等真实失败不重试
+_RETRY_ATTEMPTS = 2
+"""反爬重试次数（首次之外的额外尝试；Cookie 入共享 jar 后可自愈）。"""
+_RETRY_DELAY = 1.0
+"""反爬重试间隔（秒）：等首请求的 Set-Cookie 落 jar。"""
+_ANTIBOT_CODES = (202, 403)
+"""反爬信号状态码（202 空页 / 403 拦截）。"""
 # 难度行 Lv 单元格形状：3 / 13+ / 14?（宴谱行带 kanji 前缀，不会 fullmatch）
 _LV_RE = re.compile(r"\d{1,2}\+?\??")
 _HEADER_WORDS = {"Lv", "Tap", "Hold", "Slide", "Touch", "Break", "総数", "内訳"}
@@ -121,14 +128,13 @@ async def fetch_page_text(http, url: str, *, max_age: int) -> str:
 
     await asyncio.sleep(_FETCH_DELAY)
     # 首请求可能被 202 反爬（空页、无 Cookie），Cookie 入共享客户端 jar 后
-    # 重试；只重试 202/403（反爬信号），404/500 等真实失败不重试。
-    # 202 属 2xx、raise_for_status 不抛，重试耗尽仍 202 时必须显式失败——
+    # 重试；202 属 2xx、raise_for_status 不抛，重试耗尽仍 202 时必须显式失败——
     # 反爬空页入库会把缺口曲标记为「已抓取」，TTL 内补充静默 no-op
     resp = await http.get(url, headers=_REQUEST_HEADERS)
-    for _ in range(2):
-        if resp.status_code == 200 or resp.status_code not in (202, 403):
+    for _ in range(_RETRY_ATTEMPTS):
+        if resp.status_code not in _ANTIBOT_CODES:
             break
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(_RETRY_DELAY)
         resp = await http.get(url, headers=_REQUEST_HEADERS)
     if resp.status_code == 202:
         raise httpx.HTTPStatusError(

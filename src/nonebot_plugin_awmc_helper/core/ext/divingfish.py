@@ -1,6 +1,7 @@
 """水鱼直连：RA 排行榜 + OAuth 设备码绑定（maimai-py 未覆盖的部分）。"""
 
 import re
+import time
 from dataclasses import dataclass
 
 from . import (
@@ -29,11 +30,29 @@ class RankUser:
     ra: int
 
 
+_RANKING_CACHE: tuple[float, list[RankUser]] | None = None
+"""RA 排行榜进程内缓存：(拉取时刻, 全量榜单)。榜单位于「查看排名/我的排名」
+用户指令热路径，TTL 内复用免每次直拉（全服统计态，短缓存无一致性代价）；
+缓存期返回共享列表，调用方约定只读不改动。"""
+_RANKING_TTL = 600.0
+
+
+def _ranking_cache_clear() -> None:
+    """清空排行榜缓存（测试用）。"""
+    global _RANKING_CACHE
+    _RANKING_CACHE = None
+
+
 async def rating_ranking() -> list[RankUser]:
-    """全量 RA 排行（按 RA 从高到低）。"""
+    """全量 RA 排行（按 RA 从高到低；进程内 TTL 缓存，见 :data:`_RANKING_CACHE`）。"""
+    global _RANKING_CACHE
+    now = time.monotonic()
+    if _RANKING_CACHE is not None and now - _RANKING_CACHE[0] < _RANKING_TTL:
+        return _RANKING_CACHE[1]
     data = await fetch_json(RANKING_URL, name="水鱼排行榜")
     users = [RankUser(username=u["username"], ra=int(u["ra"])) for u in data]
     users.sort(key=lambda x: x.ra, reverse=True)
+    _RANKING_CACHE = (now, users)
     return users
 
 

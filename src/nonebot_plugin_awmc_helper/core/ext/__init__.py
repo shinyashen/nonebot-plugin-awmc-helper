@@ -2,7 +2,7 @@
 
 - :mod:`.yuzu`：柚子别名申请/投票/进行中投票 + SSE 常驻推送；
 - :mod:`.divingfish`：水鱼 RA 排行；
-- :mod:`.lxns`：落雪 OAuth 换 token / 曲库列表 / AP50；
+- :mod:`.lxns`：落雪 OAuth 换 token / 曲库列表；
 - :mod:`.wahlap`：华立机厅 location；
 - :mod:`.maimaiinfo`：日服曲库骨架/定数历史（GitHub raw）；
 - :mod:`.otoge_db`：otoge-db 日服谱面/版本/宴谱数据（GitHub raw）；
@@ -17,12 +17,18 @@
 
 import json
 import base64
+import asyncio
 from typing import Any
 from collections.abc import Callable, Awaitable
 
 import httpx
 
 from ..http import create_smart_client
+
+# ext 层共享客户端超时（net 等自管客户端同口径引用，避免逐处复写字面量）
+EXT_CLIENT_TIMEOUT = httpx.Timeout(connect=10, read=30, write=10, pool=10)
+# 网络重试退避基数（秒）：第 n 次额外尝试前等 ``_RETRY_BACKOFF * n``
+_RETRY_BACKOFF = 0.5
 
 
 class ExtError(Exception):
@@ -57,9 +63,7 @@ def get_client() -> httpx.AsyncClient:
     """ext 层共享的 httpx 客户端（懒创建）。"""
     global _client
     if _client is None:
-        _client = create_smart_client(
-            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10)
-        )
+        _client = create_smart_client(timeout=EXT_CLIENT_TIMEOUT)
     return _client
 
 
@@ -79,10 +83,13 @@ async def ext_request(
     message 错误体、落雪 OAuth error 体、水鱼 device 流按状态码分支、
     MuNET 双主机自管节流），底座只收口网络异常语义；``retries`` 是首次
     之外的额外尝试次数（幂等 GET 列表端点共 3 次尝试即 retries=2，
-    令牌/提交类端点 0 次直抛）。
+    令牌/提交类端点 0 次直抛），重试前按 :data:`_RETRY_BACKOFF` 线性退避。
     """
     last_error: httpx.RequestError | None = None
-    for _ in range(1 + max(0, retries)):
+    for attempt in range(1 + max(0, retries)):
+        if attempt:
+            # 失败退避后再试（幂等 GET）；retries=0 只尝试一次不进此分支
+            await asyncio.sleep(_RETRY_BACKOFF * attempt)
         try:
             return await get_client().request(method, url, **kwargs)
         except httpx.RequestError as e:

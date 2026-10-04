@@ -5,7 +5,7 @@
 
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode
 
 from . import (
     ExtError,
@@ -15,6 +15,13 @@ from . import (
 from ...config import plugin_config
 
 LXNS_BASE = "https://maimai.lxns.net"
+# 落雪 access token 有效期秒（oauth-guide ``expires_in`` 口径；exp 缺失时按
+# iat + 该值回退推算）
+LXNS_ACCESS_TOKEN_TTL = 900
+# 授权码形态：裸码（XXXX-XXXX-XXXX / 长 base64 串），提取时三处复用
+_CODE_PATTERN = re.compile(
+    r"^(?:[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}|[A-Za-z0-9_-]{16,256})$"
+)
 # write_player（2026-09-26 应作者要求追加）：绑定 token 兼作第三方传分插件的
 # 写凭据（落雪成绩上传），读权限之外多申请一项；存量绑定需重新 lxbind 授权
 # 才会升级到新 scope。
@@ -35,9 +42,10 @@ async def fetch_song_list(notes: bool = True) -> dict:
     )
     resp = await ext_request(
         "GET",
-        f"{LXNS_BASE}/api/v0/maimai/song/list?notes={'true' if notes else 'false'}",
+        f"{LXNS_BASE}/api/v0/maimai/song/list",
         name="落雪曲库列表",
         network_message="落雪曲库列表网络异常",
+        params={"notes": "true" if notes else "false"},
         headers=headers,
         timeout=60,
     )
@@ -96,8 +104,6 @@ def oauth_configured() -> bool:
 
 def build_authorize_url() -> str:
     """构造落雪 OAuth 授权页链接（scope：读玩家/成绩 + 上传成绩，见 SCOPE 注）。"""
-    from urllib.parse import urlencode
-
     query = urlencode(
         {
             "response_type": "code",
@@ -127,17 +133,22 @@ async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
         raise LxnsGrantError(str(data["error"]), str(data.get("error_description", "")))
     if resp.status_code != 200 or not data.get("success", True):
         raise ExtError(str(data.get("message", error_default)))
-    return LxnsToken.from_payload(data.get("data", data))
+    grant = data.get("data", data)
+    # 200 但缺 access_token（上游异常响应）：显式失败，不让 KeyError 逃逸到
+    # 绑定入口的宽捕处变成裸 'access_token' 提示
+    if "access_token" not in grant:
+        raise ExtError("落雪授权接口返回了无效数据")
+    return LxnsToken.from_payload(grant)
 
 
 def token_expiry(access_token: str) -> float | None:
-    """读出 access token 的过期时刻（JWT ``exp``，缺则 ``iat + 900``）。
+    """读出 access token 的过期时刻（JWT ``exp``，缺则 ``iat + TTL``）。
 
     只解不验：令牌是落雪签发、仅库存自用，本地预检判过期无需验签，验签由
-    落雪资源服务器做（同水鱼 ``token_subject`` 先例）。有效期 900 秒取自
-    oauth-guide（``expires_in=900``）。非 JWT / payload 非对象 / 两字段皆缺
-    时返回 None，调用方回退 401 驱动的既有续期链路（落雪 OAuth 仍在 beta，
-    不对令牌内部结构做硬依赖）。
+    落雪资源服务器做（同水鱼 ``token_subject`` 先例）。有效期取
+    :data:`LXNS_ACCESS_TOKEN_TTL`（oauth-guide ``expires_in=900``）。非 JWT /
+    payload 非对象 / 两字段皆缺时返回 None，调用方回退 401 驱动的既有续期链路
+    （落雪 OAuth 仍在 beta，不对令牌内部结构做硬依赖）。
     """
     payload = jwt_payload_unverified(access_token)
     if payload is None:
@@ -147,17 +158,17 @@ def token_expiry(access_token: str) -> float | None:
         return float(exp)
     iat = payload.get("iat")
     if isinstance(iat, (int, float)):
-        return float(iat) + 900
+        return float(iat) + LXNS_ACCESS_TOKEN_TTL
     return None
 
 
 def token_writable(access_token: str) -> bool | None:
     """读出 access token 是否含写 scope（JWT ``scope`` 含 ``write_player``）。
 
-    第三方传分插件（score-updater）据此判「可上传」而不必复刻 scope 知识
-    （单源）；存量旧授权无写 scope 返回 False，需重新 lxbind。非 JWT /
-    payload 非对象返回 None，调用方按未知态处理（同 :func:`token_expiry`
-    的回退口径）。
+    **score-updater 跨仓消费的外部契约，签名勿动**（第三方传分插件据此判
+    「可上传」而不必复刻 scope 知识，单源）；存量旧授权无写 scope 返回 False，
+    需重新 lxbind。非 JWT / payload 非对象返回 None，调用方按未知态处理
+    （同 :func:`token_expiry` 的回退口径）。
     """
     payload = jwt_payload_unverified(access_token)
     if payload is None:
@@ -200,17 +211,14 @@ async def refresh_token(refresh_token: str) -> LxnsToken:
 def extract_authorization_code(text: str) -> str | None:
     """从用户输入提取授权码：裸码 / `授权码：xxx` / 回调链接 query。"""
     value = text.strip()
-    pattern = re.compile(
-        r"^(?:[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}|[A-Za-z0-9_-]{16,256})$"
-    )
-    if pattern.fullmatch(value):
+    if _CODE_PATTERN.fullmatch(value):
         return value
     prefixed = re.fullmatch(r"授权码\s*[:：]?\s*(\S+)", value)
-    if prefixed and pattern.fullmatch(prefixed.group(1)):
+    if prefixed and _CODE_PATTERN.fullmatch(prefixed.group(1)):
         return prefixed.group(1)
     parsed = urlparse(value)
     if parsed.scheme in {"http", "https"}:
         code = parse_qs(parsed.query).get("code", [None])[0]
-        if code and pattern.fullmatch(code):
+        if code and _CODE_PATTERN.fullmatch(code):
             return code
     return None

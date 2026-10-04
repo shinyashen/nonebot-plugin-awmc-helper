@@ -25,9 +25,12 @@ async def test_fetch_json_invalid_json_is_exterror(ext_mock):
 
 
 @pytest.mark.asyncio
-async def test_fetch_json_network_error_is_extnetworkerror(ext_mock):
+async def test_fetch_json_network_error_is_extnetworkerror(ext_mock, monkeypatch):
+    import nonebot_plugin_awmc_helper.core.ext as ext_pkg
     from nonebot_plugin_awmc_helper.core.ext import ExtNetworkError, fetch_json
 
+    # 重试退避常量置 0：退避语义由实现保证，测试不等真实 sleep
+    monkeypatch.setattr(ext_pkg, "_RETRY_BACKOFF", 0)
     ext_mock.get("https://example.com/data.json").side_effect = httpx.ConnectError(
         "boom"
     )
@@ -67,4 +70,16 @@ async def test_lxns_token_grant_network_error_is_extnetworkerror(ext_mock):
         "https://maimai.lxns.net/api/v0/oauth/token"
     ).side_effect = httpx.ConnectError("boom")
     with pytest.raises(ExtNetworkError):
+        await lxns.fetch_token("ABCD-EFGH-JKLM")
+
+
+@pytest.mark.asyncio
+async def test_lxns_token_grant_missing_access_token_is_exterror(ext_mock):
+    """200 但 data 缺 access_token：显式 ExtError，不让 KeyError 逃逸成裸提示。"""
+    from nonebot_plugin_awmc_helper.core.ext import ExtError, lxns
+
+    ext_mock.post("https://maimai.lxns.net/api/v0/oauth/token").respond(
+        json={"success": True, "data": {"refresh_token": "rt"}}
+    )
+    with pytest.raises(ExtError, match="无效数据"):
         await lxns.fetch_token("ABCD-EFGH-JKLM")

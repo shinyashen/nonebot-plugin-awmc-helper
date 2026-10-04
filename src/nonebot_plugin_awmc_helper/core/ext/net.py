@@ -21,7 +21,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import Tag, BeautifulSoup
 
-from . import ExtError, ExtNetworkError
+from . import EXT_CLIENT_TIMEOUT, ExtError, ExtNetworkError
 from ..http import create_smart_client, maimaidx_ssl_context
 
 BASE = "https://maimaidx.jp/maimai-mobile"
@@ -34,6 +34,8 @@ _MAINTENANCE_MARKS = ("定期メンテナンス中です",)
 # 记录页块标识（实测 2026-09-26）：未游玩的难度页仍返回全曲块，
 # 只是块内无成绩字段；页面缺失该标识即改版或登录态丢失
 _RECORD_BLOCK_MARK = "w_450 m_15 p_r f_0"
+# 块 CSS 选择器由标识派生（单源）：类名改版只改 _RECORD_BLOCK_MARK 一处
+_RECORD_BLOCK_SELECTOR = "." + _RECORD_BLOCK_MARK.replace(" ", ".")
 
 # 浏览器指纹头（dxrating COMMON_HEADERS 全量照抄；NET 对非浏览器 UA 有风控）
 COMMON_HEADERS = {
@@ -164,7 +166,7 @@ class MaimaiNetClient:
 
     def __init__(self) -> None:
         self._http = create_smart_client(
-            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
+            timeout=EXT_CLIENT_TIMEOUT,
             headers=COMMON_HEADERS,
             follow_redirects=False,
             verify=maimaidx_ssl_context(),
@@ -377,7 +379,7 @@ def _parse_music_records(html: str) -> list[NetRecord]:
     """
     soup = BeautifulSoup(html, "html.parser")
     records: list[NetRecord] = []
-    for block in soup.select(".w_450.m_15.p_r.f_0"):
+    for block in soup.select(_RECORD_BLOCK_SELECTOR):
         record = _parse_record_block(block)
         if record is not None:
             records.append(record)

@@ -210,6 +210,7 @@ async def test_fetch_page_text_retry_on_202(monkeypatch):
     from nonebot_plugin_awmc_helper.core.ext import gamerch
 
     monkeypatch.setattr(gamerch, "_FETCH_DELAY", 0)
+    monkeypatch.setattr(gamerch, "_RETRY_DELAY", 0)
     url = f"{gamerch.WIKI_BASE}424242"
 
     # 202 → 200：重试后成功

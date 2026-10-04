@@ -46,8 +46,21 @@ _PENDING_MAX_ATTEMPTS = 10
 自增）达到该值的标题不再作为批次候选——连续多轮都未能在 MuNET 归并的条目
 暂缓重试，防每晚空转；用户可见的 pending 查歌路径不受影响。"""
 
+_REQUEST_TIMEOUT = 20
+"""单请求超时（秒）；MuNET 响应轻且直连快（§七实测 0.24s），超时按整机容忍取 20s。"""
+_DAY_SECONDS = 86400
+"""整轮间隔换算系数：``awmc_munet_alias_days``（天）→ 秒。"""
+_WALK_CHECKPOINT = 50
+"""走查游标落盘步长（每 N 条记一次断点，异常中断最多重走 N 条）。"""
+_BATCH_TITLE_CAP = 300
+"""批次候选标题安全阀：正常批次 ≤ 数十，超常（上游异常批量）截断防拖垮整轮。"""
+
 # genre 数字 → 规范表流派名（落雪/国服值域）。2026-09-28 与规范表全量分组对账
 # 推导（抽样 46 曲六档全一致），非官方映射表；107=宴会場 为推断（未实测到条目）。
+# 与 constants.GENRE_TO_ZH（Genre 枚举 → 中文显示名）、songdb 规范表 canonical
+# 流派名映射 OTOGE_CATCODE_TO_GENRE（songdb.py ~391，otoge catcode → maimai_py
+# Genre 值域）是三个各自语义正确的平行表（本表=规范表 canonical，constants=
+# 显示名），独立维护；规范表流派名变更时须同步核对本表。
 _GENRE_NAMES = {
     101: "流行&动漫",
     102: "niconico & VOCALOID",
@@ -84,7 +97,7 @@ async def _request(
                 host + path,
                 json=json_body,
                 headers={"Origin": _PORTAL_ORIGIN, "accept": "application/json"},
-                timeout=20,
+                timeout=_REQUEST_TIMEOUT,
             )
         except httpx.RequestError as e:
             last_error = e
@@ -343,7 +356,7 @@ async def refresh_aliases_full(
         if (
             walk_state.get("cursor") is None
             and finished_at
-            and time.time() - finished_at < interval_days * 86400
+            and time.time() - finished_at < interval_days * _DAY_SECONDS
         ):
             return {"status": "fresh", "finished_at": finished_at}
     if _walk_running:
@@ -369,6 +382,7 @@ async def _walk_targets(budget_seconds: float) -> dict:
     while index < len(targets):
         if time.monotonic() - started > budget_seconds:
             # 预算耗尽：本轮成果增量落库后再断点（整源替换会裁剪此前各晚数据）
+            # source 名与 provider.ALIAS_SOURCES 对齐（munet 在列）
             await store.upsert_song_aliases("munet", collected)
             await store.kv_set(_WALK_KV, {**state, "cursor": index})
             logger.info(
@@ -388,11 +402,12 @@ async def _walk_targets(budget_seconds: float) -> dict:
             for root, aliases in harvest_aliases([entry]).items():
                 collected.setdefault(root, []).extend(aliases)
         index += 1
-        if index % 50 == 0:
+        if index % _WALK_CHECKPOINT == 0:
             await store.kv_set(_WALK_KV, {**state, "cursor": index})
     # 完成：增量 upsert + 目标集外陈旧行清理（= 整源替换的对齐语义，且不裁剪
     # 断点续走时此前各晚已落库的成果；新增/删除别名以 MuNET 现态为准的强同步
     # 仅在单晚走完全程时成立，多晚拼接对存活曲只增不删——别名列表近似只增）
+    # source 名与 provider.ALIAS_SOURCES 对齐（munet 在列）
     await store.upsert_song_aliases("munet", collected)
     pruned = await store.prune_song_aliases(
         "munet", {t % DX_ID_OFFSET for t in targets}
@@ -450,13 +465,20 @@ async def _correct_existing_versions(facts: dict[str, dict]) -> list[int]:
     if not munet_ids:
         return []
     rows = await store.song_group_facts(sorted(munet_ids))
+
+    def _join_key(title: str) -> str:
+        # facts 键在 run_batch_supplement 已按 normalize_text 归一；行标题侧
+        # 同口径后再叠 norm_title（去空白）对齐——任一侧只做 norm_title 会在
+        # 简繁/全半角差异上错配（normalize_text 相等保证 NFKC 相等，反向不然）
+        return songdb.norm_title(normalize_text(title))
+
     by_title: dict[str, int] = {}
     for sid, info in rows.items():
         if info["title"]:
-            by_title.setdefault(songdb.norm_title(info["title"]), sid)
+            by_title.setdefault(_join_key(info["title"]), sid)
     corrections: dict[str, dict] = {}
     for title, fact in facts.items():
-        sid = by_title.get(songdb.norm_title(title))
+        sid = by_title.get(_join_key(title))
         if sid is None:
             continue
         patch = {k: v for k in ("version", "date") if (v := fact.get(k)) is not None}
@@ -504,21 +526,24 @@ async def run_batch_supplement() -> dict:
     canonical_titles = set(await store.list_song_titles())
     images: dict[str, str] = {}
     facts: dict[str, dict] = {}
+    # 两表键与下方等值门同口径（normalize_text）：搜索放行按归一相等，而
+    # payload.name 与 otoge 标题原文可能全半角/简繁不等，原名查表会静默丢
+    # 封面与版本/日期事实
     try:
         pr_entries = await otoge_pr.load_open_pr_entries()
     except Exception as e:
         logger.warning(f"MuNET 批次：otoge PR 预读失败（不影响流程）：{e}")
         pr_entries = []
     for entry in pr_entries:
-        if entry.get("image_url"):
-            images[entry["title"]] = entry["image_url"]
+        if entry.get("image_url") and entry.get("title"):
+            images[normalize_text(entry["title"])] = entry["image_url"]
         # PR 分支领先 main（日服当期批次），先到先得
         if (fact := _otoge_fact(entry)) and entry.get("title"):
-            facts.setdefault(entry["title"], fact)
+            facts.setdefault(normalize_text(entry["title"]), fact)
     live_entries = await ext_otoge.fetch_music_ex()
     for item in live_entries:
         if (fact := _otoge_fact(item)) and item.get("title"):
-            facts.setdefault(item["title"], fact)
+            facts.setdefault(normalize_text(item["title"]), fact)
     titles = [e["title"] for e in pr_entries if e["title"] not in canonical_titles]
     titles.extend(
         e["title"]
@@ -527,9 +552,11 @@ async def run_batch_supplement() -> dict:
     )
     titles.extend(await _pending_titles())
     titles = [t for t in dict.fromkeys(titles) if t not in canonical_titles]
-    if len(titles) > 300:  # 安全阀：异常批量候选截断（正常批次 ≤ 数十）
-        logger.warning(f"MuNET 批次：候选标题 {len(titles)} 超常，截断至 300")
-        titles = titles[:300]
+    if len(titles) > _BATCH_TITLE_CAP:  # 安全阀：异常批量候选截断（正常批次 ≤ 数十）
+        logger.warning(
+            f"MuNET 批次：候选标题 {len(titles)} 超常，截断至 {_BATCH_TITLE_CAP}"
+        )
+        titles = titles[:_BATCH_TITLE_CAP]
     logger.info(f"MuNET 批次补充：规范表外候选标题 {len(titles)} 个")
     docs_by_base: dict[int, dict] = {}
     alias_items: dict[int, list[str]] = {}
@@ -557,8 +584,8 @@ async def run_batch_supplement() -> dict:
                 alias_items.setdefault(root, []).extend(aliases)
             converted = entry_to_doc(
                 payload,
-                image_url=images.get(str(payload.get("name"))),
-                otoge_fact=facts.get(str(payload.get("name"))),
+                image_url=images.get(normalize_text(payload.get("name") or "")),
+                otoge_fact=facts.get(normalize_text(payload.get("name") or "")),
             )
             if converted is None:
                 continue
@@ -591,6 +618,7 @@ async def run_batch_supplement() -> dict:
     if corrected:
         result["corrected"] = corrected
     if alias_items:
+        # source 名与 provider.ALIAS_SOURCES 对齐（munet 在列）
         result["aliases"] = await store.upsert_song_aliases("munet", alias_items)
     try:
         filters = await fetch_browse_filters()
