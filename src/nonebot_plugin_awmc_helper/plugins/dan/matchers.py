@@ -170,7 +170,13 @@ async def _(
         if dan_id.startswith("random_"):
             gallery_id = None
         elif version_code is None:
-            gallery_id = await dan.latest_gallery_id()
+            # 默认表跟数据源 current_version：net=日服最新，其余/未绑定=国服现行
+            limit = (
+                None
+                if (binding is not None and binding.service == "net")
+                else await dan.cn_current_version()
+            )
+            gallery_id = await dan.latest_gallery_id(version_limit=limit)
         else:
             gallery_id = await dan.course_id_by_version(version_code)
             if gallery_id is None:

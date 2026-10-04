@@ -1115,6 +1115,14 @@ async def full_refresh() -> dict:
     await _ensure_templates()
     # 规范表已可能变化：指纹较上次加载不同时 maimai_py 自动重建运行时缓存
     await song_service.refresh()
+    # 段位歌单随管线刷新（join 依赖最新规范表；失败不阻塞曲库管线）
+    try:
+        from . import dan
+
+        dan_result = await dan.refresh()
+        logger.info(f"dan: 段位歌单随曲库管线刷新：{dan_result}")
+    except Exception:
+        logger.exception("dan: 段位歌单随曲库管线刷新失败（不影响曲库）")
     return result
 
 

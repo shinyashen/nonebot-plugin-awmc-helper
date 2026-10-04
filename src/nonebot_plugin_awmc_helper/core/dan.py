@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 from nonebot import logger
+from maimai_py import current_version
 from maimai_py.enums import Version
 
 from . import store
@@ -561,19 +562,32 @@ async def course_id_by_version(version: int) -> str | None:
         return row.gallery_id if row else None
 
 
-async def latest_gallery_id(kind: str = "normal") -> str | None:
-    """当前版本（version 最大）的段位表 gallery_id；库空返回 None。"""
+async def latest_gallery_id(
+    kind: str = "normal", *, version_limit: int | None = None
+) -> str | None:
+    """最新段位表 gallery_id：``version_limit`` 给定时取 ≤ 该版本的最新
+    （数据源 current_version 口径）；库内无满足行返回 None。"""
     async with store.session() as db:
         from sqlmodel import select
 
-        row = (
-            await db.exec(
-                select(store.DanCourse)
-                .where(store.DanCourse.kind == kind)
-                .order_by(store.DanCourse.version.desc())
-            )
-        ).first()
+        query = select(store.DanCourse).where(store.DanCourse.kind == kind)
+        if version_limit is not None:
+            query = query.where(store.DanCourse.version <= version_limit)
+        row = (await db.exec(query.order_by(store.DanCourse.version.desc()))).first()
         return row.gallery_id if row else None
+
+
+async def cn_current_version() -> int:
+    """国服当前版本：规范表 max(version_cn)，回落 maimai_py current_version
+    （口径对齐 songdb.State.cn_current_version）。"""
+    from sqlmodel import select
+    from sqlalchemy import func
+
+    async with store.session() as db:
+        value = (
+            await db.exec(select(func.max(store.SongSheetGroup.version_cn)))
+        ).first()
+    return int(value) if value else current_version.value
 
 
 async def grades_of(
@@ -645,12 +659,23 @@ def _level_str(ds: float) -> str:
 
 
 async def _chart_info(
-    song_id: int, kind: str, level_index: int
+    song_id: int, kind: str, level_index: int, version_code: int | None = None
 ) -> tuple[str, str, str, float]:
-    """规范表单谱面展示信息：（显示等级, 谱师, BPM, 定数）。缺位以 - / 0 兜底。"""
+    """规范表单谱面展示信息：（显示等级, 谱师, BPM, 定数）。缺位以 - / 0 兜底。
+
+    定数取 carry-forward：``version_code`` 给定时取该版本时点值（跨版本段位
+    卡显示/加分预测统一时点口径，随心配 S-2 改进先例），None 取最新。
+    """
     from sqlmodel import select
 
     db_kind = "sd" if kind == "std" else "dx"
+    level_clauses = [
+        store.SongChartLevel.song_id == song_id,
+        store.SongChartLevel.kind == db_kind,
+        store.SongChartLevel.level_id == level_index,
+    ]
+    if version_code is not None:
+        level_clauses.append(store.SongChartLevel.version <= version_code)
     async with store.session() as db:
         song = (
             await db.exec(select(store.SongRow).where(store.SongRow.id == song_id))
@@ -667,11 +692,7 @@ async def _chart_info(
         latest = (
             await db.exec(
                 select(store.SongChartLevel)
-                .where(
-                    store.SongChartLevel.song_id == song_id,
-                    store.SongChartLevel.kind == db_kind,
-                    store.SongChartLevel.level_id == level_index,
-                )
+                .where(*level_clauses)
                 .order_by(store.SongChartLevel.version.desc())
             )
         ).first()
@@ -716,6 +737,7 @@ async def _sample_random_sheets(
                     store.SongChart.song_id,
                     store.SongChart.kind,
                     store.SongChart.level_id,
+                    store.SongChartLevel.version,
                     store.SongChartLevel.level_value,
                 )
                 .join(
@@ -736,12 +758,17 @@ async def _sample_random_sheets(
                 ),
             )
         ).all()
-    # 同谱面多版本定数行取最新（SQLModel select 多列返回 Row，逐列取）
-    latest: dict[tuple[int, str, int], float] = {}
-    for song_id, kind, level_id, value in rows:
+    # 同谱面多版本定数行取「生效版本最新」的一行（非最大值——被改订降定数
+    # 的谱面应取新值）；scope 时行集已限定 version <= code，即该版本时点定数
+    latest: dict[tuple[int, str, int], tuple[int, float]] = {}
+    for song_id, kind, level_id, row_version, value in rows:
+        if value is None:
+            continue
+        if version_code is not None and row_version > version_code:
+            continue
         key = (song_id, kind, level_id)
-        if value is not None and value > latest.get(key, 0.0):
-            latest[key] = value
+        if key not in latest or row_version > latest[key][0]:
+            latest[key] = (row_version, value)
     candidates = [
         (
             song_id,
@@ -750,7 +777,7 @@ async def _sample_random_sheets(
                 level_id
             ],
         )
-        for (song_id, kind, level_id), ds in latest.items()
+        for (song_id, kind, level_id), (_ver, ds) in latest.items()
         if random_row.ds_lo <= ds <= random_row.ds_hi
     ]
     if not candidates:
@@ -774,7 +801,8 @@ async def card_data(
     独立抽取可重复，不需要 ``gallery_id``）——抽曲区域随 ``binding`` 的数据源
     （net=日服，其余/未绑定=国服），``version_code`` 限定「到该版本为止」的
     曲库；普通/真段位从 DanGrade/DanSheet 取数（削除曲等 join 不到的行保留
-    标题、其余 fallback），``gallery_id`` 为该版本段位表 id。
+    标题、其余 fallback），``gallery_id`` 为该版本段位表 id；展示/加分预测
+    定数取段位表所属版本的时点值（版本时效性——默认表即数据源现行版本）。
     ``binding`` 为空或成绩数据源不可用（UserScoreError）时走降级：达成率全
     0.0000%、底分「0」不带括号（与歌曲卡无数据一致）。返回 None = 库内无此
     段位数据（未刷新）。
@@ -789,6 +817,7 @@ async def card_data(
     from .render.nb_chart import new_best_score
 
     grade_row: store.DanGrade | store.DanRandom | None
+    course: store.DanCourse | None = None
     if dan_id.startswith("random_"):
         async with store.session() as db:
             grade_row = (
@@ -812,6 +841,13 @@ async def card_data(
         if grade_row is None:
             return None
         async with store.session() as db:
+            course = (
+                await db.exec(
+                    select(store.DanCourse).where(
+                        store.DanCourse.gallery_id == gallery_id
+                    )
+                )
+            ).first()
             sheets = (
                 await db.exec(
                     select(store.DanSheet)
@@ -856,7 +892,14 @@ async def card_data(
         gain = None
         level, charter, bpm, ds = "-", "-", "-", 0.0
         if song_id is not None:
-            level, charter, bpm, ds = await _chart_info(song_id, kind, level_index)
+            # 版本时效性：普通/真段位用段位表所属版本的时点定数（默认表=
+            # 数据源现行版本）；随机档位无版本归属，无前缀即现行
+            level, charter, bpm, ds = await _chart_info(
+                song_id,
+                kind,
+                level_index,
+                course.version if course else version_code,
+            )
             if best_list is not None:
                 # 加分预测：目标 100.5%（ScoreCoefficient 内部封顶）的 B50 净提升
                 target_ra = int(ScoreCoefficient(100.5).ra(ds))

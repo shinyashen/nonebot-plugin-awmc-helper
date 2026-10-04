@@ -483,3 +483,74 @@ async def test_random_version_and_region_scope(tmp_db, monkeypatch):
     assert await union_of(jp, version_code=24500) == {2, 3}
     # CN 区域 + 版本范围：24000 为止 → 只剩 3
     assert await union_of(cn, version_code=24000) == {3}
+
+
+@pytest.mark.asyncio
+async def test_random_timepoint_ds(tmp_db, monkeypatch):
+    """跨版本随机抽曲与时点定数（carry-forward）：改订升的曲 scope 旧版本时
+    排除（时点 14.0 不在档位区间），改订降的曲 scope 旧版本时可选且显示时点
+    定数——锁定「按生效版本取值」而非「按最大值」的口径。"""
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.core import dan
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.store import (
+        SongRow,
+        SongChart,
+        SongChartLevel,
+        SongSheetGroup,
+    )
+
+    async with tmp_db.session() as db:
+        # A：改订升（24000 时点 14.0 → 26000 时点 14.7）；B：改订降（14.8 → 14.0）
+        for sid, title, history in (
+            (1, "改订升", [(24000, 14.0), (26000, 14.7)]),
+            (2, "改订降", [(24000, 14.8), (26000, 14.0)]),
+        ):
+            db.add(SongRow(id=sid, title=title, bpm="150"))
+            db.add(
+                SongSheetGroup(
+                    song_id=sid,
+                    kind="dx",
+                    version=24000,
+                    version_cn=24000,
+                )
+            )
+            db.add(SongChart(song_id=sid, kind="dx", level_id=3, notes_tap=1))
+            for ver, ds in history:
+                db.add(
+                    SongChartLevel(
+                        song_id=sid,
+                        kind="dx",
+                        level_id=3,
+                        version=ver,
+                        level_value=ds,
+                    )
+                )
+        await db.commit()
+
+    await dan.refresh(text=FIXTURE)
+
+    async def _boom(*a, **k):
+        raise UserScoreError("offline")
+
+    monkeypatch.setattr(score_service, "get_scores_all", _boom)
+    monkeypatch.setattr(score_service, "get_b50", _boom)
+    jp = SimpleNamespace(service="net")
+
+    async def union_of(**kw) -> set[int]:
+        union: set[int] = set()
+        for _ in range(30):
+            data = await dan.card_data(None, "random_master_4", jp, **kw)
+            assert len(data.songs) == 4
+            union |= {s.song_id for s in data.songs}
+        return union
+
+    # 现行（无 scope）：A 可选（14.7）、B 出区间（14.0）被排除
+    assert await union_of() == {1}
+    # scope 24000：A 被排除（时点 14.0），B 可选（时点 14.8）
+    assert await union_of(version_code=24000) == {2}
+    # B 的展示定数也是时点值 14.8（非现行 14.0）
+    data = await dan.card_data(None, "random_master_4", jp, version_code=24000)
+    assert all(s.title == "改订降" for s in data.songs)
+    assert all(s.ds == "14.8" for s in data.songs)
