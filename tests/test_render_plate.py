@@ -51,13 +51,22 @@ def test_plate_progress_card_smoke():
     # 牌名繁体映射：樱极 → 櫻極.png 存在于素材包
     assert Path("static/mai/plate_version/櫻極.png").exists()
 
+    # 日服增量包牌头：回 归一后的素材查找走 简→繁 映射（廻），丸 直查
+    from nonebot_plugin_awmc_helper.core.render.assets import Assets
+
+    assert Assets.plate_version("回", "将") is not None
+    assert Assets.plate_version("丸", "极") is not None
+
 
 @pytest.mark.asyncio
 async def test_plate_qualified_kinds(songs):
-    """各牌种达标判定边界：舞舞须 FSD/FSDp（曾把方向写反漏 FSDp、误纳 Sync/FS/FSP）。"""
+    """各牌种达标判定边界：舞舞须 FSD/FSDp（曾把方向写反漏 FSDp、误纳 Sync/FS/FSP）。
+
+    判定单源于 core.plates.plate_score_ok（完成表盖章与本地判牌共用）。
+    """
     from maimai_py import FCType, FSType, RateType, SongType, LevelIndex, ScoreExtend
 
-    from nonebot_plugin_awmc_helper.core.render.plate_table_draw import _qualified
+    from nonebot_plugin_awmc_helper.core.plates import plate_score_ok as _qualified
 
     def score(fs=None, fc=None, ach=100.0):
         return ScoreExtend(

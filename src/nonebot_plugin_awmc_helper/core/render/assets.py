@@ -14,11 +14,12 @@ from nonebot_plugin_localstore import get_data_dir
 from ...config import plugin_config
 from ...constants import RATE_FILE, DEFAULT_THEME
 
-# 牌头素材文件名口径（按素材包实测）：版本字仅 晓/樱/堇/辉/华 用繁体，
-# 牌种仅「极」用「極」。maimai_py 的 plate_aliases 是**用户输入归一**口径（含
-# 將/鏡/廻），与素材包命名不一致，不能反推——曾致 樱将 等牌头全 miss
+# 牌头素材文件名口径（按素材包实测）：版本字仅 晓/樱/堇/辉/华/回 用繁体（回
+# 的牌框为日服增量包「廻」），牌种仅「极」用「極」。maimai_py 的 plate_aliases
+# 是**用户输入归一**口径（含 將/鏡/廻），与素材包命名不一致，不能反推——曾致
+# 樱将 等牌头全 miss
 _S2T_VERSION = str.maketrans(
-    {"晓": "暁", "樱": "櫻", "堇": "菫", "辉": "輝", "华": "華"}
+    {"晓": "暁", "樱": "櫻", "堇": "菫", "辉": "輝", "华": "華", "回": "廻"}
 )
 _S2T_KIND = str.maketrans({"极": "極"})
 

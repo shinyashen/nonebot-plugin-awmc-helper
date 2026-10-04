@@ -379,19 +379,29 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_plate_at_net_target_unsupported(app: App, db, songs):
-    """牌子 @日服 NET 目标：随目标绑定路由到适配器门禁（牌单/素材未定，
-    NET 不开放牌子；全量成绩已开放会真实抓取，不在本用例范围）。"""
+async def test_plate_at_net_target_routes(app: App, db, songs, monkeypatch):
+    """牌子 @日服 NET 目标（2026-10-04 起 NET 开放牌子）：随目标绑定路由，
+    版本/牌种归一后进入完成表编排（口径转日服由 sheet 侧消费）。"""
     import nonebot
     from fake import fake_group_message_event_v11
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+    from nonebot_plugin_alconna.uniseg import UniMessage
 
     from nonebot_plugin_awmc_helper.core.binding import binding_service
     from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
 
     target = await binding_service.ensure("OneBot V11", "99999999")
     await binding_service.bind_net(target, sega_id="sid", password="pw")
+
+    captured = {}
+
+    async def fake_sheet(binding, version, kind, page):
+        captured["user_id"] = binding.user_id
+        captured["vk"] = (version, kind, page)
+        await UniMessage.text("完成表 OK").finish(at_sender=True)
+
+    monkeypatch.setattr(plugin, "plate_completion_sheet", fake_sheet)
 
     event = fake_group_message_event_v11(
         message=Message(
@@ -419,18 +429,179 @@ async def test_plate_at_net_target_unsupported(app: App, db, songs):
         )
         ctx.should_call_send(
             event,
-            Message(
-                [
-                    MessageSegment.at(12345678),
-                    MessageSegment.text(
-                        " 日服数据源（NET）暂不支持牌子进度，敬请期待后续版本"
-                    ),
-                ]
-            ),
+            Message([MessageSegment.at(12345678), MessageSegment.text(" 完成表 OK")]),
             result=None,
             bot=bot,
         )
         ctx.should_finished()
+    assert captured["user_id"] == "99999999"
+    assert captured["vk"] == ("晓", "将", 1)
+
+
+@pytest.mark.asyncio
+async def test_plate_cn_roster_rejected(app: App, db):
+    """国服数据源查 丸将（CiRCLE 为日服版本）：真实存在的牌子也要落在
+    绑定源的可查牌单内，拒绝并给口径上限提示（2026-10-04 定案）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import (
+        Bot,
+        Message,
+        MessageSegment,
+    )
+    from nonebot.adapters.onebot.v11 import (
+        Adapter as OnebotV11Adapter,
+    )
+
+    from nonebot_plugin_awmc_helper.plugins import tables as plugin
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    # 显式钉水鱼绑定：口径限制按绑定数据源收口（默认残留行不可依赖）
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_divingfish_username(binding, "tester")
+
+    event = fake_group_message_event_v11(message="丸将进度", user_id=12345678)
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.text(" 没有找到「丸将」牌子。国服数据源可查至「彩」代牌子"),
+        ]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_plate_jp_roster_progress(app: App, db, monkeypatch):
+    """日服数据源查 丸将进度（JP 牌单）：查库路由到门面 get_plates（NET
+    侧本地判牌由 test_core_sources 覆盖）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+
+    async def fake_get_plates(b, plate, notify_slow=None):
+        assert plate == "丸将"
+        return ("sentinel",)
+
+    async def fake_overview(binding, plates, version, kind, page):
+        assert plates == ("sentinel",)
+        assert (version, kind) == ("丸", "将")
+        await UniMessage.text("进度 OK").finish(at_sender=True)
+
+    monkeypatch.setattr(plugin.score_service, "get_plates", fake_get_plates)
+    monkeypatch.setattr(plugin, "plate_progress_overview", fake_overview)
+
+    event = fake_group_message_event_v11(message="丸将进度", user_id=12345678)
+    expected = Message([MessageSegment.at(12345678), MessageSegment.text(" 进度 OK")])
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_plate_completion_sheet_scope_split(app: App, db, songs, monkeypatch):
+    """完成表口径分流（2026-10-04）：日服绑定 → JP 视图曲集 + JP 区间
+    （丸 将命中样例库 CiRCLE 段谱面）；国服绑定维持 CN 视图与 CN 区间。"""
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import sheet
+
+    class _Sentinel(Exception):
+        pass
+
+    calls = {}
+    real_get_all = song_service.get_all
+
+    async def fake_jp_all():
+        calls["view"] = "jp"
+        return await real_get_all()
+
+    async def fake_cn_all():
+        calls["view"] = "cn"
+        return await real_get_all()
+
+    async def fake_draw(
+        version, kind, scores, entries, *, page, song_service, jp=False
+    ):
+        calls["draw"] = (version, kind, len(entries), jp)
+        raise _Sentinel
+
+    async def fake_scores(b, notify_slow=None):
+        return SimpleNamespace(scores=[])
+
+    monkeypatch.setattr(song_service, "jp_all", fake_jp_all)
+    monkeypatch.setattr(song_service, "get_all", fake_cn_all)
+    monkeypatch.setattr(table_template, "draw_plate_table_with_fallback", fake_draw)
+    monkeypatch.setattr(sheet.score_service, "get_scores_all", fake_scores)
+
+    jp_binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(jp_binding, sega_id="sid", password="pw")
+    with pytest.raises(_Sentinel):
+        await sheet.plate_completion_sheet(jp_binding, "丸", "将", 1)
+    assert calls["view"] == "jp"
+    version, kind, n_entries, jp = calls["draw"]
+    assert (version, kind, jp) == ("丸", "将", True)
+    assert n_entries > 0  # 样例库 CiRCLE 段（version=26000）谱面进入丸范围
+
+    calls.clear()
+    cn_binding = await binding_service.ensure("OneBot V11", "12345679")
+    await binding_service.bind_divingfish_username(cn_binding, "tester")
+    with pytest.raises(_Sentinel):
+        await sheet.plate_completion_sheet(cn_binding, "超", "将", 1)
+    assert calls["view"] == "cn"
+    assert calls["draw"] == ("超", "将", calls["draw"][2], False)
+    assert calls["draw"][2] > 0  # 样例库 Splash 段（version=12000）谱面进入超范围
 
 
 @pytest.mark.asyncio

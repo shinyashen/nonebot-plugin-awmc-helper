@@ -75,7 +75,7 @@ def test_registry_shape():
 
 
 def test_capability_matrix():
-    """能力矩阵：NET 仅 b50/minfo；落雪缺 MY_RANKING；水鱼全量。"""
+    """能力矩阵：NET b50/minfo/全量/牌子；落雪缺 MY_RANKING；水鱼全量。"""
     from nonebot_plugin_awmc_helper.core.sources import (
         Capability,
         source_of,
@@ -85,6 +85,7 @@ def test_capability_matrix():
         Capability.B50,
         Capability.MINFO,
         Capability.SCORES_ALL,
+        Capability.PLATES,
     }
     assert Capability.MY_RANKING not in source_of("lxns").capabilities
     assert source_of("divingfish").capabilities == set(Capability)
@@ -94,21 +95,29 @@ def test_capability_matrix():
 
 
 async def test_facade_gates_unsupported(db, songs, monkeypatch):
-    """门面路由：NET 牌子（牌单/素材未定）与落雪我的排名 → 统一暂不支持。"""
+    """门面路由：NET 牌子走本地判牌、落雪我的排名 → 统一暂不支持。"""
     from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
     from nonebot_plugin_awmc_helper.core.net_score import net_score_service
 
-    net_binding = await binding_service.ensure("qq", "70001")
-    await binding_service.bind_net(net_binding, sega_id="sid", password="pw")
-    with pytest.raises(UserScoreError, match="日服数据源（NET）暂不支持牌子进度"):
-        await score_service.get_plates(net_binding, "真将")
-
-    # NET 全量成绩已接入：窗口缓存组装 → MaimaiScores 同构（b35/b15 为空库）
+    # NET 牌子（2026-10-04 开放）：窗口成绩 + JP 视图 → LocalPlates
     async def fake_scores(_b):
         return [], True
 
+    async def fake_jp_all():
+        return []
+
     monkeypatch.setattr(net_score_service, "get_scores", fake_scores)
+    monkeypatch.setattr(
+        "nonebot_plugin_awmc_helper.core.sources.song_service.jp_all", fake_jp_all
+    )
+    net_binding = await binding_service.ensure("qq", "70001")
+    await binding_service.bind_net(net_binding, sega_id="sid", password="pw")
+    plates = await score_service.get_plates(net_binding, "丸将")
+    assert await plates.get_cleared() == []
+    assert await plates.get_remained() == []
+
+    # NET 全量成绩已接入：窗口缓存组装 → MaimaiScores 同构（b35/b15 为空库）
     ms = await score_service.get_scores_all(net_binding)
     assert ms.scores == []
     assert ms.rating == 0
@@ -171,11 +180,12 @@ def test_derived_texts():
 
     assert support_note(Capability.B50) is None  # 全源支持 → 无标注
     assert support_note(Capability.SCORES_ALL) is None  # 2026-09-30 起 NET 接入
+    assert support_note(Capability.PLATES) is None  # 2026-10-04 起 NET 接入
     assert support_note(Capability.MY_RANKING) == "仅水鱼数据源"
     assert command_hints("net") == "b50、minfo、ap50"
-    # 拦截文案 = 全名 + 能力标签（牌子为 NET 当前唯一保持门禁的查询能力）
-    assert str(source_of("net").unsupported(Capability.PLATES)) == (
-        "日服数据源（NET）暂不支持牌子进度，敬请期待后续版本"
+    # 拦截文案 = 全名 + 能力标签（玩家信息为 NET 当前唯一保持门禁的查询能力）
+    assert str(source_of("net").unsupported(Capability.PLAYER)) == (
+        "日服数据源（NET）暂不支持玩家信息，敬请期待后续版本"
     )
 
 
@@ -200,4 +210,4 @@ async def test_net_hooks_route_via_facade(db, songs):
     assert score_service.view_of(df_binding.service) == "cn"
     assert score_service.supports(net_binding.service, "b50") is True
     assert score_service.supports(net_binding.service, "scores_all") is True
-    assert score_service.supports(net_binding.service, "plates") is False
+    assert score_service.supports(net_binding.service, "plates") is True

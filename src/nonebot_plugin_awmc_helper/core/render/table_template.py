@@ -339,11 +339,17 @@ _FULL_SET_PLATE_VERSIONS = ("舞", "霸")
 """旧作全集双页版本：完成表输出文件名不含牌种（各牌种共用同一对底图）。"""
 
 
-async def generate_plate_template(version: str, kind: str, song_service) -> int:
-    """NB 布局生成牌子完成表底图；舞/霸生成两页。返回谱面数。"""
-    songs = await song_service.get_all()
+async def generate_plate_template(
+    version: str, kind: str, song_service, *, jp: bool = False
+) -> int:
+    """NB 布局生成牌子完成表底图；舞/霸生成两页。返回谱面数。
+
+    ``jp=True`` 用日服视图曲集与日服版本区间（丸/回 等日服牌；仅查询兜底
+    现场生成，预渲染枚举 ``refresh_all_plate_tables`` 仍只做国服牌单）。
+    """
+    songs = await (song_service.jp_all() if jp else song_service.get_all())
     major = major_type_of_plate(version)
-    rng = plate_version_range(version)
+    rng = plate_version_range(version, jp=jp)
     if rng is None:
         return 0
     lo, hi = rng
@@ -476,13 +482,14 @@ async def draw_plate_table_with_fallback(
     *,
     page: int,
     song_service,
+    jp: bool = False,
 ) -> bytes | None:
     """牌子完成表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。"""
     from .plate_table_draw import draw_plate_table
 
     png = draw_plate_table(version, kind, scores, entries, page=page)
     if png is None:
-        await generate_plate_template(version, kind, song_service)
+        await generate_plate_template(version, kind, song_service, jp=jp)
         png = draw_plate_table(version, kind, scores, entries, page=page)
     return png
 

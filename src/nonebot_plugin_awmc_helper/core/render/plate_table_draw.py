@@ -6,13 +6,13 @@
 """
 
 from PIL import Image, ImageDraw
-from maimai_py import Song, FCType, FSType, RateType, LevelIndex, SongDifficulty
+from maimai_py import Song, FCType, RateType, LevelIndex, SongDifficulty
 
 from . import table_template
 from .fonts import FONT_RODIN, font
 from .tools import TEXT_BLUE, ID_TEXT_COLORS, scale_output, image_to_bytes
 from .assets import assets
-from ..plates import major_type_of_plate
+from ..plates import plate_score_ok, major_type_of_plate
 from ...constants import SYNC_FILE, COMBO_FILE
 from .table_layout import (
     PLATE_COLS,
@@ -32,27 +32,6 @@ ROW_STEP = PLATE_ROW_STEP  # 纵向行距 96
 START_X = PLATE_START_X
 START_Y = PLATE_START_Y
 ROW_COUNT = PLATE_COLS
-
-
-def _qualified(kind: str, score) -> bool:
-    """单谱面是否达成牌子要求（maimai_py 判牌语义同款）。"""
-    if score is None:
-        return False
-    if kind == "者":
-        return (score.achievements or 0) >= 80
-    if kind == "将":
-        # 将 = 全谱面 SSS（100.0）以上（SSS+=100.5 为自定义大将）；SS 档
-        # 口径：S=97/S+=98/SS=99/SS+=99.5/SSS=100/SSS+=100.5
-        return (score.achievements or 0) >= 100
-    if kind == "极":
-        return score.fc is not None and score.fc.value <= FCType.FC.value
-    if kind == "神":
-        return score.fc is not None and score.fc.value <= FCType.AP.value
-    if kind == "舞舞":
-        # 舞舞要求 FSD/FSDp：FSType 枚举 SYNC<FS<FSP<FSD<FSDP，取高端两档
-        # （曾写成 <= FSD，把 Sync/FS/FSP 全误判达标、FSDp 反而漏判）
-        return score.fs is not None and score.fs.value >= FSType.FSD.value
-    return False
 
 
 def _plate_icon(kind: str, score):
@@ -143,7 +122,9 @@ def draw_plate_table(
     # 跨舞/霸两页合计；网格与 t 形小标只画当前页）
     for group in played.values():
         for song_id, slots in group.items():
-            qualified_slots = [i for i, s in enumerate(slots) if _qualified(kind, s)]
+            qualified_slots = [
+                i for i, s in enumerate(slots) if plate_score_ok(kind, s)
+            ]
             qualified_slots_of[song_id] = qualified_slots
             for i, s in enumerate(slots):
                 slot_total[i] += 1

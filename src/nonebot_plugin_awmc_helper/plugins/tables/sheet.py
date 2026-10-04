@@ -19,6 +19,7 @@ from ...core.songs import song_service
 from ...core.utils import slow_notice
 from ...core.plates import (
     PLATE_KINDS,
+    PLATE_CHARS_JP,
     PLATE_KIND_ALIAS_CHARS,
     PLATE_VERSION_ALIAS_CHARS,
     in_plate_scope,
@@ -44,18 +45,22 @@ async def plate_completion_sheet(binding, version: str, kind: str, page: int) ->
     """完成表（NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条）。"""
     from ...core.render import table_template
 
-    # 数据源门禁先行（NET 不开放牌子）：与牌子进度总览同语义，避免「范围
-    # 内没有谱面」之类的次要文案盖过能力边界提示
+    # 数据源门禁先行（未开放牌子能力的源）：与牌子进度总览同语义，避免
+    # 「范围内没有谱面」之类的次要文案盖过能力边界提示
     if not score_service.supports(binding.service, Capability.PLATES):
         from ...core.sources import source_of
 
         raise source_of(binding.service).unsupported(Capability.PLATES)
+    # 牌单口径决定曲库视图与版本区间：日服口径（丸/回 等）用日服视图——
+    # JP 限定曲在牌范围内，缺了永远差曲（CN 口径维持国服网格不变）
+    jp = score_service.view_of(binding.service) == "jp"
     major = major_type_of_plate(version)
-    rng = plate_version_range(version)
+    rng = plate_version_range(version, jp=jp)
     entries = []
     if rng is not None:
         lo, hi = rng
-        for song in await song_service.get_all():
+        songs = await (song_service.jp_all() if jp else song_service.get_all())
+        for song in songs:
             for d in song.get_difficulties():
                 if in_plate_scope(song, d, lo, hi, major):
                     entries.append((song, d))
@@ -69,6 +74,7 @@ async def plate_completion_sheet(binding, version: str, kind: str, page: int) ->
         entries,
         page=page,
         song_service=song_service,
+        jp=jp,
     )
     if png is None:
         await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(at_sender=True)
@@ -166,8 +172,11 @@ async def plate_progress_overview(
 _PLATE_KIND_CHARS = frozenset((*PLATE_KINDS, *PLATE_KIND_ALIAS_CHARS))
 """牌种字符集（含繁体/和制；形状检测用）。"""
 
-_PLATE_SHAPE_VERSION = frozenset(f"{PLATE_CHARS}{PLATE_VERSION_ALIAS_CHARS}")
-"""版本字字符集（含繁体/和制；形状检测用）。"""
+_PLATE_SHAPE_VERSION = frozenset(
+    f"{PLATE_CHARS}{PLATE_CHARS_JP}{PLATE_VERSION_ALIAS_CHARS}"
+)
+"""版本字字符集（CN∪JP 牌单 + 繁体/和制；形状检测不分数据源，口径合法性
+由 matchers 经 ``plate_in_roster`` 按绑定数据源收口）。"""
 
 
 def plate_shape(text: str) -> "tuple[str, str] | None":

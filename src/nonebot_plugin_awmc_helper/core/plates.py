@@ -2,10 +2,27 @@
 
 完成表/进度渲染与 tables 插件共用；版本依据 maimai_py ``plate_to_version``
 （CN 口径：华/煌/宙/祝/宴并 PLUS，回 = CiRCLE PLUS，舞/霸为旧作全集特判）。
+日服口径（``plate_to_version_jp``：PLUS 各代独立成牌）由 ``jp=True`` 参数
+启用——库 ``MaimaiPlates`` 只认 CN 口径，日服数据源的牌子在插件侧本地判
+（:func:`build_local_plates`）。
 """
 
-from maimai_py import Song, Version, SongType, SongDifficulty, plate_to_version
+from dataclasses import dataclass
+
+from maimai_py import (
+    Song,
+    FCType,
+    FSType,
+    Version,
+    SongType,
+    LevelIndex,
+    SongDifficulty,
+    plate_to_version,
+    current_version_jp,
+    plate_to_version_jp,
+)
 from maimai_py.enums import plate_aliases
+from maimai_py.models import PlateObject
 
 from ..constants import PLATE_CHARS
 
@@ -52,12 +69,30 @@ PLATE_KINDS = tuple(
 )
 """全部牌种字符并集（输入解析/正则用；各版本**真实牌单**见 :func:`plate_kinds`）。"""
 
+_PLATE_CAP_JP = max(
+    v for v in plate_to_version_jp.values() if v.value < current_version_jp.value
+)
+"""日服可查牌子的版本上限：``current_version_jp`` 的**前一个枚举成员**
+（CiRCLE PLUS，2026-10 口径）——现行 MAGiCAL 代尚无牌字，牌单到「回」为止。"""
+
+PLATE_CHARS_JP = "舞霸" + "".join(
+    ch for ch, ver in plate_to_version_jp.items() if ver <= _PLATE_CAP_JP and ch != "初"
+)
+"""日服牌单字符（舞/霸置首同 PLATE_CHARS；日服 PLUS 各代独立成牌，含 丸/回）。
+
+口径 = maimai_py ``plate_to_version_jp`` 键序（发售序）按「版本 ≤
+``_PLATE_CAP_JP``」派生；「初」不在牌单（与国服同规：素材包无初代牌）。
+库推进 ``current_version_jp`` 后上限随枚举自动前移，新代牌字自动纳入。"""
+
 
 PLATE_VERSION_ALIAS_CHARS = "".join(
-    ch for ch, target in plate_aliases.items() if target in set(PLATE_CHARS)
+    ch
+    for ch, target in plate_aliases.items()
+    if target in set(PLATE_CHARS) | set(PLATE_CHARS_JP)
 )
-"""繁体/和制牌**版本字**（暁櫻菫輝華鏡；归一后须落入 PLATE_CHARS——回/丸等
-未实装代不收）。仅供指令正则识别，预渲染迭代仍走 PLATE_CHARS 不受影响。"""
+"""繁体/和制牌**版本字**（暁櫻菫輝華鏡廻；归一后落入 CN∪JP 牌单——形状回认
+不分数据源，口径合法性由调用方经 :func:`plate_in_roster` 收口）。仅供指令
+形状识别，预渲染迭代仍走 PLATE_CHARS 不受影响。"""
 
 PLATE_KIND_ALIAS_CHARS = "".join(
     ch for ch, target in plate_aliases.items() if target in PLATE_KINDS
@@ -102,6 +137,26 @@ def is_valid_plate(version: str, kind: str) -> bool:
     return norm_plate(kind) in plate_kinds(version)
 
 
+def plate_in_roster(version: str, *, jp: bool) -> bool:
+    """牌子是否在对应口径的**可查牌单**内（数据源限制，2026-10-04 定案）。
+
+    国服口径 = :data:`PLATE_CHARS`（≤ ``current_version``），日服口径 =
+    :data:`PLATE_CHARS_JP`（≤ CiRCLE PLUS，即 ``current_version_jp`` 前一
+    枚举成员）；舞/霸双口径通用。真实存在的牌子也可能不在当前数据源口径内
+    （国服查 丸将——CiRCLE 是日服版本），由调用方给口径提示拒绝。
+    """
+    version = norm_plate(version)
+    if version in _LEGACY_PLATES:
+        return True
+    return version in (PLATE_CHARS_JP if jp else PLATE_CHARS)
+
+
+def plate_roster_hint(jp: bool) -> str:
+    """口径限制的用户提示（牌单越界拒绝文案用；末位字符 = 最新可查代）。"""
+    roster = PLATE_CHARS_JP if jp else PLATE_CHARS
+    return f"{'日服' if jp else '国服'}数据源可查至「{roster[-1]}」代牌子"
+
+
 def major_type_of_plate(version: str) -> SongType:
     """牌子主类型（maimai_py MaimaiPlates._major_type 同语义）。
 
@@ -116,12 +171,17 @@ def major_type_of_plate(version: str) -> SongType:
     )
 
 
-def plate_version_range(version: str) -> tuple[int, int] | None:
-    """牌子覆盖的谱面版本码闭区间（未知牌字返回 None）。"""
+def plate_version_range(version: str, *, jp: bool = False) -> tuple[int, int] | None:
+    """牌子覆盖的谱面版本码闭区间（未知牌字返回 None）。
+
+    ``jp=True`` 走日服口径（``plate_to_version_jp``：PLUS 各代独立成牌，
+    区间到下一代牌字为止；与 CN 口径同函数，靠映射切换）。
+    """
+    mapping = plate_to_version_jp if jp else plate_to_version
     if version in _LEGACY_PLATES:
-        vals = [v.value for v in plate_to_version.values() if v < Version.MAIMAI_DX]
+        vals = [v.value for v in mapping.values() if v < Version.MAIMAI_DX]
         return (min(vals), max(vals)) if vals else None
-    pv = plate_to_version.get(version)
+    pv = mapping.get(version)
     if pv is None:
         return None
     # 上界 = 下一牌字版本码 -1（未/FUTURE 为占位枚举，作上界即 29999，与库
@@ -130,16 +190,20 @@ def plate_version_range(version: str) -> tuple[int, int] | None:
     lo = pv.value
     if first := _SD_FIRST_PLATES.get(version):
         lo = plate_to_version[first].value
-    nxt = [v.value for v in plate_to_version.values() if v.value > pv.value]
+    nxt = [v.value for v in mapping.values() if v.value > pv.value]
     hi = (
         (min(nxt) - 1)
         if nxt
         else max(
             v.value
-            for v in plate_to_version.values()
+            for v in mapping.values()
             if v.value < Version.MAIMAI_DX_FUTURE.value
         )
     )
+    if jp:
+        # MAGiCAL（current_version_jp）尚无牌字，回 的上界推不出下一牌字，
+        # 必须封到现行版本：MAGiCAL 曲目不得落入回（CiRCLE PLUS）牌范围
+        hi = min(hi, current_version_jp.value - 1)
     return (lo, hi)
 
 
@@ -163,3 +227,101 @@ def in_plate_scope(
     """谱面是否落在牌子范围内（主类型 + 版本区间；version 归一后比较）。"""
     code = version_code_of(diff)
     return diff.type == major_type and code is not None and lo <= code <= hi
+
+
+def plate_score_ok(kind: str, score) -> bool:
+    """单谱面是否达成牌子要求（库 ``MaimaiPlates`` 判牌语义，单一事实）。
+
+    者 = 达成率 ≥80（A）；将 = ≥100（SSS，SSS+ 同档）；极 = FC 及以上；
+    神 = AP 及以上；舞舞 = FSD 及以上。完成表盖章与本地判牌
+    （:func:`build_local_plates`）共用，不得各写一份。
+    """
+    if score is None:
+        return False
+    if kind == "者":
+        return (score.achievements or 0) >= 80
+    if kind == "将":
+        # 将 = 全谱面 SSS（100.0）以上（SSS+=100.5 为自定义大将）；SS 档
+        # 口径：S=97/S+=98/SS=99/SS+=99.5/SSS=100/SSS+=100.5
+        return (score.achievements or 0) >= 100
+    if kind == "极":
+        return score.fc is not None and score.fc.value <= FCType.FC.value
+    if kind == "神":
+        return score.fc is not None and score.fc.value <= FCType.AP.value
+    if kind == "舞舞":
+        # 舞舞要求 FSD/FSDp：FSType 枚举 SYNC<FS<FSP<FSD<FSDP，取高端两档
+        # （曾写成 <= FSD，把 Sync/FS/FSP 全误判达标、FSDp 反而漏判）
+        return score.fs is not None and score.fs.value >= FSType.FSD.value
+    return False
+
+
+@dataclass
+class LocalPlates:
+    """本地判牌结果：库 ``MaimaiPlates`` 的 duck-type 替身。
+
+    进度总览（sheet.plate_progress_overview）只消费 ``get_cleared`` /
+    ``get_remained``（``PlateObject(song, levels)``），与库返回同构。
+    """
+
+    cleared: list[PlateObject]
+    remained: list[PlateObject]
+
+    async def get_cleared(self) -> list[PlateObject]:
+        return self.cleared
+
+    async def get_remained(self) -> list[PlateObject]:
+        return self.remained
+
+
+def build_local_plates(
+    version: str, kind: str, songs: list[Song], scores: list
+) -> LocalPlates:
+    """日服口径本地判牌（库 ``MaimaiPlates`` 只认 CN 版本映射与曲库版本缓存）。
+
+    范围/主类型走 :func:`plate_version_range`（jp）/ :func:`major_type_of_plate`，
+    曲集为**日服视图**（JP 限定曲在牌范围内，缺席会永远差曲）；谱面级范围匹配
+    （:func:`in_plate_scope`），要求槽 = 该曲主类型全部谱面（Re:MASTER 仅
+    舞/霸 计入，库 ``no_remaster`` 同语义），达成判定 = :func:`plate_score_ok`。
+    """
+    version, kind = norm_plate(version), norm_plate(kind)
+    major = major_type_of_plate(version)
+    rng = plate_version_range(version, jp=True)
+    matched: dict[int, Song] = {}
+    if rng is not None:
+        lo, hi = rng
+        for song in songs:
+            if any(
+                in_plate_scope(song, d, lo, hi, major) for d in song.get_difficulties()
+            ):
+                matched[song.id] = song
+    no_remaster = version not in _LEGACY_PLATES
+    cleared: dict[int, set[LevelIndex]] = {}
+    required: dict[int, set[LevelIndex]] = {}
+    for song in matched.values():
+        levels = {d.level_index for d in song.get_difficulties(major)}
+        if no_remaster:
+            levels.discard(LevelIndex.ReMASTER)
+        cleared[song.id] = set()
+        required[song.id] = levels
+    for score in scores:
+        if score.id not in required or score.type != major:
+            continue
+        if score.level_index not in required[score.id]:
+            continue
+        if plate_score_ok(kind, score):
+            cleared[score.id].add(score.level_index)
+    remained = {
+        sid: levels - cleared[sid] for sid, levels in required.items() if levels
+    }
+    return LocalPlates(
+        cleared=[
+            PlateObject(song=matched[sid], levels=levels, scores=[])
+            for sid, levels in cleared.items()
+            if levels
+        ],
+        remained=[
+            PlateObject(song=matched[sid], levels=levels, scores=[])
+            for sid, levels in remained.items()
+            if levels
+        ],
+    )

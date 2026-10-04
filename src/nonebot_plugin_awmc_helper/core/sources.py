@@ -54,6 +54,7 @@ from .client import (
     divingfish_provider,
     divingfish_public_provider,
 )
+from .plates import build_local_plates
 from .songdb import Scope
 from .binding import (
     SERVICE_NET,
@@ -68,6 +69,8 @@ from .net_score import NetScoreError, net_score_service
 
 if TYPE_CHECKING:
     from maimai_py import ScoreExtend
+
+    from .plates import LocalPlates
 
 __all__ = [
     "SOURCES",
@@ -573,23 +576,27 @@ class LxnsSource(ProberSource):
 class NetSource(SourceBase):
     """日服 NET 适配器：官方站直连（core.ext.net 抓取 + core.net_score 组装）。
 
-    一次抓取的全量成绩在冷却窗口内被 b50/minfo/全量共享（0 请求秒回）；
+    一次抓取的全量成绩在冷却窗口内被 b50/minfo/全量/牌子共享（0 请求秒回）；
     b35/b15 划分用日服现行版本（``current_version_jp``），成绩与曲库口径
     均为日服，故 ``view = "jp"``。
 
     全量成绩（SCORES_ALL）已接入（2026-09-30）：ap50 / 完成表 / 进度 /
     分数列表等曲库消费方维持**国服视图网格**——日服限定曲不在国服网格、
-    自然缺席，共享曲定数显示国服口径（插件「国服为主、日服补充」既定口径；
-    日服专属底图未立项）。牌子（PLATES）与玩家信息（PLAYER）保持门禁：
-    前者牌单/素材未定（用户 2026-09-30 拍板暂不接入），后者无 maimai_py
-    Player 形态、卡面身份走 needs_fetch/player_profile 注入链路。
+    自然缺席，共享曲定数显示国服口径（插件「国服为主、日服补充」既定口径）。
+    牌子（PLATES）已开放（2026-10-04，丸/廻牌框入素材增量包）：日服牌单
+    （≤ CiRCLE PLUS）走 core.plates jp 口径**本地判牌**——库 ``MaimaiPlates``
+    只认 CN 版本映射与国服曲库版本缓存；完成表渲染在 sheet 侧同口径本地图。
+    玩家信息（PLAYER）保持门禁：无 maimai_py Player 形态、卡面身份走
+    needs_fetch/player_profile 注入链路。
     """
 
     key = SERVICE_NET
     zh_name = "日服数据源（NET）"
     short_zh = "日服 NET"
     view = "jp"
-    capabilities = frozenset({Capability.B50, Capability.MINFO, Capability.SCORES_ALL})
+    capabilities = frozenset(
+        {Capability.B50, Capability.MINFO, Capability.SCORES_ALL, Capability.PLATES}
+    )
 
     async def get_b50(
         self, binding: UserBinding, notify_slow=None
@@ -633,6 +640,17 @@ class NetSource(SourceBase):
         ms.rating_b35 = bests.rating_b35
         ms.rating_b15 = bests.rating_b15
         return ms
+
+    async def get_plates(
+        self, binding: UserBinding, plate: str, notify_slow=None
+    ) -> "MaimaiPlates | LocalPlates":
+        """日服牌子（本地判牌，2026-10-04 开放）：库 ``MaimaiPlates`` 只认
+        CN 口径，这里按日服牌单区间（core.plates jp 口径）+ 日服视图曲集 +
+        NET 窗口成绩本地复算，产出 get_cleared/get_remained 同构结果
+        （进度总览零改动消费；完成表不经此，sheet 侧同口径本地算）。"""
+        scores, _ = await _net_call(net_score_service.get_scores(binding))
+        songs = await song_service.jp_all()
+        return build_local_plates(plate[0], plate[1:], songs, scores)
 
     def needs_fetch(self, binding: UserBinding) -> bool:
         return net_score_service.needs_fetch(binding)

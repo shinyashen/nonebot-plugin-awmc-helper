@@ -32,7 +32,9 @@ from ...core.utils import parse_page, slow_notice, handle_errors
 from ...core.plates import (
     norm_plate,
     is_valid_plate,
+    plate_in_roster,
     plate_kinds_hint,
+    plate_roster_hint,
 )
 from ...core.binding import SessionQueryBinding, at_tolerant
 from ...core.sources import Capability
@@ -84,6 +86,14 @@ async def _(
             if not is_valid_plate(version, kind):
                 await UniMessage.text(
                     f" 没有找到「{version}{kind}」牌子。{plate_kinds_hint(version)}"
+                ).finish(at_sender=True)
+            # 牌单口径限制（2026-10-04 定案）：真实存在的牌子还要落在绑定
+            # 数据源的可查牌单内——国服 ≤ current_version（彩）、日服 ≤
+            # CiRCLE PLUS（回，current_version_jp 前一枚举成员）
+            jp = score_service.view_of(binding.service) == "jp"
+            if not plate_in_roster(version, jp=jp):
+                await UniMessage.text(
+                    f" 没有找到「{version}{kind}」牌子。{plate_roster_hint(jp)}"
                 ).finish(at_sender=True)
             if suffix == "进度":
                 plates = await score_service.get_plates(
