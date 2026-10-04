@@ -478,6 +478,89 @@ async def ensure_loaded(max_age_hours: float = 24.0) -> bool:
 # ---------------------------------------------------------------- 查询
 
 
+# ---------------------------------------------------------------- 版本前缀
+
+# 版本词根（小写）：（词根, 无 PLUS 码, PLUS 码；None=无 PLUS）。
+# dx 初代/PLUS 特例 2 字符缩写，其余按用户口径取前 n≥3 字符
+_VERSION_BASES: tuple[tuple[str, int, int | None], ...] = (
+    ("dx", Version.MAIMAI_DX.value, Version.MAIMAI_DX_PLUS.value),
+    ("splash", Version.MAIMAI_DX_SPLASH.value, Version.MAIMAI_DX_SPLASH_PLUS.value),
+    (
+        "universe",
+        Version.MAIMAI_DX_UNIVERSE.value,
+        Version.MAIMAI_DX_UNIVERSE_PLUS.value,
+    ),
+    (
+        "festival",
+        Version.MAIMAI_DX_FESTIVAL.value,
+        Version.MAIMAI_DX_FESTIVAL_PLUS.value,
+    ),
+    ("buddies", Version.MAIMAI_DX_BUDDIES.value, Version.MAIMAI_DX_BUDDIES_PLUS.value),
+    ("prism", Version.MAIMAI_DX_PRISM.value, Version.MAIMAI_DX_PRISM_PLUS.value),
+    ("circle", Version.MAIMAI_DX_CIRCLE.value, Version.MAIMAI_DX_CIRCLE_PLUS.value),
+    ("magical", Version.MAIMAI_DX_MAGICAL.value, None),
+)
+# 国服形式年→码（随心配 S-2 口径）：码 = 20000 + (年 - 2019) × 500
+_CN_YEAR_BASE, _CN_YEAR_STEP = 2019, 500
+
+
+def parse_version_prefix(arg: str) -> tuple[int | None, str]:
+    """解析段位名开头的版本前缀 → (版本码或 None, 余下段位名)。
+
+    - 日服：完整版本名或前 n≥3 字符（dx 系 2 字符）+ 可选「+」表 PLUS，
+      大小写不敏感（如 dx/dx+/uni/uni+/bud+/mag/magical）；
+    - 国服（随心配 S-2 口径）：舞萌dx无印 / 舞萌dxYYYY / 舞萌YYYY / dxYYYY /
+      YYYY，年→码 = 20000+(年-2019)×500；
+    - 无前缀返回 (None, arg)。MAGiCAL 无 PLUS，「mag+」等显式报错。
+    """
+    lowered = arg.lower()
+    if m := re.match(r"^(?:舞萌)?dx无印", lowered):
+        return Version.MAIMAI_DX.value, arg[m.end() :]
+    if m := re.match(r"^(?:舞萌)?dx(20[12]\d)", lowered):
+        year = int(m.group(1))
+        code = 20000 + (year - _CN_YEAR_BASE) * _CN_YEAR_STEP
+        return code, arg[m.end() :]
+    if m := re.match(r"^(?:舞萌)?dx\+?", lowered):
+        # 舞萌dx（无年份）= DX 无印；dx+ = PLUS
+        code = (
+            Version.MAIMAI_DX_PLUS.value
+            if m.group().endswith("+")
+            else (Version.MAIMAI_DX.value)
+        )
+        return code, arg[m.end() :]
+    if m := re.match(r"^(?:舞萌)?(20[12]\d)", lowered):
+        year = int(m.group(1))
+        code = 20000 + (year - _CN_YEAR_BASE) * _CN_YEAR_STEP
+        return code, arg[m.end() :]
+    for base, code, plus_code in _VERSION_BASES:
+        min_len = len(base) if base == "dx" else 3
+        for n in range(len(base), min_len - 1, -1):
+            if lowered.startswith(base[:n]):
+                rest = arg[n:]
+                if rest.startswith("+"):
+                    if plus_code is None:
+                        raise ValueError(f"该版本无 PLUS：{base[:n]}+")
+                    return plus_code, rest[1:]
+                return code, rest
+    return None, arg
+
+
+async def course_id_by_version(version: int) -> str | None:
+    """按版本码查段位表 id（库无该版本数据返回 None）。"""
+    async with store.session() as db:
+        from sqlmodel import select
+
+        row = (
+            await db.exec(
+                select(store.DanCourse).where(
+                    store.DanCourse.kind == "normal",
+                    store.DanCourse.version == version,
+                )
+            )
+        ).first()
+        return row.gallery_id if row else None
+
+
 async def latest_gallery_id(kind: str = "normal") -> str | None:
     """当前版本（version 最大）的段位表 gallery_id；库空返回 None。"""
     async with store.session() as db:
@@ -598,12 +681,20 @@ async def _chart_info(
 
 async def _sample_random_sheets(
     random_row: store.DanRandom,
+    *,
+    version_code: int | None = None,
+    jp_region: bool = False,
 ) -> list[tuple[int, str, str]]:
     """按档位规则随机抽四首课题曲（独立抽取、可重复）。
 
-    候选 = JP 视图 sd/dx 谱面，定数（最新 carry-forward）落在档位区间内；
-    MASTER 档按游戏规则含 Re:MASTER（gamerch：FESTiVAL 起 MASTER 随机段位
-    也会选出 Re:MASTER 谱面），EXPERT 档仅 EXPERT。候选为空抛 ValueError。
+    候选 = sd/dx 谱面，定数（最新 carry-forward）落在档位区间内；MASTER 档
+    按游戏规则含 Re:MASTER（gamerch：FESTiVAL 起 MASTER 随机段位也会选出
+    Re:MASTER 谱面），EXPERT 档仅 EXPERT。
+
+    区域跟随玩家数据源（``jp_region``：net=日服视图，其余/未绑定=国服视图），
+    国服数据源不会抽出日服限定曲；``version_code`` 给定时只抽「到该版本为止」
+    的曲库（JP 看 group.version、CN 看 version_cn，均含该版本）。候选为空抛
+    ValueError。
     """
     import random as _random
 
@@ -612,6 +703,12 @@ async def _sample_random_sheets(
     level_ids = (
         (2,) if random_row.difficulty == "expert" else (3, 4)
     )  # master 含 Re:MASTER
+    version_col = (
+        store.SongSheetGroup.version if jp_region else (store.SongSheetGroup.version_cn)
+    )
+    scope_clauses = [version_col.is_not(None)]  # type: ignore[attr-defined]
+    if version_code is not None:
+        scope_clauses.append(version_col <= version_code)  # type: ignore[attr-defined]
     async with store.session() as db:
         rows = (
             await db.exec(
@@ -633,7 +730,7 @@ async def _sample_random_sheets(
                     & (store.SongChartLevel.level_id == store.SongChart.level_id),
                 )
                 .where(
-                    store.SongSheetGroup.version.is_not(None),  # type: ignore[attr-defined]
+                    *scope_clauses,
                     store.SongChart.kind.in_(("sd", "dx")),  # type: ignore[attr-defined]
                     store.SongChart.level_id.in_(level_ids),  # type: ignore[attr-defined]
                 ),
@@ -664,12 +761,20 @@ async def _sample_random_sheets(
     return _random.choices(candidates, k=4)
 
 
-async def card_data(gallery_id: str, dan_id: str, binding=None) -> "DanCardData | None":
+async def card_data(
+    gallery_id: str | None,
+    dan_id: str,
+    binding=None,
+    *,
+    version_code: int | None = None,
+) -> "DanCardData | None":
     """组装段位卡渲染输入：课题曲规范表信息 + 玩家成绩（可降级）。
 
     ``dan_id`` 为 ``random_*`` 时走随机档位（DanRandom 表；按规则真实抽四首，
-    独立抽取可重复，不需要 ``gallery_id``）；普通/真段位从 DanGrade/DanSheet
-    取数（削除曲等 join 不到的行保留标题、其余 fallback）。
+    独立抽取可重复，不需要 ``gallery_id``）——抽曲区域随 ``binding`` 的数据源
+    （net=日服，其余/未绑定=国服），``version_code`` 限定「到该版本为止」的
+    曲库；普通/真段位从 DanGrade/DanSheet 取数（削除曲等 join 不到的行保留
+    标题、其余 fallback），``gallery_id`` 为该版本段位表 id。
     ``binding`` 为空或成绩数据源不可用（UserScoreError）时走降级：达成率全
     0.0000%、底分「0」不带括号（与歌曲卡无数据一致）。返回 None = 库内无此
     段位数据（未刷新）。
@@ -693,10 +798,14 @@ async def card_data(gallery_id: str, dan_id: str, binding=None) -> "DanCardData 
             ).first()
         if grade_row is None:
             return None
-        # 抽曲（候选为空属数据异常，显式失败）
+        # 抽曲：区域随数据源（net=日服，其余/未绑定=国服），候选为空属数据
+        # 异常显式失败
+        jp_region = binding is not None and binding.service == "net"
         picks = [
             (song_id, kind, difficulty)
-            for song_id, kind, difficulty in await _sample_random_sheets(grade_row)
+            for song_id, kind, difficulty in await _sample_random_sheets(
+                grade_row, version_code=version_code, jp_region=jp_region
+            )
         ]
     else:
         grade_row = await find_grade_row(gallery_id, dan_id)

@@ -158,15 +158,28 @@ async def _(
     await dan.ensure_loaded()
     arg = message.extract_plain_text().strip()
 
-    dan_id = _resolve_dan_id(arg)
+    try:
+        version_code, dan_arg = dan.parse_version_prefix(arg)
+    except ValueError as e:
+        await UniMessage.text(f" {e}").finish(at_sender=True)
+    dan_id = _resolve_dan_id(dan_arg)
     if dan_id == "random":  # 裸「随机」= 8 档规则总览（合并转发）
         await _finish_random_overview(bot, session)
     if dan_id:
         binding = await _usable_binding(session, event)
-        gallery_id = (
-            None if dan_id.startswith("random_") else (await dan.latest_gallery_id())
+        if dan_id.startswith("random_"):
+            gallery_id = None
+        elif version_code is None:
+            gallery_id = await dan.latest_gallery_id()
+        else:
+            gallery_id = await dan.course_id_by_version(version_code)
+            if gallery_id is None:
+                await UniMessage.text(
+                    " 该版本暂无段位数据（数据源自 Splash PLUS 起）"
+                ).finish(at_sender=True)
+        data = await dan.card_data(
+            gallery_id, dan_id, binding, version_code=version_code
         )
-        data = await dan.card_data(gallery_id, dan_id, binding)
         if data is None:
             await UniMessage.text(_NOT_LOADED).finish(at_sender=True)
         await UniMessage.image(raw=render_dan_card(data)).finish(at_sender=True)
@@ -179,7 +192,9 @@ async def _(
         names = " / ".join(g.name_ja for g, _ in grades)
         await UniMessage.text(
             f"可用段位（当前版本）：{names}\n"
-            "随机段位：EXPERT/MASTER × 初級~超上級（如「段位 MASTER超上级」）；"
+            "随机段位：EXPERT/MASTER × 初級~超上級（如「段位 紫超上」）；\n"
+            "跨版本：段位名前加版本前缀（如「段位 bud+裏皆传」「段位 dx初段」"
+            "「段位 舞萌2022十段」），不带前缀为当前版本；"
             "「段位 随机」查看随机段位规则总览"
         ).finish(at_sender=True)
     await UniMessage.text("未识别的段位名；发送「段位」查看可用段位").finish(
