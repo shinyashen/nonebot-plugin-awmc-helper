@@ -27,6 +27,7 @@
 ``local/scratch/render_dan_preview.py`` 出三样式样张比对。
 """
 
+from typing import cast
 from functools import lru_cache
 from collections import Counter
 from dataclasses import field, dataclass
@@ -511,8 +512,10 @@ def _build_damage_pill(box: str) -> Image.Image:
     """
     src = dan_asset(f"{box}.png")
     # 排除烤字/烤心等亮部与黑芯，取出现最多的颜色即药丸体色
+    # RGBA 像素实为 (r, g, b, a) 四元组；stub 联合含 float 分支，显式收窄
+    pixels = cast("tuple[tuple[int, int, int, int], ...]", src.get_flattened_data())
     body = Counter(
-        px[:3] for px in src.getdata() if px[3] > 128 and sum(px[:3]) >= 120
+        px[:3] for px in pixels if px[3] > 128 and sum(px[:3]) >= 120
     ).most_common(1)[0][0]
 
     im = Image.new("RGBA", _DAMAGE_PILL_CANVAS_T4, (0, 0, 0, 0))
@@ -538,7 +541,7 @@ def _build_damage_pill(box: str) -> Image.Image:
         raise ValueError(f"扣血药丸标签渲染为空: {label}")
     layer = layer.transform(
         _DAMAGE_PILL_CANVAS_T4,
-        Image.AFFINE,
+        Image.Transform.AFFINE,
         (1, 0, 106 - (bb[0] + bb[2]) / 2, 0, 1, cy - (bb[1] + bb[3]) / 2),
     )
     im.alpha_composite(layer)
