@@ -28,10 +28,23 @@ from typing import Any
 from pathlib import Path
 from datetime import datetime
 
+from nonebot import logger
 from pydantic import NaiveDatetime
 from sqlmodel import Field, SQLModel, col, delete, select
-from sqlalchemy import UniqueConstraint, or_, func, text, update, inspect
+from sqlalchemy import (
+    Table,
+    Column,
+    MetaData,
+    TextClause,
+    UniqueConstraint,
+    or_,
+    func,
+    text,
+    update,
+    inspect,
+)
 from sqlalchemy.exc import OperationalError as SAOperationalError
+from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -350,10 +363,24 @@ def db_file() -> Path:
     return _db_file
 
 
+def create_plugin_engine(data_dir: Path | str, filename: str) -> AsyncEngine:
+    """生态通用引擎工厂：``<data_dir>/<filename>`` 的 aiosqlite 异步引擎。
+
+    把「db_file 拼路径 + create_async_engine」样板从本仓的 localstore 默认
+    目录/``set_db_file`` 测试重定向机制中解耦出来，供 awmc 生态同构插件
+    复用——机厅仓（nonebot-plugin-awmc-arcade）与传分仓
+    （nonebot-plugin-awmc-score-updater）的引擎管理样板与本仓逐行同构，
+    后续换用本工厂与 :func:`init_plugin_db`（先主仓落地，兄弟仓择机切换）。
+    返回的引擎不入本仓全局单例，生命周期归调用方（用完 ``dispose()``）。
+    """
+    return create_async_engine(f"sqlite+aiosqlite:///{Path(data_dir) / filename}")
+
+
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
-        _engine = create_async_engine(f"sqlite+aiosqlite:///{db_file()}")
+        path = db_file()
+        _engine = create_plugin_engine(path.parent, path.name)
     return _engine
 
 
@@ -364,62 +391,172 @@ def set_db_file(path: Path | None) -> None:
     _db_file = path
 
 
-async def init_db() -> None:
-    """建表（create_all 起步；字段变更时在此追加简易迁移）。
+async def init_plugin_db(engine: AsyncEngine, metadata: MetaData) -> None:
+    """生态通用幂等建表：对 engine 执行 create_all，「already exists」按幂等成功忽略。
 
     create_all 的存在性检查与 CREATE 之间存在竞态：多进程同时初始化同一个
     库文件（如 pytest-xdist 共享默认路径）时会收到 "table already exists"，
     对 SQLite 而言即幂等成功，忽略之；本轮事务内自己已建的表由下次调用补齐。
+    参数收 metadata 而非绑死 SQLModel.metadata：调用方传各自的表元数据
+    （三仓现均用 SQLModel 全局 metadata，连带建出其他仓空表的语义见模块
+    docstring）。
     """
     try:
-        async with get_engine().begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
     except (SAOperationalError, sqlite3.OperationalError) as e:
         if "already exists" not in str(e):
             raise
+
+
+async def init_db() -> None:
+    """建表（幂等）+ 旧库补列。
+
+    模型新增**简单列**（str/bool/int/float/时间，带常量默认或可空）由
+    :func:`_migrate_columns` 的自动迁移覆盖，无需手工登记 DDL；回填/类型
+    变更等复杂迁移走同函数的 ``_MIGRATE_COLUMNS`` 特例通道。
+    """
+    await init_plugin_db(get_engine(), SQLModel.metadata)
     await _migrate_columns()
 
 
-_MIGRATE_COLUMNS: dict[str, dict[str, str]] = {
-    # ⚠️ 维护契约（与模型定义双份维护）：给已有模型新增**简单列**时，必须
-    # 同步在此登记对应的 ADD COLUMN DDL——create_all 只对不存在的表生效，
-    # 不登记则生产旧库永远缺列（无自动迁移框架，属生产库风险的刻意取舍）
-    # 旧库无 lxns_refresh_token 列（落雪 OAuth 刷新令牌，2026-09-22 起落库）
-    "user_binding": {
-        "lxns_refresh_token": (
-            "ALTER TABLE user_binding ADD COLUMN lxns_refresh_token VARCHAR"
-        ),
-        # 日服 NET 凭据（2026-09-26 起支持数据源 net）
-        "net_sega_id": "ALTER TABLE user_binding ADD COLUMN net_sega_id VARCHAR",
-        "net_password": "ALTER TABLE user_binding ADD COLUMN net_password VARCHAR",
-        # 水鱼 OAuth 设备码绑定（2026-09-28 起：写路径强制 OAuth）。
-        # BOOL 必须带 NOT NULL DEFAULT 0：无默认时存量行读出 NULL 而非 False，
-        # 与新建行不均匀，将来 `is True` 类判定会漏掉 NULL 行
-        "divingfish_oauth": (
-            "ALTER TABLE user_binding ADD COLUMN"
-            " divingfish_oauth BOOL NOT NULL DEFAULT 0"
-        ),
-        "divingfish_sub": "ALTER TABLE user_binding ADD COLUMN divingfish_sub VARCHAR",
-    },
-}
+# SQLite 方言实例（列类型 → DDL 片段编译用；无状态，模块级复用）
+_SQLITE_DIALECT = sqlite.dialect()
+
+
+def _own_tables() -> dict[str, Table]:
+    """本模块定义的表（表名 → Table）。
+
+    SQLModel 全局 metadata 三仓共享（见模块 docstring），自动迁移只对本
+    模块定义的模型负责；兄弟仓的表由兄弟仓自己的初始化流程补列。
+    """
+    return {
+        cls.__tablename__: cls.__table__
+        for cls in globals().values()
+        if isinstance(cls, type)
+        and issubclass(cls, SQLModel)
+        and cls.__module__ == __name__
+    }
+
+
+def _sqlite_default_literal(value: Any) -> str | None:
+    """Python 简单标量 → SQLite DEFAULT 字面量；不可渲染返回 None。
+
+    None 视为「无默认值」而非 ``DEFAULT NULL``（可空列旧行读 NULL 即模型
+    语义，无需显式子句）。
+    """
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    return None
+
+
+def _column_default_sql(column: Column) -> str | None:
+    """模型列可自动迁移的服务端默认值片段；拿不到返回 None。
+
+    优先 ``server_default``（模型显式声明；str 按 SQLAlchemy 语义原样内联，
+    引号转义由声明方负责）；否则取 Python 侧常量默认（``Field(default=常量)``
+    生成的标量 ColumnDefault）。``default_factory``（callable）无法变成
+    服务端默认，返回 None。
+    """
+    server_default = column.server_default
+    if server_default is not None:
+        arg = getattr(server_default, "arg", None)
+        if isinstance(arg, TextClause):
+            return str(arg)
+        if isinstance(arg, str):
+            return arg
+        return _sqlite_default_literal(arg)
+    default = column.default
+    if default is not None and getattr(default, "is_scalar", False):
+        return _sqlite_default_literal(default.arg)
+    return None
+
+
+def _auto_add_column_sql(table: str, column: Column) -> str | None:
+    """按模型列定义生成 ``ALTER TABLE … ADD COLUMN``；无法自动迁移返回 None。
+
+    列类型以对 SQLite 方言的编译结果为准（str→VARCHAR、bool→BOOLEAN、
+    int→INTEGER、NaiveDatetime→DATETIME、float→FLOAT）。SQLite 约束：
+    ADD COLUMN 带 NOT NULL 必须同时给非 NULL 常量默认值——NOT NULL 列
+    （如 default_factory 时间的必填列）凑不齐即不可自动迁移，走特例通道。
+    """
+    default_sql = _column_default_sql(column)
+    if not column.nullable and default_sql is None:
+        return None
+    parts = [
+        f"ALTER TABLE {table} ADD COLUMN {column.name}",
+        column.type.compile(_SQLITE_DIALECT),
+    ]
+    if not column.nullable:
+        parts.append("NOT NULL")
+    if default_sql is not None:
+        parts.append(f"DEFAULT {default_sql}")
+    return " ".join(parts)
+
+
+_MIGRATE_COLUMNS: dict[str, dict[str, str]] = {}
+"""复杂迁移特例通道（表名 → 列名 → 手写 DDL）。
+
+自动迁移（:func:`_auto_add_column_sql`）已覆盖「模型新增简单列」场景——
+给模型加带常量默认或可空的简单列**无需再在此登记**。本表只留自动迁移
+不适用的特例：数据回填、类型变更、带子查询的 DDL 等；同一列在此登记时
+手写 DDL 优先于自动推导。截至 2026-10-04 为空：原 5 条
+（lxns_refresh_token / net_sega_id / net_password / divingfish_sub 为可空
+VARCHAR、divingfish_oauth 为 bool NOT NULL DEFAULT 0）已逐条核对，全部
+可由自动迁移等价生成，迁入自动路径。
+"""
 
 
 async def _migrate_columns() -> None:
-    """为旧库补新列：create_all 不会修改已存在的表，SQLite 靠存在性检查幂等。"""
+    """旧库补列：create_all 不会修改已存在的表，靠本函数对齐模型列集。
+
+    单事务多表一次遍历：inspect 取本仓各表现有列集后，``_MIGRATE_COLUMNS``
+    特例 DDL 优先执行（列名不再出现在模型列集亦可，如回填临时列），其余
+    缺失列按模型定义自动生成 ADD COLUMN；已存在的列不重复添加（幂等）。
+    自动迁移不可为的缺失列（如 default_factory 时间的 NOT NULL 列）
+    log.warning 提醒登记特例通道或调整模型定义，不中断建库。
+    """
+    tables = _own_tables()
     async with get_engine().begin() as conn:
 
         def _existing(sync_conn):
             inspector = inspect(sync_conn)
+            present = set(inspector.get_table_names())
             return {
-                table: {col["name"] for col in inspector.get_columns(table)}
-                for table in _MIGRATE_COLUMNS
+                name: (
+                    {col["name"] for col in inspector.get_columns(name)}
+                    if name in present
+                    else None  # 表不存在（正常已由 create_all 同事务建出，防御竞态）
+                )
+                for name in tables
             }
 
         schema = await conn.run_sync(_existing)
-        for table, columns in _MIGRATE_COLUMNS.items():
-            for name, ddl in columns.items():
-                if name not in schema[table]:
+        for name, existing in schema.items():
+            if existing is None:
+                continue
+            manual = _MIGRATE_COLUMNS.get(name, {})
+            for col_name, ddl in manual.items():
+                if col_name not in existing:
                     await conn.execute(text(ddl))
+            for column in tables[name].columns:
+                if column.name in existing or column.name in manual:
+                    continue
+                ddl = _auto_add_column_sql(name, column)
+                if ddl is None:
+                    logger.warning(
+                        "store：列 %s.%s 无法自动迁移（NOT NULL 且无可用的"
+                        "服务端默认值，如 default_factory 时间列），请登记"
+                        " _MIGRATE_COLUMNS 特例通道或将列改为可空/常量默认",
+                        name,
+                        column.name,
+                    )
+                    continue
+                await conn.execute(text(ddl))
 
 
 def session() -> AsyncSession:
