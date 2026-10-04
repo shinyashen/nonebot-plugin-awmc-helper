@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from typing import TYPE_CHECKING
 
 import yaml
@@ -26,7 +25,10 @@ from maimai_py import current_version
 from maimai_py.enums import Version
 
 from . import store
+from .calc import SSSP_ACHIEVEMENT
 from .http import create_smart_client
+from .songdb import norm_title
+from ..constants import ERA_YEAR_TO_CODE, level_from_value
 
 if TYPE_CHECKING:
     from maimai_py.models import ScoreExtend
@@ -314,11 +316,6 @@ def parse_gallery(text: str) -> tuple[list[ParsedCourse], list[ParsedRandom]]:
 # ---------------------------------------------------------------- 入库
 
 
-def _norm_title(text: str) -> str:
-    """标题归一（与曲库 otoge join 同口径）：NFKC + 去空白 + 小写。"""
-    return "".join(unicodedata.normalize("NFKC", text).split()).lower()
-
-
 async def _song_index() -> dict:
     """规范表 JP 视图索引：标题精确/归一两级查 id + 谱面存在性集合。"""
     async with store.session() as db:
@@ -343,7 +340,7 @@ async def _song_index() -> dict:
         if sid not in jp_ids:
             continue
         exact.setdefault(title, sid)
-        norm.setdefault(_norm_title(title), sid)
+        norm.setdefault(norm_title(title), sid)
     return {"exact": exact, "norm": norm, "charts": charts}
 
 
@@ -360,7 +357,7 @@ def _join_sheets(courses: list[ParsedCourse], index: dict) -> None:
                 matched_kind = KIND_TO_SONG_TYPE.get(sheet.kind)
                 level_index = DIFF_TO_LEVEL_INDEX[sheet.difficulty]
                 if sid is None:
-                    sid = index["norm"].get(_norm_title(sheet.title))
+                    sid = index["norm"].get(norm_title(sheet.title))
                 if (
                     sid is not None
                     and (sid, matched_kind, level_index) not in index["charts"]
@@ -506,8 +503,6 @@ _VERSION_BASES: tuple[tuple[str, int, int | None], ...] = (
     ("circle", Version.MAIMAI_DX_CIRCLE.value, Version.MAIMAI_DX_CIRCLE_PLUS.value),
     ("magical", Version.MAIMAI_DX_MAGICAL.value, None),
 )
-# 国服形式年→码（随心配 S-2 口径）：码 = 20000 + (年 - 2019) × 500
-_CN_YEAR_BASE, _CN_YEAR_STEP = 2019, 500
 
 
 def parse_version_prefix(arg: str) -> tuple[int | None, str]:
@@ -516,15 +511,18 @@ def parse_version_prefix(arg: str) -> tuple[int | None, str]:
     - 日服：完整版本名或前 n≥3 字符（dx 系 2 字符）+ 可选「+」表 PLUS，
       大小写不敏感（如 dx/dx+/uni/uni+/bud+/mag/magical）；
     - 国服（随心配 S-2 口径）：舞萌dx无印 / 舞萌dxYYYY / 舞萌YYYY / dxYYYY /
-      YYYY，年→码 = 20000+(年-2019)×500；
+      YYYY，年→码查 ``constants.ERA_YEAR_TO_CODE``（与 combo 回到过去同一
+      单一事实源）；年份未收录（2018 及以前 / 2027+）时不消费前缀、整体
+      返回 (None, arg)，由段位名解析自然落到「未识别段位」；
     - 无前缀返回 (None, arg)。MAGiCAL 无 PLUS，「mag+」等显式报错。
     """
     lowered = arg.lower()
     if m := re.match(r"^(?:舞萌)?dx无印", lowered):
         return Version.MAIMAI_DX.value, arg[m.end() :]
     if m := re.match(r"^(?:舞萌)?dx(20[12]\d)", lowered):
-        year = int(m.group(1))
-        code = 20000 + (year - _CN_YEAR_BASE) * _CN_YEAR_STEP
+        code = ERA_YEAR_TO_CODE.get(int(m.group(1)))
+        if code is None:
+            return None, arg  # 未收录年份：不消费前缀，走段位名解析
         return code, arg[m.end() :]
     if m := re.match(r"^(?:舞萌)?dx\+?", lowered):
         # 舞萌dx（无年份）= DX 无印；dx+ = PLUS
@@ -535,8 +533,9 @@ def parse_version_prefix(arg: str) -> tuple[int | None, str]:
         )
         return code, arg[m.end() :]
     if m := re.match(r"^(?:舞萌)?(20[12]\d)", lowered):
-        year = int(m.group(1))
-        code = 20000 + (year - _CN_YEAR_BASE) * _CN_YEAR_STEP
+        code = ERA_YEAR_TO_CODE.get(int(m.group(1)))
+        if code is None:
+            return None, arg  # 未收录年份：不消费前缀，走段位名解析
         return code, arg[m.end() :]
     for base, code, plus_code in _VERSION_BASES:
         min_len = len(base) if base == "dx" else 3
@@ -589,8 +588,11 @@ async def latest_gallery_id(
 
 
 async def cn_current_version() -> int:
-    """国服当前版本：规范表 max(version_cn)，回落 maimai_py current_version
-    （口径对齐 songdb.State.cn_current_version）。"""
+    """国服当前版本：规范表 max(version_cn)，回落 maimai_py current_version。
+
+    与 ``songdb.State.cn_current_version`` 同口径双实现（那里走内存态、
+    这里走库查询），改一侧须同步另一侧。
+    """
     from sqlmodel import select
     from sqlalchemy import func
 
@@ -659,15 +661,6 @@ def format_base_score(current_ra: int, gain: int | None) -> str:
 # ---------------------------------------------------------------- 段位卡组装
 
 
-def _level_str(ds: float) -> str:
-    """定数 → 显示等级串（实证映射：N.0-N.5 → N，N.6-N.9 → N+）。
-
-    用十分位整数比较：浮点直接减会踩 14.6-14=0.5999… 的坑（14.6 误判 14）。
-    """
-    base = int(ds)
-    return f"{base}+" if round(ds * 10) - base * 10 >= 6 else str(base)
-
-
 async def _chart_info(
     song_id: int, kind: str, level_index: int, version_code: int | None = None
 ) -> tuple[str, str, str, float, int]:
@@ -717,7 +710,7 @@ async def _chart_info(
     ds = latest.level_value or 0.0
     chart_version = group.version or 0 if group else 0
     return (
-        _level_str(ds),
+        level_from_value(ds),
         chart.designer or "-",
         str(song.bpm or "-"),
         ds,
@@ -931,7 +924,7 @@ async def card_data(
                 course.version if course else version_code,
             )
             if bests is not None and not jp_view:  # 日服 fallback 不显示加分
-                # 加分预测：目标 100.5%（ScoreCoefficient 内部封顶）的 B50 净
+                # 加分预测：目标 SSS+（ScoreCoefficient 内部封顶）的 B50 净
                 # 提升。入线线按谱面登场版本选 B50 侧别（b35/b15，口径同歌曲
                 # 卡 chart_card）——b35 域课题曲不能拿 b15 的最低分当入线线
                 side_best = (
@@ -939,7 +932,7 @@ async def card_data(
                     if nb_chart.is_new_chart(chart_version)
                     else bests.scores_b35
                 )
-                target_ra = int(ScoreCoefficient(100.5).ra(ds))
+                target_ra = int(ScoreCoefficient(SSSP_ACHIEVEMENT).ra(ds))
                 gain = max(
                     new_best_score(
                         song_id, level_index, target_ra, side_best, song_type

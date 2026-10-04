@@ -272,13 +272,8 @@ class NetScoreService:
         # Song 本身无 type（SD/DX 折叠在根 id 下，谱面类型从 NET 记录取）
         score_type = SongType.DX if record.type == "dx" else SongType.STANDARD
         ra = int(ScoreCoefficient(record.achievement).ra(diff.level_value))
-        level_dx_score = (
-            diff.tap_num
-            + diff.hold_num
-            + diff.slide_num
-            + diff.break_num
-            + diff.touch_num
-        ) * 3
+        # DX 理论分 = 物量合计 × 3（maimai_py 单一事实源，勿手写展开）
+        level_dx_score = diff.level_dx_score
         # Score.id 一律为根 id（SD/DX 同根，类型由 Score.type 区分），对齐
         # maimai_py 各源成绩的归一根 id 约定（水鱼 _deser_score % 10000、落雪
         # API 本就根 id；宴谱 id > 100000 原样保留，本模块抓取不含宴谱）

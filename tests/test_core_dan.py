@@ -300,15 +300,19 @@ async def test_card_data_random_sampling(tmp_db):
 
 
 def test_level_str_boundaries():
-    """定数→标级映射边界：N.5→N、N.6→N+（浮点 14.6-14 坑回归）。"""
-    from nonebot_plugin_awmc_helper.core.dan import _level_str
+    """定数→标级映射边界：N.5→N、N.6→N+（浮点 14.6-14 坑回归）。
 
-    assert _level_str(14.5) == "14"
-    assert _level_str(14.6) == "14+"
-    assert _level_str(12.6) == "12+"
-    assert _level_str(13.9) == "13+"
-    assert _level_str(15.0) == "15"
-    assert _level_str(7.0) == "7"
+    dan._chart_info 的定数→标级展示单源 constants.level_from_value
+    （dan 自带的 _level_str 已删），这里锁定 dan 消费口径的边界行为。
+    """
+    from nonebot_plugin_awmc_helper.constants import level_from_value
+
+    assert level_from_value(14.5) == "14"
+    assert level_from_value(14.6) == "14+"
+    assert level_from_value(12.6) == "12+"
+    assert level_from_value(13.9) == "13+"
+    assert level_from_value(15.0) == "15"
+    assert level_from_value(7.0) == "7"
 
 
 def test_resolve_dan_id_aliases():
@@ -348,12 +352,15 @@ def test_parse_version_prefix():
         "cir十段": (26000, "十段"),
         "fes+十段": (23500, "十段"),
         "舞萌dx初段": (20000, "初段"),
-        "舞萌dx2022十段": (21500, "十段"),
-        "舞萌2022十段": (21500, "十段"),
-        "dx2022十段": (21500, "十段"),
-        "2022十段": (21500, "十段"),
+        "舞萌dx2022十段": (22000, "十段"),
+        "舞萌2022十段": (22000, "十段"),
+        "dx2022十段": (22000, "十段"),
+        "2022十段": (22000, "十段"),
         "dx无印十段": (20000, "十段"),
         "十段": (None, "十段"),
+        # 未收录年份（查表 ERA_YEAR_TO_CODE 无值）：不消费前缀、整体原样返回
+        "dx2018十段": (None, "dx2018十段"),
+        "2027十段": (None, "2027十段"),
     }
     for arg, (code, rest) in cases.items():
         assert parse_version_prefix(arg) == (code, rest), arg

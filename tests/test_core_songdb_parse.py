@@ -38,6 +38,15 @@ def test_norm_title_and_utage_ids():
     )
 
 
+def test_dx_version_stride_matches_enum():
+    """songdb 的 +500 递推常量与 maimai_py Version 枚举对齐（防枚举改动破坏递推）。"""
+    from maimai_py import Version
+
+    from nonebot_plugin_awmc_helper.core.songdb import _DX_VERSION_STRIDE
+
+    assert Version.MAIMAI_DX_PLUS - Version.MAIMAI_DX == _DX_VERSION_STRIDE
+
+
 def test_parse_level_float_and_level_from_value():
     from nonebot_plugin_awmc_helper.constants import level_from_value
     from nonebot_plugin_awmc_helper.core.songdb import parse_level_float

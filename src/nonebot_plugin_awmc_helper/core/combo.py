@@ -45,7 +45,12 @@ from maimai_py import (
 )
 
 from . import designer as designer_mod
-from .calc import build_bests, compute_rating, build_flat_bests
+from .calc import (
+    THEORETICAL_ACHIEVEMENT,
+    build_bests,
+    compute_rating,
+    build_flat_bests,
+)
 from .score import score_service
 from .songs import song_service
 from .plates import norm_plate, version_code_of
@@ -53,7 +58,12 @@ from .songdb import State, norm_title, ongeki_titles, ensure_ongeki_titles
 from .binding import strip_at_segments
 from .designer import match as _designer_match
 from .designer import build_needles as _designer_needles
-from ..constants import RATE_TO_ZH, COLOR_TO_LEVEL_INDEX, normalize_text
+from ..constants import (
+    RATE_TO_ZH,
+    ERA_YEAR_TO_CODE,
+    COLOR_TO_LEVEL_INDEX,
+    normalize_text,
+)
 
 # ---------------------------------------------------------------- 模型
 
@@ -814,19 +824,24 @@ def _sync_cond(kind: str) -> Cond:
     return Cond(CondType.SYNC, key=key, label=label, record=record)
 
 
+# 牛逼/越级门槛（S-15）：牛逼 = 达成率 ≥100.8%、越级 = <95.0%，万分位整数
+_NB_BPS = 1_008_000
+_LOSER_BPS = 950_000
+
+
 def _badge_cond(kind: str) -> Cond:
     """牛逼/越级（S-15，万分位整数比较）。"""
     if kind == "nb":
         label, key = "牛逼", "nb"
 
         def record(s: ScoreExtend) -> bool:
-            return s.achievements is not None and _bps(s.achievements) >= 1008000
+            return s.achievements is not None and _bps(s.achievements) >= _NB_BPS
 
     else:
         label, key = "越级", "loser"
 
         def record(s: ScoreExtend) -> bool:
-            return s.achievements is not None and _bps(s.achievements) < 950000
+            return s.achievements is not None and _bps(s.achievements) < _LOSER_BPS
 
     return Cond(CondType.BADGE, key=key, label=label, record=record)
 
@@ -895,9 +910,9 @@ def _ideal_of(s: ScoreExtend) -> ScoreExtend:
     if s.rate == RateType.SSSP:
         return replace(
             s,
-            achievements=101.0,
+            achievements=THEORETICAL_ACHIEVEMENT,
             fc=FCType.APP,
-            dx_rating=compute_rating(s.level_value, 101.0),
+            dx_rating=compute_rating(s.level_value, THEORETICAL_ACHIEVEMENT),
         )
     nxt = RateType(s.rate.value - 1)
     ach = _RATE_FLOOR[nxt]
@@ -1184,7 +1199,7 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
             )
         elif t.kind == "era_year":
             year_e: int = t.value
-            if year_e in _YEAR_TO_CODE:
+            if year_e in ERA_YEAR_TO_CODE:
                 conds.append(_era_year_cond(year_e, t.text))
             # 未收录年份（2000–2018 / 2027+）：残片忽略
         elif t.kind == "era":
@@ -1195,9 +1210,19 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
                     key=f"era:{which}",
                     label="dx" if which == "dx" else "旧框",
                     chart=(
-                        (lambda s, d, _cur: (version_code_of(d) or 0) > 19900)
+                        (
+                            lambda s, d, _cur: (
+                                (version_code_of(d) or 0) > Version.MAIMAI_FINALE.value
+                            )
+                        )
                         if which == "dx"
-                        else (lambda s, d, _cur: 0 < (version_code_of(d) or 0) <= 19900)
+                        else (
+                            lambda s, d, _cur: (
+                                0
+                                < (version_code_of(d) or 0)
+                                <= Version.MAIMAI_FINALE.value
+                            )
+                        )
                     ),
                     value=which,
                 )
@@ -1248,27 +1273,15 @@ def _assemble(tokens: "list[Token]") -> "list[Cond] | ComboAmbiguity | None":
     return deduped or None
 
 
-_YEAR_TO_CODE: "dict[int, int]" = {
-    2019: Version.MAIMAI_DX.value,
-    2020: Version.MAIMAI_DX_PLUS.value,
-    2021: Version.MAIMAI_DX_SPLASH.value,
-    2022: Version.MAIMAI_DX_UNIVERSE.value,
-    2023: Version.MAIMAI_DX_FESTIVAL.value,
-    2024: Version.MAIMAI_DX_BUDDIES.value,
-    2025: Version.MAIMAI_DX_PRISM.value,
-    2026: Version.MAIMAI_DX_CIRCLE.value,
-}
-"""回到过去 年份 → 代基码（Version 枚举直查；PLUS 尾码不分，对齐笔记 §9 S-2
-与 KarenBot nowVersion）。未收录年份（2000–2018 / 2027+）的 token 丢弃。"""
-
-
 def _era_year_cond(year: int, label: str) -> Cond:
     """回到过去条件（S-2）：版本 ≤ 年份码 + boundary 覆写（value=码）。
 
+    年→码单一事实源为 ``constants.ERA_YEAR_TO_CODE``（dan 段位名版本前缀
+    同表；PLUS 尾码不分，对齐笔记 §9 S-2 与 KarenBot nowVersion）。
     定数时点值与分界覆写在执行器侧由 :func:`_era_level_modifier` 与
     ``build_bests(latest_version_value=码)`` 承接。
     """
-    code = _YEAR_TO_CODE[year]
+    code = ERA_YEAR_TO_CODE[year]
     return Cond(
         CondType.ERA_YEAR,
         key=f"era_year:{code}",

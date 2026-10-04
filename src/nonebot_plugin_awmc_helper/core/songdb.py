@@ -64,6 +64,21 @@ CURRENT_FINGERPRINT: str | None = None
 
 _NOTE_KEYS = ("tap", "hold", "slide", "touch", "break")
 
+# 定数变化点去重容差：与相邻变化点差值 ≤ 容差视作同值不另立变化点
+# （dschange 连续同值合并、与 all_data 末点互校共用）
+_DS_DEDUP_TOL = 0.001
+# §5.3 国服定数校验容差：推导定数与落雪/水鱼实测偏差超过记警告
+# （宴定数是标级推导的代理值，必然有差，不参与该校验）
+_CN_DS_WARN_TOL = 0.05
+# 01 文档扁平 level 展开循环的理论上限保护（正常到轴末即 break，防异常
+# 历史把展开推入死循环）
+_FLAT_AXIS_GUARD = 4096
+# 浮点同值判定容差：差值在 1e-9 内视作不变（外部源幂等合并/扁平列合并用）
+_EPS = 1e-9
+# Version 枚举 DX 段相邻成员步进（与 maimai_py enums 对齐；版本码超出
+# 枚举已知值时的 +500 递推依据）
+_DX_VERSION_STRIDE = 500
+
 
 def norm_title(title: str) -> str:
     """标题归一（otoge-db title join 用）：NFKC + 去空白 + 小写。"""
@@ -310,7 +325,10 @@ def parse_maimaiinfo(all_data: dict[str, dict], dschange: dict) -> dict[int, Ent
             if idx < len(ds_values) and ds_values[idx] is not None:
                 chart.history = list(history_by_diff.get(idx, []))
                 current = float(ds_values[idx])
-                if chart.history and abs(chart.history[-1][1] - current) > 0.001:
+                if (
+                    chart.history
+                    and abs(chart.history[-1][1] - current) > _DS_DEDUP_TOL
+                ):
                     # dschange 快照较旧（14 处）：末变化点值以 all_data 当前值兜底
                     chart.history[-1] = (chart.history[-1][0], current)
                 elif not chart.history and version is not None:
@@ -366,7 +384,7 @@ def _dedup_points(seq: dict[str, Any]) -> list[tuple[int, float]]:
     ordered.sort(key=lambda x: x[0])
     points: list[tuple[int, float]] = []
     for version, value in ordered:
-        if not points or abs(points[-1][1] - value) > 0.001:
+        if not points or abs(points[-1][1] - value) > _DS_DEDUP_TOL:
             points.append((version, value))
     return points
 
@@ -458,13 +476,17 @@ def parse_divingfish(music_data: list[dict]) -> dict[str, dict]:
 
 
 def _df_known_kinds(music_data: dict[str, dict]) -> set[tuple[int, str]]:
-    """水鱼在列集（(song_id, kind)；id 形状定 kind：≤4 位 sd、5 位 dx、6 位宴）。"""
+    """水鱼在列集（(song_id, kind)；id 形状定 kind：≤4 位 sd、5 位 dx、6 位宴）。
+
+    边界与 maimai_py ``SongType._from_id`` 同口径（≥ UTAGE_ID_BASE = 宴、
+    ≥ DX_ID_OFFSET = DX），不在此双写裸数字。
+    """
     known: set[tuple[int, str]] = set()
     for raw_id in music_data:
         i = int(raw_id)
-        if i > 99999:
+        if i >= UTAGE_ID_BASE:
             known.add((i % DX_ID_OFFSET, "utage"))
-        elif i > 9999:
+        elif i >= DX_ID_OFFSET:
             known.add((i % DX_ID_OFFSET, "dx"))
         else:
             known.add((i, "sd"))
@@ -614,7 +636,11 @@ class State:
         return eligible[-1][1] if eligible else None
 
     def cn_current_version(self) -> int:
-        """国服当前版本：数据 max(version_cn)，回落 maimai_py current_version。"""
+        """国服当前版本：数据 max(version_cn)，回落 maimai_py current_version。
+
+        与 ``dan.cn_current_version`` 同口径双实现（这里走内存态、那里走
+        库查询），改一侧须同步另一侧。
+        """
         values = [
             g.version_cn for g in self.groups.values() if g.version_cn is not None
         ]
@@ -943,13 +969,13 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                     _set_notes(target, chart.notes)
                 if kind == "utage":
                     _fill_utage_fields(target, chart)
-                # §5.3 校验：推导国服定数 vs 落雪实测（偏差 > 0.05 记警告）；
+                # §5.3 校验：推导国服定数 vs 落雪实测（超容差记警告）；
                 # 宴定数是标级推导的代理值（§3），与实测必然有差，不参与校验
                 if chart.cn_level_value and chart.history and kind != "utage":
                     derived = cn_level_value(chart.history, cn_current)
                     if (
                         derived is not None
-                        and abs(derived - chart.cn_level_value) > 0.05
+                        and abs(derived - chart.cn_level_value) > _CN_DS_WARN_TOL
                     ):
                         state.warn(
                             f"「{entry.title}」{kind}{level_id} 国服定数推导 "
@@ -986,7 +1012,7 @@ def _crosscheck_df(
         for idx, value in enumerate(item.get("ds") or []):
             history = state.history_of(song_id, kind, idx)
             cn_value = cn_level_value(history, cn_current) if history else None
-            if cn_value and abs(cn_value - float(value)) > 0.05:
+            if cn_value and abs(cn_value - float(value)) > _CN_DS_WARN_TOL:
                 state.warn(
                     f"「{entry.title}」{kind}{idx} 定数两源不一致："
                     f"落雪 {cn_value} / 水鱼 {value}"
@@ -1306,13 +1332,13 @@ def build_song(
         return None  # 该 scope 下无任何谱面组（如 JP-only 曲的 CN 视图）
     if index is None:
         index = state.charts_of_song(song_id)
-    cn_cur = (
-        cn_current
-        if cn_current is not None
-        else state.cn_current_version()
-        if scope == "cn"
-        else 0
-    )
+    if cn_current is not None:
+        cn_cur = cn_current
+    elif scope == "cn":
+        cn_cur = state.cn_current_version()
+    else:
+        # JP 定数不走 cn 推导，0 仅占位（cn_level_value 只在 cn 分支消费）
+        cn_cur = 0
     standard, dx, utage = [], [], []
     for group in groups:
         group_version = getattr(group, version_key)
@@ -1396,11 +1422,15 @@ def _level_flat(history: list[tuple[int, float]]) -> list[float]:
     elif start < axis[0]:
         start_idx = 0
     else:
-        # 超出已知轴的新版本：按 +500 递推对位（DX 时代惯例）
-        start_idx = len(axis) - 1 + (start - axis[-1]) // 500
+        # 超出已知轴的新版本：按 _DX_VERSION_STRIDE 递推对位（DX 时代惯例）
+        start_idx = len(axis) - 1 + (start - axis[-1]) // _DX_VERSION_STRIDE
     out: list[float] = []
-    for idx in range(start_idx, start_idx + 4096):  # 理论上限保护
-        code = axis[idx] if idx < len(axis) else axis[-1] + (idx - len(axis) + 1) * 500
+    for idx in range(start_idx, start_idx + _FLAT_AXIS_GUARD):  # 理论上限保护
+        code = (
+            axis[idx]
+            if idx < len(axis)
+            else axis[-1] + (idx - len(axis) + 1) * _DX_VERSION_STRIDE
+        )
         value = None
         for v, val in history:
             if v <= code:
@@ -1421,7 +1451,7 @@ def _points_from_flat(
     对位规则：登场版本（组 version，旧框取 DX 初代）在轴上有位则从该位起；
     长度与登场版本不一致或未知时，按「列表末位 = 轴末位（DX 14 版）」端对齐。
     列表长于 14（文档收录了 MAGiCAL 等新版本）时轴先补枚举已知码、再按
-    +500 递推。连续相同值合并为变化点。
+    _DX_VERSION_STRIDE 递推。连续相同值合并为变化点。
     """
     n = len(values)
     if n == 0:
@@ -1432,11 +1462,11 @@ def _points_from_flat(
     extras = [
         v.value for v in Version if top < v.value < Version.MAIMAI_DX_FUTURE.value
     ]
-    while len(axis) < n:  # 扩展轴：先已知新版本码，再 +500 递推
+    while len(axis) < n:  # 扩展轴：先已知新版本码，再步进递推
         axis.append(
             extras[len(axis) - len(DX_VERSION_CODES)]
             if len(axis) - len(DX_VERSION_CODES) < len(extras)
-            else axis[-1] + 500
+            else axis[-1] + _DX_VERSION_STRIDE
         )
     start_idx = 0
     if debut is not None:
@@ -1450,9 +1480,9 @@ def _points_from_flat(
         idx = start_idx + offset
         if idx < len(axis):
             code = axis[idx]
-        else:  # 超出已知轴：+500 递推（新版本尚未进枚举/EXTRA 表）
-            code = axis[-1] + (idx - len(axis) + 1) * 500
-        if not points or abs(points[-1][1] - value) > 1e-9:
+        else:  # 超出已知轴：步进递推（新版本尚未进枚举/EXTRA 表）
+            code = axis[-1] + (idx - len(axis) + 1) * _DX_VERSION_STRIDE
+        if not points or abs(points[-1][1] - value) > _EPS:
             points.append((code, value))
     return points
 
@@ -2081,7 +2111,7 @@ def _merge_current_level(
         )
         return True
     last_version, last_value = history[-1]
-    if abs(last_value - value) <= 1e-9:
+    if abs(last_value - value) <= _EPS:
         return False
     if anchor is None:
         anchor = last_version

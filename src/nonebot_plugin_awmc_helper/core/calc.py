@@ -14,6 +14,7 @@ from maimai_py import (
     PlayerBests,
     ScoreExtend,
     SongDifficulty,
+    current_version,
 )
 from maimai_py.utils import ScoreCoefficient
 
@@ -24,6 +25,9 @@ RISE_ACHIEVEMENTS = (99.0, 99.5, 100.0, 100.5)
 
 SSSP_ACHIEVEMENT = 100.5
 """SSS+ 达成率阈值（推分忽略集与评级上界）。"""
+
+THEORETICAL_ACHIEVEMENT = 101.0
+"""理论值达成率（理论值计算与 RA 上限用；AP+ 即 100% 基础 + 1% BREAK 额外分）。"""
 
 SSSP_COEFFICIENT = ScoreCoefficient(SSSP_ACHIEVEMENT).c
 """SSSP 档 RA 系数（22.4，NB get_mai_what 的 RA→定数反推基准）。"""
@@ -48,6 +52,18 @@ NOTE_JUDGES: tuple[tuple[str, tuple[float, float, float]], ...] = (
     ("HOLD", (2.0, 5.0, 10.0)),
     ("SLIDE", (3.0, 7.5, 15.0)),
 )
+
+# 音符基础分（专栏计分口径，出处见 :func:`score_line` docstring）：
+# TAP·TOUCH 500、HOLD 1000、SLIDE 1500、BREAK 2500
+_NOTE_BASE_SCORE: dict[str, int] = {
+    "tap": 500,
+    "hold": 1000,
+    "slide": 1500,
+    "touch": 500,
+    "break": 2500,
+}
+# 达成率百分点 → 万分位整数的换算基数（基础分/预算均按万分位折算）
+_ACHIEVEMENT_BPS = 10_000
 
 
 def min_ds_of_ra(ra: float) -> float:
@@ -107,28 +123,28 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     if reduce_pct <= 0 or reduce_pct >= cap:
         return None
     total = (
-        diff.tap_num * 500
-        + diff.hold_num * 1000
-        + diff.slide_num * 1500
-        + diff.touch_num * 500
-        + diff.break_num * 2500
+        diff.tap_num * _NOTE_BASE_SCORE["tap"]
+        + diff.hold_num * _NOTE_BASE_SCORE["hold"]
+        + diff.slide_num * _NOTE_BASE_SCORE["slide"]
+        + diff.touch_num * _NOTE_BASE_SCORE["touch"]
+        + diff.break_num * _NOTE_BASE_SCORE["break"]
     )
     if diff.break_num == 0 or total == 0:
         return None
     bonus_total = diff.break_num * 100
     # 每 1 额外分损失的等效 GREAT TAP 数（1% 权重折算）
-    per_bonus = total / (bonus_total * 10000)
+    per_bonus = total / (bonus_total * _ACHIEVEMENT_BPS)
     break_rows = [
         (
             name,
-            (2500 - basic) / 100 + (100 - extra) * per_bonus,
+            (_NOTE_BASE_SCORE["break"] - basic) / 100 + (100 - extra) * per_bonus,
         )
         for name, basic, extra in BREAK_JUDGES
     ]
     return {
         "total_basic": total,
         "total_bonus": bonus_total,
-        "budget": reduce_pct * total / 10000,
+        "budget": reduce_pct * total / _ACHIEVEMENT_BPS,
         "breaks": diff.break_num,
         "cap": cap,
         "buddy": cap == 202,
@@ -203,8 +219,6 @@ def rise_recommend(
       （硬编码会在新版本时代漏推当前版本曲）。
     """
     if latest_version_value is None:
-        from maimai_py import current_version
-
         latest_version_value = current_version.value
     by_key: dict[tuple, ScoreExtend] = {
         (s.id, s.type, s.level_index): s for s in scores
@@ -337,8 +351,6 @@ def build_bests(
     调用方自行完成过滤/去重/曲级聚合——本函数只做拆分、排序、截断、求和。
     """
     if latest_version_value is None:
-        from maimai_py import current_version
-
         latest_version_value = current_version.value
     old: list[ScoreExtend] = []
     new: list[ScoreExtend] = []
