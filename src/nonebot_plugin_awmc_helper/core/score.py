@@ -28,6 +28,7 @@ from .sources import Capability, UserScoreError, DivingFishSource, source_of
 if TYPE_CHECKING:
     from maimai_py import DivingFishPlayer
 
+    from .plates import LocalPlates
     from .ext.divingfish import RankUser
 
 __all__ = ["UserScoreError", "build_bests", "score_service"]
@@ -117,8 +118,9 @@ class ScoreService:
 
     async def get_plates(
         self, binding: UserBinding, plate: str, notify_slow=None
-    ) -> MaimaiPlates:
-        """牌子进度（判牌语义在 maimai-py 内置）。"""
+    ) -> "MaimaiPlates | LocalPlates":
+        """牌子进度（判牌语义按数据源：CN 走库对象、NET 走本地判牌，见
+        :meth:`core.sources.SourceBase.get_plates`）。"""
         return await self._src(binding).get_plates(binding, plate, notify_slow)
 
     async def get_my_ranking(

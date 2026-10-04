@@ -365,7 +365,10 @@ class SourceBase:
 
     async def get_plates(
         self, binding: UserBinding, plate: str, notify_slow=None
-    ) -> MaimaiPlates:
+    ) -> "MaimaiPlates | LocalPlates":
+        """牌子进度：CN 源返回库 ``MaimaiPlates``，日服源返回本地判牌
+        :class:`~core.plates.LocalPlates`（库只认 CN 口径）；二者对消费方
+        duck-compatible（get_cleared/get_remained）。"""
         raise self.unsupported(Capability.PLATES)
 
     async def get_player(
