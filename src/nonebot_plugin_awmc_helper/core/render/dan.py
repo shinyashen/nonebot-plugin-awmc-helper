@@ -16,6 +16,9 @@
   没有，用 Torus 字体取同色系近似绘制，底部与数字实心字形底对齐；
 - 等级数字色号 = 难度序 +1（绿黄红紫白），宴谱 10 暂不用；
 - 扣血红字 / 回复绿字（FOT-NewRodin 日文字体）；
+- 扣血药丸为 4x 画布自绘（原 104×24 烤字素材放大发虚）：体色实时采样自
+  原素材、标签 Rodin 半透明白字、爱心取 UI_DNM_Icon_Life_04，缩回目标
+  尺寸获得与原版一致的自然抗锯齿（原素材黑芯描边即黑+体色的 AA 混合）；
 - 类型徽章（``pic/SD.png``/``pic/DX.png``，static 既有）移入标题蓝胶囊条
   右端（h20，曲名截断避让）；卡框素材已去除烤入的「でらっくスコア」字样，
   底部白条左绘信息行、槽 pill 上居中绘底分。
@@ -24,6 +27,8 @@
 ``local/scratch/render_dan_preview.py`` 出三样式样张比对。
 """
 
+from functools import lru_cache
+from collections import Counter
 from dataclasses import field, dataclass
 
 from PIL import Image, ImageDraw
@@ -486,9 +491,63 @@ def _draw_gauge(im: Image.Image, data: DanCardData) -> None:
     )
 
 
+# 扣血药丸自绘参数：4x 画布绘制后 LANCZOS 缩回 DAMAGE_PILL_SIZE，
+# 坐标均为 4x 系（= 2x 目标系 ×2）；文字/爱心/红字统一中线 y24（2x 系）
+_DAMAGE_PILL_CANVAS_T4 = (416, 96)
+_DAMAGE_PILL_CONTENT_CY_T4 = 48
+_DAMAGE_PILL_LABELS = {"01": "GREAT", "02": "GOOD", "03": "MISS"}
+_DAMAGE_PILL_LABEL_ALPHA = 200
+
+
+@lru_cache(maxsize=8)
+def _build_damage_pill(box: str) -> Image.Image:
+    """自绘扣血药丸（208×48，进程级缓存）。
+
+    原素材仅 104×24 且标签烤死图里，放大 2 倍后发虚；改为 4x 画布重拼：
+    体色实时采样自原素材（素材包换色自动跟随），标签 Rodin 半透明白字按
+    字形包围盒居中（anchor mm 的字面盒与 cap 盒有偏差），爱心取
+    UI_DNM_Icon_Life_04 与烤紫核同宽对齐；缩回目标尺寸时边缘自然生成
+    抗锯齿，黑芯描边感即黑+体色的 AA 混合，无需单独画环。
+    """
+    src = dan_asset(f"{box}.png")
+    # 排除烤字/烤心等亮部与黑芯，取出现最多的颜色即药丸体色
+    body = Counter(
+        px[:3] for px in src.getdata() if px[3] > 128 and sum(px[:3]) >= 120
+    ).most_common(1)[0][0]
+
+    im = Image.new("RGBA", _DAMAGE_PILL_CANVAS_T4, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(im)
+    draw.rounded_rectangle((8, 8, 408, 88), radius=40, fill=(*body, 255))
+    draw.rounded_rectangle((196, 16, 396, 80), radius=32, fill=(0, 0, 0, 255))
+    cy = _DAMAGE_PILL_CONTENT_CY_T4
+    heart = dan_asset("UI_DNM_Icon_Life_04.png").crop((3, 5, 45, 43))
+    gh = round(48 * 38 / 42)
+    im.alpha_composite(
+        heart.resize((48, gh), Image.Resampling.LANCZOS), (214, cy - gh // 2)
+    )
+    label = _DAMAGE_PILL_LABELS[box.removeprefix("UI_DNM_Box_Damage_")]
+    layer = Image.new("RGBA", _DAMAGE_PILL_CANVAS_T4, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text(
+        (106, cy),
+        label,
+        font=font(36, FONT_RODIN),
+        fill=(255, 255, 255, _DAMAGE_PILL_LABEL_ALPHA),
+        anchor="mm",
+    )
+    if (bb := layer.getbbox()) is None:  # 标签恒非空，防御裁剪坐标
+        raise ValueError(f"扣血药丸标签渲染为空: {label}")
+    layer = layer.transform(
+        _DAMAGE_PILL_CANVAS_T4,
+        Image.AFFINE,
+        (1, 0, 106 - (bb[0] + bb[2]) / 2, 0, 1, cy - (bb[1] + bb[3]) / 2),
+    )
+    im.alpha_composite(layer)
+    return im.resize(DAMAGE_PILL_SIZE, Image.Resampling.LANCZOS)
+
+
 def _draw_damage_boxes(im: Image.Image, data: DanCardData) -> None:
-    """三条扣血药丸（标签与心已烤）＋ 红色扣血数字；回复条中轴线对齐上方
-    元素组中心，绿色回复数字落在条内黑药丸的心右侧（均水平居中）。"""
+    """三条扣血药丸（自绘：标签白字+爱心）＋ 红色扣血数字；回复条中轴线
+    对齐上方元素组中心，绿色回复数字落在条内黑药丸的心右侧（均水平居中）。"""
     draw = ImageDraw.Draw(im)
     for i, (box, value) in enumerate(
         (
@@ -497,9 +556,7 @@ def _draw_damage_boxes(im: Image.Image, data: DanCardData) -> None:
             ("UI_DNM_Box_Damage_03", data.damage_miss),
         )
     ):
-        pill = dan_asset(f"{box}.png").resize(
-            DAMAGE_PILL_SIZE, Image.Resampling.LANCZOS
-        )
+        pill = _build_damage_pill(box)
         y = DAMAGE_PILL_POS[1] + i * DAMAGE_PILL_PITCH
         im.alpha_composite(pill, (DAMAGE_PILL_POS[0], y))
         draw.text(

@@ -113,3 +113,42 @@ def test_explicit_cover_overrides():
     data = _card_data(0.0)
     data.songs[0].cover = Image.new("RGBA", (120, 120), (255, 0, 0, 255))
     assert render_dan_card(data) != render_dan_card(_card_data(0.0))
+
+
+@requires_assets
+def test_damage_pill_self_drawn():
+    """扣血药丸自绘：尺寸/缓存同对象、三张体色互异、白字与爱心同落 y24 中线。"""
+    from nonebot_plugin_awmc_helper.core.render.dan import _build_damage_pill
+
+    p1 = _build_damage_pill("UI_DNM_Box_Damage_01")
+    assert p1.size == (208, 48)
+    assert p1.mode == "RGBA"
+    assert _build_damage_pill("UI_DNM_Box_Damage_01") is p1
+
+    bodies = {
+        n: _build_damage_pill(f"UI_DNM_Box_Damage_{n}").getpixel((30, 10))
+        for n in ("01", "02", "03")
+    }
+    assert len({b[:3] for b in bodies.values()}) == 3  # 红/绿/灰互异
+    assert all(b[3] == 255 for b in bodies.values())
+
+    def _bbox_center(im: Image.Image, zone: tuple[int, int, int, int], pred):
+        xs, ys = [], []
+        for y in range(zone[1], zone[3]):
+            for x in range(zone[0], zone[2]):
+                px = im.getpixel((x, y))
+                if px[3] > 60 and pred(px):
+                    xs.append(x)
+                    ys.append(y)
+        return (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+
+    # 左侧区白字与黑芯区紫爱心：中线均应在 y24±1
+    label_zone, heart_zone = (8, 12, 96, 36), (104, 14, 134, 34)
+    for n in ("01", "02", "03"):
+        pill = _build_damage_pill(f"UI_DNM_Box_Damage_{n}")
+        _, ly = _bbox_center(pill, label_zone, lambda px: px[0] > 215 and px[1] > 150)
+        _, hy = _bbox_center(
+            pill, heart_zone, lambda px: px[2] > 140 and px[2] > px[1] + 30
+        )
+        assert abs(ly - 24) <= 1, f"{n} 标签中线偏移: {ly}"
+        assert abs(hy - 24) <= 1, f"{n} 爱心中线偏移: {hy}"
