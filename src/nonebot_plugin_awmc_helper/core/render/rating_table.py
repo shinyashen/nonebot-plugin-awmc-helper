@@ -32,6 +32,8 @@ from .table_layout import (
     RATING_START_Y,
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
+    iter_grid,
+    grid_height,
     group_by_ds,
     grid_geometry,
     group_by_level,
@@ -332,16 +334,20 @@ def _draw_rating_core(
                 stamp_sync(x, y, score, lv15=True)
     else:
         # 同序契约：底图分组随 by_level（条件版标级大类 / 单等级定数节），
-        # 列数/列起点同步（标级大类 13 列 + x=180，标签让位）
+        # 列数/列起点同步（标级大类 13 列 + x=180，标签让位）；逐格坐标与
+        # 组推进与模板侧同走 iter_grid/grid_height 单源
         groups = group_by_level(entries) if by_level else group_by_ds(entries)
         cols, start_x = grid_geometry(by_level)
         current_y = RATING_START_Y
         for ds in groups:
             charts = groups[ds]
-            for num, (song, diff) in enumerate(charts):
-                row, col = divmod(num, cols)
-                x = start_x + col * RATING_GRID_STEP
-                y = current_y + row * RATING_GRID_STEP
+            for x, y, (song, diff), _num in iter_grid(
+                charts,
+                cols=cols,
+                start_x=start_x,
+                start_y=current_y,
+                row_step=RATING_GRID_STEP,
+            ):
                 score = played.get((song.id, diff.level_index.value))
                 if score is None:
                     continue
@@ -351,8 +357,12 @@ def _draw_rating_core(
                     stamp_sync(x, y, score)
                 else:
                     stamp_rank(x, y, score)
-            rows = (len(charts) - 1) // cols + 1
-            current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
+            current_y += grid_height(
+                len(charts),
+                cols=cols,
+                row_step=RATING_GRID_STEP,
+                group_gap=RATING_GROUP_GAP,
+            )
 
     # 全曲达成徽章（Hoshino _calc_achievements_fc 同构）：连击/Sync 计划的
     # qualified 存 COMBO_SP/SYNC_D_SP 下标，逐档 0..3；评级分支存原始达成率，

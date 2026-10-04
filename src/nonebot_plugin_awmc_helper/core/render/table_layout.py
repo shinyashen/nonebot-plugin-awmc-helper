@@ -4,9 +4,12 @@
 各写一份坐标，改一处即错位；两侧行为必须由本模块同一组常量驱动。
 """
 
-from collections.abc import Sequence
+from typing import TypeVar
+from collections.abc import Iterator, Sequence
 
 from maimai_py import Song, SongDifficulty
+
+T = TypeVar("T")
 
 # 定数表 lv7–14：85px 格、14 列、起点 x=140、首组 y=450、组间附加 30px
 RATING_GRID_STEP = 85
@@ -127,3 +130,51 @@ SCORE_ROW_COLS = 5
 # b40 收窄版式的同族锚点见 best50.B40_B15_TOP）
 B50_B35_TOP = 235
 B50_B15_TOP = 1085
+
+
+# ---------------------------------------------------------------------------
+# 分组网格循环脚手架（四处消费点共用：table_template._rating_grid/_plate_grid、
+# rating_table._draw_rating_core、plate_progress.plate_progress_bytes）
+# ---------------------------------------------------------------------------
+
+
+def grid_rows(count: int, cols: int) -> int:
+    """``count`` 个条目按 ``cols`` 列网格排布占的行数（0 个 → 0 行）。
+
+    分组网格行数算式单源（ ``(count - 1) // cols + 1`` ），底图高度预算与
+    盖章/绘制侧的组推进共用，防两处手写漂移。
+    """
+    return (count - 1) // cols + 1 if count else 0
+
+
+def grid_height(count: int, *, cols: int, row_step: int, group_gap: int) -> int:
+    """一组 ``count`` 个条目的网格占高：``grid_rows × row_step + group_gap``。
+
+    画布高度预算（求和）与组推进（前一组占高）共用。⚠️ plate_progress 的
+    折叠网格（超 51 个提前断行）组占高按**实际画出行数**（≤ 本式）自算，
+    不合用本函数。
+    """
+    return grid_rows(count, cols) * row_step + group_gap
+
+
+def iter_grid(
+    entries: Sequence[T],
+    *,
+    cols: int,
+    start_x: int,
+    start_y: int,
+    row_step: int,
+    col_step: int | None = None,
+) -> Iterator[tuple[int, int, T, int]]:
+    """单组条目的网格坐标生成器：行列序逐格 yield ``(x, y, entry, 组内序号)``。
+
+    四处分组网格循环共用的几何算式单源：``row, col = divmod(序号, cols)``、
+    ``x = start_x + col × col_step``、``y = start_y + row × row_step``。
+    底图（模板侧）与叠章（盖章侧）同用本生成器保证逐格对位；调用方以
+    :func:`grid_height` 推进组起点 y（详见其 Fold 例外备注）。
+    """
+    if col_step is None:
+        col_step = row_step
+    for num, entry in enumerate(entries):
+        row, col = divmod(num, cols)
+        yield start_x + col * col_step, start_y + row * row_step, entry, num

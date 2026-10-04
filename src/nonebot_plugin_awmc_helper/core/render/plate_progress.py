@@ -24,6 +24,7 @@ from .tools import (
 )
 from .assets import assets
 from ...constants import DIFF_DISPLAY_NAMES
+from .table_layout import grid_rows, iter_grid
 
 _START_X, _START_Y, _GAP = 84, 455, 96
 
@@ -85,11 +86,11 @@ def plate_progress_bytes(
     ``slots``：倒序槽节（Re:MASTER → Basic），每节含 ``level_index``、
     ``cleared``、``total`` 与未达成 ``items``（``(song_id, level_index, 定数)``）。
     """
-    # 高度预算（NB _get_display_row_count：每节最多 4 行）
+    # 高度预算（NB _get_display_row_count：每节最多 4 行；行数算式单源
+    # grid_rows，空节仍占 1 行）
     current_y = 395
     for slot in slots:
-        count = len(slot["items"])
-        rows = 1 if count <= 0 else min((count - 1) // _GRID_COLS + 1, _MAX_ROWS)
+        rows = max(1, min(grid_rows(len(slot["items"]), _GRID_COLS), _MAX_ROWS))
         current_y += rows * _GAP + 100
     height = current_y + 180
 
@@ -142,14 +143,21 @@ def plate_progress_bytes(
             stroke_fill=WHITE,
         )
 
-        # 未达成封面网格（13 列；超过 51 个折叠显示剩余数）
+        # 未达成封面网格（13 列；超过 51 个折叠显示剩余数）。逐格坐标走
+        # iter_grid 单源；组推进**保持手写**：折叠提前断行后组占高按实际
+        # 画出行数（max_row+1）计，小于 grid_rows 的满组行数，且节间固定
+        # +100 与组尾 max_row 耦合，不合 grid_height 的通用形状
         max_row = 0
         id_bg = assets.pic("border_table_base.png")
-        for num, (song_id, li_v, _lv) in enumerate(items):
-            row, col = divmod(num, _GRID_COLS)
-            max_row = max(max_row, row)
-            x = _START_X + col * _GAP
-            y = start_y + row * _GAP
+        for x, y, (song_id, li_v, _lv), num in iter_grid(
+            items,
+            cols=_GRID_COLS,
+            start_x=_START_X,
+            start_y=start_y,
+            row_step=_GAP,
+            col_step=_GAP,
+        ):
+            max_row = max(max_row, num // _GRID_COLS)
             if num >= _FOLD_AFTER and len(items[num:]) != 1:
                 dr.multiline_text(
                     (x, y + 35),

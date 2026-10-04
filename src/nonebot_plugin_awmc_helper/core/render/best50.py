@@ -591,6 +591,74 @@ def _b50_footer(draw: ImageDraw.ImageDraw, theme: str, service: str | None) -> N
     )
 
 
+async def _draw_b50(
+    player_name: str,
+    rating: int,
+    rating_b35: int,
+    rating_b15: int,
+    sections: list[tuple[list[ScoreExtend], Callable[[int], int]]],
+    *,
+    player: Player | None = None,
+    qqid: int | None = None,
+    service: str | None = None,
+    theme: str = DEFAULT_THEME,
+    icon_image: bytes | None = None,
+    trophy_name: str | None = None,
+    trophy_color: str | None = None,
+    course_image: bytes | None = None,
+    class_image: bytes | None = None,
+    nameplate_image: bytes | None = None,
+    sub_of: Callable[[ScoreExtend], str | None] | None = None,
+    force_trophy_name: bool = False,
+    layout: str = "b50",
+) -> Image.Image:
+    """b50 系大图统一实现（draw_b50_nb / draw_b50_flat 的单源装配，勿直调）。
+
+    ``sections``：成绩分区 ``（条目, 行 y 函数）`` 列表，行 y 函数输入行号
+    返回该行 y——nb 版式为「分区锚点 + 行号×行距」网格，flat 版式为
+    :func:`_flat_row_y` 等距满卡布；头部装配与页脚两版式逐字共用。
+    """
+    im = assets.canvas("b50.png", theme)
+    draw = ImageDraw.Draw(im)
+
+    await _draw_header(
+        im,
+        draw,
+        player_name=player_name,
+        player=player,
+        qqid=qqid,
+        rating=rating,
+        rating_b35=rating_b35,
+        rating_b15=rating_b15,
+        theme=theme,
+        icon_image=icon_image,
+        trophy_name=trophy_name,
+        trophy_color=trophy_color,
+        course_image=course_image,
+        class_image=class_image,
+        nameplate_image=nameplate_image,
+        force_trophy_name=force_trophy_name,
+        layout=layout,
+    )
+
+    # 成绩行：分区逐格网格（列几何见 table_layout，行 y 由分区行函数给出）
+    for data, row_y in sections:
+        for num, score in enumerate(data):
+            row, col = divmod(num, SCORE_ROW_COLS)
+            draw_score_row(
+                im,
+                draw,
+                SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP,
+                row_y(row),
+                score,
+                theme,
+                sub_of=sub_of,
+            )
+
+    _b50_footer(draw, theme, service)
+    return im
+
+
 async def draw_b50_nb(
     player_name: str,
     rating: int,
@@ -622,18 +690,23 @@ async def draw_b50_nb(
     ``layout``：``"b50"`` 标准 35/15 版式（默认）；``"b40"`` = 25/15 行距 125、
     b15 起 941 的收窄版式（行数少、区间分开，见 B40_ROW_STEP/B40_B15_TOP）。
     """
-    im = assets.canvas("b50.png", theme)
-    draw = ImageDraw.Draw(im)
-
-    await _draw_header(
-        im,
-        draw,
-        player_name=player_name,
+    # 成绩行分区锚点（Hoshino 布局，几何见 table_layout）；b40 版式
+    # （layout="b40"）= 5+3 行、行距 125、b15 起 941（区间间隙 97 区分区块，
+    # 末行底 1300——彩虹作下半装饰，用户拍板 2026-10-02）
+    b15_top = B40_B15_TOP if layout == "b40" else B50_B15_TOP
+    row_step = B40_ROW_STEP if layout == "b40" else SCORE_ROW_GAP
+    return await _draw_b50(
+        player_name,
+        rating,
+        rating_b35,
+        rating_b15,
+        [
+            (scores_b35, lambda row: B50_B35_TOP + row * row_step),
+            (scores_b15, lambda row: b15_top + row * row_step),
+        ],
         player=player,
         qqid=qqid,
-        rating=rating,
-        rating_b35=rating_b35,
-        rating_b15=rating_b15,
+        service=service,
         theme=theme,
         icon_image=icon_image,
         trophy_name=trophy_name,
@@ -641,24 +714,10 @@ async def draw_b50_nb(
         course_image=course_image,
         class_image=class_image,
         nameplate_image=nameplate_image,
+        sub_of=sub_of,
         force_trophy_name=force_trophy_name,
         layout=layout,
     )
-
-    # 成绩行：b35/b15 分区锚点（Hoshino 布局，几何见 table_layout）；
-    # b40 版式（layout="b40"）= 5+3 行、行距 125、b15 起 941（区间间隙 97 区分
-    # 区块，末行底 1300——彩虹作下半装饰，用户拍板 2026-10-02）
-    b15_top = B40_B15_TOP if layout == "b40" else B50_B15_TOP
-    row_step = B40_ROW_STEP if layout == "b40" else SCORE_ROW_GAP
-    for data, initial_y in ((scores_b35, B50_B35_TOP), (scores_b15, b15_top)):
-        for num, score in enumerate(data):
-            row, col = divmod(num, SCORE_ROW_COLS)
-            x = SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP
-            y = initial_y + row * row_step
-            draw_score_row(im, draw, x, y, score, theme, sub_of=sub_of)
-
-    _b50_footer(draw, theme, service)
-    return im
 
 
 FLAT_ROW_SPAN = 1078
@@ -697,17 +756,15 @@ async def draw_b50_flat(
     强制覆盖数据源称号——flat 版式只服务于条件50、label 必填；文字区约
     260px / 14pt ≈ 36 显示列，超宽按 Hoshino 规则截断）。
     """
-    im = assets.canvas("b50.png", theme)
-    draw = ImageDraw.Draw(im)
-    await _draw_header(
-        im,
-        draw,
-        player_name=player_name,
+    return await _draw_b50(
+        player_name,
+        rating_total,
+        0,
+        0,
+        [(scores, _flat_row_y)],
         player=player,
         qqid=qqid,
-        rating=rating_total,
-        rating_b35=0,
-        rating_b15=0,
+        service=service,
         theme=theme,
         icon_image=icon_image,
         trophy_name=truncate_hoshino(label, 36),
@@ -716,20 +773,8 @@ async def draw_b50_flat(
         course_image=course_image,
         class_image=class_image,
         nameplate_image=nameplate_image,
+        sub_of=sub_of,
     )
-    for num, score in enumerate(scores):
-        row, col = divmod(num, SCORE_ROW_COLS)
-        draw_score_row(
-            im,
-            draw,
-            SCORE_ROW_START_X + col * SCORE_ROW_COL_STEP,
-            _flat_row_y(row),
-            score,
-            theme,
-            sub_of=sub_of,
-        )
-    _b50_footer(draw, theme, service)
-    return im
 
 
 async def best50_bytes(*args, **kwargs) -> bytes:

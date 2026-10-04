@@ -55,6 +55,8 @@ from .table_layout import (
     RATING_GRID_STEP,
     RATING_GROUP_GAP,
     slot_rep,
+    iter_grid,
+    grid_height,
     group_by_ds,
     grid_geometry,
     slot_level_of,
@@ -104,10 +106,16 @@ def _rating_grid(
     # 完成表（x=180）并每行少渲染一个（14→13 列）（2026-10-01 用户实测遮挡）
     cols, start_x = grid_geometry(by_level)
 
-    current_y = RATING_START_Y
-    for charts in groups.values():
-        rows = (len(charts) - 1) // cols + 1
-        current_y += rows * RATING_GRID_STEP + RATING_GROUP_GAP
+    # 画布高度预算：各组网格占高求和（算式单源 grid_height）
+    current_y = RATING_START_Y + sum(
+        grid_height(
+            len(charts),
+            cols=cols,
+            row_step=RATING_GRID_STEP,
+            group_gap=RATING_GROUP_GAP,
+        )
+        for charts in groups.values()
+    )
     height = current_y + 230
 
     im = generate_frosted_card(
@@ -130,12 +138,13 @@ def _rating_grid(
             stroke_width=4,
             stroke_fill=WHITE,
         )
-        max_row = 0
-        for num, (song, diff) in enumerate(charts):
-            row, col = divmod(num, cols)
-            max_row = max(max_row, row)
-            x = start_x + col * RATING_GRID_STEP
-            y = start_y + row * RATING_GRID_STEP
+        for x, y, (song, diff), _num in iter_grid(
+            charts,
+            cols=cols,
+            start_x=start_x,
+            start_y=start_y,
+            row_step=RATING_GRID_STEP,
+        ):
             li = diff.level_index.value
             draw_cover_cell(
                 im,
@@ -149,7 +158,12 @@ def _rating_grid(
                 font_size=13,
                 fill=DIFF_TEXT_COLORS[li],
             )
-        start_y += (max_row + 1) * RATING_GRID_STEP + RATING_GROUP_GAP
+        start_y += grid_height(
+            len(charts),
+            cols=cols,
+            row_step=RATING_GRID_STEP,
+            group_gap=RATING_GROUP_GAP,
+        )
     return im
 
 
@@ -255,10 +269,16 @@ def _plate_grid(
     groups = {k: grouped[k] for k in order}
     remaster_ids = {s.id for s, _d in (remaster_entries or [])}
 
-    current_y = PLATE_START_Y
-    for charts in groups.values():
-        rows = (len(charts) - 1) // PLATE_COLS + 1
-        current_y += rows * PLATE_ROW_STEP + PLATE_GROUP_GAP
+    # 画布高度预算：各组网格占高求和（算式单源 grid_height）
+    current_y = PLATE_START_Y + sum(
+        grid_height(
+            len(charts),
+            cols=PLATE_COLS,
+            row_step=PLATE_ROW_STEP,
+            group_gap=PLATE_GROUP_GAP,
+        )
+        for charts in groups.values()
+    )
     height = current_y + 180
 
     im = generate_frosted_card(
@@ -287,12 +307,14 @@ def _plate_grid(
             stroke_width=4,
             stroke_fill=WHITE,
         )
-        max_row = 0
-        for num, (song, diff) in enumerate(charts):
-            row, col = divmod(num, PLATE_COLS)
-            max_row = max(max_row, row)
-            x = PLATE_START_X + col * PLATE_COL_STEP
-            y = start_y + row * PLATE_ROW_STEP
+        for x, y, (song, diff), _num in iter_grid(
+            charts,
+            cols=PLATE_COLS,
+            start_x=PLATE_START_X,
+            start_y=start_y,
+            row_step=PLATE_ROW_STEP,
+            col_step=PLATE_COL_STEP,
+        ):
             is_rem = song.id in remaster_ids
             draw_cover_cell(
                 im,
@@ -308,7 +330,12 @@ def _plate_grid(
                 font_size=16,
                 fill=DIFF_TEXT_COLORS[4] if is_rem else DIFF_TEXT_COLORS[0],
             )
-        start_y += (max_row + 1) * PLATE_ROW_STEP + PLATE_GROUP_GAP
+        start_y += grid_height(
+            len(charts),
+            cols=PLATE_COLS,
+            row_step=PLATE_ROW_STEP,
+            group_gap=PLATE_GROUP_GAP,
+        )
     return im
 
 
