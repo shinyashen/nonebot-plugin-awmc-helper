@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from ..constants import DX_ID_OFFSET
+from ..constants import DX_ID_OFFSET, DEFAULT_THEME, SERVICE_DIVINGFISH
 
 # ---------------------------------------------------------------------------
 # 表定义
@@ -50,7 +50,7 @@ class UserBinding(SQLModel, table=True):
 
     platform: str = Field(primary_key=True)
     user_id: str = Field(primary_key=True)
-    service: str = Field(default="divingfish")  # divingfish / lxns / net
+    service: str = Field(default=SERVICE_DIVINGFISH)  # divingfish / lxns / net
     divingfish_username: str | None = Field(default=None)
     divingfish_import_token: str | None = Field(default=None)
     # 水鱼 OAuth 设备码绑定：映射本体在授权服务器侧（ref 摘要换票），
@@ -64,7 +64,7 @@ class UserBinding(SQLModel, table=True):
     # 日服 NET 凭据（SEGA ID + 密码；NET 无第三方 API，仅能凭账号登录官方站）
     net_sega_id: str | None = Field(default=None)
     net_password: str | None = Field(default=None)
-    theme: str = Field(default="prism_plus")  # prism_plus / circle
+    theme: str = Field(default=DEFAULT_THEME)  # prism_plus / circle
     bound_at: NaiveDatetime = Field(default_factory=datetime.now)
 
 

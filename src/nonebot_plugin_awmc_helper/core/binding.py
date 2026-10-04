@@ -21,15 +21,20 @@ from nonebot.adapters import Event
 from . import store
 from .store import UserBinding
 from ..config import plugin_config
-from ..constants import THEMES, SERVICE_DISPLAY
+
+# SERVICE_* 单一事实源在 constants.py（store 模型默认值也引用），此处
+# 再导出保持既有 `from .binding import SERVICE_*` 消费方不变
+from ..constants import (
+    THEMES,
+    SERVICE_NET,
+    SERVICE_LXNS,
+    SERVICE_DISPLAY,
+    SERVICE_DIVINGFISH,
+)
 from .session_store import TtlSession, TtlSessionStore
 
 if TYPE_CHECKING:
     from nonebot_plugin_uninfo import Session
-
-SERVICE_DIVINGFISH = "divingfish"
-SERVICE_LXNS = "lxns"
-SERVICE_NET = "net"  # 日服 maimai でらっくす NET（官方站直连，凭据 = SEGA ID + 密码）
 
 # NET 数据源仅覆盖 b50；其余指令在 score/binding 层统一拦截
 NET_UNSUPPORTED_HINT = "日服数据源（NET）暂不支持该指令，敬请期待后续版本"

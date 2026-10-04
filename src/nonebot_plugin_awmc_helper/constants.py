@@ -193,7 +193,30 @@ CHART_TYPE_BY_PREFIX: dict[str, SongType] = {
 
 # 渲染主题（素材包 pic/<theme>/ 子目录名；bind 指令 0/1 映射）
 THEMES = ("prism_plus", "circle")
-DEFAULT_THEME = "prism_plus"
+THEME_PRISM_PLUS = "prism_plus"
+THEME_CIRCLE = "circle"
+DEFAULT_THEME = THEME_PRISM_PLUS
+
+# 绑定服务标识（binding/store 表值与 sources 注册表键的单一事实源；
+# 原定义在 core/binding.py，因 store 模型默认值引用而下沉至此）
+SERVICE_DIVINGFISH = "divingfish"
+SERVICE_LXNS = "lxns"
+SERVICE_NET = "net"  # 日服 maimai でらっくす NET（官方站直连，凭据 = SEGA ID + 密码）
+
+# 国服形式年份 → DX 代基码（随心配 S-2 口径：PLUS 尾码不分年，对齐 KarenBot
+# nowVersion 与 karenbot-combo-notes §9 S-2）。combo「回到过去」与 dan 段位名
+# 版本前缀共用的单一事实源（原为 combo 私有表）；2018 及以前 / 2027+ 未收录，
+# 由消费方丢弃
+ERA_YEAR_TO_CODE: "dict[int, int]" = {
+    2019: Version.MAIMAI_DX.value,
+    2020: Version.MAIMAI_DX_PLUS.value,
+    2021: Version.MAIMAI_DX_SPLASH.value,
+    2022: Version.MAIMAI_DX_UNIVERSE.value,
+    2023: Version.MAIMAI_DX_FESTIVAL.value,
+    2024: Version.MAIMAI_DX_BUDDIES.value,
+    2025: Version.MAIMAI_DX_PRISM.value,
+    2026: Version.MAIMAI_DX_CIRCLE.value,
+}
 
 # 谱面类型别名前缀：社区对同根id双谱（标准/DX/宴）的惯用区分写法
 # （dx圣诞、标准39、标星光、旧谱、宴Oshama…）。用于查询侧剥离兜底，

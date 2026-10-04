@@ -27,6 +27,10 @@ from . import store, songdb
 from .songdb import Scope
 from ..constants import DX_ID_OFFSET, normalize_text, strip_chart_prefix
 
+# 别名源标识（_merged_lib 拉取注册、munet 写库 source 键、songs 合并清单共用；
+# 顺序即合并优先序，拉取方法与持久化开关的接线仍留在 _merged_lib 本地）
+ALIAS_SOURCES: "tuple[str, ...]" = ("yuzu", "lxns", "munet")
+
 
 class ListSongProvider(ISongProvider):
     """内存曲目列表 provider（测试注入与快照降级共用，内容哈希驱动缓存）。"""
