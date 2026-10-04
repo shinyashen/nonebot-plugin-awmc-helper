@@ -26,7 +26,12 @@ from .tools import (
 from .assets import assets
 from .best50 import draw_score_row
 from .nb_chart import major_type_of
-from ...constants import DX_ID_OFFSET, LEVEL_INDEX_EN, chart_display_id
+from ...constants import (
+    DX_ID_OFFSET,
+    LEVEL_INDEX_EN,
+    THEME_PRISM_PLUS,
+    chart_display_id,
+)
 from .table_layout import (
     SCORE_ROW_GAP,
     SCORE_ROW_COLS,
@@ -72,7 +77,7 @@ class DrawScore:
     def __init__(self, height: int, *, service: str | None = None) -> None:
         # 行卡画布固定 prism_plus 版式（generate_prism_bg 渐变与装饰层均
         # prism_plus 专属，无 circle 变体）——非「默认主题」语义，勿改常量
-        theme = "prism_plus"
+        theme = THEME_PRISM_PLUS
         im = generate_prism_bg(height)
         self._im = im
         self._theme = theme

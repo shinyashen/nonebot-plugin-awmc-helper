@@ -39,7 +39,7 @@ guess_answer = on_message(rule=Rule(_is_guess_answer), priority=0, block=False)
 
 @guess_answer.handle()
 @handle_errors()
-async def _(bot: Bot, event: Event, session: Session = UniSession()):
+async def _(event: Event, session: Session = UniSession()):
     await _handle_answer(session, event.get_plaintext())
 
 

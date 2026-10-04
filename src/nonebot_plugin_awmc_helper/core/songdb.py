@@ -478,8 +478,10 @@ def parse_divingfish(music_data: list[dict]) -> dict[str, dict]:
 def _df_known_kinds(music_data: dict[str, dict]) -> set[tuple[int, str]]:
     """水鱼在列集（(song_id, kind)；id 形状定 kind：≤4 位 sd、5 位 dx、6 位宴）。
 
-    边界与 maimai_py ``SongType._from_id`` 同口径（≥ UTAGE_ID_BASE = 宴、
-    ≥ DX_ID_OFFSET = DX），不在此双写裸数字。
+    id 形状约定引用 constants 的 UTAGE_ID_BASE/DX_ID_OFFSET（不双写裸数字）；
+    与 maimai_py ``SongType._from_id`` 差一个边界等号（上游为严格 ``>``，
+    id 恰为 10000/100000 时本函数判 dx/宴、上游判 STANDARD，现实数据到不了
+    边界值）。
     """
     known: set[tuple[int, str]] = set()
     for raw_id in music_data:

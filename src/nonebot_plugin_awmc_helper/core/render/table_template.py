@@ -390,23 +390,22 @@ async def generate_plate_template(
     if rng is None:
         return 0
     lo, hi = rng
-    entries = [
-        (song, diff)
-        for song in songs
-        for diff in song.get_difficulties()
-        if in_plate_scope(song, diff, lo, hi, major)
-    ]
+    # 单趟双收：entries（牌区间内全部谱面）与 remaster（舞/霸的 ReM 槽），
+    # 免对全库 get_difficulties 展开两遍
+    want_remaster = version in _FULL_SET_PLATE_VERSIONS
+    entries: list[tuple[Song, SongDifficulty]] = []
+    remaster: list[tuple[Song, SongDifficulty]] = []
+    for song in songs:
+        for diff in song.get_difficulties():
+            if in_plate_scope(song, diff, lo, hi, major):
+                entries.append((song, diff))
+            if want_remaster and diff.type == major and diff.level_index.value == 4:
+                remaster.append((song, diff))
     if not entries:
         return 0
     out_dir = plate_table_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     if version in _FULL_SET_PLATE_VERSIONS:
-        remaster = [
-            (song, diff)
-            for song in songs
-            for diff in song.get_difficulties()
-            if diff.type == major and diff.level_index.value == 4
-        ]
         boundary = 13
         by_level = _by_level(entries, remaster)
         page_groups = [

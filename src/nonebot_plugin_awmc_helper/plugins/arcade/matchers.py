@@ -543,7 +543,7 @@ help_registry.declare(
             brief="按关键词模糊查询机厅信息",
             detail=(
                 "格式：查找机厅 <关键词>；店名/地址/别称模糊匹配，"
-                "命中 ≥5 条转图片输出。"
+                f"命中 ≥{_SEARCH_IMAGE_THRESHOLD} 条转图片输出。"
             ),
         ),
         CommandSpec(

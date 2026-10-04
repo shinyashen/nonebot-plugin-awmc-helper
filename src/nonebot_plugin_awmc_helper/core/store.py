@@ -530,7 +530,7 @@ async def _migrate_columns() -> None:
                 name: (
                     {col["name"] for col in inspector.get_columns(name)}
                     if name in present
-                    else None  # 表不存在（正常已由 create_all 同事务建出，防御竞态）
+                    else None  # 表不存在（create_all 已先行提交建出，防御竞态）
                 )
                 for name in tables
             }
@@ -548,7 +548,9 @@ async def _migrate_columns() -> None:
                     continue
                 ddl = _auto_add_column_sql(name, column)
                 if ddl is None:
-                    logger.warning(
+                    # error 而非 warning：旧库该列将永久缺失，运行期触该列的
+                    # SQL 才爆 no such column，建库期就该高优暴露
+                    logger.error(
                         "store：列 %s.%s 无法自动迁移（NOT NULL 且无可用的"
                         "服务端默认值，如 default_factory 时间列），请登记"
                         " _MIGRATE_COLUMNS 特例通道或将列改为可空/常量默认",

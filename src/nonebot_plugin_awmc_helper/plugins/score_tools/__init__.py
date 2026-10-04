@@ -509,7 +509,9 @@ help_registry.declare(
             matcher=rating_ranking,
             name="查看排名",
             aliases=("查看排行",),
-            brief="水鱼 RA 排行榜（50/页；参数为用户名时精确报名次）",
+            brief=(
+                f"水鱼 RA 排行榜（{_RANKING_PAGE_SIZE}/页；参数为用户名时精确报名次）"
+            ),
         ),
         CommandSpec(
             matcher=my_rating_ranking,

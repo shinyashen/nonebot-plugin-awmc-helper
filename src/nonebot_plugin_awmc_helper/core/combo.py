@@ -975,13 +975,7 @@ async def _era_level_modifier(boundary: int, state: "State | None" = None):
         state = await State.load()
 
     def mod(s: ScoreExtend) -> ScoreExtend:
-        kind = (
-            "utage"
-            if s.type == SongType.UTAGE
-            else "sd"
-            if s.type == SongType.STANDARD
-            else "dx"
-        )
+        kind = _songdb_kind_of(s.type)
         hist = state.resolve_chart_level(s.id, kind, s.level_index.value, boundary)
         if hist is None:
             return s
@@ -993,6 +987,11 @@ async def _era_level_modifier(boundary: int, state: "State | None" = None):
         return replace(s, level_value=hist, dx_rating=ra)
 
     return mod
+
+
+def _songdb_kind_of(t: SongType) -> str:
+    """SongType → 规范表 song_chart.kind 键（回到过去取时点定数两处共用）。"""
+    return "utage" if t == SongType.UTAGE else "sd" if t == SongType.STANDARD else "dx"
 
 
 def _fit_cond() -> Cond:
@@ -1556,18 +1555,12 @@ async def _build_chart_hit(conds: "list[Cond]", cur: int, state: "State | None" 
             return False
         for ctype, group in groups.items():
             if ctype is CondType.DS and hist_state is not None:
-                kind = (
-                    "utage"
-                    if diff.type == SongType.UTAGE
-                    else "sd"
-                    if diff.type == SongType.STANDARD
-                    else "dx"
-                )
+                kind = _songdb_kind_of(diff.type)
                 hist = hist_state.resolve_chart_level(
                     song.id, kind, diff.level_index.value, boundary
                 )
                 if hist is None or not any(
-                    round(hist * 10) == round(c.value * 10) for c in group
+                    level_value_match(hist, c.value) for c in group
                 ):
                     return False
             elif not any(c.chart(song, diff, cur) for c in group if c.chart):

@@ -142,7 +142,8 @@ async def test_init_db_idempotent(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_unmigratable_column_warns_and_skips(tmp_path: Path, monkeypatch):
     """NOT NULL + default_factory 列（kv_cache.updated_at）无法自动迁移：
-    log.warning 提醒走特例通道，跳过该列且不中断建库。"""
+    log.error 提醒走特例通道，跳过该列且不中断建库（error 级：旧库该列
+    将永久缺失、运行期触列才爆，建库期就该高优暴露）。"""
     from nonebot_plugin_awmc_helper.core import store
 
     legacy = tmp_path / "warn.db"
@@ -154,19 +155,19 @@ async def test_unmigratable_column_warns_and_skips(tmp_path: Path, monkeypatch):
     con.commit()
     con.close()
 
-    warnings: list[str] = []
+    errors: list[str] = []
 
     class _Recorder:
-        def warning(self, msg, *args):
-            warnings.append(str(msg) % args if args else str(msg))
+        def error(self, msg, *args):
+            errors.append(str(msg) % args if args else str(msg))
 
     monkeypatch.setattr(store, "logger", _Recorder())
 
     store.set_db_file(legacy)
     try:
         await store.init_db()  # 不因缺列抛错
-        assert any("kv_cache.updated_at" in w for w in warnings), (
-            f"未对不可迁移列告警：{warnings}"
+        assert any("kv_cache.updated_at" in e for e in errors), (
+            f"未对不可迁移列告警：{errors}"
         )
         # 缺列保持缺失（等特例通道登记），其余表正常建齐
         assert _pragma_columns(legacy, "kv_cache") == {"key", "payload"}

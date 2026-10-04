@@ -577,11 +577,7 @@ async def latest_gallery_id(
         query = select(store.DanCourse).where(store.DanCourse.kind == kind)
         if version_limit is not None:
             query = query.where(store.DanCourse.version <= version_limit)
-        courses = (
-            await db.exec(select(store.DanCourse).where(store.DanCourse.kind == kind))
-        ).all()
-    if version_limit is not None:
-        courses = [c for c in courses if c.version <= version_limit]
+        courses = (await db.exec(query)).all()
     if not courses:
         return None
     return max(courses, key=lambda c: c.version).gallery_id
@@ -1017,9 +1013,9 @@ async def card_data(
     view_jp = jp_source or jp_view
     logo_version = course.version if course else version_code
     if logo_version is None:
-        logo_version = (
-            Version.MAIMAI_DX_MAGICAL.value if view_jp else await cn_current_version()
-        )
+        # 非日服视图时局部 cn_current 即国服现行（jp_source 为真时已被置 0，
+        # 与此分支 view_jp=False 互斥），复用免二次库查询
+        logo_version = Version.MAIMAI_DX_MAGICAL.value if view_jp else cn_current
     logo = nb_chart.version_image(logo_version, jp=view_jp)
     return DanCardData(
         dan_id=dan_id,

@@ -134,9 +134,9 @@ async def _token_grant(payload: dict, error_default: str) -> LxnsToken:
     if resp.status_code != 200 or not data.get("success", True):
         raise ExtError(str(data.get("message", error_default)))
     grant = data.get("data", data)
-    # 200 但缺 access_token（上游异常响应）：显式失败，不让 KeyError 逃逸到
-    # 绑定入口的宽捕处变成裸 'access_token' 提示
-    if "access_token" not in grant:
+    # 200 但响应非对象或缺 access_token（上游异常形态，data 可能为 null 等）：
+    # 显式失败，不让 KeyError/TypeError 逃逸到绑定入口的宽捕处变成裸提示
+    if not isinstance(grant, dict) or "access_token" not in grant:
         raise ExtError("落雪授权接口返回了无效数据")
     return LxnsToken.from_payload(grant)
 

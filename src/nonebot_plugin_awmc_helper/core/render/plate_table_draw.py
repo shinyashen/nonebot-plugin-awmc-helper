@@ -13,7 +13,7 @@ from .fonts import FONT_RODIN, font
 from .tools import WHITE, TEXT_BLUE, ID_TEXT_COLORS, scale_output, image_to_bytes
 from .assets import assets
 from ..plates import plate_score_ok, major_type_of_plate
-from ...constants import SYNC_FILE, COMBO_FILE
+from ...constants import SYNC_FILE, COMBO_FILE, THEME_PRISM_PLUS
 from .table_layout import (
     PLATE_COLS,
     PLATE_START_X,
@@ -22,6 +22,8 @@ from .table_layout import (
     PLATE_ROW_STEP,
     PLATE_GROUP_GAP,
     slot_rep,
+    iter_grid,
+    grid_height,
     level_page_key,
 )
 from .plate_progress import progress_header
@@ -31,7 +33,7 @@ def _plate_icon(kind: str, score):
     """达成章：者/将盖评级章（compute_rating onlyrate），其余盖连击/Sync 章。"""
     if kind in ("者", "将"):
         rate = RateType._from_achievement(score.achievements or 0)
-        return assets.rate_badge(rate, "prism_plus", (80, 36)), (0, 22)
+        return assets.rate_badge(rate, THEME_PRISM_PLUS, (80, 36)), (0, 22)
     if kind == "极":
         key = score.fc.name.lower() if score.fc else "fc"
         return assets.play_bonus(COMBO_FILE.get(key, "FC"), (60, 60)), (10, 12)
@@ -171,15 +173,19 @@ def draw_plate_table(
     # 完成小标按槽位数取（非舞四槽牌种用不到 t_4，不白载一张素材）
     finished_marks = [assets.pic(f"t_{i}.png") for i in range(slot_num)]
 
-    # 网格几何直接用 table_layout 原名常量（第六轮审查：删 COL_STEP 等本地
-    # 别名——ROW_COUNT 名实不符「实为列数」，随删除消除）
+    # 网格几何走 table_layout 单源（grid_rows/iter_grid/grid_height，与模板
+    # 侧/盖章侧/进度总览同一套；第六轮审查：删 COL_STEP 等本地别名）
     current_y = PLATE_START_Y
     for level, songs_slots in played.items():
-        rows = (len(songs_slots) - 1) // PLATE_COLS + 1
-        for idx, (song_id, slots) in enumerate(songs_slots.items()):
-            row, col = divmod(idx, PLATE_COLS)
-            x = PLATE_START_X + col * PLATE_COL_STEP
-            y = current_y + row * PLATE_ROW_STEP
+        slots_list = list(songs_slots.items())
+        for x, y, (song_id, slots), idx in iter_grid(
+            slots_list,
+            cols=PLATE_COLS,
+            start_x=PLATE_START_X,
+            start_y=current_y,
+            row_step=PLATE_ROW_STEP,
+            col_step=PLATE_COL_STEP,
+        ):
             qualified_slots = qualified_slots_of[song_id]
             # 大章 = 该曲**最后一槽**（动态 4/5，Hoshino `len(results)-1` 同款）：
             # 无白谱曲的最后一槽是 Master（index 3），固定槽 4 会永不画章
@@ -199,7 +205,12 @@ def draw_plate_table(
                     )
                 else:
                     im.alpha_composite(mark, (x + 4 + 19 * s_idx, y + 63))
-        current_y += rows * PLATE_ROW_STEP + PLATE_GROUP_GAP
+        current_y += grid_height(
+            len(slots_list),
+            cols=PLATE_COLS,
+            row_step=PLATE_ROW_STEP,
+            group_gap=PLATE_GROUP_GAP,
+        )
 
     # 头部计数与进度条（与进度总览同源组件）
     progress_header(im, dr, qualified_count, len(song_level))

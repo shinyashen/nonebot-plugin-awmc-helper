@@ -29,6 +29,7 @@ from ...constants import (
     VERSION_IMAGE,
     ACHIEVEMENT_LIST,
     JP_VERSION_IMAGE,
+    THEME_PRISM_PLUS,
     version_zh,
     display_song_id,
     chart_display_id,
@@ -477,7 +478,9 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     im.alpha_composite(assets.pic(player_file), (98, p_y))
 
     # logo / 新曲标
-    im.alpha_composite(assets.pic("logo.png", "prism_plus").resize(LOGO_SIZE), (10, 35))
+    im.alpha_composite(
+        assets.pic("logo.png", THEME_PRISM_PLUS).resize(LOGO_SIZE), (10, 35)
+    )
     # 版本/新曲标口径 = 宴谱组自己的登场版本：宿主曲整曲最小版本常由普通谱
     # 决定（悪戯センセーション DX 21000 / 宴[奏] 26509），按整曲取会画错世代；
     # 宴谱组无版本时回落整曲版本。日服限定卡（jp）用日服世代图（pic/jp/）

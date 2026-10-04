@@ -30,6 +30,10 @@ _HOSTS = (
 _MIN_INTERVAL = 1.0
 """请求最小间隔（秒）；走查吞吐与对私服礼貌的折中（实测 2s 完全稳）。"""
 
+_SOURCE = "munet"
+"""本源写库/外源合并的 source 键；成员身份见 core.provider.ALIAS_SOURCES
+（本模块别名来源在该清单在列），写库点统一引用本常量。"""
+
 _throttle_lock = asyncio.Lock()
 _last_request_at = 0.0
 _walk_running = False
@@ -382,8 +386,7 @@ async def _walk_targets(budget_seconds: float) -> dict:
     while index < len(targets):
         if time.monotonic() - started > budget_seconds:
             # 预算耗尽：本轮成果增量落库后再断点（整源替换会裁剪此前各晚数据）
-            # source 名与 provider.ALIAS_SOURCES 对齐（munet 在列）
-            await store.upsert_song_aliases("munet", collected)
+            await store.upsert_song_aliases(_SOURCE, collected)
             await store.kv_set(_WALK_KV, {**state, "cursor": index})
             logger.info(
                 f"MuNET 别名走查：预算耗尽，断点 {index}/{len(targets)}"
@@ -407,10 +410,9 @@ async def _walk_targets(budget_seconds: float) -> dict:
     # 完成：增量 upsert + 目标集外陈旧行清理（= 整源替换的对齐语义，且不裁剪
     # 断点续走时此前各晚已落库的成果；新增/删除别名以 MuNET 现态为准的强同步
     # 仅在单晚走完全程时成立，多晚拼接对存活曲只增不删——别名列表近似只增）
-    # source 名与 provider.ALIAS_SOURCES 对齐（munet 在列）
-    await store.upsert_song_aliases("munet", collected)
+    await store.upsert_song_aliases(_SOURCE, collected)
     pruned = await store.prune_song_aliases(
-        "munet", {t % DX_ID_OFFSET for t in targets}
+        _SOURCE, {t % DX_ID_OFFSET for t in targets}
     )
     await store.kv_set(
         _WALK_KV, {"cursor": None, "finished_at": time.time(), "count": len(collected)}
@@ -493,7 +495,7 @@ async def _correct_existing_versions(facts: dict[str, dict]) -> list[int]:
     if not corrections:
         return []
     await songdb.apply_external_sources(
-        preloaded=[("munet", "override", corrections)], force=True
+        preloaded=[(_SOURCE, "override", corrections)], force=True
     )
     corrected_ids = [int(sid) for sid in corrections]
     logger.info(
@@ -603,7 +605,7 @@ async def run_batch_supplement() -> dict:
     if docs_by_base:
         doc = {str(base): song_doc for base, song_doc in docs_by_base.items()}
         summary = await songdb.apply_external_sources(
-            preloaded=[("munet", "fill", doc)], force=True
+            preloaded=[(_SOURCE, "fill", doc)], force=True
         )
         result["merge"] = {
             k: summary.get(k) for k in ("applied", "changed") if k in summary
@@ -618,8 +620,7 @@ async def run_batch_supplement() -> dict:
     if corrected:
         result["corrected"] = corrected
     if alias_items:
-        # source 名与 provider.ALIAS_SOURCES 对齐（munet 在列）
-        result["aliases"] = await store.upsert_song_aliases("munet", alias_items)
+        result["aliases"] = await store.upsert_song_aliases(_SOURCE, alias_items)
     try:
         filters = await fetch_browse_filters()
         logger.info(f"MuNET 版本状态：addVersion {filters.get('versions')}")

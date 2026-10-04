@@ -11,6 +11,7 @@ scripts/gen_commands.py``）。只需 nonebot.init 装配 import 环境，不启
 （如 awmc_disabled_plugins）影响。
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -24,21 +25,13 @@ import nonebot
 # import 装配，指向仓库内 static/（素材包就位后的常规 checkout 均存在）
 nonebot.init(_env_file=None, awmc_static_path=str(REPO_ROOT / "static"))
 
-PLUGINS = [
-    "alias",
-    "arcade",
-    "base",
-    "bind",
-    "dan",
-    "fortune",
-    "guess",
-    "music_query",
-    "random_song",
-    "score_query",
-    "score_tools",
-    "songdb",
-    "tables",
-]
+# 子插件清单动态取自目录（真源是主插件 __init__ 的自动发现；手抄清单会在
+# 新增子插件时静默失真）
+PLUGINS = sorted(
+    d.name
+    for d in (REPO_ROOT / "src" / "nonebot_plugin_awmc_helper" / "plugins").iterdir()
+    if d.is_dir() and (d / "__init__.py").exists()
+)
 
 
 def main() -> None:
@@ -60,7 +53,10 @@ def main() -> None:
 
     content = registry_markdown(help_registry)
     target = REPO_ROOT / "docs" / "commands.md"
-    target.write_text(content, encoding="utf-8")
+    # 原子写（临时文件 + replace）：半途失败不留截断文档
+    tmp = target.with_suffix(".md.tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, target)
     total = sum(
         len(b.commands) for b in help_registry.blocks if b.plugin.startswith("awmc.")
     )

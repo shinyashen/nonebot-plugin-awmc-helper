@@ -27,7 +27,12 @@ from .tools import (
 from ..utils import paginate
 from .assets import assets
 from .nb_chart import major_type_of, paste_version_logo
-from ...constants import GENRE_TO_ZH, version_zh, display_song_id
+from ...constants import (
+    GENRE_TO_ZH,
+    THEME_PRISM_PLUS,
+    version_zh,
+    display_song_id,
+)
 
 LEVEL_COLORS = {
     LevelIndex.BASIC: "#22bb5b",
@@ -164,7 +169,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
 
     im = generate_frosted_card(im, (50, 150, 950, 150 + lines * 145 + 100), alpha=0.2)
     im.alpha_composite(
-        assets.pic("chara_left.png", "prism_plus").resize((156, 187)), (800, 0)
+        assets.pic("chara_left.png", THEME_PRISM_PLUS).resize((156, 187)), (800, 0)
     )
     im.alpha_composite(assets.pic("moon.png").resize((120, 120)), (60, 20))
     if (logo := assets.pic_optional("maimai でらっくす PRiSM PLUS.png")) is not None:

@@ -191,9 +191,9 @@ CHART_TYPE_BY_PREFIX: dict[str, SongType] = {
 }
 
 # 渲染主题（素材包 pic/<theme>/ 子目录名；bind 指令 0/1 映射）
-THEMES = ("prism_plus", "circle")
 THEME_PRISM_PLUS = "prism_plus"
 THEME_CIRCLE = "circle"
+THEMES = (THEME_PRISM_PLUS, THEME_CIRCLE)
 DEFAULT_THEME = THEME_PRISM_PLUS
 
 # 绑定服务标识（binding/store 表值与 sources 注册表键的单一事实源；
@@ -341,18 +341,18 @@ LEVEL_LIST = [
 COMBO_FILE = {"fc": "FC", "fcp": "FCp", "ap": "AP", "app": "APp"}
 SYNC_FILE = {"sync": "Sync", "fs": "FS", "fsp": "FSp", "fsd": "FSD", "fsdp": "FSDp"}
 
-# 数据源 → 署名显示名（查分器站点品牌名，各卡面共用）
+# 数据源 → 署名显示名（查分器站点品牌名，各卡面共用；键引用上方 SERVICE_*）
 SERVICE_DISPLAY = {
-    "divingfish": "Diving-Fish",
-    "lxns": "Lxns-Network",
-    "net": "maimai NET (JP)",
+    SERVICE_DIVINGFISH: "Diving-Fish",
+    SERVICE_LXNS: "Lxns-Network",
+    SERVICE_NET: "maimai NET (JP)",
 }
 
 # 数据源 → 中文短名（面向用户的绑定/切换文案用，bind 等处共用）
 SERVICE_ZH = {
-    "divingfish": "水鱼",
-    "lxns": "落雪",
-    "net": "日服 NET",
+    SERVICE_DIVINGFISH: "水鱼",
+    SERVICE_LXNS: "落雪",
+    SERVICE_NET: "日服 NET",
 }
 
 # RateType 枚举名 → UI_TTR_Rank_*.png 文件名后缀（由 RATE_TO_ZH 派生：

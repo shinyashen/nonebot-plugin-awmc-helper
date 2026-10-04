@@ -10,21 +10,20 @@ conftest 的 session fixture 才 init（与仓内其他测试口径一致）。
 
 from pathlib import Path
 
-# 全部内置子插件：文档必须逐个覆盖（防加载失败静默缩水）
-SUBPLUGINS = (
-    "alias",
-    "arcade",
-    "base",
-    "bind",
-    "dan",
-    "fortune",
-    "guess",
-    "music_query",
-    "random_song",
-    "score_query",
-    "score_tools",
-    "songdb",
-    "tables",
+# 全部内置子插件：文档必须逐个覆盖（防加载失败静默缩水）。清单动态取自
+# plugins/ 目录（真源是主插件 __init__ 的自动发现，不手抄）
+_PLUGIN_DIR = (
+    Path(__file__).resolve().parent.parent
+    / "src"
+    / "nonebot_plugin_awmc_helper"
+    / "plugins"
+)
+SUBPLUGINS = tuple(
+    sorted(
+        d.name
+        for d in _PLUGIN_DIR.iterdir()
+        if d.is_dir() and (d / "__init__.py").exists()
+    )
 )
 
 _DOC = Path(__file__).resolve().parent.parent / "docs" / "commands.md"

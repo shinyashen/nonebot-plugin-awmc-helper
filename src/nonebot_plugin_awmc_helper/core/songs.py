@@ -1035,9 +1035,15 @@ async def _hourly_cn_poll() -> None:
         return_exceptions=True,
     )
     if isinstance(light, BaseException) or isinstance(df, BaseException):
-        # 只取异常侧打日志：light 为真值 dict（整个曲库载荷）时不能整包进日志
+        # 只取异常侧打日志：light 为真值 dict（整个曲库载荷）时不能整包进日志；
+        # 双侧同败都记（df 异常也是排障信息）
         err = light if isinstance(light, BaseException) else df
-        logger.warning(f"国服轮询拉取失败，跳过本次检测：{err}")
+        extra = (
+            f"（落雪侧：{df}）"
+            if isinstance(light, BaseException) and isinstance(df, BaseException)
+            else ""
+        )
+        logger.warning(f"国服轮询拉取失败，跳过本次检测：{err}{extra}")
         return
     lx_keys = _poll_keys(light.get("songs", []))
     df_keys: set[songdb.DetectKey] = set()

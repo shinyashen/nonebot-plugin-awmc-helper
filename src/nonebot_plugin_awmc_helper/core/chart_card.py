@@ -64,8 +64,9 @@ async def chart_card_bytes(
         if ident is not None:
             try:
                 bests = await score_service.get_b50(binding)
-                # 主类型判定单源 nb_chart.major_type_of（宴谱已在上方提前返回，
-                # 标准/DX 双空形态不可达，布尔派生与旧内联表达式等价）
+                # 主类型判定单源 nb_chart.major_type_of（布尔派生与旧内联在
+                # 「dx 组空且 prefer≠STANDARD」形态取值不同，但下游
+                # chart_version_of 组空回落标准组，输出等价）
                 prefer_sd = (
                     nb_chart.major_type_of(song, prefer_type) == SongType.STANDARD
                 )

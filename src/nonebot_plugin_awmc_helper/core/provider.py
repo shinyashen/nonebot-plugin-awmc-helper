@@ -27,8 +27,8 @@ from . import store, songdb
 from .songdb import Scope
 from ..constants import DX_ID_OFFSET, normalize_text, strip_chart_prefix
 
-# 别名源标识（_merged_lib 拉取注册、munet 写库 source 键、songs 合并清单共用；
-# 顺序即合并优先序，拉取方法与持久化开关的接线仍留在 _merged_lib 本地）
+# 别名源标识（get_aliases 拉取注册、munet 写库 source 键、songs 合并清单共用；
+# 顺序即合并优先序，拉取方法与持久化开关的接线留在 get_aliases 本地）
 ALIAS_SOURCES: "tuple[str, ...]" = ("yuzu", "lxns", "munet")
 
 
@@ -141,6 +141,8 @@ class AwmcAliasProvider(IAliasProvider):
             ("lxns", self._fetch_lxns, True),
             ("munet", self._fetch_munet, False),
         )
+        # 接线与 ALIAS_SOURCES 的名单一致性由这里钉死（新增源须两处同步）
+        assert tuple(name for name, _, _ in sources) == ALIAS_SOURCES
         pulled = await asyncio.gather(
             *(_pull(name, fetch) for name, fetch, _persist in sources)
         )
