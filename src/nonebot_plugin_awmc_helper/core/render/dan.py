@@ -208,7 +208,11 @@ def _cell(sheet: Image.Image, idx: int) -> Image.Image:
 
 def _solid_bbox(img: Image.Image, threshold: int = _HALO_THRESHOLD):
     """实心内容 bbox（alpha ≥ threshold；淡光晕边不算），无内容返回 None。"""
-    alpha = img.getchannel("A").point(lambda v: 255 if v > threshold else 0)
+
+    def _threshold(v: int) -> int:
+        return 255 if v > threshold else 0
+
+    alpha = img.getchannel("A").point(_threshold)
     return alpha.getbbox()
 
 
@@ -223,7 +227,9 @@ def _trim_fit(img: Image.Image, height: int) -> Image.Image:
     """全裁透明边后按目标字高保比缩放。"""
     if bbox := _solid_bbox(img):
         img = img.crop(bbox)
-    return img.resize((round(img.width * height / img.height), height), Image.LANCZOS)
+    return img.resize(
+        (round(img.width * height / img.height), height), Image.Resampling.LANCZOS
+    )
 
 
 def _sprite_cells(text: str) -> list[int]:
@@ -258,12 +264,12 @@ def _sprite_line(sheet: Image.Image, cells: list[int], scale: float) -> Image.Im
                 cell = cell.crop(bbox)
             cell = cell.resize(
                 (max(round(cell.width * scale), 1), max(round(cell.height * scale), 1)),
-                Image.LANCZOS,
+                Image.Resampling.LANCZOS,
             )
             placements.append((cell, x, h - cell.height))
             x += cell.width + round(6 * scale)
         else:
-            normal = _cell(sheet, idx).resize((step, h), Image.LANCZOS)
+            normal = _cell(sheet, idx).resize((step, h), Image.Resampling.LANCZOS)
             placements.append((normal, x, 0))
             x += step
     out = Image.new("RGBA", (x, h), (0, 0, 0, 0))
@@ -307,7 +313,11 @@ def _draw_achievement(card: Image.Image, value: float, left: int, bottom: int) -
     top = bottom - line.height
     card.alpha_composite(line, (left, top))
     # 实心底（阈值 220 排除格底淡影），减去 stroke 外扩后作 % 锚点
-    alpha = line.getchannel("A").point(lambda v: 255 if v > _PCT_SOLID_THRESHOLD else 0)
+
+    def _solid(v: int) -> int:
+        return 255 if v > _PCT_SOLID_THRESHOLD else 0
+
+    alpha = line.getchannel("A").point(_solid)
     content_bottom = (alpha.getbbox() or (0, 0, 0, line.height))[3]
     content_bottom -= _PCT_STROKE_COMPENSATE
     draw = ImageDraw.Draw(card)
@@ -342,7 +352,9 @@ def _draw_level(
     digits = []
     for ch in digits_text:
         d = _trim_horizontal(_cell(sheet, int(ch)))
-        digits.append(d.resize((round(d.width * scale), LEVEL_DIGIT_H), Image.LANCZOS))
+        digits.append(
+            d.resize((round(d.width * scale), LEVEL_DIGIT_H), Image.Resampling.LANCZOS)
+        )
     lv = _trim_fit(_cell(sheet, LV_CELL), LEVEL_LV_H)
     plus = (
         _trim_fit(_cell(sheet, _SPRITE_CHARS["+"]), LEVEL_PLUS_H)
@@ -367,6 +379,7 @@ def _draw_strip(card: Image.Image, song: DanSongCard) -> None:
     白色槽 pill 上居中绘底分（卡框烤字已由素材更新移除，无需遮罩）。"""
     draw = ImageDraw.Draw(card)
     info = f"定数: {song.ds} 谱师: {song.charter} BPM: {song.bpm}"
+    info_font = font(STRIP_INFO_SIZES[-1], FONT_HAN)
     for size in STRIP_INFO_SIZES:
         info_font = font(size, FONT_HAN)
         if draw.textlength(info, font=info_font) <= STRIP_INFO_RIGHT - STRIP_INFO_X:
@@ -411,7 +424,9 @@ def _draw_song_card(im: Image.Image, song: DanSongCard, left: int, top: int) -> 
 
     # 封面（削除曲等无封面 → 默认封面 0.png）
     cover = song.cover or assets.cover(song.song_id or 0)
-    card.alpha_composite(cover.resize((COVER_SIZE,) * 2, Image.LANCZOS), COVER_POS)
+    card.alpha_composite(
+        cover.resize((COVER_SIZE, COVER_SIZE), Image.Resampling.LANCZOS), COVER_POS
+    )
 
     # 类型徽章先贴，曲名左对齐并截断避让（y=22 光学居中，见 TITLE_TEXT_Y）
     badge_left = _paste_type_badge(card, song.kind)
@@ -429,7 +444,7 @@ def _draw_song_card(im: Image.Image, song: DanSongCard, left: int, top: int) -> 
     _draw_level(card, song, LEVEL_LEFT, LEVEL_CENTER_Y)
     _draw_achievement(card, song.achievement, ACHV_LEFT, ACHV_BOTTOM)
 
-    card = card.resize((CARD_W, CARD_H), Image.LANCZOS)
+    card = card.resize((CARD_W, CARD_H), Image.Resampling.LANCZOS)
     im.alpha_composite(card, (left, top))
 
 
@@ -458,7 +473,7 @@ def _draw_gauge(im: Image.Image, data: DanCardData) -> None:
     """血量表盘 + 同序号数字（整格步进拼接，居中叠在盘心）。"""
     variant = life_variant(data.life)
     gauge = dan_asset(f"UI_DNM_Base_Life_{variant:02d}.png").resize(
-        (GAUGE_SIZE,) * 2, Image.LANCZOS
+        (GAUGE_SIZE, GAUGE_SIZE), Image.Resampling.LANCZOS
     )
     im.alpha_composite(gauge, GAUGE_POS)
     digits = dan_asset(f"UI_DNM_LifeNum_{variant:02d}.png")
@@ -482,7 +497,9 @@ def _draw_damage_boxes(im: Image.Image, data: DanCardData) -> None:
             ("UI_DNM_Box_Damage_03", data.damage_miss),
         )
     ):
-        pill = dan_asset(f"{box}.png").resize(DAMAGE_PILL_SIZE, Image.LANCZOS)
+        pill = dan_asset(f"{box}.png").resize(
+            DAMAGE_PILL_SIZE, Image.Resampling.LANCZOS
+        )
         y = DAMAGE_PILL_POS[1] + i * DAMAGE_PILL_PITCH
         im.alpha_composite(pill, (DAMAGE_PILL_POS[0], y))
         draw.text(
@@ -507,18 +524,22 @@ def _fit_box(img: Image.Image, width: int, height: int) -> Image.Image:
     """等比缩放至完全落入 (width, height) 框（取 min 比例）。"""
     scale = min(width / img.width, height / img.height)
     return img.resize(
-        (round(img.width * scale), round(img.height * scale)), Image.LANCZOS
+        (round(img.width * scale), round(img.height * scale)), Image.Resampling.LANCZOS
     )
 
 
 def _fit_height(img: Image.Image, height: int) -> Image.Image:
     """等比缩放至目标高。"""
-    return img.resize((round(img.width * height / img.height), height), Image.LANCZOS)
+    return img.resize(
+        (round(img.width * height / img.height), height), Image.Resampling.LANCZOS
+    )
 
 
 def _fit_width(img: Image.Image, width: int) -> Image.Image:
     """等比缩放至目标宽。"""
-    return img.resize((width, round(img.height * width / img.width)), Image.LANCZOS)
+    return img.resize(
+        (width, round(img.height * width / img.width)), Image.Resampling.LANCZOS
+    )
 
 
 def _draw_reward(im: Image.Image, dan_id: str, logo: Image.Image | None) -> None:

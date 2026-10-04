@@ -29,6 +29,8 @@ from . import store
 from .http import create_smart_client
 
 if TYPE_CHECKING:
+    from maimai_py.models import ScoreExtend
+
     from .render.dan import DanCardData
 
 GALLERY_URL = "https://dp4p6x0xfi5o9.cloudfront.net/maimai/gallery.yaml"
@@ -287,7 +289,10 @@ def parse_gallery(text: str) -> tuple[list[ParsedCourse], list[ParsedRandom]]:
         # 渲染的 normal/shin 底图由段位种名 id 推导
         course = ParsedCourse(gid, "normal", version.value)
         for sec in lst["sections"]:
-            name_ja = _DAN_SECTION_RE.match(sec["title"]).group(1)
+            m = _DAN_SECTION_RE.match(sec["title"])
+            if m is None:
+                raise ValueError(f"段位段名不匹配: {sec['title']!r}")
+            name_ja = m.group(1)
             dan_id = _DAN_ID_BY_NAME.get(name_ja)
             if dan_id is None:
                 raise ValueError(f"未知段位名: {sec['title']!r}")
@@ -573,8 +578,14 @@ async def latest_gallery_id(
         query = select(store.DanCourse).where(store.DanCourse.kind == kind)
         if version_limit is not None:
             query = query.where(store.DanCourse.version <= version_limit)
-        row = (await db.exec(query.order_by(store.DanCourse.version.desc()))).first()
-        return row.gallery_id if row else None
+        courses = (
+            await db.exec(select(store.DanCourse).where(store.DanCourse.kind == kind))
+        ).all()
+    if version_limit is not None:
+        courses = [c for c in courses if c.version <= version_limit]
+    if not courses:
+        return None
+    return max(courses, key=lambda c: c.version).gallery_id
 
 
 async def cn_current_version() -> int:
@@ -599,9 +610,7 @@ async def grades_of(
 
         grades = (
             await db.exec(
-                select(store.DanGrade)
-                .where(store.DanGrade.gallery_id == gallery_id)
-                .order_by(store.DanGrade.sort)
+                select(store.DanGrade).where(store.DanGrade.gallery_id == gallery_id)
             )
         ).all()
         sheets = (
@@ -612,12 +621,13 @@ async def grades_of(
     by_grade: dict[str, list[store.DanSheet]] = {}
     for s in sheets:
         by_grade.setdefault(s.dan_id, []).append(s)
+    grades = sorted(grades, key=lambda g: g.sort)
     return [
         (g, sorted(by_grade.get(g.dan_id, []), key=lambda s: s.idx)) for g in grades
     ]
 
 
-async def find_grade_row(gallery_id: str, dan_id: str) -> store.DanGrade | None:
+async def find_grade_row(gallery_id: str | None, dan_id: str) -> store.DanGrade | None:
     async with store.session() as db:
         from sqlmodel import select
 
@@ -689,14 +699,13 @@ async def _chart_info(
                 )
             )
         ).first()
-        latest = (
-            await db.exec(
-                select(store.SongChartLevel)
-                .where(*level_clauses)
-                .order_by(store.SongChartLevel.version.desc())
-            )
-        ).first()
-    ds = latest.level_value if latest else 0.0
+        level_rows = (
+            await db.exec(select(store.SongChartLevel).where(*level_clauses))
+        ).all()
+    if song is None or chart is None or not level_rows:
+        return "-", "-", "-", 0.0
+    latest = max(level_rows, key=lambda r: r.version)
+    ds = latest.level_value or 0.0
     return _level_str(ds), chart.designer or "-", str(song.bpm or "-"), ds
 
 
@@ -733,23 +742,17 @@ async def _sample_random_sheets(
     async with store.session() as db:
         rows = (
             await db.exec(
-                select(
-                    store.SongChart.song_id,
-                    store.SongChart.kind,
-                    store.SongChart.level_id,
-                    store.SongChartLevel.version,
-                    store.SongChartLevel.level_value,
-                )
+                select(store.SongChart, store.SongChartLevel)
                 .join(
                     store.SongSheetGroup,
                     (store.SongSheetGroup.song_id == store.SongChart.song_id)
-                    & (store.SongSheetGroup.kind == store.SongChart.kind),
+                    & (store.SongSheetGroup.kind == store.SongChart.kind),  # type: ignore[reportArgumentType]
                 )
                 .join(
                     store.SongChartLevel,
                     (store.SongChartLevel.song_id == store.SongChart.song_id)
                     & (store.SongChartLevel.kind == store.SongChart.kind)
-                    & (store.SongChartLevel.level_id == store.SongChart.level_id),
+                    & (store.SongChartLevel.level_id == store.SongChart.level_id),  # type: ignore[reportArgumentType]
                 )
                 .where(
                     *scope_clauses,
@@ -761,14 +764,14 @@ async def _sample_random_sheets(
     # 同谱面多版本定数行取「生效版本最新」的一行（非最大值——被改订降定数
     # 的谱面应取新值）；scope 时行集已限定 version <= code，即该版本时点定数
     latest: dict[tuple[int, str, int], tuple[int, float]] = {}
-    for song_id, kind, level_id, row_version, value in rows:
-        if value is None:
+    for chart, level in rows:
+        if level.level_value is None:
             continue
-        if version_code is not None and row_version > version_code:
+        if version_code is not None and level.version > version_code:
             continue
-        key = (song_id, kind, level_id)
-        if key not in latest or row_version > latest[key][0]:
-            latest[key] = (row_version, value)
+        key = (chart.song_id, chart.kind, chart.level_id)
+        if key not in latest or level.version > latest[key][0]:
+            latest[key] = (level.version, level.level_value)
     candidates = [
         (
             song_id,
@@ -850,18 +853,19 @@ async def card_data(
             ).first()
             sheets = (
                 await db.exec(
-                    select(store.DanSheet)
-                    .where(
+                    select(store.DanSheet).where(
                         store.DanSheet.gallery_id == gallery_id,
                         store.DanSheet.dan_id == dan_id,
                     )
-                    .order_by(store.DanSheet.idx)
                 )
             ).all()
-        picks = [(s.song_id, s.kind, s.difficulty, s.title) for s in sheets]
+        picks = [
+            (s.song_id, s.kind, s.difficulty, s.title)
+            for s in sorted(sheets, key=lambda s: s.idx)
+        ]
 
     # 玩家成绩：未绑定/数据源不可用统一降级（与歌曲卡无数据一致）
-    score_map: dict[tuple, object] = {}
+    score_map: dict[tuple, ScoreExtend] = {}
     best_list: list | None = None
     if binding is not None:
         try:
@@ -887,7 +891,7 @@ async def card_data(
             else None
         )
         if score is not None:
-            achievement = score.achievements
+            achievement = score.achievements or 0.0
             ra = int(score.dx_rating or 0)
         gain = None
         level, charter, bpm, ds = "-", "-", "-", 0.0

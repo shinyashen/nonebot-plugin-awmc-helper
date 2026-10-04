@@ -87,7 +87,7 @@ def _resolve_dan_id(arg: str) -> str | None:
 
 def _logo():
     """奖励区版本 logo（国服区素材，缺失返回 None 由渲染跳过）。"""
-    from ..render.assets import assets
+    from ...core.render.assets import assets
 
     path = plugin_config.awmc_static_path / "mai" / "pic" / "dan" / "DX_2026_Logo.png"
     return assets.get(path) if path.exists() else None

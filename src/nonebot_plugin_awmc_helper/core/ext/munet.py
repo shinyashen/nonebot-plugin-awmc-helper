@@ -12,7 +12,7 @@
 import json
 import time
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from nonebot import logger
@@ -288,7 +288,7 @@ def _otoge_fact(item: dict) -> dict | None:
     - otoge title join 全程按标题对齐，上游字段缺失/脏值宁可放弃（宁缺毋滥）。
     """
     try:
-        version = int(item.get("version"))
+        version = int(cast("int | str", item.get("version")))
     except (TypeError, ValueError):
         return None
     if not 10000 <= version < 30000:
@@ -296,7 +296,7 @@ def _otoge_fact(item: dict) -> dict | None:
     fact: dict[str, int] = {"version": version}
     for key in ("release", "date_updated", "date_added"):
         try:
-            date = int(item.get(key))
+            date = int(cast("int | str", item.get(key)))
         except (TypeError, ValueError):
             continue
         if date:
