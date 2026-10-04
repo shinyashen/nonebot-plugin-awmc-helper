@@ -239,7 +239,10 @@ help_registry.declare(
             matcher=search_alias_song,
             name="<名称>是什么歌",
             brief="别名/标题/ID 反查曲目（别名优先，出谱面卡）",
-            detail="格式：<名称>是什么歌；支持别名、宴谱、纯数字 id 等形态。",
+            detail=(
+                "格式：<名称>是什么歌 [页]；别名优先，其次 ID、最后标题关键词。\n"
+                "支持别名、宴谱、纯数字 id 等形态；命中柚子投票中的曲目时给出提示。"
+            ),
         ),
         CommandSpec(
             matcher=query_chart,

@@ -450,10 +450,12 @@ help_registry.declare(
             capability=Capability.B50,
             brief="B50 成绩大图（带参数=水鱼用户名代查，@某人=代查）",
             detail=(
+                "查询自己的 B50 成绩大图。\n"
                 "格式：b50 [@某人|水鱼用户名]\n"
                 "带参数=水鱼公开代查（无需绑定）；@某人 代查优先用对方绑定，"
                 "对方未绑定时 QQ 平台回退水鱼按 QQ 公开查询。\n"
-                "水鱼公开查询凭据优先级：绑定用户名 > QQ 号。"
+                "水鱼公开查询凭据优先级：绑定用户名 > QQ 号。\n"
+                "数据源为日服 NET 时按日服定数与现行版本组装。"
             ),
         ),
         CommandSpec(
@@ -463,7 +465,7 @@ help_registry.declare(
             capability=Capability.SCORES_ALL,
             brief="无条件全量 b40（旧系数 FiNALE 口径，头部含段位分 2100）",
             detail=(
-                "裸 b40 = 全部成绩按旧系数重算（恒拆 25+15），"
+                "裸 b40 = 全部成绩按旧系数（FiNALE 口径）重算（恒拆 25+15），"
                 "头部称号条固定「底分 + 段位分 2100」；\n"
                 "带条件的旧系数卡（nb40、dx2022b40 等）见「条件50」。"
             ),
@@ -474,7 +476,10 @@ help_registry.declare(
             aliases=("AP50",),
             capability=Capability.SCORES_ALL,
             brief="AP-only best50（全 AP 成绩组装出图）",
-            detail="格式：ap50 [@某人]；等价「神50」，只统计 AP/AP+ 的 best50。",
+            detail=(
+                "格式：ap50 [@某人]；等价「神50」，"
+                "只统计 AP/AP+ 的 best50（全 AP 成绩组装出图）。"
+            ),
         ),
         CommandSpec(
             matcher=combo50,
@@ -514,7 +519,9 @@ help_registry.declare(
             matcher=ginfo,
             name="ginfo",
             brief="谱面游玩统计（样本/拟合/评级分布）",
-            detail="格式：ginfo <[难度色]曲目>。",
+            detail=(
+                "格式：ginfo <[难度色]曲目>；输出游玩统计（样本/拟合）与评级分布图。"
+            ),
         ),
     ],
 )

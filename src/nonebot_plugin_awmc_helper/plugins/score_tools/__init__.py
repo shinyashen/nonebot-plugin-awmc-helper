@@ -467,7 +467,7 @@ _score_line_spec = CommandSpec(
     name="分数线",
     brief="查询指定谱面达标分数线允许的容错（图片出卡）",
     detail=(
-        "此功能为查询某谱面达到目标达成率的容错。\n"
+        "此功能为查询某谱面达到目标达成率的容错（图片出卡）。\n"
         "命令格式：分数线「难度色/宴」「id/别名/曲名」「分数线」\n"
         "难度色：绿/黄/红/紫/白（与查询键可连写，如 紫799 / 紫琪露诺）。\n"
         "宴谱：分数线 宴<别名/曲名> <线>（多宴谱时列 id，用 宴<谱面id> 指定；\n"
@@ -480,7 +480,8 @@ _score_line_spec = CommandSpec(
         "        GREAT / GOOD / MISS\n"
         "TAP·TOUCH  1 / 2.5  / 5\n"
         "HOLD       2 / 5    / 10\n"
-        "SLIDE      3 / 7.5  / 15"
+        "SLIDE      3 / 7.5  / 15\n"
+        "发送「分数线 帮助」可直接查看本说明。"
     ),
     example="分数线 紫799 100.5",
 )
@@ -498,7 +499,11 @@ help_registry.declare(
             aliases=("我要在<等级>上加N分",),
             capability=Capability.B50,
             brief="基于全体最低 RA 反推定数区间的推分推荐",
-            detail="格式：我要上N分 / 我要在<等级>上加N分（如 我要在13+上5分）。",
+            detail=(
+                "基于全体最低 RA 反推定数区间给出推分推荐。\n"
+                "格式：我要上N分 / 我要在<等级>上加N分"
+                "（如 我要上20分、我要在紫13+上加10分）。"
+            ),
         ),
         CommandSpec(
             matcher=rating_ranking,
@@ -512,6 +517,7 @@ help_registry.declare(
             # 适用性标注（仅水鱼数据源）由 capability 经注册表自动派生
             capability=Capability.MY_RANKING,
             brief="在 RA 榜单中定位自己的名次",
+            detail="需已绑定水鱼。",
         ),
     ],
 )

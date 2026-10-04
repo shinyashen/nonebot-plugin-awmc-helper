@@ -44,7 +44,9 @@
        await UniMessage.text("done").finish()
    ```
 
-3. 在 `docs/commands.md` 补充指令表，并补 nonebug 测试。
+3. 补 nonebug 测试，然后运行 `uv run poe gen-commands` 重新生成指令手册
+   （`docs/commands.md` 由帮助注册表自动生成，请勿手工编辑；
+   `tests/test_gen_commands.py` 与文档逐字节锁死）。
 
 > 上方单文件骨架即下方[单文件豁免](#单文件豁免)形态；功能变大后按
 > [目录结构约定](#目录结构约定)拆分。

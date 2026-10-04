@@ -102,6 +102,10 @@ help_registry.declare(
             matcher=guess,
             name="猜歌",
             brief="开启猜歌对局（特征提示逐轮递进，超时揭晓）",
+            detail=(
+                "发送「猜歌」开启对局："
+                "6 条特征提示逐轮递进 + 曲绘裁剪，猜中或超时揭晓答案。"
+            ),
         ),
         CommandSpec(
             matcher=guess_pic,

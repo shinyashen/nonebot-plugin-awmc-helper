@@ -479,6 +479,10 @@ help_registry.declare(
             name="开启/关闭排卡",
             scope="群管",
             brief="本群排卡开关（部署默认关，关闭群内排卡指令静默不响应）",
+            detail=(
+                "本群排卡开关，部署默认关（AWMC_ARCADE_ENABLED）；"
+                "关闭时群内排卡指令静默不响应。"
+            ),
         ),
         CommandSpec(
             matcher=arcade_add,
@@ -489,7 +493,10 @@ help_registry.declare(
             brief=(
                 f"添加机厅信息（自定义 id 自 {CUSTOM_ARCADE_ID_BASE} 起自增，重名拒绝）"
             ),
-            detail="格式：添加机厅 <店名> <地址> <机台数量> [别称...]",
+            detail=(
+                f"格式：添加机厅 <店名> <地址> <机台数量> [别称...]；"
+                f"自定义 id 自 {CUSTOM_ARCADE_ID_BASE} 起自增，重名拒绝"
+            ),
         ),
         CommandSpec(
             matcher=arcade_del,
@@ -513,7 +520,7 @@ help_registry.declare(
             aliases=("编辑机厅",),
             scope="群管",
             brief="修改机厅机台数（群管）",
-            detail="格式：修改机厅 <店名|ID> 数量 <数量>",
+            detail="格式：修改机厅 <店名|ID> 数量 <数量>（修改机台数）。",
         ),
         CommandSpec(
             matcher=arcade_sub,
@@ -521,7 +528,7 @@ help_registry.declare(
             aliases=("取消订阅机厅", "取消订阅"),
             scope="群管",
             brief="订阅/取消订阅机厅（简化后续人数指令）",
-            detail="格式：订阅机厅 <店名|ID>",
+            detail="格式：订阅机厅 <店名|ID>；订阅后人数指令仅对本群订阅生效。",
         ),
         CommandSpec(
             matcher=arcade_show_sub,
@@ -534,14 +541,19 @@ help_registry.declare(
             name="查找机厅",
             aliases=("查询机厅", "机厅查找", "机厅查询", "搜索机厅", "机厅搜索"),
             brief="按关键词模糊查询机厅信息",
-            detail="格式：查找机厅 <关键词>",
+            detail=(
+                "格式：查找机厅 <关键词>；店名/地址/别称模糊匹配，"
+                "命中 ≥5 条转图片输出。"
+            ),
         ),
         CommandSpec(
             matcher=arcade_add_person,
             name="<店名>±N人",
             brief="操作本群订阅机厅的排卡人数（+N卡 改机台数）",
             detail=(
-                "格式：<店名/别名> <设置|增加|减少|+|-> <数量>；\n"
+                "格式：<店名/别名> <设置|增加|减少|+|-> <数量>[人|卡]；\n"
+                "人人可排（对齐原版），仅对本群订阅机厅生效；\n"
+                "单次变更上限 awmc_arcade_max_delta；\n"
                 "省略店名（如「+1」）静默忽略；相对增量写入，多人同时操作不丢更新"
             ),
         ),

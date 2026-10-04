@@ -129,6 +129,10 @@ help_registry.declare(
             scope="SUPERUSER",
             hidden=True,
             brief="手动执行曲库全量重建管线",
+            detail=(
+                "手动执行曲库全量重建管线；日常无需手动：每日 4:05 自动全量，"
+                "国服更新按 AWMC_CN_POLL_MINUTES 轮询自动触发。"
+            ),
         ),
     ],
 )

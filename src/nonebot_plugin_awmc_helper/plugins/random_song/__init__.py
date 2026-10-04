@@ -198,7 +198,7 @@ help_registry.declare(
             matcher=genre_random,
             name="来个/随个/给个 <分类>",
             brief="按分类随机（流行/东方/宴会場等）",
-            detail="如 随个流行；宴会場分类含宴谱。",
+            detail="按分类随机（流行/东方/宴会場等），如 随个流行；宴会場分类含宴谱。",
         ),
         CommandSpec(
             matcher=mai_what,
@@ -210,7 +210,7 @@ help_registry.declare(
             name="mai什么加分",
             aliases=("mai什么推分", "mai什么上分"),
             brief="基于个人 B50 末位的推分单曲推荐",
-            detail="未绑定或拉取失败时退化为普通随机。",
+            detail="基于个人 B50 末位推荐单曲；未绑定或拉取失败时退化为普通随机。",
         ),
     ],
 )

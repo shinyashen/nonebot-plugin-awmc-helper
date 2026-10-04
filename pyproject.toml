@@ -77,6 +77,7 @@ plugins = ["nonebot_plugin_awmc_helper"]
 
 [tool.poe.tasks]
 test = "pytest --cov=src --cov-report xml --junitxml=./junit.xml -n auto"
+gen-commands = "python scripts/gen_commands.py" # docs/commands.md 生成（注册表唯一事实源）
 bump = "bump-my-version bump"
 show-bump = "bump-my-version show-bump"
 
