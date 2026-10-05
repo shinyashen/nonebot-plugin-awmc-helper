@@ -407,6 +407,12 @@ async def init_plugin_db(engine: AsyncEngine, metadata: MetaData) -> None:
     except (SAOperationalError, sqlite3.OperationalError) as e:
         if "already exists" not in str(e):
             raise
+        # 多进程并发首启（如 pytest-xdist 各 worker 的 lifespan startup 同打
+        # 一个库文件）：check 与 CREATE 交错触发 already-exists 时本轮
+        # create_all 已中断、未建的表缺位——重跑一遍，第二轮 checkfirst 对
+        # 已建表全部跳过、漏建表补齐，天然幂等
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
 
 
 async def init_db() -> None:
