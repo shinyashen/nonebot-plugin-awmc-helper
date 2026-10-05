@@ -192,3 +192,79 @@ async def test_plate_template_name_split_by_view(songs, tmp_path, monkeypatch):
     base = {"version": "华", "kind": "将", "play_result": [], "entries": [], "page": 1}
     assert draw_plate_table(jp=True, **base) is None
     assert draw_plate_table(jp=False, **base) is not None
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_plate_sidecar_written_and_heals(songs, tmp_path, monkeypatch):
+    """封面缺口留档与查询期愈合（2026-10-05）：生成时缺失写 sidecar；
+    缺口封面本地可得即重渲清档；无进展限频重试、仅推进时间戳。"""
+    import json
+    import time
+
+    from mocks import make_diff, make_song, sample_songs, seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import jp_cover, table_template
+
+    real_get_all = song_service.get_all
+
+    async def fake_jp_all():
+        return await real_get_all()
+
+    monkeypatch.setattr(song_service, "jp_all", fake_jp_all)
+    out = tmp_path / "plate_table"
+    monkeypatch.setattr(table_template, "plate_table_dir", lambda: out)
+    cache = tmp_path / "jp_covers"
+    monkeypatch.setattr(jp_cover, "jp_cache_dir", lambda: cache)
+
+    song = make_song(8013, "（构造）待补封面曲", diffs=[make_diff(version=20600)])
+    await seed_service(song_service, [*sample_songs(), song])
+
+    responses = [[8013]]  # 首轮报缺失，之后补齐
+
+    async def fake_ensure_many(ids, **kw):
+        return responses.pop(0) if responses else []
+
+    monkeypatch.setattr(jp_cover, "ensure_many", fake_ensure_many)
+
+    await table_template.generate_plate_template("华", "将", song_service)
+    sidecar = table_template.plate_sidecar_file("华", "将", 1)
+    assert sidecar.exists()
+    assert json.loads(sidecar.read_text())["missing"] == [8013]
+
+    # 缺口未补 & 时间戳新鲜：直接用旧底图，不触发网络重试
+    png = await table_template.draw_plate_table_with_fallback(
+        "华", "将", [], [], page=1, song_service=song_service
+    )
+    assert png is not None
+    assert sidecar.exists()
+
+    # 缺口封面被他路补齐（本地可得）：重渲并清档
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "8013.png").write_bytes(b"\x89PNG-fake")
+    png = await table_template.draw_plate_table_with_fallback(
+        "华", "将", [], [], page=1, song_service=song_service
+    )
+    assert png is not None
+    assert not sidecar.exists()
+
+    # 时间戳过期 + 无进展（仍缺失）：限频重试一轮，仅推进时间戳不重渲
+    stale_ts = time.time() - 7200
+    sidecar.write_text(json.dumps({"missing": [8014], "ts": stale_ts}))
+    responses.append([8014])  # 重试仍失败
+    png = await table_template.draw_plate_table_with_fallback(
+        "华", "将", [], [], page=1, song_service=song_service
+    )
+    assert png is not None
+    assert sidecar.exists()
+    assert json.loads(sidecar.read_text())["ts"] > stale_ts
+
+    # 时间戳过期 + 重试补齐：重渲清档
+    sidecar.write_text(json.dumps({"missing": [8014], "ts": stale_ts}))
+    responses.append([])  # 重试成功
+    png = await table_template.draw_plate_table_with_fallback(
+        "华", "将", [], [], page=1, song_service=song_service
+    )
+    assert png is not None
+    assert not sidecar.exists()

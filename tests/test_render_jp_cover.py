@@ -148,7 +148,7 @@ async def test_ensure_default_plate_silent_on_failure(jp_env, mock):
 
 @pytest.mark.asyncio
 async def test_ensure_many_batch(jp_env, mock):
-    """批量补齐：已命中零开销跳过，未命中限流拉取落盘。"""
+    """批量补齐：已命中零开销跳过，未命中限流拉取落盘，返回仍缺失集。"""
     store, _static, cache = jp_env
     for sid, name in ((1, "a1.png"), (2, "b2.png"), (3, "c3.png")):
         await _seed_song(store, sid, image_url=name)
@@ -163,7 +163,7 @@ async def test_ensure_many_batch(jp_env, mock):
 
     from nonebot_plugin_awmc_helper.core.render import jp_cover
 
-    await jp_cover.ensure_many([1, 2, 3], cache_dir=cache)
+    assert await jp_cover.ensure_many([1, 2, 3], cache_dir=cache) == []
     assert (cache / "2.png").read_bytes() == PNG
     assert (cache / "3.png").read_bytes() == PNG
     assert route3.call_count == 1
@@ -171,20 +171,63 @@ async def test_ensure_many_batch(jp_env, mock):
 
 @pytest.mark.asyncio
 async def test_ensure_many_probe_failure_skips_batch(jp_env, mock):
-    """探针（首未命中曲）失败 → 整批放弃，不发起剩余请求（防超时空等）。"""
+    """探针（前 3 首有文件名的曲）全失败 → 整批放弃并返回缺失集（防超时空等）。"""
     store, _static, cache = jp_env
     await _seed_song(store, 4, image_url="d4.png")
     await _seed_song(store, 5, image_url="d5.png")
     mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/d4.png").respond(500)
     route5 = mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/d5.png").respond(
+        500, content=PNG
+    )
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    assert await jp_cover.ensure_many([4, 5], cache_dir=cache) == [4, 5]
+    assert not (cache / "4.png").exists()
+    assert route5.call_count == 1  # 探针轮次
+
+
+@pytest.mark.asyncio
+async def test_ensure_many_no_url_never_probes(jp_env, mock):
+    """快照无封面文件名的曲（删除曲）：排除出探针与拉取，不毒整批。
+
+    2026-10-05 服务器实测：探针首曲落在无文件名曲（id12055 删除曲）上，
+    本地即刻 False 被误判「官方站不可达」，整批封面全落占位图。
+    """
+    store, _static, cache = jp_env
+    await _seed_song(store, 2055, image_url=None)  # 删除曲：无文件名
+    await _seed_song(store, 269, image_url="x9f.png")
+    mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/x9f.png").respond(
         200, content=PNG
     )
 
     from nonebot_plugin_awmc_helper.core.render import jp_cover
 
-    await jp_cover.ensure_many([4, 5], cache_dir=cache)
-    assert not (cache / "4.png").exists()
-    assert route5.call_count == 0
+    assert await jp_cover.ensure_many([2055, 269], cache_dir=cache) == []
+    assert (cache / "269.png").read_bytes() == PNG
+    # 无文件名曲未发起任何请求（music/x9f 之外的路径未 mock，命中即报错）
+    assert not (cache / "2055.png").exists()
+
+
+@pytest.mark.asyncio
+async def test_ensure_many_single_404_does_not_bail(jp_env, mock):
+    """探针中单曲 404：不熔断（其余探针成功即继续），404 曲进缺失集。"""
+    store, _static, cache = jp_env
+    for sid, name in ((8, "h8.png"), (9, "h9.png"), (10, "h10.png")):
+        await _seed_song(store, sid, image_url=name)
+    mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/h8.png").respond(404)
+    mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/h9.png").respond(
+        200, content=PNG
+    )
+    route10 = mock.get(
+        url="https://maimaidx.jp/maimai-mobile/img/Music/h10.png"
+    ).respond(200, content=PNG)
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    assert await jp_cover.ensure_many([8, 9, 10], cache_dir=cache) == [8]
+    assert (cache / "9.png").exists()
+    assert route10.call_count == 1
 
 
 @pytest.mark.asyncio

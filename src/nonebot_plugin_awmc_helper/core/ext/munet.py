@@ -628,3 +628,60 @@ async def run_batch_supplement() -> dict:
         logger.debug(f"MuNET BrowseFilters 状态获取失败（信息性）：{e}")
     logger.info(f"MuNET 批次补充完成：{result}")
     return result
+
+
+async def run_deletion_sweep(check_ids: list[int] | None = None) -> list[int]:
+    """MuNET 在列复核：候选 id 逐个 GetById，真缺席作删除曲的权威信号。
+
+    - 复核集 = ``check_ids``（songdb 传 maimaiinfo 独有且 DX 世代的候选）
+      ∪ MuNET 留痕入库 id（``munet_batch_ids``）；在列只验一次（
+      ``munet_present_ids`` 留档，后续跳过，稳态近零请求）；
+    - 缺席（404/空壳，确定性信号）留档 ``munet_absent_ids`` 并剔出留痕
+      保护集——该伞本为 otoge 回滚不误删而设，却让删除曲永久滞留
+      （2026-10-05 id12055 上线前删除曲经 maimaiinfo 机台全集滞留实测）；
+      重建据此跳过 maimaiinfo 重建行并整曲剔除，曲若重新上线（MuNET 复
+      载）则候选复核命中在列、缺席集退出、重建自愈；
+    - 网络失败/WAF 走异常不计缺席（不确定性）；otoge 系曲的正常下架由
+      otoge 下架记录直接判定，不经此。
+    返回本次**新确认**的缺席 id。
+    """
+    known_raw = await store.kv_get("munet_batch_ids")
+    known = (
+        {int(x) for x in known_raw if isinstance(x, (int, float))}
+        if isinstance(known_raw, list)
+        else set()
+    )
+    present_raw = await store.kv_get("munet_present_ids")
+    present = (
+        {int(x) for x in present_raw if isinstance(x, (int, float))}
+        if isinstance(present_raw, list)
+        else set()
+    )
+    targets = sorted((set(check_ids or ()) | known) - present)
+    newly_absent: list[int] = []
+    newly_present: list[int] = []
+    for sid in targets:
+        try:
+            entry = await fetch_music_by_id(sid)
+        except ExtError as e:
+            logger.warning(f"MuNET 删除复核：id={sid} 请求失败（{e}），本轮跳过")
+            continue
+        (newly_absent if entry is None else newly_present).append(sid)
+    if newly_present:
+        await store.kv_set("munet_present_ids", sorted(present | set(newly_present)))
+    if newly_absent:
+        absent_raw = await store.kv_get("munet_absent_ids")
+        absent = (
+            {int(x) for x in absent_raw if isinstance(x, (int, float))}
+            if isinstance(absent_raw, list)
+            else set()
+        )
+        absent |= set(newly_absent)
+        await store.kv_set("munet_absent_ids", sorted(absent))
+        if known & set(newly_absent):
+            await store.kv_set("munet_batch_ids", sorted(known - set(newly_absent)))
+        logger.info(
+            f"MuNET 删除复核：{len(newly_absent)} 曲已不在 MuNET，判删除曲"
+            f"（重建跳过 maimaiinfo 行并整曲剔除）：{newly_absent}"
+        )
+    return newly_absent

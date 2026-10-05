@@ -12,6 +12,8 @@
 模块），底图缺失时在内存中按同布局现算，不再落盘。
 """
 
+import json
+import time
 import asyncio
 from typing import Any
 from pathlib import Path
@@ -375,6 +377,86 @@ async def generate_rating_template(level: str, song_service) -> int:
 _FULL_SET_PLATE_VERSIONS = ("舞", "霸")
 """旧作全集双页版本：完成表输出文件名不含牌种（各牌种共用同一对底图）。"""
 
+_COVER_RETRY_INTERVAL = 3600
+"""sidecar 缺口重试间隔（秒）：查询触发、限频一小时，官方站抖动自愈。"""
+
+
+def plate_template_name(version: str, kind: str, page: int, *, jp: bool = False) -> str:
+    """完成表底图文件名（去扩展名）单源：预渲染存图、查询读图、sidecar
+    留档共用，防三处手拼漂移。CN 裸名，JP 带 ``-jp`` 后缀（分口径）。"""
+    name = (
+        f"{version}-{page}"
+        if version in _FULL_SET_PLATE_VERSIONS
+        else f"{version}{kind}"
+    )
+    return f"{name}-jp" if jp else name
+
+
+def plate_template_file(
+    version: str, kind: str, page: int, *, jp: bool = False
+) -> Path:
+    """完成表底图 PNG 路径（:func:`plate_template_name` 加扩展名）。"""
+    return plate_table_dir() / f"{plate_template_name(version, kind, page, jp=jp)}.png"
+
+
+def plate_sidecar_file(version: str, kind: str, page: int, *, jp: bool = False) -> Path:
+    """完成表底图的封面缺失留档（JSON sidecar，与底图同名换扩展名）。"""
+    return plate_table_dir() / f"{plate_template_name(version, kind, page, jp=jp)}.json"
+
+
+async def _save_plate_sidecar(
+    version: str, kind: str, page: int, *, jp: bool, missing: list[int]
+) -> None:
+    """封面缺失留档：missing 非空写 ``{缺失集, 时间戳}``，空则删旧档。
+
+    查询侧据此愈合（:func:`_plate_sidecar_heal`）——生成时下载失败的曲
+    （官方站抖动）不烙死占位图，封面补齐后自动重渲；快照未提供文件名的
+    曲不在 missing（无法在线补，收敛归曲库刷新的指纹失效管）。
+    """
+    sidecar = plate_sidecar_file(version, kind, page, jp=jp)
+    if not missing:
+        sidecar.unlink(missing_ok=True)
+        return
+    payload = json.dumps(
+        {"missing": sorted(set(missing)), "ts": time.time()}, ensure_ascii=False
+    )
+    await asyncio.to_thread(sidecar.write_text, payload)
+
+
+async def _plate_sidecar_heal(
+    version: str, kind: str, page: int, *, jp: bool, song_service
+) -> bool:
+    """底图存在但生成时有封面缺口：检查缺口状态，需重渲返回 True。
+
+    - 缺口中有曲封面已本地可得（他路补齐，如卡片查询）→ 重渲；
+    - 距上次尝试超过 :data:`_COVER_RETRY_INTERVAL` → 经 ``ensure_many``
+      重试一轮（探针熔断使官方站不可达时秒级返回），有新落盘 → 重渲，
+      无进展仅推进时间戳（避免每查必试）。
+    """
+    from . import jp_cover
+
+    sidecar = plate_sidecar_file(version, kind, page, jp=jp)
+    if not sidecar.exists():
+        return False
+    try:
+        data = json.loads(sidecar.read_text())
+        missing = [int(x) for x in data.get("missing") or []]
+    except Exception:
+        logger.exception(f"封面缺失留档损坏，忽略：{sidecar.name}")
+        return False
+    if not missing:
+        await asyncio.to_thread(sidecar.unlink, True)
+        return False
+    if await asyncio.to_thread(jp_cover.any_local, missing):
+        return True
+    if time.time() - float(data.get("ts") or 0) < _COVER_RETRY_INTERVAL:
+        return False
+    still = await jp_cover.ensure_many(missing)
+    if len(still) < len(missing):
+        return True
+    await _save_plate_sidecar(version, kind, page, jp=jp, missing=still)
+    return False
+
 
 async def generate_plate_template(
     version: str, kind: str, song_service, *, jp: bool = False
@@ -406,13 +488,18 @@ async def generate_plate_template(
     if not entries:
         return 0
     # 底图内嵌曲绘批量补齐（2026-10-05 服务器实测补缺）：卡片渲染的逐卡
-    # ensure 惯例在底图路径缺失，JP 曲缺缓存全落 0.png；CN 曲静态命中零开销
+    # ensure 惯例在底图路径缺失，JP 曲缺缓存全落 0.png；CN 曲静态命中零开销。
+    # 仍缺失的（官方站抖动）留档 sidecar，查询侧择机重试重渲
     from . import jp_cover
 
-    await jp_cover.ensure_many(song.id for song, _ in entries)
+    still_missing = await jp_cover.ensure_many(song.id for song, _ in entries)
+    if still_missing:
+        logger.warning(
+            f"完成表底图 {version}{kind}（{'jp' if jp else 'cn'}）生成时 "
+            f"{len(still_missing)} 曲封面拉取失败，已留档待重试：{still_missing}"
+        )
     out_dir = plate_table_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    suffix = "-jp" if jp else ""
     if version in _FULL_SET_PLATE_VERSIONS:
         boundary = 13
         by_level = _by_level(entries, remaster)
@@ -433,12 +520,19 @@ async def generate_plate_template(
                 )
             )
             await asyncio.to_thread(
-                img.save, out_dir / f"{version}-{pages + 1}{suffix}.png"
+                img.save,
+                out_dir / f"{plate_template_name(version, kind, pages + 1, jp=jp)}.png",
+            )
+            await _save_plate_sidecar(
+                version, kind, pages + 1, jp=jp, missing=still_missing
             )
             total += sum(len(v) for v in group.values())
         return total
     img = await asyncio.to_thread(_plate_grid, entries)
-    await asyncio.to_thread(img.save, out_dir / f"{version}{kind}{suffix}.png")
+    await asyncio.to_thread(
+        img.save, out_dir / f"{plate_template_name(version, kind, 1, jp=jp)}.png"
+    )
+    await _save_plate_sidecar(version, kind, 1, jp=jp, missing=still_missing)
     return len(entries)
 
 
@@ -530,10 +624,18 @@ async def draw_plate_table_with_fallback(
     song_service,
     jp: bool = False,
 ) -> bytes | None:
-    """牌子完成表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。"""
+    """牌子完成表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。
+
+    底图在但 sidecar 有封面缺口（生成时官方站抖动）→ :func:`_plate_sidecar_heal`
+    择机重试，封面补齐即重渲（否则占位图烙死到下次指纹变化）。
+    """
     from .plate_table_draw import draw_plate_table
 
     png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)
+    if png is not None and await _plate_sidecar_heal(
+        version, kind, page, jp=jp, song_service=song_service
+    ):
+        png = None  # 缺口已愈：走下方重渲分支
     if png is None:
         await generate_plate_template(version, kind, song_service, jp=jp)
         png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)

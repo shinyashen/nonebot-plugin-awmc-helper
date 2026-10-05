@@ -23,6 +23,9 @@ from .download import DownloadGate, download_to_file
 _COVER_GATE = DownloadGate()
 """曲绘下载去重（同曲/同键并发合并为单次下载）。"""
 
+_PROBE_COUNT = 3
+"""批量补齐的探针数：任一成功即认为官方站可达；单曲 404 不熔断。"""
+
 _DEFAULT_PLATE_URL = (
     "https://maimaidx.jp/maimai-mobile/img/NamePlate/b919c327669240b8.png"
 )
@@ -67,32 +70,63 @@ async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
     )
 
 
+def has_local(song_id: int, cache: Path | None = None) -> bool:
+    """曲绘本地是否可得（static 素材或缓存；sidecar 愈合检查用）。"""
+    return _has_local(song_id, cache or jp_cache_dir())
+
+
+def any_local(song_ids: Iterable[int], cache: Path | None = None) -> bool:
+    """任一 id 的曲绘本地可得（sidecar 愈合检查：缺口被他路补齐即重渲）。"""
+    return any(_has_local(i, cache or jp_cache_dir()) for i in song_ids)
+
+
 async def ensure_many(
     song_ids: Iterable[int], *, cache_dir: Path | None = None, parallelism: int = 8
-) -> None:
+) -> list[int]:
     """批量补齐曲绘缓存（底图内嵌曲绘用；卡片路径逐卡 ensure，底图一版整批）。
 
-    static/缓存已命中的 id 零开销跳过；未命中集**先以首曲探针**——官方站
-    不可达时整批放弃（否则数百曲 × 下载超时是分钟级空等），探针通过才
-    信号量限流并发拉取。单曲失败静默落 0.png 占位（:func:`download_to_file`
-    自带 warning），不阻塞底图生成。``cache_dir`` 供测试注入。
+    返回**有封面文件名但仍未落盘**的 id（下载失败集，调用方留档供后续重
+    试）。快照未提供文件名的曲无法在线补（删除曲在 NET 已无封面索引），
+    直接排除且**不参与探针**——曾以首曲探针命中此类曲、本地即刻 False 被
+    误判「站点不可达」毒死整批（2026-10-05 服务器实测）。static/缓存已命
+    中的 id 零开销跳过；未命中集先以前 :data:`_PROBE_COUNT` 首顺序探针，
+    任一成功才信号量限流并发拉取（官方站不可达时整批放弃，否则数百曲 ×
+    下载超时是分钟级空等）。``cache_dir`` 供测试注入。
     """
     cache = cache_dir or jp_cache_dir()
-    todo = [i for i in dict.fromkeys(song_ids) if not _has_local(i, cache)]
-    if not todo:
-        return
-    if not await ensure(todo[0], cache_dir=cache):
-        logger.warning(
-            f"jp_cover：批量补齐探针失败（{todo[0]}），跳过剩余 {len(todo) - 1} 曲"
+    ids = list(dict.fromkeys(song_ids))
+    if not ids:
+        return []
+    url_map = await store.song_image_urls(ids)
+    missing = [i for i in ids if not _has_local(i, cache)]
+    no_url = [i for i in missing if i not in url_map]
+    todo = [i for i in missing if i in url_map]
+    if no_url:
+        logger.info(
+            f"jp_cover：{len(no_url)} 曲快照未提供封面文件名，暂用占位图"
+            f"（删除曲或快照未追加，待曲库刷新收敛）：{no_url}"
         )
-        return
+    if not todo:
+        return []
+    probe, ok = todo[:_PROBE_COUNT], False
+    for sid in probe:
+        if await ensure(sid, cache_dir=cache):
+            ok = True
+    if not ok:
+        logger.warning(
+            f"jp_cover：探针 {len(probe)} 曲均拉取失败，判定官方站不可达，"
+            f"跳过剩余 {len(todo) - len(probe)} 曲"
+        )
+        return todo
     sem = asyncio.Semaphore(parallelism)
 
     async def _one(song_id: int) -> None:
         async with sem:
             await ensure(song_id, cache_dir=cache)
 
-    await asyncio.gather(*(_one(sid) for sid in todo[1:]))
+    rest = [i for i in todo if not _has_local(i, cache)]
+    await asyncio.gather(*(_one(sid) for sid in rest))
+    return [i for i in todo if not _has_local(i, cache)]
 
 
 async def ensure_image(

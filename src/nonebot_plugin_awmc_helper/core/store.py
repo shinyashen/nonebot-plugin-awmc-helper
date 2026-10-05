@@ -742,6 +742,20 @@ async def song_image_url(song_id: int) -> str | None:
     return row.image_url if row else None
 
 
+async def song_image_urls(song_ids: list[int]) -> dict[int, str]:
+    """批量曲绘文件名映射（仅含**有**文件名的 id；批量补齐封面用）。"""
+    unique = list(dict.fromkeys(song_ids))
+    if not unique:
+        return {}
+    async with session() as db:
+        rows = (
+            await db.exec(
+                select(SongRow.id, SongRow.image_url).where(col(SongRow.id).in_(unique))
+            )
+        ).all()
+    return {sid: url for sid, url in rows if url}
+
+
 async def load_song_aliases(sources: list[str]) -> dict[int, list[str]]:
     """读取若干源的别名快照（根 id → 别名列表）。"""
     async with session() as db:

@@ -66,11 +66,8 @@ def draw_plate_table(
     is_wu = version in ("舞", "霸")
     major = major_type_of_plate(version)
     slot_num = 5 if is_wu else 4
-    plate_name = f"{version}-{page}" if is_wu else f"{version}{kind}"
-    if jp:
-        plate_name += "-jp"
-
-    path = table_template.plate_table_dir() / f"{plate_name}.png"
+    # 底图名/口径后缀单源 table_template（存图/读图/sidecar 共用，防手拼漂移）
+    path = table_template.plate_template_file(version, kind, page, jp=jp)
     if not path.exists():
         return None
     im = Image.open(path).convert("RGBA")
