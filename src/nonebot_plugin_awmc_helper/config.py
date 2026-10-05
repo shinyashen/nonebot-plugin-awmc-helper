@@ -81,8 +81,9 @@ class Config(BaseModel):
     # 从曲库与全部重建/合并路径剔除。自动信号对其无效的场合使用——上线前
     # 删除曲（id12055 实测）maimaiinfo 机台全集持续收录、MuNET 未清理条目
     # （与现役条目完全同构）、otoge 从未记录，三方数据都无法区分「删除」与
-    # 「存在」，只有人工知识可判（2026-10-05 定案）
-    awmc_song_denylist: list[int] = []
+    # 「存在」，只有人工知识可判（2026-10-05 定案）。默认值烧入已人工确认的
+    # 12055（ループザルーム，MAGiCAL 上线前删除、maimaiinfo 638126f 起收录）
+    awmc_song_denylist: list[int] = [12055]
     # MuNET 别名全量走查刷新间隔（天，0=禁用默认关；走查有断点续走与单次
     # 60 分钟时间预算，实测约 30 分钟单晚走完）
     awmc_munet_alias_days: int = 0

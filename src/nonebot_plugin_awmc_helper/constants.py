@@ -156,8 +156,9 @@ PLATE_CHARS = "舞霸" + "".join(
 # ---------------------------------------------------------------------------
 
 # 数据源两域命名 = 「前缀 + 日式尾名」（穷举自 dschange.json / all_data `from`
-# 实测；初代无尾名），与官方尾名仅 Splash 一词大小写不同。MAGiCAL 段为按
-# 命名规律的预收（数据源尚未出现）；FUTURE 为占位枚举，不生成任何名字。
+# 实测；初代无尾名），与官方尾名仅 Splash 一词大小写不同。MAGiCAL 已实测
+# （maimaiinfo 2026-10-04 提交起数据源出现 `maimai でらっくす MAGiCAL`）；
+# FUTURE 为占位枚举，不生成任何名字。
 _JP_SUFFIX: dict[Version, str] = {
     ver: name.replace("SPLASH", "Splash") for ver, name in _DX_VERSION_NAMES.items()
 }

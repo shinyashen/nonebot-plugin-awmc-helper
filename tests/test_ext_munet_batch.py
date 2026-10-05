@@ -409,3 +409,12 @@ async def test_excluded_song_ids_union(db, monkeypatch):
     monkeypatch.setattr(plugin_config, "awmc_song_denylist", [12055, 2056])
 
     assert await songdb._excluded_song_ids() == {845, 2055, 2056}
+
+
+def test_denylist_default_pins_deleted_song():
+    """默认屏蔽名单烧入 12055（ループザルーム）：上线前删除曲，三方数据源
+    均无法自动判删（2026-10-05 定案），只靠这份人工知识兜底——改默认值须
+    有同等确凿的人工确认依据。"""
+    from nonebot_plugin_awmc_helper.config import Config
+
+    assert Config(awmc_static_path="static").awmc_song_denylist == [12055]
