@@ -180,6 +180,8 @@ def test_score_line_formula():
     g3 = rows["G-3"]
     direct = 1250 * 100 / total + 60 * 1 / 2000
     assert g3 * 10000 / total == pytest.approx(direct)
+    # 每等效 GREAT TAP 的达成率损失（分数线卡标签口径，2026-10-05）
+    assert result["per_great"] == pytest.approx(10000 / total)
 
     assert score_line(diff, 101.5) is None  # 非法线
     assert score_line(diff, -1) is None

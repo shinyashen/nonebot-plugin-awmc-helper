@@ -66,6 +66,18 @@ _NOTE_BASE_SCORE: dict[str, int] = {
 _ACHIEVEMENT_BPS = 10_000
 
 
+def basic_score_total(diff: SongDifficulty) -> int:
+    """谱面基础满分（专栏计分口径）：TAP·TOUCH 500、HOLD 1000、SLIDE 1500、
+    BREAK 2500（:func:`score_line` 与 combo 寸/锁血的谱面容错事实共用）。"""
+    return (
+        diff.tap_num * _NOTE_BASE_SCORE["tap"]
+        + diff.hold_num * _NOTE_BASE_SCORE["hold"]
+        + diff.slide_num * _NOTE_BASE_SCORE["slide"]
+        + diff.touch_num * _NOTE_BASE_SCORE["touch"]
+        + diff.break_num * _NOTE_BASE_SCORE["break"]
+    )
+
+
 def min_ds_of_ra(ra: float) -> float:
     """B50 末位 RA → 入线所需最低定数（SSSP 系数反推，调用方自行取整）。"""
     return ra / SSSP_COEFFICIENT
@@ -120,7 +132,8 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     P-1/P-2 的显示名用玩家通俗称法「50落/100落」（用户拍板，不望文生义）。
 
     返回 dict：``total_basic`` / ``total_bonus`` / ``budget``（等效 GREAT
-    TAP 预算）/ ``breaks`` / ``cap`` / ``buddy`` / ``break_rows``
+    TAP 预算）/ ``per_great``（每等效 GREAT TAP 的达成率损失，百分点）/
+    ``breaks`` / ``cap`` / ``buddy`` / ``break_rows``
     （(档名, 等效数) 列表）。``line`` 非法（超出 (0, cap]）或谱面无
     BREAK / 基础分为 0 返回 None。
     """
@@ -128,13 +141,7 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     reduce_pct = cap - line
     if reduce_pct <= 0 or reduce_pct >= cap:
         return None
-    total = (
-        diff.tap_num * _NOTE_BASE_SCORE["tap"]
-        + diff.hold_num * _NOTE_BASE_SCORE["hold"]
-        + diff.slide_num * _NOTE_BASE_SCORE["slide"]
-        + diff.touch_num * _NOTE_BASE_SCORE["touch"]
-        + diff.break_num * _NOTE_BASE_SCORE["break"]
-    )
+    total = basic_score_total(diff)
     if diff.break_num == 0 or total == 0:
         return None
     bonus_total = diff.break_num * 100
@@ -151,6 +158,7 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
         "total_basic": total,
         "total_bonus": bonus_total,
         "budget": reduce_pct * total / _ACHIEVEMENT_BPS,
+        "per_great": _ACHIEVEMENT_BPS / total,
         "breaks": diff.break_num,
         "cap": cap,
         "buddy": cap == 202,

@@ -322,7 +322,15 @@ def score_line_card(
     rank_img = assets.rate_badge(rate_type_of(diff, line), theme, size=(204, 96))
     if rank_img is not None:
         im.alpha_composite(rank_img, (110, 586 - 48))
-    draw.text((360, 528), "目标达成率", font=font(22), fill=_GRAY, anchor="lm")
+    # 标签括注每等效 GREAT TAP 的达成率损失（用户要求的口径）；字号 20：
+    # 22 号实测 416px 会撞右栏（「99.5000 %」行右栏最左 769，20 号止于 738）
+    draw.text(
+        (360, 528),
+        f"目标达成率（每个GREAT TAP-{result['per_great']:.4f}%）",
+        font=font(20),
+        fill=_GRAY,
+        anchor="lm",
+    )
     f_big = font(54, FONT_RODIN)
     pct_text = f"{line:.4f} %"
     draw.text((360, 586), pct_text, font=f_big, fill=_DARK, anchor="lm")
