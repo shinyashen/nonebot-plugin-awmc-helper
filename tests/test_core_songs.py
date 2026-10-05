@@ -520,3 +520,36 @@ async def db(tmp_path):
     await store.init_db()
     yield
     store.set_db_file(None)
+
+
+@pytest.mark.asyncio
+async def test_stale_plate_templates_invalidated_on_fingerprint(
+    songs, tmp_path, monkeypatch
+):
+    """规范表指纹变化即失效日服完成表底图（2026-10-05）：只删 ``-jp``，
+    CN 裸名底图留给预渲染管线；kv 缺值保守失效；同指纹不重复删。"""
+    from nonebot_plugin_awmc_helper.core import store, songdb
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+
+    plate_dir = tmp_path / "plate_table"
+    plate_dir.mkdir()
+    monkeypatch.setattr(table_template, "plate_table_dir", lambda: plate_dir)
+    for name in ("未将-jp.png", "丸将-jp.png", "华将.png"):
+        (plate_dir / name).write_bytes(b"png")
+    # 测试环境 songdb 未装载（指纹 None），monkeypatch 哨兵指纹；
+    # kv 留一个旧值模拟上上次加载
+    monkeypatch.setattr(songdb, "CURRENT_FINGERPRINT", "fp-test")
+    await store.kv_set("lib_fingerprint", "fp-old")
+
+    await song_service._invalidate_stale_plate_templates()
+
+    assert not (plate_dir / "未将-jp.png").exists()
+    assert not (plate_dir / "丸将-jp.png").exists()
+    assert (plate_dir / "华将.png").exists()  # CN 底图归预渲染管线管
+    assert await store.kv_get("lib_fingerprint") == "fp-test"
+
+    # 同指纹再跑：不删（惰性重建出的新底图不会被误清）
+    (plate_dir / "回将-jp.png").write_bytes(b"png")
+    await song_service._invalidate_stale_plate_templates()
+    assert (plate_dir / "回将-jp.png").exists()

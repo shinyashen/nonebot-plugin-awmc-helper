@@ -364,6 +364,7 @@ class SongService:
             return False
         await self._apply_to_cache(all_songs)
         await self._write_snapshot(all_songs)
+        await self._invalidate_stale_plate_templates()
         # 日服视图与国服视图口径并列展示（CN 视图不含仅日服曲目）
         jp_count = len(await self._jp_songs_map())
         logger.info(
@@ -371,6 +372,35 @@ class SongService:
             f"日服 {jp_count} 首（耗时 {time.monotonic() - started:.1f}s）"
         )
         return True
+
+    async def _invalidate_stale_plate_templates(self) -> None:
+        """规范表指纹变化即失效日服完成表底图（删档等惰性重建，2026-10-05）。
+
+        底图生成时烙死网格与曲绘：日服曲的 image_url 随快照追加（封面后补）、
+        新曲入库都让旧底图过时，而日服底图是查询惰性生成、无预渲染管线覆盖
+        ——指纹较上次加载有变化时删掉 ``-jp`` 底图，下次查询带新网格与新封面
+        重建。CN 底图由预渲染管线覆盖（外部源变化即重建 + SUPERUSER 更新指
+        令），不在此删。kv 缺值按已变化处理（保守失效，一次性惰性重建成本）。
+        """
+        from .render import table_template
+
+        fp = songdb.CURRENT_FINGERPRINT
+        # 指纹缺位（songdb 未装载/降级）无失效依据，不删
+        if not fp or await store.kv_get("lib_fingerprint") == fp:
+            return
+        plate_dir = table_template.plate_table_dir()
+        stale = sorted(plate_dir.glob("*-jp.png")) if plate_dir.exists() else []
+        for path in stale:
+            try:
+                path.unlink()
+            except OSError:
+                logger.exception(f"日服完成表底图删除失败：{path.name}")
+        await store.kv_set("lib_fingerprint", fp)
+        if stale:
+            logger.info(
+                f"规范表指纹变化，日服完成表底图已失效 {len(stale)} 张"
+                "（查询时惰性重建）"
+            )
 
     async def refresh(self) -> bool:
         """刷新曲库：规范表指纹较上次加载有变化时 maimai_py 自动重建缓存。"""
