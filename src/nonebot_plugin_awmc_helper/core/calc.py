@@ -79,21 +79,33 @@ def basic_score_total(diff: SongDifficulty) -> int:
 
 
 def chart_loss_facts(diff: SongDifficulty) -> "tuple[float, float] | None":
-    """谱面容错事实（combo 寸/锁血的谱面相关判定用），单位**万分位**：
+    """谱面容错事实（combo 寸/锁血的谱面相关判定用），单位**万分位**。
 
-    - 每 1 个等效 GREAT TAP（1 个 TAP 从 CP 掉 GREAT，损 100 基础分）的
-      达成率损失 = 1e8/基础满分（= 10000/满分 个百分点，与
-      :func:`score_line` 的预算口径自洽：预算 × 每损失 = 上限-线）；
-    - 每 1 个 100落（BREAK P-2，额外分 50）的达成率损失 = 5000/BREAK 数
-      （= 0.5/BREAK数 个百分点；额外分通道 1% × 50/(100×BREAK数)，与
-      ``score_line`` break_rows 的「100落」等效数 × 每 GREAT TAP 损失同式）。
+    推导（专栏计分口径：达成率 = 基础分/基础满分×100% + 额外分/额外满分×1%）：
 
-    基础满分为 0 或无 BREAK（100落 概念不成立）→ None（规则不适用）。
+    - **每 1 个等效 GREAT TAP**（1 个 TAP 从 CP 掉 GREAT，损 100 基础分）：
+      100/基础满分 × 100 个百分点 = 10⁴/满分 pct，万分位再 ×10⁴ →
+      ``1e8/基础满分``。1e8 = 损失基础分 100 × 百分比基数 100 × 万分位基数
+      10000；与 :func:`score_line` 预算口径自洽（预算 × 每损失 = 上限-线）。
+    - **每 1 个 100落**（BREAK P-2：基础 2500 满额、额外仅 50/100，即损
+      50 额外分）：额外通道全谱共值 1 个百分点（额外满分 = BREAK 数×100），
+      损失 = 50/(100×BREAK数) × 1 = ``0.5/BREAK数`` pct = ``5000/BREAK数``
+      万分位。0.5 = 50（损的额外分）/ 100（每 BREAK 的额外满分）；÷BREAK数
+      = 摊到全谱额外通道。与 ``score_line`` break_rows 的「100落」等效数 ×
+      每 GREAT TAP 损失同式（测试断言两者乘积自洽）。
+
+    buddy 宴谱损失 ×2（份数，见 :func:`_scales_of`）。实践中宴谱成绩不入
+    成绩流（寸/锁血谓词不会收到宴谱），此分支仅为口径完备。基础满分为 0
+    或无 BREAK（100落 概念不成立）→ None（规则不适用）。
     """
     total = basic_score_total(diff)
     if total <= 0 or diff.break_num == 0:
         return None
-    return (_ACHIEVEMENT_BPS * _ACHIEVEMENT_BPS / total, 5000 / diff.break_num)
+    scales = _scales_of(achievement_cap(diff))
+    return (
+        _ACHIEVEMENT_BPS * _ACHIEVEMENT_BPS * scales / total,
+        5000 * scales / diff.break_num,
+    )
 
 
 def min_ds_of_ra(ra: float) -> float:
@@ -133,6 +145,27 @@ def rate_type_of(diff: SongDifficulty, line: float) -> "RateType":
     return RateType._from_achievement(line)
 
 
+def _scales_of(cap: int) -> int:
+    """达成率上限折合的 101 口径份数（普通/非 buddy 宴 = 1，buddy = 2）。
+
+    buddy 宴谱 = 左右两机台**各打一张独立的** 101（100 基础 + 1 额外）谱面，
+    显示达成率为两份之和（≤202）——已考证（2026-10-05，用户口径 + 上游
+    provider + 快照实测）：maimai.py 水鱼 provider ``is_buddy = len(charts)==2``
+    且顶层物量 = charts[0]+charts[1]；落雪 buddy 曲 notes 为 left/right 两组
+    （[協]ラグトレイン 左 (183,76,53,164,173) / 右 (172,63,53,102,216)，两谱
+    独立且不对称，左基础满分占 48.2%）；本项目规范表主物量列 = 左右之和、
+    左右明细另存 BuddyNotes。
+
+    由此按**合计物量**折算单判定损失：每判定损失 ×份数、预算 ÷份数；
+    break_rows 的 per_bonus 因额外通道总值与每 GREAT 损失同乘份数而两相消，
+    与普通谱同式（不变）。
+
+    ⚠️ 左右谱面实际物量不对称，此处按「满分左右均摊」对称近似：损失值与
+    左右真实损失的算术平均差 <0.2%（AM-GM：4·B_L·B_R/(B_L+B_R)² ≥ 0.985）。
+    """
+    return round(cap / THEORETICAL_ACHIEVEMENT)
+
+
 def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     """分数线容错计算（2026-10-02 按专栏口径重写，替代原版复刻公式）。
 
@@ -141,19 +174,20 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     （额外分仅 BREAK 有，满分 = break 数×100）。
 
     「等效 GREAT TAP」= 1 个 TAP 从 Critical Perfect 掉到 GREAT 的损失
-    （100 基础分）。总预算 = 基础满分×(上限-线)/10000，与原版「允许的
-    TAP GREAT 数」同值（口径兼容）；基础分损失 Δb → Δb/100，额外分损失
-    Δx → Δx×基础满分/(额外满分×10000)，两通道严格可加。上限见
-    :func:`achievement_cap`（buddy 宴谱 202，物量字段即左右机台合计值）。
+    （100 基础分）。总预算 = 基础满分×(上限-线)/(10000×份数)，普通谱与
+    原版「允许的 TAP GREAT 数」同值（口径兼容）；基础分损失 Δb → Δb/100，
+    额外分损失 Δx → Δx×基础满分/(额外满分×10000)，两通道严格可加。上限见
+    :func:`achievement_cap`（buddy 宴谱 202，物量字段即左右机台合计值）；
+    份数（buddy = 2）的含义与对称近似误差见 :func:`_scales_of`。
 
     BREAK 判定档位（CP 基础 2500+额外 100 为满分基准，不列）：
     P-1/P-2 的显示名用玩家通俗称法「50落/100落」（用户拍板，不望文生义）。
 
     返回 dict：``total_basic`` / ``total_bonus`` / ``budget``（等效 GREAT
-    TAP 预算）/ ``per_great``（每等效 GREAT TAP 的达成率损失，百分点）/
-    ``breaks`` / ``cap`` / ``buddy`` / ``break_rows``
-    （(档名, 等效数) 列表）。``line`` 非法（超出 (0, cap]）或谱面无
-    BREAK / 基础分为 0 返回 None。
+    TAP 预算）/ ``per_great``（每等效 GREAT TAP 的达成率损失，百分点，
+    恒满足 budget×per_great = 上限-线）/ ``breaks`` / ``cap`` / ``buddy`` /
+    ``break_rows``（(档名, 等效数) 列表）。``line`` 非法（超出 (0, cap]）
+    或谱面无 BREAK / 基础分为 0 返回 None。
     """
     cap = achievement_cap(diff)
     reduce_pct = cap - line
@@ -162,8 +196,10 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     total = basic_score_total(diff)
     if diff.break_num == 0 or total == 0:
         return None
+    scales = _scales_of(cap)
     bonus_total = diff.break_num * 100
-    # 每 1 额外分损失的等效 GREAT TAP 数（1% 权重折算）
+    # 每 1 额外分损失的等效 GREAT TAP 数（1% 通道权重折算；buddy 份数两相
+    # 消——额外通道总值与每 GREAT 损失同乘份数——故与普通谱同式）
     per_bonus = total / (bonus_total * _ACHIEVEMENT_BPS)
     break_rows = [
         (
@@ -175,8 +211,8 @@ def score_line(diff: SongDifficulty, line: float) -> dict[str, Any] | None:
     return {
         "total_basic": total,
         "total_bonus": bonus_total,
-        "budget": reduce_pct * total / _ACHIEVEMENT_BPS,
-        "per_great": _ACHIEVEMENT_BPS / total,
+        "budget": reduce_pct * total / (_ACHIEVEMENT_BPS * scales),
+        "per_great": _ACHIEVEMENT_BPS * scales / total,
         "breaks": diff.break_num,
         "cap": cap,
         "buddy": cap == 202,

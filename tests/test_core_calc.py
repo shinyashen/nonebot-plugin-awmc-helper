@@ -182,6 +182,8 @@ def test_score_line_formula():
     assert g3 * 10000 / total == pytest.approx(direct)
     # 每等效 GREAT TAP 的达成率损失（分数线卡标签口径，2026-10-05）
     assert result["per_great"] == pytest.approx(10000 / total)
+    # 不变量：预算 × 每损失 = 上限-线
+    assert result["budget"] * result["per_great"] == pytest.approx(101 - 100)
 
     assert score_line(diff, 101.5) is None  # 非法线
     assert score_line(diff, -1) is None
@@ -189,8 +191,8 @@ def test_score_line_formula():
 
 def test_chart_loss_facts():
     """谱面容错事实（寸理论值段/锁血判定共用，万分位）：每 GREAT TAP 与
-    每 100落 的达成率损失；与 score_line 的 100落 等效数自洽。"""
-    from mocks import make_diff
+    每 100落 的达成率损失；与 score_line 的 100落 等效数自洽；buddy ×2。"""
+    from mocks import make_diff, make_utage
 
     from nonebot_plugin_awmc_helper.core.calc import score_line, chart_loss_facts
 
@@ -203,10 +205,16 @@ def test_chart_loss_facts():
     assert drop100 == pytest.approx(5000 / 20)
     rows = dict(score_line(diff, 100)["break_rows"])
     assert rows["100落"] * great == pytest.approx(drop100)
+    # buddy = 两份 101（物量合计口径）：损失 ×2（份数见 calc._scales_of）
+    b_great, b_drop100 = chart_loss_facts(make_utage(is_buddy=True))
+    b_total = 58 * 500 + 217 * 1000 + 27 * 1500 + 0 * 500 + 7 * 2500
+    assert b_great == pytest.approx(2e8 / b_total)
+    assert b_drop100 == pytest.approx(2 * 5000 / 7)
 
 
 def test_score_line_utage_buddy_cap():
-    """buddy 宴谱上限 202（200 基础 + 2 额外）：线可到 202，预算按 202-线。"""
+    """buddy 宴谱上限 202（两份 101 相加）：线可到 202，预算与每 GREAT 损失
+    按份数 ×2/÷2（物量为左右机台合计、单机台 ≈ 满分/2）。"""
     from mocks import make_utage
 
     from nonebot_plugin_awmc_helper.core.calc import score_line, achievement_cap
@@ -216,7 +224,9 @@ def test_score_line_utage_buddy_cap():
     total = 58 * 500 + 217 * 1000 + 27 * 1500 + 0 * 500 + 7 * 2500
     result = score_line(utage, 101.5)  # 普通谱非法线，buddy 合法
     assert result is not None
-    assert result["budget"] == (202 - 101.5) * total / 10000
+    assert result["budget"] == (202 - 101.5) * total / 20000
+    assert result["per_great"] == pytest.approx(20000 / total)
+    assert result["budget"] * result["per_great"] == pytest.approx(202 - 101.5)
     assert result["cap"] == 202
     assert result["buddy"] is True
     assert score_line(utage, 202) is None  # 满线无容错
