@@ -1,7 +1,7 @@
 """core/songdb 解析层：纯函数与源解析（不走网络、不写库）。
 
 除少数「机制构造」迷你条目（已注明）外，断言值全部取自 tests/data/snapshots/
-真实快照（2026-09-29 取材）。
+真实快照（2026-09-29 取材，maimaiinfo 部分 2026-10-05 刷新至 638126f）。
 """
 
 from songdb_fixtures import (
@@ -69,11 +69,17 @@ def test_parse_maimaiinfo_skeleton_and_history():
     from nonebot_plugin_awmc_helper.core.songdb import parse_maimaiinfo
 
     jp = parse_maimaiinfo(make_all_data(), make_dschange())
-    # SD 8 True Love Song：BASIC 在 UNiVERSE PLUS 4.0→5.0（快照真实变化点）
+    # SD 8 True Love Song：BASIC 自初代 4.0（旧框历史恢复后首点=登场版本 10000），
+    # UNiVERSE PLUS 4.0→5.0（快照真实变化点）
     h = jp[8].charts["sd"][0].history
-    assert h == [(20000, 4.0), (22500, 5.0)]
-    # ADV 在 FESTiVAL 6.4→7.2
-    assert jp[8].charts["sd"][1].history == [(20000, 6.4), (23000, 7.2)]
+    assert h == [(10000, 4.0), (22500, 5.0)]
+    # ADV 自初代 6.0、GreeN 6.4→FESTiVAL 7.2，MAGiCAL 7.2→7.9（2026-10 真实调整）
+    assert jp[8].charts["sd"][1].history == [
+        (10000, 6.0),
+        (12000, 6.4),
+        (23000, 7.2),
+        (27000, 7.9),
+    ]
     # 11396 テリトリーバトル MASTER：dschange 末值 13.5 旧于 all_data 13.6，
     # 末变化点以 all_data 校正（§2.13，真实数据源滞后样本）
     assert jp[1396].charts["dx"][3].history == [
@@ -82,11 +88,16 @@ def test_parse_maimaiinfo_skeleton_and_history():
         (23500, 13.6),
     ]
     # 30/10030 ネコ日和。：双谱曲——SD 自 maimai（10000）、DX 自 PRiSM PLUS（25500），
-    # SD MASTER 带 PRiSM 变化点 11.8→12.6
+    # SD MASTER 带旧框全程与 PRiSM 变化点 11.8→12.6（旧框段随上游 2026-10-04 恢复）
     assert jp[30].versions["sd"] == 10000
     assert jp[30].versions["dx"] == 25500
     assert jp[30].charts["sd"][3].history == [
-        (20000, 10.6),
+        (10000, 10.0),
+        (11000, 9.0),
+        (12000, 9.3),
+        (15000, 9.5),
+        (16000, 9.7),
+        (18000, 10.6),
         (20500, 10.8),
         (21000, 11.1),
         (22500, 11.8),
@@ -131,9 +142,18 @@ def test_parse_maimaiinfo_skeleton_and_history():
     # from=未知 且无 dschange → 版本不可知（12 レーザービーム，otoge 亦未收录）
     assert jp[12].versions["sd"] is None
     assert jp[12].charts["sd"][0].history == []
-    # __increments__ 合并：10267 Ignite Infinity（CiRCLE PLUS 26500 登场 → 根 267）
+    # 新格式内联（上游 2026-10-04 起 __increments__ 已废）：10267 Ignite Infinity
+    # （CiRCLE PLUS 26500 登场 → 根 267）
     assert jp[267].versions["dx"] == 26500
     assert jp[267].charts["dx"][0].history == [(26500, 3.0)]
+    # 旧格式 ``__increments__`` 合并兼容（快照内该段继承自上一轮采集）：
+    # 854 全世界共通リズム感テスト 仅存在于增量段（all_data 亦无）
+    from nonebot_plugin_awmc_helper.core.songdb import _parse_dschange
+
+    inc_hist = _parse_dschange(make_dschange()).get("854", {}).get("sd", {})
+    assert inc_hist == {
+        idx: [(26500, v)] for idx, v in enumerate([6.0, 8.0, 10.0, 12.0])
+    }
     # SD/DX 谱面物量（SD 4 元组 touch=0 / DX 5 元组，真实值）
     assert jp[8].charts["sd"][0].notes == (63, 23, 8, 0, 2)
     assert jp[30].charts["dx"][0].notes == (97, 11, 6, 4, 8)

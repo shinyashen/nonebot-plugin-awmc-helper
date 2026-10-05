@@ -1,4 +1,6 @@
-"""歌曲库测试样例数据构造（真实快照版，2026-09-29 取材）。
+"""歌曲库测试样例数据构造（真实快照版，2026-09-29 取材；maimaiinfo 部
+2026-10-05 刷新至上游 638126f——MAGiCAL 段内联、旧框历史恢复、607 曲低
+难度定数调整）。
 
 全部真实条目裁剪自 ``tests/data/snapshots/``（字段与值未手改，溯源见该目录
 meta.json / README.md）；payload 形状对齐 2026-09-21 实测的四源结构。
@@ -37,9 +39,12 @@ def make_all_data() -> dict[str, dict]:
 
 
 def make_dschange() -> dict:
-    """dschange：8（UNiVERSE PLUS 变更点）/ 239（多段变更、Re:MASTER CiRCLE PLUS
-    变更未进国服）/ 11396（all_data 末值校正 dschange 的真实滞后样本）/
-    30+10030（PRiSM 变更）+ ``__increments__`` CiRCLE PLUS 段（裁至 10267/854）。"""
+    """dschange（上游 2026-10-04 新格式：新版本值内联进各曲目历史，含旧框段）：
+    8（UNiVERSE PLUS 变更点 + MAGiCAL 7.2→7.9）/ 239（多段变更、Re:MASTER
+    CiRCLE PLUS 变更未进国服）/ 11396（all_data 末值校正 dschange 的真实滞后
+    样本）/ 30+10030（PRiSM 变更 + 30 BASIC MAGiCAL 7.9→8.6）/ 10267（内联
+    CiRCLE PLUS 登场）；另继承上一轮采集的 ``__increments__`` 段（裁至 854，
+    仅覆盖解析器旧格式兼容路径）。"""
     return _fresh("maimaiinfo_dschange.json")
 
 

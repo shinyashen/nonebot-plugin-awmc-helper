@@ -102,9 +102,9 @@ async def test_rebuild_full_union(db):
         buddy.notes_touch,
         buddy.notes_break,
     ) == (355, 139, 106, 266, 389)
-    # 定数历史（变化点）与宴推导值：8 BASIC 在 UNiVERSE PLUS 4.0→5.0；
-    # 蛸宴标级 12+? 推导 12.7
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (22500, 5.0)]
+    # 定数历史（变化点）与宴推导值：8 BASIC 自初代 4.0（旧框历史恢复）、
+    # UNiVERSE PLUS 4.0→5.0；蛸宴标级 12+? 推导 12.7
+    assert state.history_of(8, "sd", 0) == [(10000, 4.0), (22500, 5.0)]
     assert state.history_of(199, "utage", 0) == [(24000, 12.7)]
     # 标准 JSON 与指纹已生成
     doc = await db.kv_get("songdb_json")
@@ -189,7 +189,7 @@ async def test_jp_missing_and_cn_absence_delete(db):
     state = await songdb.State.load()
     assert 9002 not in state.songs
     # JP 侧波动不影响其余曲（8 仍在且历史完好）
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (22500, 5.0)]
+    assert state.history_of(8, "sd", 0) == [(10000, 4.0), (22500, 5.0)]
 
 
 @pytest.mark.asyncio
@@ -360,9 +360,11 @@ async def test_external_sources_merge(db, tmp_path, monkeypatch):
     assert state.charts[(8, "sd", 1)].designer == "FILLED"  # 原 designer 为空 → 填充
     assert state.charts[(8, "sd", 1)].notes_tap == 85  # 已有物量不被 fill 覆盖
     assert state.history_of(8, "sd", 1) == [
-        (20000, 6.4),
+        (10000, 6.0),
+        (12000, 6.4),
         (23000, 7.2),
-    ]  # 已有历史不被 fill 覆盖
+        (27000, 7.9),
+    ]  # 已有历史不被 fill 覆盖（含 MAGiCAL 真实调整点）
     assert state.groups[(8, "sd")].version_cn == 10000  # version_cn 拒写（国服唯二源）
     assert state.groups[(8, "sd")].version == 10000  # fill：已有 version 不动
     # 阶段二：override 模式 —— 日服字段被覆盖、version_cn 仍被拒绝
@@ -449,7 +451,7 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
     state = await songdb.State.load()
     # 既有变化点保留，末尾按日服当前版本（夹具 max 组版本 = 26500 increments 曲）追加
     assert state.history_of(8, "sd", 0) == [
-        (20000, 4.0),
+        (10000, 4.0),
         (22500, 5.0),
         (26500, 4.8),
     ]
@@ -462,7 +464,7 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
     )
     state = await songdb.State.load()
     assert state.history_of(8, "sd", 0) == [
-        (20000, 4.0),
+        (10000, 4.0),
         (22500, 5.0),
         (26500, 4.8),
     ]
@@ -482,7 +484,7 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
     await songdb.apply_external_sources()
     state = await songdb.State.load()
     assert state.history_of(8, "sd", 0) == [
-        (20000, 4.0),
+        (10000, 4.0),
         (22500, 5.0),
         (26500, 4.8),
     ]
@@ -538,7 +540,7 @@ async def test_external_source_forced_reapply_after_rebuild(db, tmp_path, monkey
     await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
     assert state.charts[(8, "sd", 0)].notes_tap == 63
-    assert state.history_of(8, "sd", 0) == [(20000, 4.0), (22500, 5.0)]
+    assert state.history_of(8, "sd", 0) == [(10000, 4.0), (22500, 5.0)]
 
     # 文件未变，force 重放：校正恢复且 changed 反映真实变化
     summary = await songdb.apply_external_sources(force=True)
@@ -549,7 +551,7 @@ async def test_external_source_forced_reapply_after_rebuild(db, tmp_path, monkey
         state.charts[(8, "sd", 0)].notes_touch,
     ) == (9, 9)
     assert state.history_of(8, "sd", 0) == [
-        (20000, 4.0),
+        (10000, 4.0),
         (22500, 5.0),
         (26500, 7.7),
     ]

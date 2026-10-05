@@ -1,7 +1,8 @@
-# 测试快照（真实数据，2026-09-29 采集）
+# 测试快照（真实数据，2026-09-29 采集；2026-10-05 maimaiinfo 部分刷新）
 
 测试造数的唯一取材来源：全部条目裁剪自下列真实数据源原样 payload（字段与值未手改）。
 生成脚本与原始抓取物在 local/scratch/（不入库）；凭据只存在于 local/，不入本目录。
+各源采集 commit/日期以 meta.json 为准。
 
 刷新流程：重跑 local/scratch/capture_snapshot.py（+round2/round3）→ build_snapshots.py →
 按 meta.json 里的 commit/日期核对 → 同步修正依赖具体值的断言。
