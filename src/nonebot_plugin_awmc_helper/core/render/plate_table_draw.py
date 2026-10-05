@@ -1,6 +1,7 @@
 """牌子完成表（NB core/image/plate_table.py::DrawPlateTable 的移植）。
 
-打开预渲染底图（``plate_table/{版本}{牌种}.png``，舞/霸为 ``舞-1/2.png``），
+打开预渲染底图（``plate_table/{版本}{牌种}.png``，舞/霸为 ``舞-1/2.png``；
+日服口径带 ``-jp`` 后缀，与 CN 网格分图），
 叠加：总进度条与完成数、达成谱面章（者/将盖评级章，极/神盖连击章，
 舞舞盖 Sync 章 + t_0..t_4 分槽小标）、各难度分组计数与进度条。
 """
@@ -54,12 +55,20 @@ def draw_plate_table(
     entries: list[tuple[Song, SongDifficulty]],
     *,
     page: int = 1,
+    jp: bool = False,
 ) -> bytes | None:
-    """绘制牌子完成表。``entries`` 为牌子范围内主类型谱面（与模板同源）。"""
+    """绘制牌子完成表。``entries`` 为牌子范围内主类型谱面（与模板同源）。
+
+    底图名分口径（``-jp`` 后缀，2026-10-05）：CN/JP 共用牌字（华/爽 等）
+    两口径网格不同（区间/曲集都异），同名底图会让日服查询读到 CN 预渲染
+    网格、叠章错位——CN 维持裸名（存量部署缓存不用重渲），JP 一律带后缀。
+    """
     is_wu = version in ("舞", "霸")
     major = major_type_of_plate(version)
     slot_num = 5 if is_wu else 4
     plate_name = f"{version}-{page}" if is_wu else f"{version}{kind}"
+    if jp:
+        plate_name += "-jp"
 
     path = table_template.plate_table_dir() / f"{plate_name}.png"
     if not path.exists():

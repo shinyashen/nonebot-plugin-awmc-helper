@@ -383,6 +383,8 @@ async def generate_plate_template(
 
     ``jp=True`` 用日服视图曲集与日服版本区间（丸/回 等日服牌；仅查询兜底
     现场生成，预渲染枚举 ``refresh_all_plate_tables`` 仍只做国服牌单）。
+    底图名带 ``-jp`` 后缀与 CN 分图：共用牌字（华/爽 等）两口径网格不同，
+    同名会让日服查询读到 CN 预渲染网格（2026-10-05 修）。
     """
     songs = await (song_service.jp_all() if jp else song_service.get_all())
     major = major_type_of_plate(version)
@@ -405,6 +407,7 @@ async def generate_plate_template(
         return 0
     out_dir = plate_table_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "-jp" if jp else ""
     if version in _FULL_SET_PLATE_VERSIONS:
         boundary = 13
         by_level = _by_level(entries, remaster)
@@ -424,11 +427,13 @@ async def generate_plate_template(
                     flat, remaster_entries=remaster, pages=pages
                 )
             )
-            await asyncio.to_thread(img.save, out_dir / f"{version}-{pages + 1}.png")
+            await asyncio.to_thread(
+                img.save, out_dir / f"{version}-{pages + 1}{suffix}.png"
+            )
             total += sum(len(v) for v in group.values())
         return total
     img = await asyncio.to_thread(_plate_grid, entries)
-    await asyncio.to_thread(img.save, out_dir / f"{version}{kind}.png")
+    await asyncio.to_thread(img.save, out_dir / f"{version}{kind}{suffix}.png")
     return len(entries)
 
 
@@ -523,10 +528,10 @@ async def draw_plate_table_with_fallback(
     """牌子完成表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。"""
     from .plate_table_draw import draw_plate_table
 
-    png = draw_plate_table(version, kind, scores, entries, page=page)
+    png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)
     if png is None:
         await generate_plate_template(version, kind, song_service, jp=jp)
-        png = draw_plate_table(version, kind, scores, entries, page=page)
+        png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)
     return png
 
 

@@ -139,3 +139,56 @@ def test_plate_latest_header_fallback(tmp_path, monkeypatch):
         assets_mod, "default_plate_path", lambda: tmp_path / "missing.png"
     )
     assert assets.plate_version("未", "将") is None
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_plate_template_name_split_by_view(songs, tmp_path, monkeypatch):
+    """底图名分口径（2026-10-05 修同名冲突）：CN 裸名、JP 带 -jp 后缀。
+
+    共用牌字（华 等）两口径区间/曲集都异——CN 华（20000-20999）含 20000
+    段、JP 华（20500-20999）不含——同名底图会让日服查询读到 CN 预渲染
+    网格、叠章错位（未牌预览改造时发现的历史隐患）。
+    """
+    from mocks import make_diff, make_song, sample_songs, seed_service
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.render.plate_table_draw import (
+        draw_plate_table,
+    )
+
+    # 测试注入集当 JP 视图（真实 jp_all 走 songdb 规范表，与 tables 测试同规）
+    real_get_all = song_service.get_all
+
+    async def fake_jp_all():
+        return await real_get_all()
+
+    monkeypatch.setattr(song_service, "jp_all", fake_jp_all)
+
+    out = tmp_path / "plate_table"
+    monkeypatch.setattr(table_template, "plate_table_dir", lambda: out)
+
+    # 注入构造曲：20050 仅 CN 华含、20600 两口径都含 → 两口径必出不同网格
+    extra = [
+        make_song(8011, "（构造）DX 早期曲", diffs=[make_diff(version=20050)]),
+        make_song(8012, "（构造）DX PLUS 曲", diffs=[make_diff(version=20600)]),
+    ]
+    await seed_service(song_service, [*sample_songs(), *extra])
+
+    n_cn = await table_template.generate_plate_template("华", "将", song_service)
+    n_jp = await table_template.generate_plate_template(
+        "华", "将", song_service, jp=True
+    )
+    assert n_cn == 2
+    assert n_jp == 1
+    assert (out / "华将.png").exists()
+    assert (out / "华将-jp.png").exists()
+    assert (out / "华将.png").read_bytes() != (out / "华将-jp.png").read_bytes()
+
+    # 读图同规：JP 底图缺失时 JP 查询视为缺失（None → fallback 现场生成），
+    # CN 查询不受影响照读裸名
+    (out / "华将-jp.png").unlink()
+    base = {"version": "华", "kind": "将", "play_result": [], "entries": [], "page": 1}
+    assert draw_plate_table(jp=True, **base) is None
+    assert draw_plate_table(jp=False, **base) is not None
