@@ -17,6 +17,8 @@ def test_plate_roster_chars():
     # 日服 PLUS 各代独立成牌，CN 罗盘键序下 丸/回 恰为追加尾段
     assert PLATE_CHARS_JP == PLATE_CHARS + "丸回"
     assert PLATE_CHARS_JP[-1] == "回"
+    # 「未」不进牌单：口径边界展示仍为 latest-1（回），未仅作 latest 特殊查询
+    assert "未" not in PLATE_CHARS_JP
 
 
 def test_plate_version_range_jp():
@@ -58,6 +60,41 @@ def test_plate_in_roster_and_hint():
     assert plate_in_roster("霸", jp=True)
     assert plate_roster_hint(False) == "国服数据源可查至「彩」代牌子"
     assert plate_roster_hint(True) == "日服数据源可查至「回」代牌子"
+    # 未 = 现行代占位（不进牌单/口径提示）：仅日服口径的特殊查询放行
+    assert plate_in_roster("未", jp=True)
+    assert not plate_in_roster("未", jp=False)
+
+
+def test_plate_latest_version_range():
+    """未 = 现行代占位版本字：区间即 current_version_jp 单代闭区间，CN 无此语义。"""
+    from maimai_py import current_version_jp
+
+    from nonebot_plugin_awmc_helper.core.plates import plate_version_range
+
+    v = current_version_jp.value
+    assert v == 27000  # MAGiCAL（2026-10 口径，maimai_py 推进后随库前移）
+    assert plate_version_range("未", jp=True) == (v, v)
+    assert plate_version_range("未", jp=False) is None
+
+
+def test_plate_jp_leading_and_latest_name():
+    """国服预览口径分类（2026-10-05 定案）：丸/回（含繁体 廻）与 未 为日服
+    领先牌，两口径共有牌字（舞/华/彩 等）不是；提示文案版本名钉住 MAGiCAL。"""
+    from maimai_py import Version, current_version_jp
+
+    from nonebot_plugin_awmc_helper.core.plates import (
+        PLATE_LATEST_VERSION_NAME,
+        plate_is_jp_leading,
+    )
+
+    for ch in ("丸", "回", "廻", "未"):
+        assert plate_is_jp_leading(ch)
+    for ch in ("舞", "霸", "华", "彩", "超", "祝"):
+        assert not plate_is_jp_leading(ch)
+    # 版本名与 current_version_jp 同步维护：枚举推进（公布新牌字/新代）时
+    # 本断言失败提醒换名
+    assert current_version_jp is Version.MAIMAI_DX_MAGICAL
+    assert PLATE_LATEST_VERSION_NAME == "MAGiCAL"
 
 
 # ---------------------------------------------------------------- 判牌与本地判牌
@@ -114,6 +151,11 @@ async def test_build_local_plates_scope():
     kai = build_local_plates("回", "将", songs, scores)
     assert [p.song.id for p in await kai.get_cleared()] == []
     assert [p.song.id for p in await kai.get_remained()] == [8004]
+
+    # 未 = 现行代（MAGiCAL）占位：只含 27000 一段，8002 无分留在 remained
+    mado = build_local_plates("未", "将", songs, scores)
+    assert [p.song.id for p in await mado.get_cleared()] == []
+    assert [p.song.id for p in await mado.get_remained()] == [8002]
 
 
 async def test_build_local_plates_remaster_not_required():

@@ -1,6 +1,7 @@
 """awmc.tables 指令测试：`更新定数表` 刷新必须执行（finish 截断回归）、
 牌子牌单校验（不存在的牌名拒答）、13定数表、牌子条件帮助。"""
 
+from typing import ClassVar
 from pathlib import Path
 
 import pytest
@@ -396,7 +397,7 @@ async def test_plate_at_net_target_routes(app: App, db, songs, monkeypatch):
 
     captured = {}
 
-    async def fake_sheet(binding, version, kind, page):
+    async def fake_sheet(binding, version, kind, page, *, preview=False):
         captured["user_id"] = binding.user_id
         captured["vk"] = (version, kind, page)
         await UniMessage.text("完成表 OK").finish(at_sender=True)
@@ -602,6 +603,164 @@ async def test_plate_completion_sheet_scope_split(app: App, db, songs, monkeypat
     assert calls["view"] == "cn"
     assert calls["draw"] == ("超", "将", calls["draw"][2], False)
     assert calls["draw"][2] > 0  # 样例库 Splash 段（version=12000）谱面进入超范围
+
+
+@pytest.mark.asyncio
+async def test_plate_cn_preview_routing(app: App, db, monkeypatch):
+    """国服查日服领先牌路由（2026-10-05）：完成表带 preview=True 进编排，
+    进度总览维持牌单拒绝（test_plate_cn_roster_rejected）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_divingfish_username(binding, "tester")
+
+    captured = {}
+
+    async def fake_sheet(binding, version, kind, page, *, preview=False):
+        captured["args"] = (version, kind, preview)
+        await UniMessage.text("完成表 OK").finish(at_sender=True)
+
+    monkeypatch.setattr(plugin, "plate_completion_sheet", fake_sheet)
+
+    async def _run(message: str, version: str, kind: str, preview: bool):
+        captured.clear()
+        event = fake_group_message_event_v11(message=message, user_id=12345678)
+        expected = Message(
+            [MessageSegment.at(12345678), MessageSegment.text(" 完成表 OK")]
+        )
+        async with app.test_matcher(plugin.progress_cmd) as ctx:
+            bot = ctx.create_bot(
+                base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+            )
+            ctx.receive_event(bot, event)
+            ctx.should_call_api(
+                "get_group_info",
+                {"group_id": 87654321},
+                result={
+                    "group_id": 87654321,
+                    "group_name": "g",
+                    "member_count": 1,
+                    "max_member_count": 10,
+                },
+            )
+            ctx.should_call_api(
+                "get_group_member_info",
+                {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+                result={
+                    "user_id": 12345678,
+                    "role": "member",
+                    "card": "",
+                    "nickname": "t",
+                },
+            )
+            ctx.should_call_send(event, expected, result=None, bot=bot)
+            ctx.should_finished()
+        assert captured["args"] == (version, kind, preview)
+
+    # 丸（CiRCLE，日服领先）与 未（占位字）完成表均降级为预览放行
+    await _run("丸将完成表", "丸", "将", True)
+    await _run("未将完成表", "未", "将", True)
+
+
+@pytest.mark.asyncio
+async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatch):
+    """完成表预览语义（2026-10-05）：强制 JP 视图、不取成绩不盖标志，
+    发图前提示待实装；「未」提示须带具体版本名（非官方牌名）。"""
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import sheet
+
+    calls = {}
+    real_get_all = song_service.get_all
+
+    async def fake_jp_all():
+        calls["view"] = "jp"
+        return await real_get_all()
+
+    async def fake_draw(
+        version, kind, scores, entries, *, page, song_service, jp=False
+    ):
+        calls["draw"] = (version, kind, len(scores), jp)
+        return b"png"
+
+    async def fake_scores(b, notify_slow=None):
+        calls["scores"] = True
+        return SimpleNamespace(scores=[])
+
+    class FakeUniMessage:
+        sent: ClassVar[list] = []
+
+        def __init__(self, *parts):
+            self.parts = parts
+
+        @classmethod
+        def text(cls, s):
+            return cls(s)
+
+        @classmethod
+        def image(cls, **kw):
+            return cls(kw)
+
+        async def send(self, **kw):
+            FakeUniMessage.sent.append(("send", self.parts))
+
+        async def finish(self, **kw):
+            FakeUniMessage.sent.append(("finish", self.parts))
+
+    monkeypatch.setattr(song_service, "jp_all", fake_jp_all)
+    monkeypatch.setattr(table_template, "draw_plate_table_with_fallback", fake_draw)
+    monkeypatch.setattr(sheet.score_service, "get_scores_all", fake_scores)
+    monkeypatch.setattr(sheet, "UniMessage", FakeUniMessage)
+
+    # 样例库补一首 MAGiCAL 段曲（未 = 现行代占位，27000）：缺曲则空范围提前收尾
+    from mocks import make_diff, make_song, sample_songs, seed_service
+
+    magical = make_song(8010, "（构造）MAGiCAL 曲", diffs=[make_diff(version=27000)])
+    await seed_service(song_service, [*sample_songs(), magical])
+
+    cn = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_divingfish_username(cn, "tester")
+
+    # 丸将预览：JP 视图、成绩零拉取（无章可盖）、提示待实装
+    FakeUniMessage.sent.clear()
+    await sheet.plate_completion_sheet(cn, "丸", "将", 1, preview=True)
+    assert calls["view"] == "jp"
+    assert calls["draw"] == ("丸", "将", 0, True)
+    assert "scores" not in calls
+    (mode, parts), (finish_mode, _img) = FakeUniMessage.sent
+    assert mode == "send"
+    assert "国服待实装" in parts[0]
+    assert finish_mode == "finish"
+
+    # 未将预览：提示须带具体版本名（未 非官方名）与待实装
+    FakeUniMessage.sent.clear()
+    calls.pop("view", None)
+    await sheet.plate_completion_sheet(cn, "未", "将", 1, preview=True)
+    assert calls["view"] == "jp"
+    _mode, parts = FakeUniMessage.sent[0]
+    assert "MAGiCAL" in parts[0]
+    assert "待实装" in parts[0]
+
+    # 日服源查 未将（非预览）：成绩照取，提示占位字与版本名
+    jp = await binding_service.ensure("OneBot V11", "12345679")
+    await binding_service.bind_net(jp, sega_id="sid", password="pw")
+    FakeUniMessage.sent.clear()
+    await sheet.plate_completion_sheet(jp, "未", "将", 1)
+    assert calls["scores"] is True
+    assert calls["draw"] == ("未", "将", 0, True)
+    _mode, parts = FakeUniMessage.sent[0]
+    assert "MAGiCAL" in parts[0]
+    assert "待实装" not in parts[0]
 
 
 @pytest.mark.asyncio

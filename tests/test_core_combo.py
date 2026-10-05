@@ -840,6 +840,7 @@ def test_plate_shape():
     assert plate_shape("舞神") == ("舞", "神")
     assert plate_shape("樱舞舞") == ("樱", "舞舞")
     assert plate_shape("暁極") == ("暁", "極")  # 形状层不归一
+    assert plate_shape("未将") == ("未", "将")  # 现行代占位字形状成立
     assert plate_shape("辉") is None  # 无牌种
     assert plate_shape("东方") is None  # 非牌文本
     # 合法性校验（归一后按牌单例外表）
@@ -848,6 +849,7 @@ def test_plate_shape():
     assert is_valid_plate(norm_plate("暁"), norm_plate("極"))
     assert not is_valid_plate("真", "将")  # 真无将
     assert not is_valid_plate("樱", "者")  # 樱无者
+    assert is_valid_plate("未", "将")  # 未 = 占位牌，四牌种可查
 
 
 # ---------------------------------------------------------------- 中二/音击侧别

@@ -11,6 +11,7 @@ from PIL import Image
 from maimai_py import RateType
 from nonebot_plugin_localstore import get_data_dir
 
+from ..plates import PLATE_LATEST_CHAR
 from ...config import plugin_config
 from ...constants import RATE_FILE, DEFAULT_THEME
 
@@ -33,6 +34,16 @@ def jp_cache_dir() -> Path:
 def online_item_cache_dir(kind: str) -> Path:
     """收藏品（牌子/头像）在线素材缓存目录（localstore 数据区，按类分子目录）。"""
     return get_data_dir("nonebot_plugin_awmc_helper") / "online_items" / kind
+
+
+def default_plate_path() -> Path:
+    """官方デフォルト素色框缓存路径（收藏品 plate 类，未牌头图占位）。
+
+    下载方 :func:`core.render.jp_cover.ensure_default_plate` 与取图方
+    :meth:`Assets.plate_version` 的共同单源；固定文件名与收藏品 id 命名
+    （``UI_Plate_{id:06d}.png``）天然不冲突。
+    """
+    return online_item_cache_dir("plate") / "UI_Plate_default.png"
 
 
 class Assets:
@@ -109,11 +120,18 @@ class Assets:
 
         素材包文件名为繁体（牌种「極」、版本字 暁/櫻/菫/輝/華），先按繁体名
         查找再回退原始输入；舞舞牌「舞舞舞」、霸者「霸者」自然命中。
+        「未」（:data:`PLATE_LATEST_CHAR`，现行代占位）无牌图：落官方
+        デフォルト素色框（启动经 jp_cover 预缓存），缓存缺失返回 None——
+        调用方照旧跳过牌头贴图。
         """
         kind_t = kind.translate(_S2T_KIND)
         version_t = version.translate(_S2T_VERSION)
         for name in (f"{version_t}{kind_t}.png", f"{version}{kind}.png"):
             path = cls.static_path() / "mai" / "plate_version" / name
+            if path.exists():
+                return cls.get(path)
+        if version == PLATE_LATEST_CHAR:
+            path = default_plate_path()
             if path.exists():
                 return cls.get(path)
         return None

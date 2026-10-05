@@ -41,6 +41,24 @@ async def _warn_missing_templates() -> None:
         logger.warning("完成表底图未生成，请 SUPERUSER 执行「更新完成表」")
 
 
+@get_driver().on_startup
+async def _ensure_latest_plate_asset() -> None:
+    """未牌（现行代占位）头图启动预缓存：官方デフォルト素色框。
+
+    有缓存不重拉；失败不阻塞启动（头图渲染侧回退跳过贴图，下次启动重试）。
+    """
+    if not plugin_config.awmc_startup_tasks:
+        return
+    from nonebot import logger
+
+    from ...core.render import jp_cover
+
+    try:
+        await jp_cover.ensure_default_plate()
+    except Exception:
+        logger.exception("未牌头图素材（デフォルト素色框）预缓存失败")
+
+
 from .matchers import (  # noqa: F401
     plate_help,
     progress_cmd,

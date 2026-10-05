@@ -14,11 +14,19 @@ from pathlib import Path
 
 from .. import store
 from ..http import maimaidx_ssl_context
-from .assets import assets, jp_cache_dir
+from .assets import assets, jp_cache_dir, default_plate_path
 from .download import DownloadGate, download_to_file
 
 _COVER_GATE = DownloadGate()
 """曲绘下载去重（同曲/同键并发合并为单次下载）。"""
+
+_DEFAULT_PLATE_URL = (
+    "https://maimaidx.jp/maimai-mobile/img/NamePlate/b919c327669240b8.png"
+)
+"""官方デフォルト素色框（NET 收藏品页装备初始框的预览图）。
+
+2026-09-28 账号实测固定哈希、与曲绘同 host 免登录可拉（396×63）；哈希可能
+随官方改版轮换——404 时未牌头图退化为缺省跳过，下次启动重试新地址。"""
 
 
 def _has_local(song_id: int, cache: Path) -> bool:
@@ -73,6 +81,30 @@ async def ensure_image(
         key,
         lambda: download_to_file(
             url, path, subject=f"jp_cover：{key} 曲绘", verify=maimaidx_ssl_context()
+        ),
+    )
+    return path if ok else None
+
+
+async def ensure_default_plate(cache_dir: Path | None = None) -> Path | None:
+    """官方デフォルト素色框落盘缓存（未牌完成表/进度头图占位；启动即拉）。
+
+    固定文件名落盘（:func:`assets.default_plate_path` 单源）；已有缓存不重拉，
+    失败返回 None（渲染侧头图回退跳过，下次启动重试）。``cache_dir`` 供测试
+    注入，默认取 localstore 收藏品 plate 类目录。
+    """
+    path = default_plate_path()
+    if cache_dir is not None:
+        path = cache_dir / path.name
+    if path.exists():
+        return path
+    ok = await _COVER_GATE.run(
+        "default_plate",
+        lambda: download_to_file(
+            _DEFAULT_PLATE_URL,
+            path,
+            subject="jp_cover：デフォルト素色框",
+            verify=maimaidx_ssl_context(),
         ),
     )
     return path if ok else None

@@ -54,6 +54,18 @@ _PLATE_KINDS_ROSTER: dict[str, tuple[str, ...]] = {
 
 _DEFAULT_PLATE_KINDS = ("将", "极", "神", "舞舞")
 
+PLATE_LATEST_CHAR = "未"
+"""现行代占位版本字（2026-10-05 定案）：现行版本不会有当版本的版本字牌，
+「未」**不进牌单**（口径边界展示仍为 latest-1「回」，:func:`plate_roster_hint`
+不变），仅作日服口径查询 latest 代 x 牌的特殊版本字——版本区间即
+``current_version_jp`` 单代，库推进后语义自动随迁（未 永远指现行代）。
+判型经映射 FUTURE≥DX 同落 :class:`SongType.DX`，与现行代一致无需特判。"""
+
+PLATE_LATEST_VERSION_NAME = "MAGiCAL"
+"""「未」对应的具体版本官方名（提示文案用）：未 非官方名（国服日服皆无此
+牌字），玩家提示必须带版本名。官方公布正式牌字、maimai_py 推进
+``current_version_jp`` 时与本常量同步换名（test_core_plates 钉住枚举）。"""
+
 _SD_FIRST_PLATES = {"真": "初"}
 """下界前移的版本：**真牌含初代曲**——库侧 ``MaimaiPlates._configure`` 把
 初+真 并作真牌范围，原版 Hoshino 的 ``VERSION_MAP["真"]`` 亦为 [真, 初]；
@@ -137,6 +149,21 @@ def is_valid_plate(version: str, kind: str) -> bool:
     return norm_plate(kind) in plate_kinds(version)
 
 
+def plate_is_jp_leading(version: str) -> bool:
+    """（国服口径）牌子是否为日服领先版本：丸/回（JP 独有牌字）或
+    「未」（:data:`PLATE_LATEST_CHAR`，现行代占位）。
+
+    国服数据源查这类牌子没有判牌意义（曲目与成绩都未落地），仅完成表以
+    预览态放行（sheet 侧强制日服视图、不计达成标志）；进度总览与日服口径
+    （本就领先，无此概念）不走此判定。集合式派生自两口径牌单差集，国服
+    追代后自动收窄。
+    """
+    version = norm_plate(version)
+    if version == PLATE_LATEST_CHAR:
+        return True
+    return version in PLATE_CHARS_JP and version not in PLATE_CHARS
+
+
 def plate_in_roster(version: str, *, jp: bool) -> bool:
     """牌子是否在对应口径的**可查牌单**内（数据源限制，2026-10-04 定案）。
 
@@ -144,8 +171,12 @@ def plate_in_roster(version: str, *, jp: bool) -> bool:
     :data:`PLATE_CHARS_JP`（≤ CiRCLE PLUS，即 ``current_version_jp`` 前一
     枚举成员）；舞/霸双口径通用。真实存在的牌子也可能不在当前数据源口径内
     （国服查 丸将——CiRCLE 是日服版本），由调用方给口径提示拒绝。
+    「未」（:data:`PLATE_LATEST_CHAR`）不进牌单，仅日服口径作为 latest
+    特殊查询放行。
     """
     version = norm_plate(version)
+    if version == PLATE_LATEST_CHAR:
+        return jp
     if version in _LEGACY_PLATES:
         return True
     return version in (PLATE_CHARS_JP if jp else PLATE_CHARS)
@@ -176,7 +207,14 @@ def plate_version_range(version: str, *, jp: bool = False) -> tuple[int, int] | 
 
     ``jp=True`` 走日服口径（``plate_to_version_jp``：PLUS 各代独立成牌，
     区间到下一代牌字为止；与 CN 口径同函数，靠映射切换）。
+    「未」（:data:`PLATE_LATEST_CHAR`）= 现行代占位：jp 口径返回
+    ``current_version_jp`` 单代闭区间，CN 口径无此语义返回 None。
     """
+    if version == PLATE_LATEST_CHAR:
+        if not jp:
+            return None
+        v = current_version_jp.value
+        return (v, v)
     mapping = plate_to_version_jp if jp else plate_to_version
     if version in _LEGACY_PLATES:
         vals = [v.value for v in mapping.values() if v < Version.MAIMAI_DX]
@@ -184,9 +222,10 @@ def plate_version_range(version: str, *, jp: bool = False) -> tuple[int, int] | 
     pv = mapping.get(version)
     if pv is None:
         return None
-    # 上界 = 下一牌字版本码 -1（未/FUTURE 为占位枚举，作上界即 29999，与库
-    # ``MaimaiPlates._configure`` 的 [本代, 下一代) 半开区间口径一致）；
-    # 下界默认为本代，真牌前移到初（_SD_FIRST_PLATES）——只动下界，上界仍按真。
+    # 上界 = 下一牌字版本码 -1（FUTURE 为库侧占位枚举、不作牌字，末位真实
+    # 牌字的上界即 FiNALE 前全集——与库 ``MaimaiPlates._configure`` 的
+    # [本代, 下一代) 半开区间口径一致）；下界默认为本代，真牌前移到初
+    # （_SD_FIRST_PLATES）——只动下界，上界仍按真。
     lo = pv.value
     if first := _SD_FIRST_PLATES.get(version):
         lo = plate_to_version[first].value

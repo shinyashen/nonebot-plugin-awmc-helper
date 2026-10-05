@@ -37,6 +37,7 @@ from ...core.plates import (
     plate_in_roster,
     plate_kinds_hint,
     plate_roster_hint,
+    plate_is_jp_leading,
 )
 from ...core.binding import SessionQueryBinding, at_tolerant
 from ...core.sources import Capability
@@ -91,9 +92,13 @@ async def _(
                 ).finish(at_sender=True)
             # 牌单口径限制（2026-10-04 定案）：真实存在的牌子还要落在绑定
             # 数据源的可查牌单内——国服 ≤ current_version（彩）、日服 ≤
-            # CiRCLE PLUS（回，current_version_jp 前一枚举成员）
+            # CiRCLE PLUS（回，current_version_jp 前一枚举成员）；「未」为
+            # 现行代占位的日服 latest 特殊查询（plate_in_roster 内特判放行，
+            # 不进口径提示文案）。国服查日服领先牌（丸/回/未）仅完成表降级
+            # 为预览放行（sheet 侧强制日服视图、不计达成），进度总览维持拒绝
             jp = score_service.view_of(binding.service) == "jp"
-            if not plate_in_roster(version, jp=jp):
+            preview = not jp and suffix == "完成表" and plate_is_jp_leading(version)
+            if not plate_in_roster(version, jp=jp) and not preview:
                 await UniMessage.text(
                     f" 没有找到「{version}{kind}」牌子。{plate_roster_hint(jp)}"
                 ).finish(at_sender=True)
@@ -103,7 +108,9 @@ async def _(
                 )
                 await plate_progress_overview(binding, plates, version, kind, page)
             else:
-                await plate_completion_sheet(binding, version, kind, page)
+                await plate_completion_sheet(
+                    binding, version, kind, page, preview=preview
+                )
             return
 
     # 中文尾缀（进度/完成表/定数表）排除纯数字闲聊，裸数字等级/定数一律
@@ -289,7 +296,8 @@ help_registry.declare(
                 "分组）；\n"
                 "牌组合（真极完成表/樱极进度/舞舞进度等）走牌子专用渲染"
                 "（牌种按各代真实牌表校验，如真代无极将、霸仅者），"
-                "达成条件见「牌子条件」。"
+                "达成条件见「牌子条件」；日服领先牌（丸/回，及占位字「未」"
+                "指日服现行版本）国服可查完成表预览、不计达成标志。"
             ),
         ),
         CommandSpec(

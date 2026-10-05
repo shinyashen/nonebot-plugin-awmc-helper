@@ -14,6 +14,10 @@ PNG = b"\x89PNG-fake-bytes"
 
 URL = "https://maimaidx.jp/maimai-mobile/img/Music/c4ec.png"
 
+DEFAULT_PLATE_URL = (
+    "https://maimaidx.jp/maimai-mobile/img/NamePlate/b919c327669240b8.png"
+)
+
 
 @pytest.fixture
 def mock():
@@ -110,3 +114,33 @@ def test_ssl_context_includes_intermediate():
 
     subjects = str(maimaidx_ssl_context().get_ca_certs())
     assert "GlobalSign GCC R46 OV TLS CA 2025" in subjects
+
+
+@pytest.mark.asyncio
+async def test_ensure_default_plate_downloads_and_caches(jp_env, mock):
+    """官方デフォルト素色框：首拉落盘固定名（未牌头图），已有缓存不重拉。"""
+    _store, _static, cache = jp_env
+    route = mock.get(url=DEFAULT_PLATE_URL).respond(200, content=PNG)
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    path = await jp_cover.ensure_default_plate(cache_dir=cache)
+    assert path == cache / "UI_Plate_default.png"
+    assert path.read_bytes() == PNG
+    assert route.call_count == 1
+
+    again = await jp_cover.ensure_default_plate(cache_dir=cache)
+    assert again == path
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ensure_default_plate_silent_on_failure(jp_env, mock):
+    """素色框拉取失败返回 None、无落盘（未牌头图渲染侧回退跳过贴图）。"""
+    _store, _static, cache = jp_env
+    mock.get(url=DEFAULT_PLATE_URL).respond(500)
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    assert await jp_cover.ensure_default_plate(cache_dir=cache) is None
+    assert not (cache / "UI_Plate_default.png").exists()

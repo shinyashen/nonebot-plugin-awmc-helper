@@ -20,7 +20,9 @@ from ...core.utils import slow_notice
 from ...core.plates import (
     PLATE_KINDS,
     PLATE_CHARS_JP,
+    PLATE_LATEST_CHAR,
     PLATE_KIND_ALIAS_CHARS,
+    PLATE_LATEST_VERSION_NAME,
     PLATE_VERSION_ALIAS_CHARS,
     in_plate_scope,
     major_type_of_plate,
@@ -64,8 +66,23 @@ _WU_PLATE_PAGE_BOUNDARY = "13"
 """舞/霸牌子按等级 13 分界分页（NB 同款）。"""
 
 
-async def plate_completion_sheet(binding, version: str, kind: str, page: int) -> None:
-    """完成表（NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条）。"""
+def _latest_plate_notice() -> str:
+    """「未」占位提示（国服日服通用）：非官方牌名，告知对应的具体版本名。"""
+    return (
+        f" 「未」为占位字：指日服现行版本「{PLATE_LATEST_VERSION_NAME}」"
+        "（官方尚未公布该代牌字），非官方牌名"
+    )
+
+
+async def plate_completion_sheet(
+    binding, version: str, kind: str, page: int, *, preview: bool = False
+) -> None:
+    """完成表（NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条）。
+
+    ``preview``（2026-10-05 定案）：国服数据源查日服领先版本（丸/回，含
+    「未」= 日服现行代占位）——牌子国服待实装，仅作前瞻：强制日服视图出
+    谱面网格，不取成绩、不盖任何达成标志，发图前提示待实装。
+    """
     from ...core.render import table_template
 
     # 数据源门禁先行（未开放牌子能力的源）：与牌子进度总览同语义，避免
@@ -75,8 +92,9 @@ async def plate_completion_sheet(binding, version: str, kind: str, page: int) ->
 
         raise source_of(binding.service).unsupported(Capability.PLATES)
     # 牌单口径决定曲库视图与版本区间：日服口径（丸/回 等）用日服视图——
-    # JP 限定曲在牌范围内，缺了永远差曲（CN 口径维持国服网格不变）
-    jp = score_service.view_of(binding.service) == "jp"
+    # JP 限定曲在牌范围内，缺了永远差曲（CN 口径维持国服网格不变）；
+    # 预览查询同走日服视图（领先牌的曲目只在日服视图里）
+    jp = preview or score_service.view_of(binding.service) == "jp"
     major = major_type_of_plate(version)
     rng = plate_version_range(version, jp=jp)
     entries = []
@@ -89,11 +107,18 @@ async def plate_completion_sheet(binding, version: str, kind: str, page: int) ->
                     entries.append((song, d))
     if not entries:
         await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
-    scores = await score_service.get_scores_all(binding, notify_slow=slow_notice())
+    if preview:
+        # 预览不取成绩：无章可盖（牌子待实装，达成本就无从谈起），还省一次
+        # 全量成绩拉取
+        scores = []
+    else:
+        scores = (
+            await score_service.get_scores_all(binding, notify_slow=slow_notice())
+        ).scores
     png = await table_template.draw_plate_table_with_fallback(
         version,
         kind,
-        scores.scores,
+        scores,
         entries,
         page=page,
         song_service=song_service,
@@ -101,6 +126,22 @@ async def plate_completion_sheet(binding, version: str, kind: str, page: int) ->
     )
     if png is None:
         await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(at_sender=True)
+    notice = ""
+    if preview:
+        if version == PLATE_LATEST_CHAR:
+            notice = (
+                f" 「未」为占位字：指日服现行版本「{PLATE_LATEST_VERSION_NAME}」，"
+                "牌子国服待实装，图为完成表预览、不计达成标志"
+            )
+        else:
+            notice = (
+                f" 「{version}{kind}」牌子国服待实装，"
+                "图为日服口径完成表预览、不计达成标志"
+            )
+    elif version == PLATE_LATEST_CHAR:
+        notice = _latest_plate_notice()
+    if notice:
+        await UniMessage.text(notice).send(at_sender=True)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
@@ -187,6 +228,9 @@ async def plate_progress_overview(
         total_count=len(info),
         completed_count=completed_count,
     )
+    if version == PLATE_LATEST_CHAR:
+        # 「未」非官方牌名：进度总览同完成表，发图前告知具体版本名
+        await UniMessage.text(_latest_plate_notice()).send(at_sender=True)
     await UniMessage.image(raw=png).finish(at_sender=True)
 
 
@@ -196,10 +240,10 @@ _PLATE_KIND_CHARS = frozenset((*PLATE_KINDS, *PLATE_KIND_ALIAS_CHARS))
 """牌种字符集（含繁体/和制；形状检测用）。"""
 
 _PLATE_SHAPE_VERSION = frozenset(
-    f"{PLATE_CHARS}{PLATE_CHARS_JP}{PLATE_VERSION_ALIAS_CHARS}"
+    f"{PLATE_CHARS}{PLATE_CHARS_JP}{PLATE_VERSION_ALIAS_CHARS}{PLATE_LATEST_CHAR}"
 )
-"""版本字字符集（CN∪JP 牌单 + 繁体/和制；形状检测不分数据源，口径合法性
-由 matchers 经 ``plate_in_roster`` 按绑定数据源收口）。"""
+"""版本字字符集（CN∪JP 牌单 + 繁体/和制 + 现行代占位「未」；形状检测不分
+数据源，口径合法性由 matchers 经 ``plate_in_roster`` 按绑定数据源收口）。"""
 
 
 def plate_shape(text: str) -> "tuple[str, str] | None":
