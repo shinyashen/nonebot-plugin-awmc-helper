@@ -11,6 +11,9 @@
 
 import asyncio
 from pathlib import Path
+from collections.abc import Iterable
+
+from nonebot import logger
 
 from .. import store
 from ..http import maimaidx_ssl_context
@@ -62,6 +65,34 @@ async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
             verify=maimaidx_ssl_context(),
         ),
     )
+
+
+async def ensure_many(
+    song_ids: Iterable[int], *, cache_dir: Path | None = None, parallelism: int = 8
+) -> None:
+    """批量补齐曲绘缓存（底图内嵌曲绘用；卡片路径逐卡 ensure，底图一版整批）。
+
+    static/缓存已命中的 id 零开销跳过；未命中集**先以首曲探针**——官方站
+    不可达时整批放弃（否则数百曲 × 下载超时是分钟级空等），探针通过才
+    信号量限流并发拉取。单曲失败静默落 0.png 占位（:func:`download_to_file`
+    自带 warning），不阻塞底图生成。``cache_dir`` 供测试注入。
+    """
+    cache = cache_dir or jp_cache_dir()
+    todo = [i for i in dict.fromkeys(song_ids) if not _has_local(i, cache)]
+    if not todo:
+        return
+    if not await ensure(todo[0], cache_dir=cache):
+        logger.warning(
+            f"jp_cover：批量补齐探针失败（{todo[0]}），跳过剩余 {len(todo) - 1} 曲"
+        )
+        return
+    sem = asyncio.Semaphore(parallelism)
+
+    async def _one(song_id: int) -> None:
+        async with sem:
+            await ensure(song_id, cache_dir=cache)
+
+    await asyncio.gather(*(_one(sid) for sid in todo[1:]))
 
 
 async def ensure_image(

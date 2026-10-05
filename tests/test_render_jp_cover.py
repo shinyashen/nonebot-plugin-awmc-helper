@@ -144,3 +144,59 @@ async def test_ensure_default_plate_silent_on_failure(jp_env, mock):
 
     assert await jp_cover.ensure_default_plate(cache_dir=cache) is None
     assert not (cache / "UI_Plate_default.png").exists()
+
+
+@pytest.mark.asyncio
+async def test_ensure_many_batch(jp_env, mock):
+    """批量补齐：已命中零开销跳过，未命中限流拉取落盘。"""
+    store, _static, cache = jp_env
+    for sid, name in ((1, "a1.png"), (2, "b2.png"), (3, "c3.png")):
+        await _seed_song(store, sid, image_url=name)
+    cache.mkdir(exist_ok=True)
+    (cache / "1.png").write_bytes(PNG)  # 1 已命中
+    mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/b2.png").respond(
+        200, content=PNG
+    )
+    route3 = mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/c3.png").respond(
+        200, content=PNG
+    )
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    await jp_cover.ensure_many([1, 2, 3], cache_dir=cache)
+    assert (cache / "2.png").read_bytes() == PNG
+    assert (cache / "3.png").read_bytes() == PNG
+    assert route3.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ensure_many_probe_failure_skips_batch(jp_env, mock):
+    """探针（首未命中曲）失败 → 整批放弃，不发起剩余请求（防超时空等）。"""
+    store, _static, cache = jp_env
+    await _seed_song(store, 4, image_url="d4.png")
+    await _seed_song(store, 5, image_url="d5.png")
+    mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/d4.png").respond(500)
+    route5 = mock.get(url="https://maimaidx.jp/maimai-mobile/img/Music/d5.png").respond(
+        200, content=PNG
+    )
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    await jp_cover.ensure_many([4, 5], cache_dir=cache)
+    assert not (cache / "4.png").exists()
+    assert route5.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_ensure_many_all_cached_no_request(jp_env, mock):
+    """全部命中 static/缓存时不发起任何请求。"""
+    _store, static, cache = jp_env
+    cache.mkdir(exist_ok=True)
+    cover_dir = static / "mai" / "cover"
+    (cover_dir / "7.png").write_bytes(PNG)
+    (cache / "8.png").write_bytes(PNG)
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    await jp_cover.ensure_many([7, 8], cache_dir=cache)
+    assert not mock.routes or all(r.call_count == 0 for r in mock.routes)

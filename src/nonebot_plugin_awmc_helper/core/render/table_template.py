@@ -405,6 +405,11 @@ async def generate_plate_template(
                 remaster.append((song, diff))
     if not entries:
         return 0
+    # 底图内嵌曲绘批量补齐（2026-10-05 服务器实测补缺）：卡片渲染的逐卡
+    # ensure 惯例在底图路径缺失，JP 曲缺缓存全落 0.png；CN 曲静态命中零开销
+    from . import jp_cover
+
+    await jp_cover.ensure_many(song.id for song, _ in entries)
     out_dir = plate_table_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     suffix = "-jp" if jp else ""
