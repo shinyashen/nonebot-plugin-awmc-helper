@@ -50,6 +50,7 @@ from .calc import (
     build_bests,
     compute_rating,
     build_flat_bests,
+    chart_loss_facts,
     level_value_match,
 )
 from .score import score_service
@@ -829,6 +830,13 @@ def _sync_cond(kind: str) -> Cond:
 _NB_BPS = 1_008_000
 _LOSER_BPS = 950_000
 
+THEORETICAL_BPS = 1_010_000
+"""理论值达成率万分位（101.0000 = calc.THEORETICAL_ACHIEVEMENT；寸的理论值
+段上端开——理论值本身不归寸）。"""
+
+_KILL_LINES_BPS = (1_000_000, 1_005_000)
+"""锁血判定线（万分位）：SSS 100.0 / SSS+ 100.5。"""
+
 
 def _badge_cond(kind: str) -> Cond:
     """牛逼/越级（S-15，万分位整数比较）。"""
@@ -858,48 +866,77 @@ def _star_cond(n: int) -> Cond:
     )
 
 
-def _cun_distance(bps: int) -> int:
-    """寸：距所属里程碑（100.0 / 100.5）的万分位差。"""
-    return 1005000 - bps if bps >= 1004500 else 1000000 - bps
-
-
 def _kill_overshoot(bps: int) -> int:
     """名刀：超出所属里程碑（100.0 / 100.5）的万分位量。"""
     return bps - 1005000 if bps >= 1005000 else bps - 1000000
 
 
 def _cun_cond() -> Cond:
-    """寸（S-17 定稿区间）：[99.9,100) ∪ [100.45,100.5)，按距目标线升序。"""
+    """寸（S-17）：经典区间 [99.9,100) ∪ [100.45,100.5) + **理论值寸**——
+    距 101（理论值）不足一个 100落（分数 + 100落损失 ≥ 101，2026-10-05
+    用户拍板新增）。理论值寸依赖谱面 BREAK 数，谓词由执行器注入事实表后
+    生效（:func:`_bind_chart_loss`，parse 期无曲库数据；曲库查不到的谱面
+    只走经典区间）。排序为**分数降序**（并入理论值寸后「距目标线升序」
+    不再良定义——三段各有所属线）。"""
     return Cond(
         CondType.CUN,
         key="cun",
         label="寸",
-        record=lambda s: (
-            s.achievements is not None
-            and (
-                999000 <= _bps(s.achievements) < 1000000
-                or 1004500 <= _bps(s.achievements) < 1005000
-            )
-        ),
-        sort_key=lambda s: -_cun_distance(_bps(s.achievements)),
+        sort_key=lambda s: _bps(s.achievements),
     )
 
 
 def _kill_cond() -> Cond:
-    """名刀（S-18 定稿区间）：[100,100.1) ∪ [100.5,100.55)，按超出量升序。"""
+    """锁血（S-18，2026-10-05 用户拍板改语义）：分数距所属里程碑
+    （100.0 / 100.5）不足一个等效 GREAT TAP（分数 − 每 GREAT TAP 损失 <
+    线，即再来一个 TAP GREAT 就掉线）。依赖谱面基础满分，谓词由执行器
+    注入（:func:`_bind_chart_loss`）；按超出量升序不变。"""
     return Cond(
         CondType.KILL,
         key="kill",
         label="名刀",
-        record=lambda s: (
-            s.achievements is not None
-            and (
-                1000000 <= _bps(s.achievements) < 1001000
-                or 1005000 <= _bps(s.achievements) < 1005500
-            )
-        ),
         sort_key=lambda s: -_kill_overshoot(_bps(s.achievements)),
     )
+
+
+def _cun_record(
+    facts: "dict[tuple[int, SongType, LevelIndex], tuple[float, float]]",
+):
+    """寸谓词（事实表注入后）：经典区间 + 理论值寸 [101−100落损失, 101)。"""
+
+    def record(s: ScoreExtend) -> bool:
+        if s.achievements is None:
+            return False
+        bps = _bps(s.achievements)
+        if 999000 <= bps < 1000000 or 1004500 <= bps < 1005000:
+            return True
+        loss = facts.get((s.id, s.type, s.level_index))
+        # 上端开：101.0000 是理论值不是寸（对齐旧区间里程碑值归锁不归寸）
+        return (
+            loss is not None
+            and bps < THEORETICAL_BPS
+            and bps + loss[1] >= THEORETICAL_BPS
+        )
+
+    return record
+
+
+def _kill_record(
+    facts: "dict[tuple[int, SongType, LevelIndex], tuple[float, float]]",
+):
+    """锁血谓词（事实表注入后）：[线, 线+每 GREAT TAP 损失) 两段
+    （100.0 / 100.5；损失取整前按万分位浮点比较，边界外半开）。"""
+
+    def record(s: ScoreExtend) -> bool:
+        if s.achievements is None:
+            return False
+        loss = facts.get((s.id, s.type, s.level_index))
+        if loss is None:
+            return False
+        bps = _bps(s.achievements)
+        return any(line <= bps < line + loss[0] for line in _KILL_LINES_BPS)
+
+    return record
 
 
 def _ideal_of(s: ScoreExtend) -> ScoreExtend:
@@ -1639,6 +1676,42 @@ async def combo_chart_entries(
     return entries
 
 
+def _chart_loss_map(
+    songs: "list[Song]",
+) -> "dict[tuple[int, SongType, LevelIndex], tuple[float, float]]":
+    """曲库 → 谱面容错事实表（键与成绩 id 口径对齐 :func:`_chart_key`）。
+
+    值为 :func:`~core.calc.chart_loss_facts` 的 (每 GREAT TAP 损失,
+    每 100落 损失)，万分位（谓词比较域）；基础满分为 0 / 无 BREAK 的谱面
+    不入表。
+    """
+    facts: "dict[tuple[int, SongType, LevelIndex], tuple[float, float]]" = {}
+    for song in songs:
+        for diff in song.get_difficulties():
+            loss = chart_loss_facts(diff)
+            if loss is not None:
+                facts[_chart_key(song, diff)] = loss
+    return facts
+
+
+def _bind_chart_loss(conds: "list[Cond]", songs: "list[Song]") -> "list[Cond]":
+    """寸/锁血条件的谱面容错事实注入（执行期单点；record 谓词唯一评估
+    入口 :func:`combo_filtered_scores`）。
+
+    理论值寸/锁血判定依赖谱面物量（100落损失/每 GREAT TAP 损失），parse
+    期无曲库数据——此处物化事实表后 ``dataclasses.replace`` 出完整谓词
+    （Cond 为 frozen，成绩过滤走副本，原解析结果不可变）。谱面不在曲库
+    （成绩流脏数据）→ 谱面相关分支不命中（寸的经典区间不受影响）。
+    """
+    if not any(c.ctype in (CondType.CUN, CondType.KILL) for c in conds):
+        return conds
+    facts = _chart_loss_map(songs)
+    records = {CondType.CUN: _cun_record(facts), CondType.KILL: _kill_record(facts)}
+    return [
+        replace(c, record=records[c.ctype]) if c.ctype in records else c for c in conds
+    ]
+
+
 async def combo_filtered_scores(
     conds: "list[Cond]",
     binding,
@@ -1656,6 +1729,7 @@ async def combo_filtered_scores(
     """
     if songs is None:
         songs = await _songs_of(binding)
+    conds = _bind_chart_loss(conds, songs)
     cur = _current_of(binding)
     await ensure_ongeki_titles()  # 中二/音击谓词的集合前置加载（幂等）
     chart_hit = await _build_chart_hit(conds, cur, state=hist_state)

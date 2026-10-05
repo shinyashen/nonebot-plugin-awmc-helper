@@ -187,6 +187,24 @@ def test_score_line_formula():
     assert score_line(diff, -1) is None
 
 
+def test_chart_loss_facts():
+    """谱面容错事实（寸理论值段/锁血判定共用，万分位）：每 GREAT TAP 与
+    每 100落 的达成率损失；与 score_line 的 100落 等效数自洽。"""
+    from mocks import make_diff
+
+    from nonebot_plugin_awmc_helper.core.calc import score_line, chart_loss_facts
+
+    diff = make_diff(
+        tap_num=700, hold_num=100, slide_num=100, touch_num=100, break_num=20
+    )
+    great, drop100 = chart_loss_facts(diff)
+    total = 700 * 500 + 100 * 1000 + 100 * 1500 + 100 * 500 + 20 * 2500
+    assert great == pytest.approx(1e8 / total)
+    assert drop100 == pytest.approx(5000 / 20)
+    rows = dict(score_line(diff, 100)["break_rows"])
+    assert rows["100落"] * great == pytest.approx(drop100)
+
+
 def test_score_line_utage_buddy_cap():
     """buddy 宴谱上限 202（200 基础 + 2 额外）：线可到 202，预算按 202-线。"""
     from mocks import make_utage

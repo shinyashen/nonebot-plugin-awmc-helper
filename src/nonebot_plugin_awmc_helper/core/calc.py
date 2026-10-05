@@ -78,6 +78,24 @@ def basic_score_total(diff: SongDifficulty) -> int:
     )
 
 
+def chart_loss_facts(diff: SongDifficulty) -> "tuple[float, float] | None":
+    """谱面容错事实（combo 寸/锁血的谱面相关判定用），单位**万分位**：
+
+    - 每 1 个等效 GREAT TAP（1 个 TAP 从 CP 掉 GREAT，损 100 基础分）的
+      达成率损失 = 1e8/基础满分（= 10000/满分 个百分点，与
+      :func:`score_line` 的预算口径自洽：预算 × 每损失 = 上限-线）；
+    - 每 1 个 100落（BREAK P-2，额外分 50）的达成率损失 = 5000/BREAK 数
+      （= 0.5/BREAK数 个百分点；额外分通道 1% × 50/(100×BREAK数)，与
+      ``score_line`` break_rows 的「100落」等效数 × 每 GREAT TAP 损失同式）。
+
+    基础满分为 0 或无 BREAK（100落 概念不成立）→ None（规则不适用）。
+    """
+    total = basic_score_total(diff)
+    if total <= 0 or diff.break_num == 0:
+        return None
+    return (_ACHIEVEMENT_BPS * _ACHIEVEMENT_BPS / total, 5000 / diff.break_num)
+
+
 def min_ds_of_ra(ra: float) -> float:
     """B50 末位 RA → 入线所需最低定数（SSSP 系数反推，调用方自行取整）。"""
     return ra / SSSP_COEFFICIENT

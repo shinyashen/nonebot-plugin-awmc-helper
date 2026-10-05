@@ -444,22 +444,41 @@ async def test_run_combo_achievement_set_empty_renders(db, songs, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_combo_cun_sort_override(db, songs, monkeypatch):
-    """寸50：区间过滤 + 距目标线升序（排序覆盖默认 RA 降序）。"""
+async def test_run_combo_cun_theory_range(db, songs, monkeypatch):
+    """寸50（2026-10-05 口径）：理论值寸按谱面 100落 损失判定 + 全体分数降序。
+
+    199 DX MASTER（BREAK 37）100落损失 = 5000/37 ≈ 135.14 万分位 → 理论值寸
+    下界 = 101 − 0.0135 = 100.9865；199 SD MASTER（BREAK 21）≈ 238.10 →
+    下界 100.9762。成绩数值按「真实曲目 + 合理值」构造。
+    """
+    from maimai_py import SongType, LevelIndex
+
     from nonebot_plugin_awmc_helper.core import combo as combo_mod
     from nonebot_plugin_awmc_helper.core.combo import parse_combo
 
-    near_1005 = _score(1, achievements=100.47, version=12000)  # 距 100.5 = 0.03
-    near_1000 = _score(2, achievements=99.95, version=12000)  # 距 100.0 = 0.05
-    outside = _score(3, achievements=100.44, version=12000)  # 寸区间外
-    milestone = _score(4, achievements=100.0, version=12000)  # 归锁不归寸
+    dx = {"type_": SongType.DX, "level_index": LevelIndex.MASTER, "version": 12000}
+    theory = _score(199, achievements=100.99, **dx)  # 100.99+0.0135 ≥ 101 寸
+    below = _score(199, achievements=100.98, **dx)  # 100.98+0.0135 < 101 不寸
+    classic = _score(
+        199,
+        type_=SongType.STANDARD,
+        level_index=LevelIndex.MASTER,
+        version=12000,
+        achievements=100.47,
+    )
+    low = _score(
+        199,
+        type_=SongType.STANDARD,
+        level_index=LevelIndex.MASTER,
+        version=12000,
+        achievements=99.95,
+    )
     monkeypatch.setattr(
-        combo_mod,
-        "score_service",
-        _FakeScoreService([near_1000, outside, near_1005, milestone]),
+        combo_mod, "score_service", _FakeScoreService([low, below, classic, theory])
     )
     result = await combo_mod.run_combo(parse_combo("寸"), _binding())
-    assert [s.id for s in result.scores] == [1, 2]
+    # 分数降序（理论值寸 100.99 > 经典 100.47 > 99.95）；100.98 不入
+    assert [s.achievements for s in result.scores] == [100.99, 100.47, 99.95]
 
 
 @pytest.mark.asyncio
@@ -1591,38 +1610,77 @@ def test_rate_boundary_semantics():
 
 
 def test_cun_kill_boundaries():
-    """寸/名刀万分位边界（§9 S-17/18 定稿区间，含半开衔接）。"""
-    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+    """寸/锁血判定边界（经典区间半开衔接 + 谱面相关段，事实表注入后）。
 
-    cun = parse_combo("寸")[0].record
-    kill = parse_combo("锁")[0].record
-    # 寸 [99.9,100) ∪ [100.45,100.5)
+    事实表取整数值：每 GREAT TAP 损失 200 万分位、每 100落 损失 100 万分位
+    → 理论值寸段 [100.99, 101)、锁血段 [100,100.02) ∪ [100.5,100.52)。
+    """
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+
+    facts = {(1, SongType.STANDARD, LevelIndex.MASTER): (200.0, 100.0)}
+    cun = combo_mod._cun_record(facts)
+    kill = combo_mod._kill_record(facts)
+    # 寸经典区间 [99.9,100) ∪ [100.45,100.5)（里程碑值归锁不归寸）
     assert cun(_score(1, achievements=99.9))
     assert not cun(_score(1, achievements=99.8999))
     assert cun(_score(1, achievements=99.9999))
-    assert not cun(_score(1, achievements=100.0))  # 里程碑归锁不归寸
+    assert not cun(_score(1, achievements=100.0))
     assert not cun(_score(1, achievements=100.4499))
     assert cun(_score(1, achievements=100.45))
     assert not cun(_score(1, achievements=100.5))
-    # 名刀 [100,100.1) ∪ [100.5,100.55)
+    # 寸理论值段 [101−100落损失, 101)：下端闭（+损失恰 ≥101 即寸）、上端开
+    assert cun(_score(1, achievements=100.99))
+    assert not cun(_score(1, achievements=100.9899))
+    assert not cun(_score(1, achievements=101.0))  # 理论值本身不归寸
+    assert not cun(_score(2, achievements=100.995))  # 谱面不在曲库 → 无该段
+    # 锁血 [线, 线+每GREAT损失)：一个 TAP GREAT 恰落在线上（=线）不归锁
     assert kill(_score(1, achievements=100.0))
-    assert kill(_score(1, achievements=100.0999))
-    assert not kill(_score(1, achievements=100.1))
+    assert kill(_score(1, achievements=100.0199))
+    assert not kill(_score(1, achievements=100.02))
     assert kill(_score(1, achievements=100.5))
-    assert kill(_score(1, achievements=100.5499))
-    assert not kill(_score(1, achievements=100.55))
+    assert kill(_score(1, achievements=100.5199))
+    assert not kill(_score(1, achievements=100.52))
+    assert not kill(_score(1, achievements=99.9999))  # 线下不锁（锚定所属线）
+    assert not kill(_score(2, achievements=100.01))  # 谱面不在曲库 → 不判锁血
 
 
 @pytest.mark.asyncio
-async def test_cun_sort_by_distance(db, songs, monkeypatch):
-    """寸排序覆盖：距目标线近者在前（100.49 距 0.01 < 99.95 距 0.05）。"""
+async def test_run_combo_kill_chart_facts(db, songs, monkeypatch):
+    """锁血50（2026-10-05 语义）：谱面相关判定——199 DX MASTER 基础满分
+    549000，每 GREAT TAP 损失 = 1e8/549000 ≈ 182.15 万分位 → 锁血段
+    [100,100.0183) ∪ [100.5,100.5183)，按超出量升序。"""
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import combo as combo_mod
+    from nonebot_plugin_awmc_helper.core.combo import parse_combo
+
+    dx = {"type_": SongType.DX, "level_index": LevelIndex.MASTER, "version": 12000}
+    scores = [
+        _score(199, achievements=100.0, **dx),  # 超出 0
+        _score(199, achievements=100.01, **dx),  # 100.01−0.0183 < 100 锁
+        _score(199, achievements=100.02, **dx),  # ≥100 不锁
+        _score(199, achievements=100.51, **dx),  # 100.51−0.0183 < 100.5 锁
+        _score(199, achievements=100.52, **dx),  # ≥100.5 不锁
+        _score(199, achievements=99.9999, **dx),  # 线下不锁
+    ]
+    monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService(scores))
+    result = await combo_mod.run_combo(parse_combo("锁血"), _binding())
+    assert [s.achievements for s in result.scores] == [100.0, 100.01, 100.51]
+
+
+@pytest.mark.asyncio
+async def test_cun_sort_by_score_desc(db, songs, monkeypatch):
+    """寸排序覆盖（2026-10-05 改口径）：分数降序——100.45 > 99.98 > 99.91
+    （旧「距目标线升序」为 99.98 > 100.45 > 99.91，两口径可区分）。"""
     from nonebot_plugin_awmc_helper.core import combo as combo_mod
     from nonebot_plugin_awmc_helper.core.combo import parse_combo
 
     scores = [
-        _score(1, version=12000, achievements=99.95),  # 距 100.0 = 0.05
-        _score(2, version=12000, achievements=100.49),  # 距 100.5 = 0.01
-        _score(3, version=12000, achievements=99.91),  # 距 100.0 = 0.09
+        _score(1, version=12000, achievements=99.98),
+        _score(2, version=12000, achievements=100.45),
+        _score(3, version=12000, achievements=99.91),
     ]
     monkeypatch.setattr(combo_mod, "score_service", _FakeScoreService(scores))
     result = await combo_mod.run_combo(parse_combo("寸"), _binding())
