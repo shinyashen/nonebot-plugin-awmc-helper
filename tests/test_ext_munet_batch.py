@@ -384,47 +384,28 @@ async def test_munet_absent_filters_maimaiinfo_resurrection(db):
     assert 2055 in (await songdb.State.load()).songs
 
     # 缺席信号：过滤重建行 + 整曲删除
-    await songdb.rebuild(payloads, munet_absent_ids={2055})
+    await songdb.rebuild(payloads, excluded_ids={2055})
     assert 2055 not in (await songdb.State.load()).songs
 
     # 复活防护：再次重建（maimaiinfo 仍收录）不复现
-    await songdb.rebuild(payloads, munet_absent_ids={2055})
+    await songdb.rebuild(payloads, excluded_ids={2055})
     assert 2055 not in (await songdb.State.load()).songs
 
     # 缺席压过「机台快照在列」（extra_jp_ids 单独存在时保留）
     await songdb.rebuild(payloads, extra_jp_ids={2055})
     assert 2055 in (await songdb.State.load()).songs
-    await songdb.rebuild(payloads, extra_jp_ids={2055}, munet_absent_ids={2055})
+    await songdb.rebuild(payloads, extra_jp_ids={2055}, excluded_ids={2055})
     assert 2055 not in (await songdb.State.load()).songs
 
 
 @pytest.mark.asyncio
-async def test_munet_absence_check_candidates(db, monkeypatch):
-    """候选派生（2026-10-05）：maimaiinfo 独有 ∩ DX 世代（version ≥ 20000）
-    进复核；远古世代 otoge 双缺属常态不进；裁决全量缺席集返回并留档。"""
-    import copy
+async def test_excluded_song_ids_union(db, monkeypatch):
+    """剔除集（2026-10-05）：MuNET 缺席裁决 kv ∪ 部署屏蔽名单（显示 id
+    归一根 id）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.config import plugin_config
 
-    from nonebot_plugin_awmc_helper.core import store, songdb
-    from nonebot_plugin_awmc_helper.core.ext import munet
+    await db.kv_set("munet_absent_ids", [845])
+    monkeypatch.setattr(plugin_config, "awmc_song_denylist", [12055, 2056])
 
-    async with store.session() as session:
-        session.add(store.SongSheetGroup(song_id=2055, kind="dx", version=27000))
-        session.add(store.SongSheetGroup(song_id=2060, kind="sd", version=15000))
-        await session.commit()
-
-    payloads = full_payloads()
-    payloads["maimaiinfo"]["12055"] = _deleted_song_entry()  # root 2055
-    ancient = copy.deepcopy(make_all_data()["10199"])
-    ancient["id"] = "2060"
-    ancient["type"] = "SD"
-    ancient["basic_info"]["title"] = "（构造）远古滞留曲"
-    payloads["maimaiinfo"]["2060"] = ancient  # root 2060，version 15000 < DX
-
-    async def fake_by_id(music_id: int):
-        return None if music_id == 2055 else {"name": "x"}
-
-    monkeypatch.setattr(munet, "_MIN_INTERVAL", 0)
-    monkeypatch.setattr(munet, "fetch_music_by_id", fake_by_id)
-
-    assert await songdb._munet_absence_check(payloads) == {2055}
-    assert await db.kv_get("munet_absent_ids") == [2055]
+    assert await songdb._excluded_song_ids() == {845, 2055, 2056}

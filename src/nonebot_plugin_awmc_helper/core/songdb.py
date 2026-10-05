@@ -1034,7 +1034,7 @@ def apply_missing(
     jp_known_titles: set[str] | None,
     jp_deleted_titles: set[str] | None = None,
     extra_known_ids: set[int] | None = None,
-    munet_absent_ids: set[int] | None = None,
+    excluded_ids: set[int] | None = None,
 ) -> int:
     """缺失/删除统一规则（§7.5-B）：一侧缺置该侧版本列 NULL，两侧皆无整曲删除。
 
@@ -1045,9 +1045,9 @@ def apply_missing(
     - ``jp_deleted_titles``：otoge 下架标题集（权威下架信号）；
     - ``extra_known_ids``：外部补充源（机台快照等）给出的 id 集——在列信号最强
       （日服当前机台数据），优先于 otoge 下架记录（§7.5-C）；
-    - ``munet_absent_ids``：MuNET GetById 复核确认的缺席集——**最高优先删除
-      信号**，压过 maimaiinfo 机台全集残留与机台快照（上线前删除曲在 MuNET
-      已无索引，而挖掘类数据源会永久滞留，2026-10-05 id12055 实测）。
+    - ``excluded_ids``：重建剔除集（MuNET 留痕缺席裁决 ∪ 部署屏蔽名单
+      ``AWMC_SONG_DENYLIST``）——**最高优先删除信号**，压过 maimaiinfo
+      机台全集残留与机台快照。
     整曲删除以**源在列信号**判定（任一信号源认为在列即保留；信号源全缺时回落
     版本列全空），避免「版本未知」与「该服未上线」混淆造成误删。
     返回整曲删除数。
@@ -1087,7 +1087,7 @@ def apply_missing(
                 )
             if extra_known_ids is not None and song_id in extra_known_ids:
                 jp_present = True  # 机台当前数据在列，覆盖一切滞后信号
-            if munet_absent_ids is not None and song_id in munet_absent_ids:
+            if excluded_ids is not None and song_id in excluded_ids:
                 jp_present = False  # MuNET 缺席复核确认，压过机台残留/快照
         else:
             jp_present = any(g.version is not None for g in groups)
@@ -1115,13 +1115,13 @@ async def rebuild(
     payloads: dict[str, Any],
     *,
     extra_jp_ids: set[int] | None = None,
-    munet_absent_ids: set[int] | None = None,
+    excluded_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     """规范表重建入口：接收各源 payload（None = 该源本次未拉取成功，跳过），写回 DB。
 
     payloads 键：``maimaiinfo`` / ``dschange`` / ``otoge_db`` / ``otoge_deleted`` /
     ``lxns`` / ``divingfish``。``extra_jp_ids`` 为外部补充源的 id 集（JP 在列信号，
-    §7.5-C）。``munet_absent_ids`` 为 MuNET 复核确认的删除曲（缺席信号）：**在
+    §7.5-C）。``excluded_ids`` 为 MuNET 复核确认的删除曲（缺席信号）：**在
     apply_jp 之前过滤 maimaiinfo 条目**——缺席曲的行会随每次重建复活（maimaiinfo
     机台全集持续收录），不过滤则删除无效。返回统计与告警（已写日志，供通知拼接）。
     """
@@ -1129,9 +1129,9 @@ async def rebuild(
     jp: dict[int, Entry] = {}
     if payloads.get("maimaiinfo") is not None and payloads.get("dschange") is not None:
         jp = parse_maimaiinfo(payloads["maimaiinfo"], payloads["dschange"])
-        if munet_absent_ids:
+        if excluded_ids:
             absent_filtered = {
-                sid: e for sid, e in jp.items() if sid not in munet_absent_ids
+                sid: e for sid, e in jp.items() if sid not in excluded_ids
             }
             if len(absent_filtered) != len(jp):
                 logger.info(
@@ -1202,7 +1202,7 @@ async def rebuild(
         jp_known_titles=set(otoge.live_titles) if otoge else None,
         jp_deleted_titles=set(otoge.deleted_titles) if otoge else set(),
         extra_known_ids=extra_jp_ids,
-        munet_absent_ids=munet_absent_ids,
+        excluded_ids=excluded_ids,
     )
     await state.save()
     await _archive_raw(payloads)
@@ -1680,12 +1680,17 @@ async def refresh_all(
     # MuNET 缺席复核（2026-10-05）：maimaiinfo 独有（otoge 现役/下架皆无）且
     # 已归入 DX 世代的候选，经 MuNET GetById 仲裁——在列 = otoge 滞后/回滚
     # （保留），缺席 = 删除曲（权威剔除信号，压过 maimaiinfo 机台全集残留）
-    munet_absent: set[int] = set()
-    if payloads.get("maimaiinfo") is not None and payloads.get("otoge_db") is not None:
-        try:
-            munet_absent = await _munet_absence_check(payloads)
-        except Exception:
-            logger.exception("songdb: MuNET 删除复核失败（本轮按无缺席信号重建）")
+    # 重建剔除集（2026-10-05）：MuNET 留痕在列复核（缺席裁决留档 kv）∪ 部署
+    # 级屏蔽名单。复核仅覆盖 MuNET 自建曲——MuNET 对删除曲的清理不可依赖
+    # （id12055 上线前删除曲实测仍收录、条目与现役完全同构），对宴/教程曲则
+    # 无收录（maimaiinfo 独有候选的缺席不作信号，曾据此误删三首活曲已回退）
+    try:
+        from .ext import munet as ext_munet
+
+        await ext_munet.run_deletion_sweep()
+    except Exception:
+        logger.exception("songdb: MuNET 留痕在列复核失败（不影响重建）")
+    excluded = await _excluded_song_ids()
     # 外部补充源：读取一次，id 集作 JP 在列信号参与删除判定，重建后合并（§7.5-C）
     try:
         extra_docs = await _load_extra_docs()
@@ -1700,7 +1705,7 @@ async def refresh_all(
     result = await rebuild(
         payloads,
         extra_jp_ids=extra_jp_ids(extra_docs) | munet_ids,
-        munet_absent_ids=munet_absent or None,
+        excluded_ids=excluded or None,
     )
     logger.info(
         f"songdb：重建完成——曲 {result['songs']}、谱面组 {result['groups']}、"
@@ -1720,7 +1725,7 @@ async def refresh_all(
             # force：重建已用基础源覆写外部字段（maimaiinfo 物量/定数历史无条件
             # 写回），必须强制重放外部源，否则机台校正活不过下一次重建
             result["extra"] = await apply_external_sources(
-                preloaded=extra_docs, force=True, munet_absent_ids=munet_absent or None
+                preloaded=extra_docs, force=True, excluded_ids=excluded or None
             )
         except Exception:
             logger.exception("songdb: 外部补充源应用失败（不影响规范表）")
@@ -2056,51 +2061,28 @@ def extra_jp_ids(docs: list[tuple[str, str, dict]]) -> set[int]:
     return {int(key) for _n, _m, doc in docs for key in doc if str(key).isdigit()}
 
 
-async def _munet_absence_check(payloads: dict[str, Any]) -> set[int]:
-    """MuNET 缺席复核（刷新管线内）：派生候选 → GetById 仲裁 → 全量缺席集。
+async def _excluded_song_ids() -> set[int]:
+    """重建剔除集：MuNET 留痕缺席裁决（kv）∪ 部署级屏蔽名单（归一根 id）。
 
-    候选 = maimaiinfo 独有（otoge 现役/下架标题皆无）∩ 当前已归入 DX 世代
-    （规范表 version ≥ 20000）。otoge 不覆盖远古世代（约 250 首旧曲双缺属
-    常态，其缺席不构成信号），按版本收窄；MuNET 为 day-0 源：候选在列 =
-    otoge 滞后/回滚（保留，兼作回滚保护），缺席 = 删除曲（id12055 上线前
-    删除曲经 maimaiinfo 机台全集滞留，2026-10-05 实测）。复核集经
-    :func:`munet.run_deletion_sweep`（含 MuNET 留痕 id），缺席裁决留档
-    ``munet_absent_ids``。返回裁决后**全量**缺席集（重建与外部源合并共用）。
+    屏蔽名单（``AWMC_SONG_DENYLIST``）为人工确认的删除曲——三方数据源
+    （maimaiinfo 机台全集/MuNET 未清理条目/otoge 从未记录）无法与在役曲区
+    分，只有人工知识可判（2026-10-05 id12055 定案）；缺席裁决仅来自 MuNET
+    留痕自建曲的复核（MuNET 自身清理不可依赖，见 run_deletion_sweep）。
     """
-    from .ext import munet as ext_munet
-
-    info, dschange = payloads.get("maimaiinfo"), payloads.get("dschange")
-    if info is None or dschange is None:
-        return set()
-    jp = parse_maimaiinfo(info, dschange)
-    otoge_titles = {
-        norm_title(e["title"]) for e in payloads.get("otoge_db") or [] if e.get("title")
-    } | {
-        norm_title(e["title"])
-        for e in payloads.get("otoge_deleted") or []
-        if e.get("title")
-    }
-    async with store.session() as session:
-        rows = (
-            await session.exec(
-                select(store.SongSheetGroup.song_id).where(
-                    col(store.SongSheetGroup.version) >= Version.MAIMAI_DX.value
-                )
-            )
-        ).all()
-    dx_ids = set(rows)
-    candidates = [
-        sid
-        for sid, e in jp.items()
-        if e.title and sid in dx_ids and norm_title(e.title) not in otoge_titles
-    ]
-    await ext_munet.run_deletion_sweep(check_ids=candidates)
     raw = await store.kv_get("munet_absent_ids")
-    return (
+    absent = (
         {int(x) for x in raw if isinstance(x, (int, float))}
         if isinstance(raw, list)
         else set()
     )
+    from ..config import plugin_config
+
+    denied = {
+        int(x) % DX_ID_OFFSET
+        for x in plugin_config.awmc_song_denylist
+        if isinstance(x, (int, float)) and int(x) > 0
+    }
+    return absent | denied
 
 
 async def _munet_known_ids() -> set[int]:
@@ -2120,7 +2102,7 @@ async def apply_external_sources(
     preloaded: list[tuple[str, str, dict]] | None = None,
     *,
     force: bool = False,
-    munet_absent_ids: set[int] | None = None,
+    excluded_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     """读取并应用外部补充源（§7.5-C）：仅日服侧，标准 JSON，override/fill 字段级合并。
 
@@ -2151,7 +2133,7 @@ async def apply_external_sources(
     summary["hash"] = digest
     if docs and (force or digest != prev):
         applied, created, changed_fields = await _merge_extra_docs(
-            docs, munet_absent_ids=munet_absent_ids
+            docs, excluded_ids=excluded_ids
         )
         summary["applied"] = applied
         summary["created"] = created
@@ -2444,14 +2426,14 @@ async def _archive_extra_docs(docs: list[tuple[str, str, dict]]) -> None:
 
 
 async def _merge_extra_docs(
-    docs: list[tuple[str, str, dict]], munet_absent_ids: set[int] | None = None
+    docs: list[tuple[str, str, dict]], excluded_ids: set[int] | None = None
 ) -> tuple[int, int, int]:
     """外部标准 JSON 合并进主表：**只允许日服侧**，写 ``version_cn`` 忽略并告警。
 
     主表缺失的曲（骨架外新曲、maimaiinfo 滞后的新版曲等，文档自带 id）直接
     创建（仅日侧行，version_cn 恒 NULL）；单元素 sd/dx ``level`` 按「当前定数」
     语义合并（:func:`_merge_current_level`），多元素列表按 01 文档线格式对位。
-    ``munet_absent_ids``（MuNET 缺席复核确认的删除曲）跳过——机台快照等挖掘
+    ``excluded_ids``（MuNET 缺席复核确认的删除曲）跳过——机台快照等挖掘
     类文档可能收录删除曲，合并建行会让其随刷新复活。返回 (applied 处理条目数,
     created 新增曲数, changed 真实值变化字段数)。
     """
@@ -2467,7 +2449,7 @@ async def _merge_extra_docs(
                 logger.warning(f"songdb: 外部源 {name} 非法 id {song_id_str!r}，跳过")
                 continue
             song_id = int(song_id_str)
-            if munet_absent_ids and song_id in munet_absent_ids:
+            if excluded_ids and song_id in excluded_ids:
                 continue  # 删除曲：外部源文档不建行
             if not isinstance(song_doc, dict):
                 logger.warning(f"songdb: 外部源 {name} id={song_id} 条目非对象，跳过")

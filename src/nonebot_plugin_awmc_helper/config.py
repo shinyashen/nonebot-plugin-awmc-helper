@@ -77,6 +77,12 @@ class Config(BaseModel):
     # MuNET current_jp 版本批次补充（当批曲目谱面/当前定数/别名/发布日期，
     # fill 语义 + 创建缺失曲；每日管线内 title-diff 候选，默认关需显式开启）
     awmc_munet_batch: bool = False
+    # 曲库屏蔽名单（根 id 或显示 id 皆可，读入归一根 id）：人工确认的删除曲
+    # 从曲库与全部重建/合并路径剔除。自动信号对其无效的场合使用——上线前
+    # 删除曲（id12055 实测）maimaiinfo 机台全集持续收录、MuNET 未清理条目
+    # （与现役条目完全同构）、otoge 从未记录，三方数据都无法区分「删除」与
+    # 「存在」，只有人工知识可判（2026-10-05 定案）
+    awmc_song_denylist: list[int] = []
     # MuNET 别名全量走查刷新间隔（天，0=禁用默认关；走查有断点续走与单次
     # 60 分钟时间预算，实测约 30 分钟单晚走完）
     awmc_munet_alias_days: int = 0
