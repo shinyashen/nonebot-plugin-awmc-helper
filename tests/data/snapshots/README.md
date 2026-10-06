@@ -9,3 +9,7 @@
 
 「当前态」场景（国服当前进度、限曲身份、增量段等会随版本推进过期）也以本快照为准构造；
 快照无原型的路径（如国服限定曲，当前真实数据已不存在）在 fixture 内构造并注明。
+
+2026-10-06 增补 munet_inarau.json（三源一档的场景文件）：居並ぶ穀物と溜息まじりの
+運送屋 MAGiCAL 标准谱面追加——MuNET GetById 实时取回、otoge/maimaiinfo 裁自本地
+克隆（commit 见 meta.json munet_inarau 条目），供「既有曲追加谱面组」批次路径用例。

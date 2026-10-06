@@ -188,3 +188,14 @@ def make_pending_revealed(**over: Any) -> dict:
 def make_munet_entry() -> dict:
     """MuNET GetById 真实条目（物語はここから，addVersion 27，含别名与逐谱定数）。"""
     return _fresh("munet_monogatari.json")
+
+
+def make_munet_inarau() -> dict:
+    """居並ぶ穀物と溜息まじりの運送屋 MAGiCAL 标准谱面追加场景（2026-10-06 取材）。
+
+    三源一档：``get_by_id`` = MuNET GetById/1154（SD+DX 混合条目，SD 段
+    2026-10-04 入库）、``otoge`` = music-ex 现役条目（lev_* SD 追加全套，
+    version 27002/release 261002）、``maimaiinfo`` = all_data[11154] DX 原谱。
+    供「既有曲追加谱面组」批次路径用例，溯源见 snapshots/meta.json。
+    """
+    return _fresh("munet_inarau.json")

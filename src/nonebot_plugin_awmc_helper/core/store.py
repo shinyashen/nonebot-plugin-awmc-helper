@@ -776,6 +776,26 @@ async def list_song_titles() -> set[str]:
     return {row.title for row in rows if row.title}
 
 
+async def song_kind_index() -> dict[int, tuple[str, frozenset[str]]]:
+    """全库歌曲的 (title, 已有谱面组 kind 集)，批次「标题+组类型」差分用。
+
+    返回 ``{song_id: (title, kinds)}``（title 为空的不返回）；kinds 含
+    sd/dx/utage 全量，消费方按需取用。谱面组追加候选的判定依据是
+    otoge 侧分组字段与这里的 kind 集合做差。
+    """
+    async with session() as db:
+        song_rows = (await db.exec(select(SongRow))).all()
+        group_rows = (await db.exec(select(SongSheetGroup))).all()
+    kinds: dict[int, set[str]] = {}
+    for group in group_rows:
+        kinds.setdefault(group.song_id, set()).add(group.kind)
+    return {
+        row.id: (row.title, frozenset(kinds.get(row.id, ())))
+        for row in song_rows
+        if row.title
+    }
+
+
 async def song_group_facts(song_ids: list[int]) -> dict[int, dict]:
     """指定曲的标题与 sd/dx 组版本/日期现值（MuNET 批次既有曲校正用）。
 

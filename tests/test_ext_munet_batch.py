@@ -1,7 +1,9 @@
-"""MuNET current_jp 批次内新增歌曲补充：title-diff 候选 → 拉取 → fill 合并。
+"""MuNET current_jp 批次补充：标题/组类型差分候选 → 拉取 → fill 合并。
 
 批次条目取 MuNET 真实条目（物語はここから，id 2020，2026-09-29 GetById 快照，
 见 songdb_fixtures.make_munet_entry）；封面走 otoge PR 预读的真实哈希名。
+既有曲追加谱面组路径取居並ぶ穀物と溜息まじりの運送屋 MAGiCAL SD 追加的真实
+三源场景（2026-10-06 取材，make_munet_inarau）。
 """
 
 import pytest
@@ -13,6 +15,7 @@ from songdb_fixtures import (
     make_divingfish,
     make_otoge_live,
     make_munet_entry,
+    make_munet_inarau,
     make_otoge_deleted,
 )
 
@@ -198,42 +201,170 @@ async def test_munet_ids_guard_against_otoge_rollback(db, monkeypatched_munet):
     assert state.songs.get(BATCH_ENTRY_ID) is not None  # 不被回滚误删
 
 
-async def test_batch_corrects_poisoned_version(db, monkeypatched_munet, monkeypatch):
-    """既有曲版本校正（2026-10-03 OV3RCLOCK 实况）：批次建曲写入国际服批次码
-    后，otoge 权威值（PR 预读）出现时经 override 通道纠正（fill/基础源都只填
-    空，不校正会永久滞留）。"""
+async def test_batch_corrects_unconfirmed_version(db, monkeypatched_munet, monkeypatch):
+    """批次写入版本的 otoge 事实校正（OV3RCLOCK 残留形态）：日服已上但 MuNET
+    addVersion 仍是国际服先行批次码（26→26500）且 otoge 事实未到 → 写入未证实
+    留痕；otoge 权威值到场后按留痕覆写该组（fill/基础源都只填空，不校正会
+    永久滞留）。"""
     from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.core.ext import munet, otoge_pr
 
-    await songdb.rebuild(full_payloads())
-    await munet.run_batch_supplement()
-    # 模拟国际服先行曲误写：组版本退化为国际服码（addVersion 26 → CiRCLE PLUS）
-    state = await songdb.State.load()
-    state.groups[(BATCH_ENTRY_ID, "dx")].version = 26500
-    await state.save()
+    # 国际服先行、日服已上（optJapan 非空）→ addVersion 26 推导码被当组版本写入
+    intl_entry = {
+        "id": 2024,
+        "name": "OV3RCLOCK",
+        "artist": "Alicemetix",
+        "bpm": 118,
+        "genre": 105,
+        "addVersion": 26,
+        "version": 26506,
+        "aliases": [],
+        "charts": [
+            {
+                "difficulty": 3,
+                "kind": 1,
+                "designer": "",
+                "utageId": 0,
+                "optJapan": "A000",
+                "optInternational": "A031",
+                "playableArea": 2,
+                "releaseTime": None,
+                "tapCount": 685,
+                "holdCount": 40,
+                "slideCount": 91,
+                "touchCount": 24,
+                "breakCount": 87,
+                "constants": [{"version": 26, "constant": 14.8}],
+            }
+        ],
+    }
+
+    async def fake_search(query):
+        if query == "OV3RCLOCK":
+            return [dict(intl_entry)]
+        return []
+
+    async def fake_by_id(music_id):
+        return dict(intl_entry) if music_id == 2024 else None
 
     async def fake_pr():
+        return [{"title": "OV3RCLOCK", "image_url": "360427dd3d2c96ca.png"}]
+
+    monkeypatch.setattr(munet, "search_music", fake_search)
+    monkeypatch.setattr(munet, "fetch_music_by_id", fake_by_id)
+    monkeypatch.setattr(otoge_pr, "load_open_pr_entries", fake_pr)
+
+    await songdb.rebuild(full_payloads())
+    await munet.run_batch_supplement()
+    state = await songdb.State.load()
+    assert state.groups[(2024, "dx")].version == 26500
+    assert (await db.kv_get("munet_batch_groups")) == {
+        "2024": {"dx": {"version": 26500, "confirmed": False}}
+    }
+
+    async def fake_pr_with_fact():
         # 真实 PR #1213 口径：MAGiCAL 期中 27002 + release 261002
         return [
             {
-                "title": "物語はここから",
-                "image_url": BATCH_COVER,
+                "title": "OV3RCLOCK",
+                "image_url": "360427dd3d2c96ca.png",
                 "version": "27002",
                 "release": "261002",
             }
         ]
 
-    monkeypatch.setattr(otoge_pr, "load_open_pr_entries", fake_pr)
+    monkeypatch.setattr(otoge_pr, "load_open_pr_entries", fake_pr_with_fact)
     result = await munet.run_batch_supplement()
-    assert result["corrected"] == [BATCH_ENTRY_ID]
+    assert result["corrected"] == [2024]
     state = await songdb.State.load()
-    group = state.groups[(BATCH_ENTRY_ID, "dx")]
+    group = state.groups[(2024, "dx")]
     assert group.version == 27002
     assert group.date == 261002
-
-    # 稳态：值已一致，下一轮不再产生校正
+    # 校正后转 confirmed，稳态不再产生校正
+    assert (await db.kv_get("munet_batch_groups"))["2024"]["dx"] == {
+        "version": 27002,
+        "confirmed": True,
+    }
     second = await munet.run_batch_supplement()
     assert "corrected" not in second
+
+
+async def test_batch_adds_missing_sd_group(db, monkeypatched_munet, monkeypatch):
+    """既有曲追加谱面组（2026-10-06 居並ぶ穀物と溜息まじりの運送屋 MAGiCAL
+    SD 追加实测）：标题已在规范表但 otoge 分组字段（lev_bas）表明其拥有缺失
+    的 sd 组 → MuNET 混合条目按 only_kind 只转 SD 段 → fill 建组；既有组版本
+    不被组追加与校正触碰（otoge 条目级批次码≠组内历史版本）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.ext import munet, otoge_db
+
+    case = make_munet_inarau()
+    # Ignite Infinity（真实双组曲）在裁剪快照里缺 SD 条目，会成真组候选干扰
+    # 计数：本用例聚焦居並ぶ，按现役表时点差异裁去（合法裁剪口径）
+    otoge_entries = [s for s in make_otoge_live() if s["title"] != "Ignite Infinity"]
+    payloads = full_payloads()
+    payloads["maimaiinfo"]["11154"] = case["maimaiinfo"]
+    payloads["otoge_db"] = [*otoge_entries, case["otoge"]]
+    await songdb.rebuild(payloads)
+    state = await songdb.State.load()
+    assert state.songs[1154].title == "居並ぶ穀物と溜息まじりの運送屋"
+    assert (1154, "sd") not in state.groups  # 前置：otoge 已知 SD 而表内缺组
+    assert state.groups[(1154, "dx")].version == 21000
+
+    inarau = case["get_by_id"]
+
+    async def fake_search(query):
+        if query == "居並ぶ穀物と溜息まじりの運送屋":
+            return [dict(inarau)]
+        if query == "物語はここから":
+            return [dict(make_munet_entry()["search"]["musicData"][0])]
+        return []
+
+    async def fake_by_id(music_id):
+        if music_id == 1154:
+            return dict(inarau)
+        if music_id == BATCH_ENTRY_ID:
+            return dict(make_munet_entry()["get_by_id"])
+        return None
+
+    async def fake_main():
+        return [*otoge_entries, case["otoge"]]
+
+    monkeypatch.setattr(munet, "search_music", fake_search)
+    monkeypatch.setattr(munet, "fetch_music_by_id", fake_by_id)
+    monkeypatch.setattr(otoge_db, "fetch_music_ex", fake_main)
+
+    result = await munet.run_batch_supplement()
+    assert result["group_candidates"] == 1
+    assert result["entries"] == 2  # 居並ぶ（组追加）+ 物語はここから（新曲候选照常）
+
+    state = await songdb.State.load()
+    sd_group = state.groups[(1154, "sd")]
+    assert sd_group.version == 27002  # otoge 事实（非 MuNET addVersion 码 27000）
+    assert sd_group.date == 261002
+    assert sd_group.version_cn is None  # 日服先行，国服未上线
+    chart = state.chart(1154, "sd", 3)
+    assert chart.designer == "サファ太"
+    assert (
+        chart.notes_tap,
+        chart.notes_hold,
+        chart.notes_slide,
+        chart.notes_touch,
+        chart.notes_break,
+    ) == (592, 56, 174, 0, 93)
+    assert state.history_of(1154, "sd", 3) == [(27002, 13.8)]
+    assert state.groups[(1154, "dx")].version == 21000  # 既有组原样
+    assert (await db.kv_get("munet_batch_groups"))["1154"] == {
+        "sd": {"version": 27002, "confirmed": True}
+    }
+    assert 1154 in (await db.kv_get("munet_batch_ids"))
+
+    # 下一轮：组已齐候选清零，校正稳态无动作
+    second = await munet.run_batch_supplement()
+    assert second["group_candidates"] == 0
+    assert "corrected" not in second
+    state = await songdb.State.load()
+    assert state.groups[(1154, "dx")].version == 21000
+    assert state.groups[(1154, "sd")].version == 27002
 
 
 async def test_batch_intl_first_song_uses_otoge_fact(

@@ -3,6 +3,7 @@
 import httpx
 import respx
 import pytest
+from songdb_fixtures import make_munet_inarau
 
 
 @pytest.fixture(autouse=True)
@@ -195,6 +196,57 @@ def test_entry_to_doc_dx_group_offset(munet):
     base, doc = munet.entry_to_doc(entry)
     assert base == 1580  # SD+DX 双组曲的 DX 组 = 曲 id + 10000
     assert "dx" in doc["sheets"]
+
+
+def test_entry_to_doc_only_kind_splits_mixed_entry(munet):
+    """混合条目（同一 MuNET 行挂 SD+DX 两套谱）按 only_kind 精确分流，
+    目标组外的谱面不入文档；宴目标非法。"""
+    entry = _entry(id=11154)
+    sd_chart = _entry()["charts"][0]
+    entry["charts"] = [
+        sd_chart,
+        {**sd_chart, "difficulty": 3, "kind": 1, "designer": "隅田川星人"},
+    ]
+    base, doc = munet.entry_to_doc(entry, only_kind="sd")
+    assert base == 1154  # id % 10000
+    assert list(doc["sheets"]) == ["sd"]
+    assert [c["level_id"] for c in doc["sheets"]["sd"]["contents"]] == [0]
+    _base, doc = munet.entry_to_doc(entry, only_kind="dx")
+    assert list(doc["sheets"]) == ["dx"]
+    assert doc["sheets"]["dx"]["contents"][0]["designer"] == "隅田川星人"
+    with pytest.raises(ValueError, match="only_kind"):
+        munet.entry_to_doc(entry, only_kind="utage")
+
+
+def test_entry_to_doc_designer_dash_filtered(munet):
+    """'-'＝谱师未公开：与 parse_maimaiinfo 同口径不入库。"""
+    _base, doc = munet.entry_to_doc(_entry(), only_kind="sd")
+    assert "designer" not in doc["sheets"]["sd"]["contents"][0]
+
+
+def test_entry_to_doc_inarau_sd_addition(munet):
+    """真实混合条目（居並ぶ穀物と溜息まじりの運送屋，MuNET 2026-10-06
+    GetById）：SD 追加段（kind=0、addVersion 27）+ otoge 事实 → 完整 SD 组
+    文档；DX 原谱（kind=1）不掺入。"""
+    fact = {"version": 27002, "date": 261002}
+    base, doc = munet.entry_to_doc(
+        make_munet_inarau()["get_by_id"], otoge_fact=fact, only_kind="sd"
+    )
+    assert base == 1154
+    sheet = doc["sheets"]["sd"]
+    assert sheet["version"] == 27002
+    assert sheet["date"] == 261002
+    contents = sheet["contents"]
+    assert [c["level_id"] for c in contents] == [0, 1, 2, 3]
+    assert [c["level"][0] for c in contents] == [4.0, 6.8, 10.7, 13.8]
+    assert [c.get("designer") for c in contents] == [
+        None,
+        None,
+        "Luxizhel",
+        "サファ太",
+    ]
+    assert contents[0]["notes"] == [174, 10, 9, 0, 4]
+    assert all(c["notes"][3] == 0 for c in contents)  # SD 谱无 touch
 
 
 def test_entry_to_doc_buddy_utage_excluded(munet):

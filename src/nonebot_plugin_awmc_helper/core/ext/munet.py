@@ -41,6 +41,11 @@ _walk_running = False
 原子——并发触发（每日 cron + 手动 force）后到者立即 running，不排队重走。"""
 
 _WALK_KV = "munet_alias_walk"
+_BATCH_GROUPS_KV = "munet_batch_groups"
+"""批次建组写入留痕：``{song_id: {kind: {"version", "confirmed"}}}``——
+version=本轮写入组版本的文档值，confirmed=写入时有 otoge 事实背书。
+版本校正（:func:`_correct_unconfirmed_versions`）只覆写未证实写入，
+防止 otoge 条目级「最新批次码」冲掉既有曲老组的历史版本。"""
 _WALK_BUDGET_SECONDS = 3600.0
 """单次走查时间预算（60 分钟；规范表实测 1763 请求 ≈ 30 分钟，预算留足余量
 保证单晚走完），超时记游标跨日续走。"""
@@ -198,7 +203,11 @@ def _entry_kind(entry: dict) -> str | None:
 
 
 def entry_to_doc(
-    entry: dict, *, image_url: str | None = None, otoge_fact: dict | None = None
+    entry: dict,
+    *,
+    image_url: str | None = None,
+    otoge_fact: dict | None = None,
+    only_kind: str | None = None,
 ) -> tuple[int, dict] | None:
     """MuNET 条目 → 01 标准 JSON 片段（(规范表曲 id, doc)）；不可转换 → None。
 
@@ -209,15 +218,33 @@ def entry_to_doc(
       国际服码（OV3RCLOCK 实测 addVersion 26 → CiRCLE PLUS，日服实为 MAGiCAL），
       误写日侧组版本且 fill/基础源都不覆盖会永久滞留；otoge 事实（PR 预读/
       现役表的日服权威 version/release）优先于 MuNET 推导值；
+    - ``only_kind``（sd/dx）＝既有曲追加谱面组：只转换目标组的谱面——混合
+      条目（同一 MuNET 行挂 SD+DX 两套谱，2026-10-06 居並ぶ SD 追加实测）
+      按 MuNET ``kind``（0=SD、1=DX）分流，不给就全并入 ``_entry_kind`` 的
+      单一组（新曲路径的行为，新曲不存在混合形态）；
     - 宴谱内容不转换：MuNET utageId 无法映射规范表 level_id，宴字段由 otoge-db
       提供（独立宴谱条目仍建曲与组版本，别名照常收割）；宴为日服独占，其组
       版本不做在役确认；
     - buddy（協）谱物量恒 0（无左右分工），不产 notes 留给 otoge-db。
     """
     music_id = int(entry["id"])
-    kind = _entry_kind(entry)
-    if kind is None:
-        return None
+    if only_kind is not None:
+        if only_kind not in ("sd", "dx"):
+            raise ValueError(f"only_kind 仅支持 sd/dx：{only_kind!r}")
+        kind = only_kind
+    else:
+        kind = _entry_kind(entry)
+        if kind is None:
+            return None
+
+    def _in_kind(chart: dict) -> bool:
+        # 目标组谱面选择：宴谱恒排除；only_kind 按机台 kind 精确分流
+        if chart.get("utageId"):
+            return False
+        if only_kind is None:
+            return True
+        return chart.get("kind") == (0 if only_kind == "sd" else 1)
+
     doc: dict[str, Any] = {
         "title": entry.get("name") or "",
         "artist": entry.get("artist") or "",
@@ -239,18 +266,18 @@ def entry_to_doc(
         contents: list[dict] = []
         earliest: int | None = None
         jp_confirmed = any(
-            not c.get("utageId") and c.get("optJapan")
-            for c in entry.get("charts") or []
+            _in_kind(c) and c.get("optJapan") for c in entry.get("charts") or []
         )
         fact = otoge_fact or {}
         version = fact.get("version")
         if version is None and code is not None and jp_confirmed:
             version = code
         for chart in entry.get("charts") or []:
-            if chart.get("utageId"):
+            if not _in_kind(chart):
                 continue
             content: dict[str, Any] = {"level_id": int(chart.get("difficulty") or 0)}
-            if chart.get("designer"):
+            # '-'＝谱师未公开（与 parse_maimaiinfo 同口径，不入库）
+            if chart.get("designer") and chart["designer"] != "-":
                 content["designer"] = chart["designer"]
             notes = [
                 int(chart.get(k) or 0)
@@ -449,72 +476,122 @@ async def _pending_titles() -> list[str]:
     return titles
 
 
-async def _correct_existing_versions(facts: dict[str, dict]) -> list[int]:
-    """既有曲版本/日期校正：MuNET 曾入库的曲按 otoge 日服权威值覆写。
-
-    批次建曲时写入的组版本可能是 MuNET 侧口径（国际服先行曲拿到国际服批次
-    码，2026-10-03 OV3RCLOCK 实测 26500≠日服 27002），而合并层 fill 与日侧
-    基础源（apply_jp/_fill_row_from_otoge）对既有组版本都只填空不覆盖，错误
-    值会永久滞留——此处对 ``munet_batch_ids`` 在列且 otoge 事实不同的曲走
-    override 文档显式校正（经 apply_external_sources，指纹/底图联动一致）。
-    只动 sd/dx 组：宴为日服独占，MuNET addVersion 无国际服先行问题。
-    """
-    if not facts:
-        return []
+def _group_title_key(title: str) -> str:
+    """标题 join 键（组追加差分与既有组校正共用）：normalize_text（NFKC+简体）
+    后再 norm_title（去空白）对齐——任一侧只做 norm_title 会在简繁/全半角
+    差异上错配（normalize_text 相等保证 NFKC 相等，反向不然）。"""
     from .. import songdb
 
-    munet_ids = set(await store.kv_get("munet_batch_ids") or [])
-    if not munet_ids:
+    return songdb.norm_title(normalize_text(title))
+
+
+# otoge 条目的分组字段 → 规范表组类别（sd 组无前缀、dx 组带 dx_ 前缀）
+_OTOGE_KIND_FIELD = {"sd": "lev_bas", "dx": "dx_lev_bas"}
+
+
+async def _correct_unconfirmed_versions(facts: dict[str, dict]) -> list[int]:
+    """批次写入组版本的 otoge 事实校正（仅限未证实写入，防覆写既有组）。
+
+    批次建组时写入的组版本可能是 MuNET 侧口径（国际服先行曲拿到国际服批次
+    码，2026-10-03 OV3RCLOCK 实测 26500≠日服 27002），而合并层 fill 与日侧
+    基础源（apply_jp/_fill_row_from_otoge）对既有组版本都只填空不覆盖，错误
+    值会永久滞留——事实到场后按 :data:`_BATCH_GROUPS_KV` 留痕覆写该组并转
+    confirmed。
+
+    otoge 事实在场的写入直接 confirmed、永不覆写：otoge ``version`` 是条目
+    级「最新批次」码，与曲内老组的历史版本天然不等——既有曲追加谱面组时
+    （2026-10-06 居並ぶ SD 追加），按曲级/差值覆写会把老组版本冲成新批次码，
+    故校正严格限定在「未证实留痕」上。留痕值已被其他源改写（现值≠留痕值）
+    时重新锚定为现值并转 confirmed，同样不覆写。只动 sd/dx 组：宴为日服
+    独占，MuNET addVersion 无国际服先行问题。
+    """
+    from .. import songdb
+
+    records = await store.kv_get(_BATCH_GROUPS_KV)
+    if not isinstance(records, dict) or not records:
         return []
-    rows = await store.song_group_facts(sorted(munet_ids))
-
-    def _join_key(title: str) -> str:
-        # facts 键在 run_batch_supplement 已按 normalize_text 归一；行标题侧
-        # 同口径后再叠 norm_title（去空白）对齐——任一侧只做 norm_title 会在
-        # 简繁/全半角差异上错配（normalize_text 相等保证 NFKC 相等，反向不然）
-        return songdb.norm_title(normalize_text(title))
-
-    by_title: dict[str, int] = {}
-    for sid, info in rows.items():
-        if info["title"]:
-            by_title.setdefault(_join_key(info["title"]), sid)
+    ids = sorted(int(k) for k in records if isinstance(k, str) and k.isdigit())
+    if not ids:
+        return []
+    rows = await store.song_group_facts(ids)
     corrections: dict[str, dict] = {}
-    for title, fact in facts.items():
-        sid = by_title.get(_join_key(title))
-        if sid is None:
+    corrected: list[int] = []
+    dirty = False
+    for sid_str, kinds in records.items():
+        if not isinstance(kinds, dict) or not isinstance(sid_str, str):
             continue
-        patch = {k: v for k in ("version", "date") if (v := fact.get(k)) is not None}
-        if not patch:
+        if not sid_str.isdigit():
             continue
-        for kind in ("sd", "dx"):
-            group = rows[sid]["groups"].get(kind)
-            # 有差异才写：override 文档只在真实偏差时产生，稳态零合并
-            if group and any(group.get(k) != v for k, v in patch.items()):
-                sheet = corrections.setdefault(str(sid), {"sheets": {}})["sheets"]
-                sheet[kind] = dict(patch)
-    if not corrections:
-        return []
-    await songdb.apply_external_sources(
-        preloaded=[(_SOURCE, "override", corrections)], force=True
-    )
-    corrected_ids = [int(sid) for sid in corrections]
-    logger.info(
-        f"MuNET 批次：既有曲版本校正 {len(corrected_ids)} 首"
-        f"（{corrected_ids}，otoge 权威值覆写）"
-    )
-    return corrected_ids
+        info = rows.get(int(sid_str))
+        if info is None or not info["title"]:
+            continue
+        fact = facts.get(_group_title_key(info["title"]))
+        for kind, rec in list(kinds.items()):
+            if kind not in ("sd", "dx") or not isinstance(rec, dict):
+                continue
+            if rec.get("confirmed"):
+                continue
+            group = info["groups"].get(kind)
+            if group is None:
+                # 组已不存在（重建删除等）：留痕失效
+                del kinds[kind]
+                dirty = True
+                continue
+            if fact is None:
+                continue  # 事实未到，保持未证实态等下一轮
+            if group["version"] == fact["version"]:
+                # 现值已与事实一致（他源先行校正）→ 收编转 confirmed
+                kinds[kind] = {"version": group["version"], "confirmed": True}
+                dirty = True
+            elif group["version"] == rec.get("version"):
+                # 留痕值原样在列且与事实不符 → 覆写该组（override 文档只在
+                # 真实偏差时产生，稳态零合并）
+                patch = {
+                    k: v for k in ("version", "date") if (v := fact.get(k)) is not None
+                }
+                if patch:
+                    sheet = corrections.setdefault(sid_str, {"sheets": {}})["sheets"]
+                    sheet[kind] = patch
+                    kinds[kind] = {"version": fact["version"], "confirmed": True}
+                    dirty = True
+                    corrected.append(int(sid_str))
+            else:
+                # 现值已被其他源改写（≠留痕值）→ 重新锚定为现值，不覆写
+                kinds[kind] = {"version": group["version"], "confirmed": True}
+                dirty = True
+    if corrections:
+        await songdb.apply_external_sources(
+            preloaded=[(_SOURCE, "override", corrections)], force=True
+        )
+    if dirty:
+        await store.kv_set(_BATCH_GROUPS_KV, records)
+    if corrected:
+        corrected = sorted(set(corrected))
+        logger.info(
+            f"MuNET 批次：未证实组版本校正 {len(corrected)} 首"
+            f"（{corrected}，otoge 权威值覆写）"
+        )
+    return corrected
 
 
 async def run_batch_supplement() -> dict:
-    """current_jp 批次内新增歌曲补充：otoge 视角 title-diff → 拉取合并。
+    """current_jp 批次补充：otoge 视角「标题+组类型」差分 → 拉取合并。
 
-    - 候选 = otoge-db 视角下规范表没有的标题：自动化 PR 分支（day-0 标题+
+    - 新曲候选 = otoge-db 视角下规范表没有的标题：自动化 PR 分支（day-0 标题+
       封面哈希，§六）∪ merged main 现役表 ∪ ``song_pending`` 暂存标题——
       **版本内期中新增**（如 MAGiCAL 期的 27001 追加曲）与新版本批次同样覆盖；
+    - 组追加候选 = 标题已在规范表、但 otoge 条目的分组字段（sd=``lev_bas``、
+      dx=``dx_lev_bas``）表明其拥有表内缺失的 sd/dx 组——既有曲的标准/DX
+      谱面追加（2026-10-06 居並ぶ穀物と溜息まじりの運送屋 MAGiCAL SD 追加
+      实测）。宴组不参与：MuNET utageId 无法映射规范表 level_id，宴结构
+      仍由 maimaiinfo 驱动（song-db-design 定案）；
     - 每个候选标题 ``Search`` 解析 id → ``GetById`` 全量 → 01 标准 JSON
-      （fill 模式 + 创建缺失曲，经 :func:`songdb.apply_external_sources`）；
-      搜索按标题/别名模糊命中，仅对名称与候选一致的条目拉取全量；
-    - 别名随拉取收割进 ``song_alias``（增量 upsert）；
+      （新曲走 fill 模式 + 创建缺失曲；组追加按 ``only_kind`` 只转换目标
+      组，fill 对既有组只填空不覆盖），经 :func:`songdb.apply_external_sources`
+      合并；搜索按标题/别名模糊命中，仅对名称与候选一致的条目拉取全量；
+    - 建组逐 (曲, 组) 留痕写入值与 otoge 事实背书（:data:`_BATCH_GROUPS_KV`，
+      供 :func:`_correct_unconfirmed_versions`）；别名随拉取收割进
+      ``song_alias``（增量 upsert）；
     - 每日管线触发，稳态无新增时零歌曲请求；BrowseFilters 仅作版本状态日志。
     """
     from . import otoge_db as ext_otoge
@@ -526,6 +603,10 @@ async def run_batch_supplement() -> dict:
         return {"status": "disabled"}
     # 成员判断走 set（全库曲名 × 候选集的 `not in` 否则是数百万次线性比较）
     canonical_titles = set(await store.list_song_titles())
+    # 组追加差分索引：归一标题 → (曲 id, 已有组 kind 集)
+    title_index: dict[str, tuple[int, frozenset[str]]] = {}
+    for sid, (row_title, kinds) in (await store.song_kind_index()).items():
+        title_index.setdefault(_group_title_key(row_title), (sid, kinds))
     images: dict[str, str] = {}
     facts: dict[str, dict] = {}
     # 两表键与下方等值门同口径（normalize_text）：搜索放行按归一相等，而
@@ -554,16 +635,43 @@ async def run_batch_supplement() -> dict:
     )
     titles.extend(await _pending_titles())
     titles = [t for t in dict.fromkeys(titles) if t not in canonical_titles]
+    # 组追加候选：otoge 分组字段与规范表现有组做差（同曲同组去重，PR 先到先得）
+    group_work: list[tuple[str, str]] = []
+    seen_groups: set[tuple[str, str]] = set()
+    for item in (*pr_entries, *live_entries):
+        title = item.get("title")
+        if not title:
+            continue
+        existing = title_index.get(_group_title_key(title))
+        if existing is None:
+            continue  # 表内无此曲：新曲候选路径负责
+        _, kinds = existing
+        for kind in ("sd", "dx"):
+            if kind not in kinds and item.get(_OTOGE_KIND_FIELD[kind]):
+                if (title, kind) not in seen_groups:
+                    seen_groups.add((title, kind))
+                    group_work.append((title, kind))
     if len(titles) > _BATCH_TITLE_CAP:  # 安全阀：异常批量候选截断（正常批次 ≤ 数十）
         logger.warning(
             f"MuNET 批次：候选标题 {len(titles)} 超常，截断至 {_BATCH_TITLE_CAP}"
         )
         titles = titles[:_BATCH_TITLE_CAP]
-    logger.info(f"MuNET 批次补充：规范表外候选标题 {len(titles)} 个")
+    if len(group_work) > _BATCH_TITLE_CAP:
+        logger.warning(
+            f"MuNET 批次：组追加候选 {len(group_work)} 超常，截断至 {_BATCH_TITLE_CAP}"
+        )
+        group_work = group_work[:_BATCH_TITLE_CAP]
+    logger.info(
+        f"MuNET 批次补充：规范表外候选标题 {len(titles)} 个，"
+        f"组追加候选 {len(group_work)} 个"
+    )
     docs_by_base: dict[int, dict] = {}
+    batch_groups: dict[str, dict] = {}
     alias_items: dict[int, list[str]] = {}
     processed = 0
-    for title in titles:
+    work: list[tuple[str, str | None]] = [(t, None) for t in titles]
+    work.extend(group_work)
+    for title, only_kind in work:
         try:
             hits = await search_music(title)
         except ExtError as e:
@@ -584,10 +692,13 @@ async def run_batch_supplement() -> dict:
             processed += 1
             for root, aliases in harvest_aliases([payload]).items():
                 alias_items.setdefault(root, []).extend(aliases)
+            name_key = normalize_text(payload.get("name") or "")
+            fact = facts.get(name_key)
             converted = entry_to_doc(
                 payload,
-                image_url=images.get(normalize_text(payload.get("name") or "")),
-                otoge_fact=facts.get(normalize_text(payload.get("name") or "")),
+                image_url=images.get(name_key),
+                otoge_fact=fact,
+                only_kind=only_kind,
             )
             if converted is None:
                 continue
@@ -597,9 +708,18 @@ async def run_batch_supplement() -> dict:
                 if song_doc.get(field) and not merged.get(field):
                     merged[field] = song_doc[field]
             merged["sheets"].update(song_doc["sheets"])
+            # 逐 (曲, 组) 留痕写入值 + otoge 事实背书（组追加/新曲同款，
+            # 同曲多命中时按条目顺序后者覆盖，与 sheets 的 update 同口径）
+            rec = batch_groups.setdefault(str(base), {})
+            for kind, sheet in song_doc["sheets"].items():
+                rec[kind] = {
+                    "version": sheet.get("version"),
+                    "confirmed": fact is not None,
+                }
     result: dict[str, Any] = {
         "status": "batch",
         "candidates": len(titles),
+        "group_candidates": len(group_work),
         "entries": processed,
     }
     if docs_by_base:
@@ -616,7 +736,13 @@ async def run_batch_supplement() -> dict:
         merged_ids = set(known) if isinstance(known, list) else set()
         merged_ids |= set(docs_by_base)
         await store.kv_set("munet_batch_ids", sorted(merged_ids))
-    corrected = await _correct_existing_versions(facts)
+        # 组写入留痕（新曲建组与既有曲追加组同款）：校正只认未证实写入
+        records = await store.kv_get(_BATCH_GROUPS_KV)
+        merged_records = records if isinstance(records, dict) else {}
+        for base, kinds in batch_groups.items():
+            merged_records.setdefault(str(base), {}).update(kinds)
+        await store.kv_set(_BATCH_GROUPS_KV, merged_records)
+    corrected = await _correct_unconfirmed_versions(facts)
     if corrected:
         result["corrected"] = corrected
     if alias_items:

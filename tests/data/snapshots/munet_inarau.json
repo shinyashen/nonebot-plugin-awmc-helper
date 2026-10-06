@@ -1,0 +1,729 @@
+{
+ "maimaiinfo": {
+  "id": "11154",
+  "title": "居並ぶ穀物と溜息まじりの運送屋",
+  "type": "DX",
+  "ds": [
+   3.0,
+   7.8,
+   11.8,
+   12.9
+  ],
+  "level": [
+   "3",
+   "7+",
+   "11+",
+   "12+"
+  ],
+  "cids": [
+   1,
+   1,
+   1,
+   1
+  ],
+  "charts": [
+   {
+    "notes": [
+     120,
+     18,
+     4,
+     18,
+     5
+    ],
+    "charter": "-"
+   },
+   {
+    "notes": [
+     299,
+     36,
+     10,
+     41,
+     8
+    ],
+    "charter": "-"
+   },
+   {
+    "notes": [
+     394,
+     69,
+     35,
+     70,
+     22
+    ],
+    "charter": "小鳥遊さん"
+   },
+   {
+    "notes": [
+     697,
+     70,
+     123,
+     26,
+     34
+    ],
+    "charter": "隅田川星人"
+   }
+  ],
+  "basic_info": {
+   "title": "居並ぶ穀物と溜息まじりの運送屋",
+   "artist": "hanzo",
+   "genre": "舞萌",
+   "bpm": "160",
+   "release_date": "20200917",
+   "from": "maimai でらっくす Splash",
+   "is_new": false
+  },
+  "alias": [
+   "居並ぶ穀物と溜息まじりの運送屋",
+   "老汉推车",
+   "牢大骑车",
+   "老汉拉车",
+   "老爷爷",
+   "木雕2",
+   "木雕鲶鱼2",
+   "老登拉车",
+   "水手",
+   "运送屋"
+  ],
+  "fit_diff": [
+   3.35,
+   7.54,
+   11.58,
+   12.8
+  ]
+ },
+ "otoge": {
+  "sort": "1103",
+  "title": "居並ぶ穀物と溜息まじりの運送屋",
+  "title_kana": "イナラフコクモツトタメイキマシリノウンソウヤ",
+  "artist": "hanzo",
+  "catcode": "maimai",
+  "version": "27002",
+  "bpm": "160",
+  "image_url": "c02537aab0c8a6a2.png",
+  "release": "261002",
+  "lev_bas": "4",
+  "lev_adv": "6",
+  "lev_exp": "10+",
+  "lev_mas": "13+",
+  "dx_lev_bas": "3",
+  "dx_lev_adv": "7+",
+  "dx_lev_exp": "11+",
+  "dx_lev_mas": "12+",
+  "lev_bas_i": "4.0",
+  "lev_bas_notes": "197",
+  "lev_bas_notes_tap": "174",
+  "lev_bas_notes_hold": "10",
+  "lev_bas_notes_slide": "9",
+  "lev_bas_notes_break": "4",
+  "lev_adv_i": "6.8",
+  "lev_adv_notes": "324",
+  "lev_adv_notes_tap": "280",
+  "lev_adv_notes_hold": "18",
+  "lev_adv_notes_slide": "14",
+  "lev_adv_notes_break": "12",
+  "lev_exp_i": "10.7",
+  "lev_exp_notes": "604",
+  "lev_exp_notes_tap": "427",
+  "lev_exp_notes_hold": "78",
+  "lev_exp_notes_slide": "55",
+  "lev_exp_notes_break": "44",
+  "lev_exp_designer": "Luxizhel",
+  "lev_mas_i": "13.8",
+  "lev_mas_notes": "915",
+  "lev_mas_notes_tap": "592",
+  "lev_mas_notes_hold": "56",
+  "lev_mas_notes_slide": "174",
+  "lev_mas_notes_break": "93",
+  "lev_mas_designer": "サファ太",
+  "dx_lev_bas_i": "3.0",
+  "dx_lev_bas_notes": "165",
+  "dx_lev_bas_notes_tap": "120",
+  "dx_lev_bas_notes_hold": "18",
+  "dx_lev_bas_notes_slide": "4",
+  "dx_lev_bas_notes_touch": "18",
+  "dx_lev_bas_notes_break": "5",
+  "dx_lev_adv_i": "7.8",
+  "dx_lev_adv_notes": "394",
+  "dx_lev_adv_notes_tap": "299",
+  "dx_lev_adv_notes_hold": "36",
+  "dx_lev_adv_notes_slide": "10",
+  "dx_lev_adv_notes_touch": "41",
+  "dx_lev_adv_notes_break": "8",
+  "dx_lev_exp_i": "11.8",
+  "dx_lev_exp_notes": "590",
+  "dx_lev_exp_notes_tap": "394",
+  "dx_lev_exp_notes_hold": "69",
+  "dx_lev_exp_notes_slide": "35",
+  "dx_lev_exp_notes_touch": "70",
+  "dx_lev_exp_notes_break": "22",
+  "dx_lev_exp_designer": "小鳥遊さん",
+  "dx_lev_mas_i": "12.9",
+  "dx_lev_mas_notes": "950",
+  "dx_lev_mas_notes_tap": "697",
+  "dx_lev_mas_notes_hold": "70",
+  "dx_lev_mas_notes_slide": "123",
+  "dx_lev_mas_notes_touch": "26",
+  "dx_lev_mas_notes_break": "34",
+  "dx_lev_mas_designer": "隅田川星人",
+  "wiki_url": "https://gamerch.com/maimai/533873",
+  "intl": "1",
+  "date_added": "20200917",
+  "date_updated": "20261002",
+  "date_intl_added": "20210129"
+ },
+ "get_by_id": {
+  "id": 1154,
+  "name": "居並ぶ穀物と溜息まじりの運送屋",
+  "artist": "hanzo",
+  "bpm": 160,
+  "genre": 105,
+  "addVersion": 15,
+  "version": 21000,
+  "hasStandard": true,
+  "hasDeluxe": true,
+  "isLocked": false,
+  "aliases": [
+   {
+    "id": 570,
+    "musicId": 1154,
+    "music": null,
+    "alias": "拔小蒜",
+    "databaseAddTime": "2025-08-13T09:37:14.848077+00:00"
+   },
+   {
+    "id": 4923,
+    "musicId": 1154,
+    "music": null,
+    "alias": "勇敢勇敢我的朋友",
+    "databaseAddTime": "2025-08-13T09:41:13.09178+00:00"
+   },
+   {
+    "id": 4924,
+    "musicId": 1154,
+    "music": null,
+    "alias": "木雕2",
+    "databaseAddTime": "2025-08-13T09:41:13.091781+00:00"
+   },
+   {
+    "id": 4925,
+    "musicId": 1154,
+    "music": null,
+    "alias": "木雕鲶鱼2",
+    "databaseAddTime": "2025-08-13T09:41:13.091782+00:00"
+   },
+   {
+    "id": 4926,
+    "musicId": 1154,
+    "music": null,
+    "alias": "老汉拉车",
+    "databaseAddTime": "2025-08-13T09:41:13.091784+00:00"
+   },
+   {
+    "id": 4927,
+    "musicId": 1154,
+    "music": null,
+    "alias": "老汉推车",
+    "databaseAddTime": "2025-08-13T09:41:13.091786+00:00"
+   },
+   {
+    "id": 4928,
+    "musicId": 1154,
+    "music": null,
+    "alias": "老爷爷",
+    "databaseAddTime": "2025-08-13T09:41:13.091788+00:00"
+   },
+   {
+    "id": 4929,
+    "musicId": 1154,
+    "music": null,
+    "alias": "老登拉车",
+    "databaseAddTime": "2025-08-13T09:41:13.09179+00:00"
+   },
+   {
+    "id": 4930,
+    "musicId": 1154,
+    "music": null,
+    "alias": "运送屋",
+    "databaseAddTime": "2025-08-13T09:41:13.091791+00:00"
+   },
+   {
+    "id": 4931,
+    "musicId": 1154,
+    "music": null,
+    "alias": "进击的骆驼祥子",
+    "databaseAddTime": "2025-08-13T09:41:13.091793+00:00"
+   },
+   {
+    "id": 7932,
+    "musicId": 1154,
+    "music": null,
+    "alias": "卖炭翁",
+    "databaseAddTime": "2025-08-13T09:41:42.262699+00:00"
+   },
+   {
+    "id": 9994,
+    "musicId": 1154,
+    "music": null,
+    "alias": "骆驼祥子",
+    "databaseAddTime": "2026-01-16T04:00:37.747804+00:00"
+   },
+   {
+    "id": 10041,
+    "musicId": 1154,
+    "music": null,
+    "alias": "老农民我的乡亲",
+    "databaseAddTime": "2026-01-18T04:00:33.031746+00:00"
+   },
+   {
+    "id": 10042,
+    "musicId": 1154,
+    "music": null,
+    "alias": "老头拉车",
+    "databaseAddTime": "2026-01-18T04:00:33.031769+00:00"
+   }
+  ],
+  "charts": [
+   {
+    "id": 3959,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 0,
+    "kind": 1,
+    "addVersion": 15,
+    "designer": "",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "A000",
+    "optInternational": "A000",
+    "optChina": "A000",
+    "playableArea": 7,
+    "tapCount": 120,
+    "holdCount": 18,
+    "slideCount": 4,
+    "touchCount": 18,
+    "breakCount": 5,
+    "notesCount": 165,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 3959,
+      "chartId": 3959,
+      "chart": null,
+      "version": 24,
+      "constant": 3,
+      "databaseAddTime": "2025-08-13T09:33:54.515822+00:00"
+     },
+     {
+      "id": 9528,
+      "chartId": 3959,
+      "chart": null,
+      "version": 23,
+      "constant": 3,
+      "databaseAddTime": "2025-08-13T09:36:34.857902+00:00"
+     },
+     {
+      "id": 22325,
+      "chartId": 3959,
+      "chart": null,
+      "version": 25,
+      "constant": 3,
+      "databaseAddTime": "2025-09-19T02:31:00.408425+00:00"
+     },
+     {
+      "id": 28596,
+      "chartId": 3959,
+      "chart": null,
+      "version": 26,
+      "constant": 3,
+      "databaseAddTime": "2026-03-21T18:35:36.687361+00:00"
+     },
+     {
+      "id": 36360,
+      "chartId": 3959,
+      "chart": null,
+      "version": 27,
+      "constant": 3,
+      "databaseAddTime": "2026-09-18T14:08:40.599571+00:00"
+     }
+    ],
+    "releaseTime": "2020-09-17T00:00:00+00:00",
+    "databaseAddTime": "2025-08-13T09:33:54.514871+00:00",
+    "gameMusicId": 11154
+   },
+   {
+    "id": 3960,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 1,
+    "kind": 1,
+    "addVersion": 15,
+    "designer": "",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "A000",
+    "optInternational": "A000",
+    "optChina": "A000",
+    "playableArea": 7,
+    "tapCount": 299,
+    "holdCount": 36,
+    "slideCount": 10,
+    "touchCount": 41,
+    "breakCount": 8,
+    "notesCount": 394,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 3960,
+      "chartId": 3960,
+      "chart": null,
+      "version": 24,
+      "constant": 7.8,
+      "databaseAddTime": "2025-08-13T09:33:54.516495+00:00"
+     },
+     {
+      "id": 9529,
+      "chartId": 3960,
+      "chart": null,
+      "version": 23,
+      "constant": 7.8,
+      "databaseAddTime": "2025-08-13T09:36:34.858548+00:00"
+     },
+     {
+      "id": 22326,
+      "chartId": 3960,
+      "chart": null,
+      "version": 25,
+      "constant": 7.8,
+      "databaseAddTime": "2025-09-19T02:31:00.408779+00:00"
+     },
+     {
+      "id": 28597,
+      "chartId": 3960,
+      "chart": null,
+      "version": 26,
+      "constant": 7.8,
+      "databaseAddTime": "2026-03-21T18:35:36.687381+00:00"
+     },
+     {
+      "id": 36361,
+      "chartId": 3960,
+      "chart": null,
+      "version": 27,
+      "constant": 7.8,
+      "databaseAddTime": "2026-09-18T14:08:40.59958+00:00"
+     }
+    ],
+    "releaseTime": "2020-09-17T00:00:00+00:00",
+    "databaseAddTime": "2025-08-13T09:33:54.515847+00:00",
+    "gameMusicId": 11154
+   },
+   {
+    "id": 3961,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 2,
+    "kind": 1,
+    "addVersion": 15,
+    "designer": "小鳥遊さん",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "A000",
+    "optInternational": "A000",
+    "optChina": "A000",
+    "playableArea": 7,
+    "tapCount": 394,
+    "holdCount": 69,
+    "slideCount": 35,
+    "touchCount": 70,
+    "breakCount": 22,
+    "notesCount": 590,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 3961,
+      "chartId": 3961,
+      "chart": null,
+      "version": 24,
+      "constant": 11.8,
+      "databaseAddTime": "2025-08-13T09:33:54.517211+00:00"
+     },
+     {
+      "id": 9530,
+      "chartId": 3961,
+      "chart": null,
+      "version": 23,
+      "constant": 11.8,
+      "databaseAddTime": "2025-08-13T09:36:34.859235+00:00"
+     },
+     {
+      "id": 22327,
+      "chartId": 3961,
+      "chart": null,
+      "version": 25,
+      "constant": 11.8,
+      "databaseAddTime": "2025-09-19T02:31:00.409193+00:00"
+     },
+     {
+      "id": 28598,
+      "chartId": 3961,
+      "chart": null,
+      "version": 26,
+      "constant": 11.8,
+      "databaseAddTime": "2026-03-21T18:35:36.687397+00:00"
+     },
+     {
+      "id": 36362,
+      "chartId": 3961,
+      "chart": null,
+      "version": 27,
+      "constant": 11.8,
+      "databaseAddTime": "2026-09-18T14:08:40.599586+00:00"
+     }
+    ],
+    "releaseTime": "2020-09-17T00:00:00+00:00",
+    "databaseAddTime": "2025-08-13T09:33:54.516514+00:00",
+    "gameMusicId": 11154
+   },
+   {
+    "id": 3962,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 3,
+    "kind": 1,
+    "addVersion": 15,
+    "designer": "隅田川星人",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "A000",
+    "optInternational": "A000",
+    "optChina": "A000",
+    "playableArea": 7,
+    "tapCount": 697,
+    "holdCount": 70,
+    "slideCount": 123,
+    "touchCount": 26,
+    "breakCount": 34,
+    "notesCount": 950,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 3962,
+      "chartId": 3962,
+      "chart": null,
+      "version": 24,
+      "constant": 12.9,
+      "databaseAddTime": "2025-08-13T09:33:54.518006+00:00"
+     },
+     {
+      "id": 9531,
+      "chartId": 3962,
+      "chart": null,
+      "version": 23,
+      "constant": 12.9,
+      "databaseAddTime": "2025-08-13T09:36:34.86003+00:00"
+     },
+     {
+      "id": 16224,
+      "chartId": 3962,
+      "chart": null,
+      "version": 16,
+      "constant": 12.9,
+      "databaseAddTime": "2025-08-13T09:41:13.091798+00:00"
+     },
+     {
+      "id": 16225,
+      "chartId": 3962,
+      "chart": null,
+      "version": 17,
+      "constant": 12.9,
+      "databaseAddTime": "2025-08-13T09:41:13.0918+00:00"
+     },
+     {
+      "id": 16226,
+      "chartId": 3962,
+      "chart": null,
+      "version": 18,
+      "constant": 12.9,
+      "databaseAddTime": "2025-08-13T09:41:13.091802+00:00"
+     },
+     {
+      "id": 22328,
+      "chartId": 3962,
+      "chart": null,
+      "version": 25,
+      "constant": 12.9,
+      "databaseAddTime": "2025-09-19T02:31:00.409654+00:00"
+     },
+     {
+      "id": 28599,
+      "chartId": 3962,
+      "chart": null,
+      "version": 26,
+      "constant": 12.9,
+      "databaseAddTime": "2026-03-21T18:35:36.687416+00:00"
+     },
+     {
+      "id": 36363,
+      "chartId": 3962,
+      "chart": null,
+      "version": 27,
+      "constant": 12.9,
+      "databaseAddTime": "2026-09-18T14:08:40.599593+00:00"
+     }
+    ],
+    "releaseTime": "2020-09-17T00:00:00+00:00",
+    "databaseAddTime": "2025-08-13T09:33:54.517231+00:00",
+    "gameMusicId": 11154
+   },
+   {
+    "id": 7597,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 0,
+    "kind": 0,
+    "addVersion": 27,
+    "designer": "-",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "N011",
+    "optInternational": "",
+    "optChina": "",
+    "playableArea": 1,
+    "tapCount": 174,
+    "holdCount": 10,
+    "slideCount": 9,
+    "touchCount": 0,
+    "breakCount": 4,
+    "notesCount": 197,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 39697,
+      "chartId": 7597,
+      "chart": null,
+      "version": 27,
+      "constant": 4,
+      "databaseAddTime": "2026-10-04T06:09:28.083436+00:00"
+     }
+    ],
+    "releaseTime": null,
+    "databaseAddTime": "2026-10-04T06:09:28.083369+00:00",
+    "gameMusicId": 1154
+   },
+   {
+    "id": 7598,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 1,
+    "kind": 0,
+    "addVersion": 27,
+    "designer": "-",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "N011",
+    "optInternational": "",
+    "optChina": "",
+    "playableArea": 1,
+    "tapCount": 280,
+    "holdCount": 18,
+    "slideCount": 14,
+    "touchCount": 0,
+    "breakCount": 12,
+    "notesCount": 324,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 39698,
+      "chartId": 7598,
+      "chart": null,
+      "version": 27,
+      "constant": 6.8,
+      "databaseAddTime": "2026-10-04T06:09:28.083497+00:00"
+     }
+    ],
+    "releaseTime": null,
+    "databaseAddTime": "2026-10-04T06:09:28.083455+00:00",
+    "gameMusicId": 1154
+   },
+   {
+    "id": 7599,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 2,
+    "kind": 0,
+    "addVersion": 27,
+    "designer": "Luxizhel",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "N011",
+    "optInternational": "",
+    "optChina": "",
+    "playableArea": 1,
+    "tapCount": 427,
+    "holdCount": 78,
+    "slideCount": 55,
+    "touchCount": 0,
+    "breakCount": 44,
+    "notesCount": 604,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 39699,
+      "chartId": 7599,
+      "chart": null,
+      "version": 27,
+      "constant": 10.7,
+      "databaseAddTime": "2026-10-04T06:09:28.083521+00:00"
+     }
+    ],
+    "releaseTime": null,
+    "databaseAddTime": "2026-10-04T06:09:28.08351+00:00",
+    "gameMusicId": 1154
+   },
+   {
+    "id": 7600,
+    "musicId": 1154,
+    "music": null,
+    "difficulty": 3,
+    "kind": 0,
+    "addVersion": 27,
+    "designer": "サファ太",
+    "utageId": 0,
+    "utageKanji": "",
+    "utageComment": "",
+    "optJapan": "N011",
+    "optInternational": "",
+    "optChina": "",
+    "playableArea": 1,
+    "tapCount": 592,
+    "holdCount": 56,
+    "slideCount": 174,
+    "touchCount": 0,
+    "breakCount": 93,
+    "notesCount": 915,
+    "isSelfMade": false,
+    "constants": [
+     {
+      "id": 39700,
+      "chartId": 7600,
+      "chart": null,
+      "version": 27,
+      "constant": 13.8,
+      "databaseAddTime": "2026-10-04T06:09:28.083568+00:00"
+     }
+    ],
+    "releaseTime": null,
+    "databaseAddTime": "2026-10-04T06:09:28.083548+00:00",
+    "gameMusicId": 1154
+   }
+  ],
+  "databaseAddTime": "2025-08-13T09:33:54.514852+00:00"
+ }
+}
