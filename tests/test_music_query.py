@@ -1103,3 +1103,163 @@ async def test_alias_single_net_routes_jp_view(app: App, songs, monkeypatch):
         lambda: chart_card_bytes(jp_song, net_binding, SongType.DX, True),
         suffix="您要找的是不是这首？",
     )
+
+
+# ---------------------------------------------------------------------------
+# 数字 id 解析的追加谱面组回退（2026-10-06 居並ぶ MAGiCAL SD 追加实测）：
+# CN 视图按根 id 合并缓存必命中，偏好类型 CN 缺而日服视图有时回退日服出卡
+# ---------------------------------------------------------------------------
+
+
+def _inarau_pair():
+    """居並ぶ穀物と溜息まじりの運送屋（真实曲，实测值）：CN 视图为 DX 原曲
+    （maimai_py 形态，无 standard），日服视图为追加 SD 组后的双组曲。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    cn_song = make_song(
+        1154,
+        "居並ぶ穀物と溜息まじりの運送屋",
+        version=21000,
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="12+",
+                level_value=12.9,
+                version=21000,
+                tap_num=697,
+                hold_num=70,
+                slide_num=123,
+                touch_num=26,
+                break_num=34,
+            )
+        ],
+    )
+    jp_song = make_song(
+        1154,
+        "居並ぶ穀物と溜息まじりの運送屋",
+        version=27002,
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.MASTER,
+                level="13+",
+                level_value=13.8,
+                version=27002,
+                tap_num=592,
+                hold_num=56,
+                slide_num=174,
+                touch_num=0,
+                break_num=93,
+            ),
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="12+",
+                level_value=12.9,
+                version=21000,
+                tap_num=697,
+                hold_num=70,
+                slide_num=123,
+                touch_num=26,
+                break_num=34,
+            ),
+        ],
+    )
+    return cn_song, jp_song
+
+
+@pytest.mark.asyncio
+async def test_resolve_raw_id_sd_addition_falls_back_to_jp(monkeypatch):
+    """SD 形状 id（1154）：CN 命中缺 standard 谱面而日服视图有 → 回退日服
+    曲对象并 jp=True（追加组日服先行，CN 数据未跟进）。"""
+    from mocks import seed_service
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    cn_song, jp_song = _inarau_pair()
+
+    async def fake_jp_map():
+        return {1154: jp_song}
+
+    await seed_service(song_service, [cn_song])
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    try:
+        hit = await song_service.resolve_raw_chart(1154)
+        assert hit is not None
+        song, prefer, jp, utage_diff = hit
+        assert song is jp_song
+        assert prefer is SongType.STANDARD
+        assert jp is True
+        assert utage_diff is None
+    finally:
+        song_service._ready.clear()
+
+
+@pytest.mark.asyncio
+async def test_resolve_raw_id_dx_display_keeps_cn(monkeypatch):
+    """DX 展示 id（11154）：CN 命中且偏好类型（DX）在 CN 在列 → 不回退，
+    维持 CN 卡（既有口径）。"""
+    from mocks import seed_service
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    cn_song, _jp_song = _inarau_pair()
+
+    async def fake_jp_map():
+        return {}
+
+    await seed_service(song_service, [cn_song])
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    try:
+        hit = await song_service.resolve_raw_chart(11154)
+        assert hit is not None
+        song, prefer, jp, _utage_diff = hit
+        assert song.id == 1154  # inject 克隆歌曲对象，按根 id 断言（非身份）
+        assert song.difficulties.standard == []
+        assert prefer is SongType.DX
+        assert jp is False
+    finally:
+        song_service._ready.clear()
+
+
+@pytest.mark.asyncio
+async def test_resolve_raw_id_no_fallback_when_jp_lacks_type(monkeypatch):
+    """CN 缺偏好类型但日服视图也没有 → 维持 CN 命中（渲染端组回落口径）。"""
+    from mocks import make_diff, make_song, seed_service
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    cn_song, _jp_song = _inarau_pair()
+    jp_dx_only = make_song(
+        1154,
+        "居並ぶ穀物と溜息まじりの運送屋",
+        version=21000,
+        diffs=[
+            make_diff(
+                type=SongType.DX,
+                level_index=LevelIndex.MASTER,
+                level="12+",
+                level_value=12.9,
+            )
+        ],
+    )
+
+    async def fake_jp_map():
+        return {1154: jp_dx_only}
+
+    await seed_service(song_service, [cn_song])
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    try:
+        hit = await song_service.resolve_raw_chart(1154)
+        assert hit is not None
+        song, prefer, jp, _utage_diff = hit
+        assert song.id == 1154
+        assert prefer is SongType.STANDARD
+        assert jp is False
+    finally:
+        song_service._ready.clear()

@@ -654,6 +654,12 @@ class SongService:
         查分器 id 形状推断偏好（:func:`prefer_type_from_raw_id`），5 位 DX
         展示 id 回查国服对象定日服标注——CN 视图无此曲（日服限定）时
         ``jp=True`` 且返回日服曲对象。
+
+        追加谱面组回退（2026-10-06 居並ぶ MAGiCAL SD 追加实测）：CN 视图
+        （maimai_py 按根 id 合并缓存）对 SD/DX 形状 id 几乎总有命中，但标准/DX
+        追加组日服先行时 CN 数据缺该类型谱面——偏好类型 CN 缺而日服视图有
+        → 改用日服曲对象并 ``jp=True`` 出卡；两侧皆无时维持 CN 命中原状
+        （渲染端 major_diffs 另有组回落口径）。
         """
         if raw_id >= UTAGE_ID_BASE:
             utage_hit = await self.by_utage_id(raw_id)
@@ -666,9 +672,18 @@ class SongService:
         song = await self.by_id(raw_id) or await self.jp_by_id(raw_id)
         if song is None:
             return None
+        prefer = prefer_type_from_raw_id(raw_id)
         # raw_id 可能是 DX 展示 id：按解析出的根 id 回查国服视图定标注
         cn_song = await self.by_id(song.id)
-        return cn_song or song, prefer_type_from_raw_id(raw_id), cn_song is None, None
+        if (
+            cn_song is not None
+            and prefer is not None
+            and not cn_song.get_difficulties(prefer)
+            and (jp_song := await self.jp_by_id(raw_id)) is not None
+            and jp_song.get_difficulties(prefer)
+        ):
+            return jp_song, prefer, True, None
+        return cn_song or song, prefer, cn_song is None, None
 
     async def by_utage_id(
         self, diff_id: int
