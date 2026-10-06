@@ -770,6 +770,34 @@ class SongService:
                 result.append(song)
         return result
 
+    async def _complete_chart_types(self, songs: "list[Song]") -> "list[Song]":
+        """定位结果按日服视图补齐缺失谱面组（追加组日服先行的组级并集）。
+
+        CN 视图（maimai_py）元数据滞后于规范表：标准/DX 追加组日服先行期间
+        CN 曲对象缺该类型谱面，条目展开（chart_entries）少出对应条目——双谱
+        曲退化为单条目直出卡，用户看不到「列出 id 指定」的双条目形态
+        （2026-10-06 居並ぶ MAGiCAL SD 追加实测）。日服视图有 CN 缺失的
+        类型时换用日服曲对象；出卡层的 CN 对象换回与曲线数据由
+        song_lookup_reply / resolve_raw_chart 的偏好回退与绑定路由负责。
+        类型级判定（空/非空），不逐张补谱面（宴轮换的逐张差异不经此）。
+        """
+        if not songs:
+            return songs
+        jp_map = await self._jp_songs_map()
+
+        def _lacks(cn: Song, jp: Song) -> bool:
+            return (
+                (not cn.difficulties.standard and bool(jp.difficulties.standard))
+                or (not cn.difficulties.dx and bool(jp.difficulties.dx))
+                or (not cn.difficulties.utage and bool(jp.difficulties.utage))
+            )
+
+        out: list[Song] = []
+        for song in songs:
+            jp = jp_map.get(song.id)
+            out.append(jp if jp is not None and _lacks(song, jp) else song)
+        return out
+
     async def entries_for_name(
         self, name: str, *, scope: Scope = "cn", cn_title: bool = False
     ) -> list[ChartEntry]:
@@ -794,6 +822,7 @@ class SongService:
             songs = await self.by_title_fuzzy(name)
         if not songs:
             songs = await self.jp_by_title_fuzzy(name)
+        songs = await self._complete_chart_types(songs)
         entries = chart_entries_many(songs)
         if not strip_info:
             return entries

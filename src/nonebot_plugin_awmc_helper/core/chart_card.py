@@ -132,9 +132,21 @@ async def song_lookup_reply(
             diffs = [utage_diff] if utage_diff is not None else None
             png = nb_chart.song_chart_banquet_info(song, diffs, jp=jp)
         else:
-            song = cn_songs[song.id] or song
+            cn_song = cn_songs[song.id]
+            song = cn_song or song
             card_song, jp_card = await resolve_card_view(song, binding)
             jp = flags[0]
+            # 追加谱面组回退（与 resolve_raw_chart 同口径，2026-10-06 居並ぶ
+            # SD 追加实测）：偏好类型谱面 CN 对象缺而日服视图有 → 日服对象
+            # 出卡（jp=True 不嵌国服 B50——该类型谱面国服无成绩可嵌）
+            if (
+                prefer is not None
+                and cn_song is not None
+                and not cn_song.get_difficulties(prefer)
+                and (jp_song := await song_service.jp_by_id(song.id)) is not None
+                and jp_song.get_difficulties(prefer)
+            ):
+                card_song, jp = jp_song, True
             png = await chart_card_bytes(card_song, binding, prefer, jp or jp_card)
         msg = UniMessage.text(f" {JP_ONLY_NOTE}") if jp else UniMessage()
         text = "您要找的是不是这首？"

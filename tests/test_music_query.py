@@ -1263,3 +1263,102 @@ async def test_resolve_raw_id_no_fallback_when_jp_lacks_type(monkeypatch):
         assert jp is False
     finally:
         song_service._ready.clear()
+
+
+@pytest.mark.asyncio
+async def test_entries_completion_lists_added_group(db, monkeypatch):
+    """定位层组级并集（2026-10-06 居並ぶ SD 追加实测）：CN 视图缺 standard
+    而日服视图有 → 条目展开出 SD/DX 双条目（双谱曲「列出 id 指定」形态），
+    不再退化为单 DX 条目直出卡。"""
+    from mocks import seed_service
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    cn_song, jp_song = _inarau_pair()
+    cn_song.aliases = ["骆驼祥子"]
+    jp_song.aliases = ["骆驼祥子"]
+
+    async def fake_jp_map():
+        return {1154: jp_song}
+
+    await seed_service(song_service, [cn_song])
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    try:
+        entries = await song_service.entries_for_name("骆驼祥子")
+        assert [(e[0], e[2]) for e in entries] == [
+            (1154, SongType.STANDARD),
+            (11154, SongType.DX),
+        ]
+        assert all(song is jp_song for _, song, _ in entries)
+    finally:
+        song_service._ready.clear()
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_lookup_reply_sd_prefix_renders_jp_card(app: App, db, monkeypatch):
+    """「标准骆驼祥子是什么歌」：SD 单条目出卡走日服对象并带日服限定标注
+    （CN 对象缺 standard 谱面，出卡偏好回退与 resolve_raw_chart 同口径）。"""
+    import base64
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from mocks import seed_service
+    from maimai_py import SongType
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import music_query
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+    from nonebot_plugin_awmc_helper.core.chart_card import (
+        JP_ONLY_NOTE,
+        chart_card_bytes,
+    )
+
+    cn_song, jp_song = _inarau_pair()
+    cn_song.aliases = ["骆驼祥子"]
+    jp_song.aliases = ["骆驼祥子"]
+
+    async def fake_jp_map():
+        return {1154: jp_song}
+
+    async def fake_ensure(_song_id):
+        return None
+
+    await seed_service(song_service, [cn_song])
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    monkeypatch.setattr(jp_cover, "ensure", fake_ensure)
+
+    png = await chart_card_bytes(jp_song, None, SongType.STANDARD, True)
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.text(f" {JP_ONLY_NOTE}"),
+            MessageSegment.image(f"base64://{base64.b64encode(png).decode()}"),
+            MessageSegment.text("您要找的是不是这首？"),
+        ]
+    )
+    matcher = music_query.search_alias_song
+    event = fake_group_message_event_v11(message="标准骆驼祥子是什么歌")
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
