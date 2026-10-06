@@ -200,3 +200,53 @@ async def test_create_plugin_engine_factory(tmp_path: Path):
         assert {"user_binding", "arcade", "kv_cache"} <= tables
     finally:
         await engine.dispose()
+
+
+class _StubConn:
+    """create_all 桩：run_sync 按脚本逐轮抛错，脚本耗尽后成功。"""
+
+    def __init__(self, script: list[Exception]):
+        self.script = script
+        self.calls = 0
+
+    async def run_sync(self, fn, *args, **kwargs):
+        self.calls += 1
+        if self.calls <= len(self.script):
+            raise self.script[self.calls - 1]
+        return None
+
+
+class _StubEngine:
+    def __init__(self, script: list[Exception]):
+        self.conn = _StubConn(script)
+
+    def begin(self):
+        return self
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_init_plugin_db_race_retry():
+    """建表竞态有界重试（2026-10-06 CI py3.14 实锤：xdist 多 worker 交错时
+    单轮重试可再次撞 already-exists）：连续两轮撞车第三轮收敛；非竞态
+    OperationalError 不重试、首轮即上抛。"""
+    from nonebot_plugin_awmc_helper.core import store
+
+    race = _StubEngine(
+        [
+            sqlite3.OperationalError("table arcade already exists"),
+            sqlite3.OperationalError("table kv_cache already exists"),
+        ]
+    )
+    await store.init_plugin_db(race, SQLModel.metadata)  # 第三轮收敛不抛
+    assert race.conn.calls == 3
+
+    fatal = _StubEngine([sqlite3.OperationalError("unable to open database file")])
+    with pytest.raises(sqlite3.OperationalError, match="unable to open"):
+        await store.init_plugin_db(fatal, SQLModel.metadata)
+    assert fatal.conn.calls == 1

@@ -400,19 +400,20 @@ async def init_plugin_db(engine: AsyncEngine, metadata: MetaData) -> None:
     参数收 metadata 而非绑死 SQLModel.metadata：调用方传各自的表元数据
     （三仓现均用 SQLModel 全局 metadata，连带建出其他仓空表的语义见模块
     docstring）。
+
+    ⚠️ 竞态可能**连续多轮**命中（N 个 worker 的 check/CREATE 交错），单轮
+    重试在 xdist 高并发下仍可再次撞 already-exists（2026-10-06 CI py3.14
+    实锤），故有界循环重试至收敛；非竞态 OperationalError 照常上抛。
     """
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(metadata.create_all)
-    except (SAOperationalError, sqlite3.OperationalError) as e:
-        if "already exists" not in str(e):
-            raise
-        # 多进程并发首启（如 pytest-xdist 各 worker 的 lifespan startup 同打
-        # 一个库文件）：check 与 CREATE 交错触发 already-exists 时本轮
-        # create_all 已中断、未建的表缺位——重跑一遍，第二轮 checkfirst 对
-        # 已建表全部跳过、漏建表补齐，天然幂等
-        async with engine.begin() as conn:
-            await conn.run_sync(metadata.create_all)
+    for _ in range(3):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(metadata.create_all)
+            return
+        except (SAOperationalError, sqlite3.OperationalError) as e:
+            if "already exists" not in str(e):
+                raise
+    raise RuntimeError("create_all 连续多轮 already-exists 未收敛（异常高并发）")
 
 
 async def init_db() -> None:
