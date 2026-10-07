@@ -846,6 +846,94 @@ async def test_combo_chart_entries_heuristic(db, songs):
     assert isinstance(await combo_chart_entries(parse_combo("雪辉dx")), ComboEmpty)
 
 
+@pytest.fixture
+async def bulk_lib(db):
+    """全库替换注入夹具（图长收缩回归用）：用后清 _ready 防泄漏同 worker。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    yield song_service
+    song_service._ready.clear()
+
+
+@pytest.mark.asyncio
+async def test_combo_chart_entries_single_chart_never_shrunk(bulk_lib):
+    """回归（13+ap完成表 0/0）：谱面级精确条件不做图长收缩。
+
+    >200 收缩（ds≥14）曾作用于等级条件——13+ 全组定数 13.6~13.9 被整组
+    滤空后返回**空列表**（ComboEmpty 守卫在收缩前，拦不住），完成表渲染
+    0/0 且无盖章。单等级底图是按全量谱面预渲染的网格，精确条件必须全量
+    保留（§9.0 完成表不收缩难度）。
+    """
+
+    from mocks import make_bulk_level_songs
+
+    from nonebot_plugin_awmc_helper.core.combo import (
+        ComboEmpty,
+        parse_combo,
+        combo_chart_entries,
+    )
+
+    await bulk_lib.inject(make_bulk_level_songs(220))
+    entries = await combo_chart_entries(parse_combo("13+级"))
+    assert not isinstance(entries, ComboEmpty)
+    # 220 张全部保留（旧逻辑：>200 → ds≥14 → 13.7 全滤 → 空列表）
+    assert len(entries) == 220
+    assert all(e[1].level_value == 13.7 for e in entries)
+
+
+@pytest.mark.asyncio
+async def test_combo_chart_entries_shrink_never_empties(bulk_lib):
+    """宽条件代表谱面集：收缩过滤逐级兜底，滤空即放弃该级收缩。
+
+    旧框/低定数全集类宽条件（代表集 >200 且定数全 <14.0）曾同样被滤空。
+    """
+    from mocks import make_bulk_level_songs
+
+    from nonebot_plugin_awmc_helper.core.combo import (
+        ComboEmpty,
+        parse_combo,
+        combo_chart_entries,
+    )
+
+    # 220 张东方曲、定数 13.7（宽条件 → 代表谱面分支 → 220 条 >200）
+    await bulk_lib.inject(make_bulk_level_songs(220))
+    entries = await combo_chart_entries(parse_combo("东方"))
+    assert not isinstance(entries, ComboEmpty)
+    assert len(entries) == 220
+
+
+@pytest.mark.asyncio
+async def test_combo_chart_entries_shrink_still_caps_wide_sets(bulk_lib):
+    """宽条件图长启发式仍生效：>400 收 MASTER、>200 收 ds≥14（可满足时）。"""
+    from mocks import make_diff, make_bulk_level_songs
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.combo import (
+        ComboEmpty,
+        parse_combo,
+        combo_chart_entries,
+    )
+
+    # 450 张各带 MASTER(14.2)+Re:MASTER(14.5)：代表集 900 → >400 收 MASTER
+    # → 450 → >200 收 ds≥14（全满足）→ 450
+    await bulk_lib.inject(
+        make_bulk_level_songs(
+            450,
+            level="14",
+            make_diffs=lambda i: [
+                make_diff(level="14", level_value=14.2, level_index=LevelIndex.MASTER),
+                make_diff(
+                    level="14", level_value=14.5, level_index=LevelIndex.ReMASTER
+                ),
+            ],
+        )
+    )
+    entries = await combo_chart_entries(parse_combo("东方"))
+    assert not isinstance(entries, ComboEmpty)
+    assert len(entries) == 450
+    assert all(e[1].level_index is LevelIndex.MASTER for e in entries)
+
+
 def test_plate_shape():
     """牌子形状检测：牌组合文本 → (版本, 牌种)；非牌形状 → None。
 

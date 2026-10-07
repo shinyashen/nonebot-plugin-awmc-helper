@@ -8,6 +8,7 @@ KISS CANDY FLAVOR(624)——后两首在柚子别名库共持真实别名「糖�
 
 from typing import TYPE_CHECKING
 from pathlib import Path
+from collections.abc import Callable
 
 import pytest
 from maimai_py import (
@@ -420,6 +421,33 @@ def sample_songs() -> list[Song]:
         ),
         # 构造补位（快照无原型）：disabled 路径（落雪 disabled 当前实测为 0）
         make_song(902, "（构造）下架样例", disabled=True),
+    ]
+
+
+def make_bulk_level_songs(
+    count: int,
+    *,
+    song_id_base: int = 30000,
+    level: str = "13+",
+    level_value: float = 13.7,
+    genre: Genre = Genre.東方Project,
+    make_diffs: "Callable[[int], list[SongDifficulty]] | None" = None,
+) -> list[Song]:
+    """批量构造同标级「（构造）」压测曲：图长收缩回归专用（快照无此原型）。
+
+    断言只消费条目数量/难度档，不涉曲名别名展示；``make_diffs(i)`` 自定义
+    谱面组（如 MASTER+Re:MASTER 双谱），缺省单张 DX MASTER。
+    """
+    return [
+        make_song(
+            song_id_base + i,
+            f"（构造）压测曲{song_id_base + i}",
+            genre=genre,
+            diffs=make_diffs(i)
+            if make_diffs is not None
+            else [make_diff(level=level, level_value=level_value)],
+        )
+        for i in range(count)
     ]
 
 
