@@ -108,19 +108,23 @@ def draw_rating_table(
     *,
     theme: str = DEFAULT_THEME,
     checker: "Callable[[Any, Any, Any], bool] | None" = None,
+    im: "Image.Image | None" = None,
 ) -> bytes | None:
     """绘制等级完成表（条件化收编后保留：单等级条件走文件底图与 lv15 版式）。
 
     ``plan``：None/达成率计划 → 评级章模式；fc/fcp/ap → 连击章模式（NB
     plan=True）；fs/fdx/fsp → Sync 章模式（NB 未支持，按连击章模式自然扩展）。
     ``play_result``：玩家全量成绩（ScoreExtend 列表）。底图缺失返回 None。
+    ``im``：调用方预生成的底图（日服视图现算分支，``use_file=False`` 链路）；
+    缺省读预渲染文件。
     ``checker``：达标判定 ``(achievements, fc, fs) -> bool``（plan_of 产物），
     驱动盖章三态背景（QoL：达标白/不达标黑/未打无）；None 回退 ≥100 分界。
     """
-    path = table_template.rating_table_file(level)
-    if not path.exists():
-        return None
-    im = Image.open(path).convert("RGBA")
+    if im is None:
+        path = table_template.rating_table_file(level)
+        if not path.exists():
+            return None
+        im = Image.open(path).convert("RGBA")
     played = {
         (score.id, score.level_index.value): score
         for score in play_result

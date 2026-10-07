@@ -138,10 +138,16 @@ async def _(
     # 表头 = 规范化 label 串（评级档大写等，QoL：s 强制大写）
     header = conds_title(parsed) or cond_text
 
+    # 日服视图禁用国服预渲染文件底图（网格=国服全量谱面，与日服曲集不一致
+    # → 盖章错位/曲集缺漏）：单等级表按 entries 现算（不落盘，条件版同口径）
+    use_file = score_service.view_of(binding.service) != "jp"
+
     if suffix == "定数表":
         # 单等级条件走文件底图 + Level. 前缀（收编等价）；其余现算
         if len(parsed) == 1 and parsed[0].ctype is CondType.LEVEL:
-            png = await table_template.rating_table_text_bytes(parsed[0].value, entries)
+            png = await table_template.rating_table_text_bytes(
+                parsed[0].value, entries, use_file=use_file
+            )
         else:
             png = await table_template.rating_table_cond_text_bytes(entries, header)
         await UniMessage.image(raw=png).finish(at_sender=True)
@@ -169,9 +175,12 @@ async def _(
             theme=theme,
             song_service=song_service,
             checker=checker,
+            use_file=use_file,
         )
     else:
-        im = await table_template.rating_table_base_image(entries, single_level)
+        im = await table_template.rating_table_base_image(
+            entries, single_level, use_file=use_file
+        )
         png = draw_rating_table_cond(
             im,
             plan,

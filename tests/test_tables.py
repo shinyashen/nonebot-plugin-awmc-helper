@@ -311,8 +311,9 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         captured["user_id"] = binding.user_id
         return SimpleNamespace(scores=[])
 
-    async def fake_base_image(entries, level=None):
+    async def fake_base_image(entries, level=None, *, use_file=True):
         captured["level"] = level
+        captured["use_file"] = use_file
         return "im-sentinel"
 
     def fake_cond(
@@ -1007,7 +1008,7 @@ async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
 
     captured = {}
 
-    async def fake_base_image(entries, level=None):
+    async def fake_base_image(entries, level=None, *, use_file=True):
         captured["level"] = level
         return "im-sentinel"
 
@@ -1066,6 +1067,258 @@ async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
         "plan": "fc",
         "by_level": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_combo_score_table_single_level_not_emptied(
+    app: App, db, songs, monkeypatch
+):
+    """回归（2026-10-07 实机 0/0）：13+ap完成表——等级条件谱面集 220 张曾被
+    图长收缩（ds≥14）整组滤空（13+ 定数全 <14.0），渲染 0/0 且无盖章；
+    谱面级精确条件必须全量保留（§9.0 完成表不收缩难度）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from mocks import make_bulk_level_songs
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    await binding_service.ensure("OneBot V11", "12345678")
+    # 全库替换为 220 张 13+（定数 13.7）：>200 触发旧收缩、<400 不触发 MASTER 收缩
+    await song_service.inject(make_bulk_level_songs(220))
+
+    captured = {}
+
+    async def fake_scores_all(b, notify_slow=None):
+        return SimpleNamespace(scores=[])
+
+    async def fake_base_image(entries, level=None, *, use_file=True):
+        captured["level"] = level
+        return "im-sentinel"
+
+    def fake_cond(
+        im,
+        plan,
+        scores,
+        entries,
+        *,
+        header_text,
+        header_prefix=None,
+        theme=None,
+        checker=None,
+        by_level=None,
+    ):
+        captured["entries_len"] = len(entries)
+        captured["plan"] = plan
+        captured["header"] = header_text
+        return b"png"
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+    monkeypatch.setattr(table_template, "rating_table_base_image", fake_base_image)
+    monkeypatch.setattr(plugin, "draw_rating_table_cond", fake_cond)
+
+    event = fake_group_message_event_v11(message="13+ap完成表", user_id=12345678)
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [MessageSegment.at(12345678), MessageSegment.image("base64://cG5n")]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    # 220 张全量到渲染层（旧逻辑此处为 0 → 底图满网格却 0/0 无盖章）
+    assert captured["entries_len"] == 220
+    assert captured["plan"] == "ap"
+    assert captured["level"] == "13+"
+    assert captured["header"] == "13+"
+
+
+@pytest.mark.asyncio
+async def test_combo_score_table_jp_view_fresh_base_image(app: App, db, monkeypatch):
+    """回归：日服视图单等级完成表禁用国服预渲染底图（网格=国服全量谱面，
+    与日服曲集不一致 → 盖章错位），按 JP entries 现算（use_file=False）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from songdb_fixtures import (
+        make_lxns,
+        make_all_data,
+        make_dschange,
+        make_divingfish,
+        make_otoge_live,
+        make_otoge_deleted,
+    )
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    await songdb.rebuild(
+        {
+            "maimaiinfo": make_all_data(),
+            "dschange": make_dschange(),
+            "otoge_db": make_otoge_live(),
+            "otoge_deleted": make_otoge_deleted(),
+            "lxns": make_lxns(),
+            "divingfish": make_divingfish(),
+        }
+    )
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+
+    captured = {}
+
+    async def fake_scores_all(b, notify_slow=None):
+        return SimpleNamespace(scores=[])
+
+    async def fake_base_image(entries, level=None, *, use_file=True):
+        captured["level"] = level
+        captured["use_file"] = use_file
+        captured["entries_len"] = len(entries)
+        return "im-sentinel"
+
+    def fake_cond(im, plan, scores, entries, **kw):
+        return b"png"
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+    monkeypatch.setattr(table_template, "rating_table_base_image", fake_base_image)
+    monkeypatch.setattr(plugin, "draw_rating_table_cond", fake_cond)
+
+    event = fake_group_message_event_v11(message="13+ap完成表", user_id=12345678)
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [MessageSegment.at(12345678), MessageSegment.image("base64://cG5n")]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    # JP 视图：现算底图（不读国服文件），曲集=日服 13+（含日限 チルノ DX）
+    assert captured["use_file"] is False
+    assert captured["level"] == "13+"
+    assert captured["entries_len"] > 0
+
+
+@pytest.mark.asyncio
+async def test_combo_ds_table_jp_view_fresh_base_image(app: App, db, monkeypatch):
+    """日服视图单等级定数表同样禁用国服预渲染底图（曲集缺日限谱面）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from songdb_fixtures import (
+        make_lxns,
+        make_all_data,
+        make_dschange,
+        make_divingfish,
+        make_otoge_live,
+        make_otoge_deleted,
+    )
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    await songdb.rebuild(
+        {
+            "maimaiinfo": make_all_data(),
+            "dschange": make_dschange(),
+            "otoge_db": make_otoge_live(),
+            "otoge_deleted": make_otoge_deleted(),
+            "lxns": make_lxns(),
+            "divingfish": make_divingfish(),
+        }
+    )
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_net(binding, sega_id="sid", password="pw")
+
+    captured = {}
+
+    async def fake_text_bytes(level, entries, *, use_file=True):
+        captured["level"] = level
+        captured["use_file"] = use_file
+        return b"png"
+
+    monkeypatch.setattr(table_template, "rating_table_text_bytes", fake_text_bytes)
+
+    event = fake_group_message_event_v11(message="13+定数表", user_id=12345678)
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [MessageSegment.at(12345678), MessageSegment.image("base64://cG5n")]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    assert captured == {"level": "13+", "use_file": False}
 
 
 @pytest.mark.asyncio

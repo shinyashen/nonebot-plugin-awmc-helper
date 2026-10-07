@@ -601,10 +601,23 @@ async def draw_rating_table_with_fallback(
     theme: str,
     song_service,
     checker: "Callable[[Any, Any, Any], bool] | None" = None,
+    use_file: bool = True,
 ) -> bytes | None:
-    """定数表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。"""
+    """定数表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。
+
+    ``use_file=False``（日服视图）：预渲染文件是国服全量网格，与日服曲集
+    不一致 → 按 entries 现算底图（不落盘，条件版现算同口径），不再走
+    「缺失即补写国服文件」的回退。
+    """
     from .rating_table import draw_rating_table
 
+    if not use_file:
+        im = await asyncio.to_thread(
+            lambda: _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
+        )
+        return draw_rating_table(
+            level, plan, scores, entries, theme=theme, checker=checker, im=im
+        )
     png = draw_rating_table(level, plan, scores, entries, theme=theme, checker=checker)
     if png is None:
         await generate_rating_template(level, song_service)
@@ -703,18 +716,25 @@ def _width(text: str) -> int:
 
 
 async def rating_table_base_image(
-    entries: Sequence[tuple[Song, SongDifficulty]], level: "str | None" = None
+    entries: Sequence[tuple[Song, SongDifficulty]],
+    level: "str | None" = None,
+    *,
+    use_file: bool = True,
 ) -> Image.Image:
     """完成表/定数表底图统一入口：level 文件底图优先（既有预渲染，收编后
     单等级条件保持同速同像素），缺失或无条件 level 时按 entries 现算。
+
+    ``use_file=False``（日服视图）：预渲染文件是国服全量网格，与日服曲集
+    不一致，按 entries 现算且不落盘（条件版现算同口径，2026-09-30 拍板）。
 
     条件版现算不落盘、不做进程缓存（2026-09-30 拍板：条件组合长尾命中率
     低，现算 1-3s 可接受）。CPU 密集，整体在工作线程执行（L-6）。
     """
     if level:
-        path = rating_table_file(level)
-        if path.exists():
-            return Image.open(path).convert("RGBA")
+        if use_file:
+            path = rating_table_file(level)
+            if path.exists():
+                return Image.open(path).convert("RGBA")
         if level == "15":
             # lv15 三列大图版式（含 UNKNOWN 槽）仅文件缺失现算分支保持
             return await asyncio.to_thread(lambda: _rating_grid_15(entries))
@@ -727,14 +747,17 @@ async def _rating_table_text_bytes(
     entries: Sequence[tuple[Song, SongDifficulty]],
     header: str,
     level: "str | None" = None,
+    use_file: bool = True,
 ) -> bytes:
     """定数表文字版渲染孪生体合并实现（第六轮审查）。
 
     ``level`` 非 None → 底图走该等级文件底图（缺失现算）且表头带
     「Level.」前缀；None → 条件版（底图按 entries 现算、条件串直接作表头）。
+    ``use_file=False``（日服视图）按 entries 现算（口径同
+    :func:`rating_table_base_image`）。
     现算分支 CPU 密集，整体在工作线程执行（L-6），故本函数为协程。
     """
-    im = await rating_table_base_image(entries, level)
+    im = await rating_table_base_image(entries, level, use_file=use_file)
     dr = ImageDraw.Draw(im)
     draw_level_header(
         dr, header, 220, prefix="Level." if level else None, suffix="定数表"
@@ -743,7 +766,10 @@ async def _rating_table_text_bytes(
 
 
 async def rating_table_text_bytes(
-    level: str, entries: Sequence[tuple[Song, SongDifficulty]]
+    level: str,
+    entries: Sequence[tuple[Song, SongDifficulty]],
+    *,
+    use_file: bool = True,
 ) -> bytes:
     """`<等级>定数表`（NB DrawRatingTable(level_text=True) 版式）。
 
@@ -753,7 +779,9 @@ async def rating_table_text_bytes(
     签名保持 ``(level, entries)``——plugins/tables 直调（对外名兼容），
     实现统一走 :func:`_rating_table_text_bytes`。
     """
-    return await _rating_table_text_bytes(entries, level, level=level)
+    return await _rating_table_text_bytes(
+        entries, level, level=level, use_file=use_file
+    )
 
 
 async def rating_table_cond_text_bytes(
