@@ -56,13 +56,24 @@ def test_parse_level_float_and_level_from_value():
     assert parse_level_float("13?") == 13.0
     assert parse_level_float("14+") == 14.7
     assert parse_level_float("abc") is None
-    # 标级=定数纯函数（otoge-db 全量 85 值 0 冲突验证）
+    # 标级=定数纯函数（maimaiinfo 全量机台数据验证：1-6 无 + 记法、
+    # 「x」覆盖 x.0-x.9——6.7/6.8/6.9 实测均显示「6」；7 起 .6 边界，
+    # 7.6 实测显示「7+」）
     assert level_from_value(12.0) == "12"
     assert level_from_value(12.5) == "12"
     assert level_from_value(12.6) == "12+"
     assert level_from_value(12.9) == "12+"
     assert level_from_value(13.5) == "13"
     assert level_from_value(13.6) == "13+"
+    # 低于 LEVEL_PLUS_MIN 一律无 +
+    assert level_from_value(6.0) == "6"
+    assert level_from_value(6.6) == "6"
+    assert level_from_value(6.9) == "6"
+    assert level_from_value(5.8) == "5"
+    # 阈值档位本身有 +（7.6 → 「7+」，Luminescence 等机台实测）
+    assert level_from_value(7.0) == "7"
+    assert level_from_value(7.5) == "7"
+    assert level_from_value(7.6) == "7+"
 
 
 def test_parse_maimaiinfo_skeleton_and_history():

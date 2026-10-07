@@ -292,9 +292,18 @@ def strip_chart_prefix(
     return None
 
 
+LEVEL_PLUS_MIN = 7
+"""最低带「+」的标级（maimaiinfo 全量机台数据验证：1–6 级无「+」记法，
+「x」即代表 x.0–x.9 全域——6.7/6.8/6.9 实测均显示「6」；「7+」为最低带+
+档位，otoge-db 全量档位串词表中同样不存在 6+ 及以下）。"""
+
+
 def level_from_value(level_value: float) -> str:
-    """定数 → 标级串（otoge-db 全量验证：x.0–x.5 → 无+，x.6–x.9 → +，0 冲突）。"""
+    """定数 → 标级串（统一入口）：x.0–x.5 → 无+，x.6–x.9 → +；
+    低于 :data:`LEVEL_PLUS_MIN` 一律无+（「x」覆盖 x.0–x.9 全域）。"""
     base = int(level_value)
+    if base < LEVEL_PLUS_MIN:
+        return f"{base}"
     return f"{base}+" if round(level_value * 10) % 10 >= 6 else f"{base}"
 
 
