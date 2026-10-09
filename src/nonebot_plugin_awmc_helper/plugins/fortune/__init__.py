@@ -13,6 +13,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
+from ...constants import ds_text
 from ...core.help import CommandSpec, help_registry
 from ...core.songs import song_service
 from ...core.utils import handle_errors
@@ -79,7 +80,7 @@ async def _(session: Session = UniSession()):
     hit = await song_service.random(exclude_utage=False, rng=daily_random)
     if hit is not None:
         song, _diff = hit
-        ds = "/".join(f"{d.level_value:.1f}" for d in song.get_difficulties())
+        ds = "/".join(ds_text(d.level_value) for d in song.get_difficulties())
         lines.append("打机时不要大力拍打或滑动哦")
         lines.append(f"今日推荐歌曲：ID.{song.id} - {song.title}（定数 {ds}）")
         await (

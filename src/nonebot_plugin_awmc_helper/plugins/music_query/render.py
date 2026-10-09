@@ -5,7 +5,7 @@
 
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from ...constants import display_song_id
+from ...constants import ds_text, display_song_id
 from ...core.songs import cn_song_map, list_jp_note
 from ...core.render import song as song_render
 from ...core.render import jp_cover, nb_chart
@@ -142,7 +142,7 @@ async def _render_pending_result(pending: "list[PendingSong]") -> bool:
     for p in pending:
         charts = p.major_charts()
         ds = "、".join(
-            f"{'DX' if c.is_dx else 'SD'}{c.level_id + 1} {c.level_value:.1f}"
+            f"{'DX' if c.is_dx else 'SD'}{c.level_id + 1} {ds_text(c.level_value)}"
             for c in charts
         )
         lines.append(f"「{p.title}」 {ds}" if ds else f"「{p.title}」")

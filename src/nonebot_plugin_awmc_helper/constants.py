@@ -307,6 +307,16 @@ def level_from_value(level_value: float) -> str:
     return f"{base}+" if round(level_value * 10) % 10 >= 6 else f"{base}"
 
 
+def ds_text(level_value: float) -> str:
+    """定数 → 显示文本（统一入口）：恒一位小数，14.0 不缩写为 14。
+
+    所有面向用户的定数展示一律经此函数——裸 f-string 依赖值恰为 float
+    （int 形态会静默丢「.0」），``:g`` 更是主动剥尾零；显示口径只在
+    本函数钉死一次。
+    """
+    return f"{level_value:.1f}"
+
+
 # ---------------------------------------------------------------------------
 # NB 版绘图移植用的映射表（core/render/nb_chart.py、best50.py 使用）
 # ---------------------------------------------------------------------------

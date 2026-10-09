@@ -33,6 +33,7 @@ from ...constants import (
     COMBO_FILE,
     DEFAULT_THEME,
     SERVICE_DISPLAY,
+    ds_text,
     chart_display_id,
 )
 
@@ -129,7 +130,7 @@ def song_play_data(
         # (685, 251+y) 白字区域相交，提前绘制不被覆盖，逐像素等价
         dr.text(
             (685, level_y + y),
-            f"{diff.level_value}",
+            ds_text(diff.level_value),
             font=font(21, FONT_RODIN),
             fill=WHITE,
             anchor="mm",

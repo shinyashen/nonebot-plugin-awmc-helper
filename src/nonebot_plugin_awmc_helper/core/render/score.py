@@ -30,6 +30,7 @@ from ...constants import (
     DX_ID_OFFSET,
     LEVEL_INDEX_EN,
     THEME_PRISM_PLUS,
+    ds_text,
     chart_display_id,
 )
 from .table_layout import (
@@ -180,7 +181,7 @@ class DrawScore:
             )
             dr.text(
                 (x + 315, y + 124),
-                f"ds:{diff.level_value}",
+                f"ds:{ds_text(diff.level_value)}",
                 font=font(18, FONT_NUM),
                 fill=id_color,
                 anchor="lm",

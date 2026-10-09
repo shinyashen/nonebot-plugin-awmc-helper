@@ -53,6 +53,7 @@ from ...constants import (
     THEME_CIRCLE,
     DEFAULT_THEME,
     SERVICE_DISPLAY,
+    ds_text,
 )
 from .table_layout import (
     B50_B15_TOP,
@@ -566,7 +567,7 @@ def draw_score_row(
         (x + 93, y + 65),
         sub_text
         if sub_text is not None
-        else f"{score.level_value} -> {int(score.dx_rating or 0)}",
+        else f"{ds_text(score.level_value)} -> {int(score.dx_rating or 0)}",
         font=font(15, FONT_NUM),
         fill=DIFF_TEXT_COLORS[diff],
         anchor="lm",

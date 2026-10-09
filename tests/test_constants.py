@@ -267,3 +267,14 @@ def test_chart_display_id_rules():
     assert chart_display_id(song, dx_diff) == 10835
     utage = make_utage(diff_id=119670)
     assert chart_display_id(song, utage) == 119670
+
+
+def test_ds_text_always_one_decimal():
+    """定数显示统一入口：整值定数恒带一位小数（14.0 不缩写为 14）。"""
+    from nonebot_plugin_awmc_helper.constants import ds_text
+
+    assert ds_text(14.0) == "14.0"
+    assert ds_text(13.5) == "13.5"
+    assert ds_text(7.0) == "7.0"
+    # int 形态（上游模型无强转，脏数据直接透传）同样不得丢小数
+    assert ds_text(13) == "13.0"

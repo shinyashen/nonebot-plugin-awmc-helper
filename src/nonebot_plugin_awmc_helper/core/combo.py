@@ -64,6 +64,7 @@ from ..constants import (
     RATE_TO_ZH,
     ERA_YEAR_TO_CODE,
     COLOR_TO_LEVEL_INDEX,
+    ds_text,
     normalize_text,
 )
 
@@ -1165,7 +1166,7 @@ def _ds_cond(v: float) -> Cond:
     return Cond(
         CondType.DS,
         key=f"ds:{round(v * 10)}",
-        label=f"{v:g}定数",
+        label=f"{ds_text(v)}定数",
         chart=lambda s, d, _cur, _v=v: level_value_match(d.level_value, _v),
         value=v,
         single_chart=True,

@@ -9,6 +9,8 @@ from collections.abc import Iterator, Sequence
 
 from maimai_py import Song, SongDifficulty
 
+from ...constants import ds_text
+
 T = TypeVar("T")
 
 # 定数表 lv7–14：85px 格、14 列、起点 x=140、首组 y=450、组间附加 30px
@@ -53,7 +55,7 @@ def group_by_ds(
     for song, diff in entries:
         if diff.level_value < 7:
             continue
-        grouped.setdefault(f"{diff.level_value:.1f}", []).append((song, diff))
+        grouped.setdefault(ds_text(diff.level_value), []).append((song, diff))
     return {k: grouped[k] for k in sorted(grouped, key=float, reverse=True)}
 
 

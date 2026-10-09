@@ -30,6 +30,7 @@ from ...constants import (
     ACHIEVEMENT_LIST,
     JP_VERSION_IMAGE,
     THEME_PRISM_PLUS,
+    ds_text,
     version_zh,
     display_song_id,
     chart_display_id,
@@ -336,7 +337,7 @@ def song_chart_info(
         spacing = 70 * index
         mr.text(
             (120, 590 + spacing),
-            f"{diff.level}({diff.level_value:.1f})",
+            f"{diff.level}({ds_text(diff.level_value)})",
             font=font(22, FONT_RODIN),
             fill=color,
             anchor="mm",

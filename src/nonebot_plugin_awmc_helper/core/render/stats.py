@@ -11,7 +11,7 @@ from maimai_py import Song, FCType, RateType, SongDifficulty
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import image_to_bytes
-from ...constants import RATE_TO_ZH, DIFF_DISPLAY_NAMES, chart_display_id
+from ...constants import RATE_TO_ZH, DIFF_DISPLAY_NAMES, ds_text, chart_display_id
 
 W, H = 1000, 900
 TITLE_COLOR = (44, 52, 60, 255)
@@ -81,7 +81,7 @@ def song_global_data(song: Song, diff: SongDifficulty) -> bytes:
         anchor="mm",
     )
     stat_line = (
-        f"样本数 {curve.sample_size}　拟合定数 {curve.fit_level_value:.1f}　"
+        f"样本数 {curve.sample_size}　拟合定数 {ds_text(curve.fit_level_value)}　"
         f"平均达成率 {curve.avg_achievements:.2f}%"
         f"（σ {curve.stdev_achievements:.2f}）　"
         f"平均DX {curve.avg_dx_score:.0f}"

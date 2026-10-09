@@ -30,6 +30,7 @@ from .nb_chart import major_type_of, paste_version_logo
 from ...constants import (
     GENRE_TO_ZH,
     THEME_PRISM_PLUS,
+    ds_text,
     version_zh,
     display_song_id,
 )
@@ -120,7 +121,7 @@ def draw_song_card(song: Song, id_override: int | None = None) -> Image.Image:
         lvl_w = text_size(lvl_name, f_lvl)[0]
         draw.text((20 + (112 - lvl_w) // 2, y + 5), lvl_name, font=f_lvl, fill="#fff")
         info = (
-            f"{diff.level_value:.1f}　"
+            f"{ds_text(diff.level_value)}　"
             f"TAP {diff.tap_num}　HOLD {diff.hold_num}　"
             f"SLIDE {diff.slide_num}　TOUCH {diff.touch_num}　BRK {diff.break_num}　"
             # 谱师缺省（真实数据 SD BASIC/ADVANCED 常无谱师）按「0 即 -」约定画 -
@@ -241,7 +242,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         if is_utage:
             draw.text(
                 (x + 125, y + 105),
-                f"{utage[0].level_value}",
+                ds_text(utage[0].level_value),
                 font=font(15, FONT_RODIN),
                 fill=WHITE,
                 anchor="mm",
@@ -256,7 +257,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
                 color = DIFF_TEXT_COLORS[diff.level_index.value]
                 draw.text(
                     (x + 125 + 50 * diff.level_index.value, y + 105),
-                    f"{diff.level_value}",
+                    ds_text(diff.level_value),
                     font=font(15, FONT_RODIN),
                     fill=color,
                     anchor="mm",

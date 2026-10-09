@@ -33,6 +33,7 @@ from ...constants import (
     THEME_CIRCLE,
     DEFAULT_THEME,
     DIFF_DISPLAY_NAMES,
+    ds_text,
     chart_display_id,
 )
 
@@ -289,11 +290,13 @@ def score_line_card(
     elif li == LevelIndex.ReMASTER:
         badge_fill = (230, 197, 255, 255)
         badge_text = ID_TEXT_COLORS[li.value]
-        diff_name, lv_text = DIFF_DISPLAY_NAMES[li.value], f"Lv {diff.level_value:.1f}"
+        diff_name = DIFF_DISPLAY_NAMES[li.value]
+        lv_text = f"Lv {ds_text(diff.level_value)}"
     else:
         badge_fill = ID_TEXT_COLORS[li.value]
         badge_text = WHITE
-        diff_name, lv_text = DIFF_DISPLAY_NAMES[li.value], f"Lv {diff.level_value:.1f}"
+        diff_name = DIFF_DISPLAY_NAMES[li.value]
+        lv_text = f"Lv {ds_text(diff.level_value)}"
     bx0, by0, bx1, by1 = 830, 336, 1090, 436
     draw.rounded_rectangle((bx0, by0, bx1, by1), 22, fill=badge_fill)
     bcx = (bx0 + bx1) // 2
