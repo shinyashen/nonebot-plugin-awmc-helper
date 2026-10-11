@@ -139,6 +139,13 @@ async def test_cn_view_uses_cn_values(built):
     jp_master = jp_song.get_difficulty(SongType.STANDARD, LevelIndex(4))
     assert jp_master is not None
     assert jp_master.level_value == 14.2  # 日服最新
+    # 谱面登场版本逐谱面化（2026-10-11）：ReM 为组内后补（组 GreeN 13000），
+    # 日服视图按定数历史首点取真实追加版本 21000（Splash）——不再以组级落进
+    # 舞/霸；组登场谱面维持组级；CN 视图维持组级 version_cn（上断言 12005）
+    assert jp_master.version == 21000
+    jp_sd_master = jp_song.get_difficulty(SongType.STANDARD, LevelIndex.MASTER)
+    assert jp_sd_master is not None
+    assert jp_sd_master.version == 13000
     # 国服限定曲仅 CN 视图可见；JP-only 曲仅 JP 视图可见（テリトリーバトル）
     assert build_song(built, 9002, "cn") is not None
     assert build_song(built, 9002, "jp") is None
@@ -542,3 +549,27 @@ async def test_jp_fallback_all_cn_delegates(db, monkeypatch, app):
         )
     finally:
         song_service._ready.clear()
+
+
+@pytest.mark.asyncio
+async def test_jp_plate_remaster_addition_scoping(built):
+    """组内后补 ReM（System "Z" ReM@21000）的牌子归属（2026-10-11 定案）：
+    追加版本出旧作区间 → 舞/霸不再要求该 ReM（组级压平局限消除）；
+    非舞/霸牌一律不要求 ReM → 煌（Splash）虽有该 ReM 条目但整曲不进牌。"""
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.plates import build_local_plates
+    from nonebot_plugin_awmc_helper.core.songdb import all_songs
+
+    songs = all_songs(built, "jp")
+
+    wu = build_local_plates("舞", "将", songs, [])
+    obj = next((p for p in await wu.get_remained() if p.song.id == 239), None) or next(
+        (p for p in await wu.get_cleared() if p.song.id == 239), None
+    )
+    assert obj is not None
+    assert LevelIndex.ReMASTER not in obj.levels  # 只要求组登场谱面（13000 段）
+
+    kai = build_local_plates("煌", "将", songs, [])
+    assert all(p.song.id != 239 for p in await kai.get_remained())
+    assert all(p.song.id != 239 for p in await kai.get_cleared())

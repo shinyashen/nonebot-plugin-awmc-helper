@@ -1346,6 +1346,8 @@ def build_song(
     ``index`` 为 ``(kind, level_id) → SongChart`` 索引；``cn_current`` 为国服当前
     版本码——整库物化时由 :func:`all_songs` 计算一次传入（cn_current_version
     内部全组扫描，原先每张谱面调一次，物化上万次）。
+    谱面 ``version``：日服视图逐谱面取定数历史首点（组内后补谱面按真实追加
+    版本归属，见物化循环内注释）；国服视图 = 组级 ``version_cn``。
     """
     row = state.songs.get(song_id)
     if row is None:
@@ -1380,7 +1382,23 @@ def build_song(
                 )
             else:
                 level_value = state.resolve_chart_level(song_id, kind, level_id)
-            diff = _chart_from_row(chart_row, kind, group_version, level_value)
+            # 谱面登场版本（2026-10-11 定案）：日服视图逐谱面取定数历史首点
+            # ——组内后补谱面（旧曲 ReM 追加等）按真实追加版本归属（如 239
+            # ReM@21000 不再以组级 13000 落进舞/霸）；历史缺失回落组级、首点
+            # 早于组级（脏数据）记警告并回落。CN 视图维持组级 version_cn：
+            # 落雪逐谱面 version 未落库（今日与组级零分歧），且 CN 牌按 CN
+            # 版本判定、定数历史首点是日服版本码不可混用
+            chart_version = group_version
+            if scope == "jp" and kind != "utage":
+                history = state.history_of(song_id, kind, level_id)
+                if history and history[0][0] > group_version:
+                    chart_version = history[0][0]
+                elif history and history[0][0] < group_version:
+                    logger.warning(
+                        f"谱面登场版本早于组级版本（id={song_id} {kind}{level_id} "
+                        f"{history[0][0]} < {group_version}），回落组级"
+                    )
+            diff = _chart_from_row(chart_row, kind, chart_version, level_value)
             if kind == "utage":
                 utage.append(diff)
             elif kind == "sd":

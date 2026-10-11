@@ -186,10 +186,13 @@ class SongRow(SQLModel, table=True):
 
 
 class SongSheetGroup(SQLModel, table=True):
-    """谱面组（sd/dx/utage）：组内谱面 version 完全一致（song-db-design §2.3）。
+    """谱面组（sd/dx/utage）：``version`` = 组（曲）登场版本（song-db-design §2.3）。
 
-    ``version`` = 日服更新版本；``version_cn`` = 国服更新版本，NULL = 国服未上线；
-    ``date`` = 日服更新（宴为复活）日期，8 位 int。
+    组内谱面可晚于组登场（组内后补谱面——旧曲 ReM 追加等，2026-10-11 起日服
+    视图物化按定数历史首点逐谱面取登场版本，不变式由「组内一致」放宽为
+    「谱面登场版本 ≥ 组版本」）；``version_cn`` = 国服更新版本，NULL = 国服
+    未上线（国服逐谱面 version 未落库，今日与组级零分歧）；``date`` = 日服
+    更新（宴为复活）日期，8 位 int。
     """
 
     __tablename__ = "song_sheet_group"  # type: ignore[reportGeneralTypeIssues]
