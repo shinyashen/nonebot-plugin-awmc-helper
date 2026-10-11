@@ -124,16 +124,20 @@ def plate_kinds(version: str) -> tuple[str, ...]:
 
 
 def plate_kinds_of(version: str) -> tuple[str, ...]:
-    """完成表**预渲染**枚举口径：舞/霸全牌、真无将故跳过，其余版本只出「将」。
+    """完成表**预渲染**枚举口径：舞/霸全牌、其余版本只出「将」，无将版本
+    （真）取真实牌单首个牌种（极）锚定。
 
-    与 :func:`plate_kinds`（真实牌单）区分——真实牌单各版本都是四牌，只预渲染
-    「将」是既有的省时口径（其余牌种查询时兜底生成，见
-    ``table_template.draw_plate_table_with_fallback``）。
+    与 :func:`plate_kinds`（真实牌单）区分——底图网格与牌种无关（章在查询
+    时叠，``table_template.draw_plate_table_with_fallback``），每版本渲一种
+    即可，其余牌种查询时兜底生成。真无将：历史口径直接跳过导致整代真牌
+    只能查询时现场生成（2026-10-11 修）——初整代无牌仍为空（不在牌单）。
     """
     kinds = plate_kinds(version)
     if version in _LEGACY_PLATES:
         return kinds
-    return ("将",) if "将" in kinds else ()
+    if "将" in kinds:
+        return ("将",)
+    return kinds[:1]
 
 
 def plate_kinds_hint(version: str) -> str:

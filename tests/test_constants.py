@@ -187,12 +187,14 @@ def test_plate_kinds_roster_and_validity():
     assert plate_kinds_of("舞") == ("将", "极", "神", "舞舞")
     assert plate_kinds_of("霸") == ("者",)
     assert plate_kinds_of("樱") == ("将",)
-    # 真无将：真实牌单只有 极/神/舞舞，且不参与「将」的预渲染
+    # 真无将：真实牌单只有 极/神/舞舞；预渲染取首个牌种（极）锚定底图
+    # （2026-10-11 修——历史口径直接跳过导致整代真牌只能查询时现场生成）
     assert plate_kinds("真") == ("极", "神", "舞舞")
-    assert plate_kinds_of("真") == ()
+    assert plate_kinds_of("真") == ("极",)
     assert not is_valid_plate("真", "将")
     assert is_valid_plate("真", "极")
     assert plate_kinds("初") == ()
+    assert plate_kinds_of("初") == ()
     for kind in ("将", "极", "神", "舞舞", "者"):
         assert not is_valid_plate("初", kind)
     assert is_valid_plate("舞", "将")
