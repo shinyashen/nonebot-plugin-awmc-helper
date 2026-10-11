@@ -22,7 +22,7 @@ from nonebot import logger
 from maimai_py import LevelIndex, PlateObject
 
 from . import store
-from .plates import PLATE_FULL_SET_VERSIONS, norm_plate
+from .plates import PLATE_FULL_SET_VERSIONS, PlatesView, norm_plate
 from .ext.yuzu import get_plate_list
 from ..constants import DX_ID_OFFSET
 
@@ -212,7 +212,7 @@ class _FilteredPlates:
         return self._apply(await self._inner.get_remained())
 
 
-async def filter_cn_plates(plate: str, plates):
+async def filter_cn_plates(plate: str, plates: PlatesView) -> PlatesView:
     """CN 判牌对象过筛（sources CN 源 ``get_plates`` 出口）：牌单不可用时
     原样返回。``plate`` 为「版本字+牌种」串（版本字取首字符）。"""
     version = norm_plate(plate[0])

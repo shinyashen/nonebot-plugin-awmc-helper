@@ -7,6 +7,7 @@
 （:func:`build_local_plates`）。
 """
 
+from typing import Protocol
 from dataclasses import dataclass
 
 from maimai_py import (
@@ -352,6 +353,21 @@ class LocalPlates:
         return self.remained
 
 
+class PlatesView(Protocol):
+    """判牌对象鸭子口径：库 ``MaimaiPlates``、本地判牌 :class:`LocalPlates`
+    与柚子牌单过滤视图（``core.plate_source._FilteredPlates``）共用的最小
+    消费面——牌子指令/进度总览只取 cleared/remained 两个出口。
+
+    结构化子类型：三者在 ``get_cleared``/``get_remained`` 上同构（async、
+    返回 ``list[PlateObject]``），声明处（``sources``/``score`` 门面）统一
+    收口到本协议，免逐处扩名义联合。
+    """
+
+    async def get_cleared(self) -> list[PlateObject]: ...
+
+    async def get_remained(self) -> list[PlateObject]: ...
+
+
 def build_local_plates(
     version: str, kind: str, songs: list[Song], scores: list
 ) -> LocalPlates:
@@ -367,23 +383,27 @@ def build_local_plates(
     version, kind = norm_plate(version), norm_plate(kind)
     rng = plate_version_range(version, jp=True)
     matched: dict[int, Song] = {}
+    in_scope_of: dict[int, list[SongDifficulty]] = {}
     if rng is not None:
         lo, hi = rng
         for song in songs:
-            if any(in_plate_scope(song, d, lo, hi) for d in song.get_difficulties()):
+            in_scope = [
+                d for d in song.get_difficulties() if in_plate_scope(song, d, lo, hi)
+            ]
+            if in_scope:
                 matched[song.id] = song
+                in_scope_of[song.id] = in_scope
     no_remaster = version not in _LEGACY_PLATES
     cleared: dict[int, set[LevelIndex]] = {}
     required: dict[int, set[LevelIndex]] = {}
     scope_types: dict[int, set[SongType]] = {}
-    for song in matched.values():
-        in_scope = [d for d in song.get_difficulties() if in_plate_scope(song, d, *rng)]
+    for song_id, in_scope in in_scope_of.items():
         levels = {d.level_index for d in in_scope}
         if no_remaster:
             levels.discard(LevelIndex.ReMASTER)
-        cleared[song.id] = set()
-        required[song.id] = levels
-        scope_types[song.id] = {d.type for d in in_scope}
+        cleared[song_id] = set()
+        required[song_id] = levels
+        scope_types[song_id] = {d.type for d in in_scope}
     for score in scores:
         if score.id not in required or score.type not in scope_types[score.id]:
             continue

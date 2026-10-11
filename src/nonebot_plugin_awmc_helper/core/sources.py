@@ -32,7 +32,6 @@ from maimai_py import (
     SongType,
     PlayerSong,
     PlayerBests,
-    MaimaiPlates,
     MaimaiScores,
     MaimaiPyError,
     RateLimitError,
@@ -54,7 +53,7 @@ from .client import (
     divingfish_provider,
     divingfish_public_provider,
 )
-from .plates import build_local_plates
+from .plates import PlatesView, build_local_plates
 from .songdb import Scope
 from .binding import (
     SERVICE_NET,
@@ -71,7 +70,6 @@ from .plate_source import filter_cn_plates
 if TYPE_CHECKING:
     from maimai_py import ScoreExtend
 
-    from .plates import LocalPlates
 
 __all__ = [
     "SOURCES",
@@ -366,7 +364,7 @@ class SourceBase:
 
     async def get_plates(
         self, binding: UserBinding, plate: str, notify_slow=None
-    ) -> "MaimaiPlates | LocalPlates":
+    ) -> PlatesView:
         """牌子进度：CN 源返回库 ``MaimaiPlates``，日服源返回本地判牌
         :class:`~core.plates.LocalPlates`（库只认 CN 口径）；二者对消费方
         duck-compatible（get_cleared/get_remained）。"""
@@ -503,7 +501,7 @@ class ProberSource(SourceBase):
 
     async def get_plates(
         self, binding: UserBinding, plate: str, notify_slow=None
-    ) -> MaimaiPlates:
+    ) -> PlatesView:
         """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，凭据按绑定标志路由。
 
         出口过柚子牌单（Q60）：库按版本区间匹配（含「日服已删・国服在列」
@@ -652,7 +650,7 @@ class NetSource(SourceBase):
 
     async def get_plates(
         self, binding: UserBinding, plate: str, notify_slow=None
-    ) -> "MaimaiPlates | LocalPlates":
+    ) -> PlatesView:
         """日服牌子（本地判牌，2026-10-04 开放）：库 ``MaimaiPlates`` 只认
         CN 口径，这里按日服牌单区间（core.plates jp 口径）+ 日服视图曲集 +
         NET 窗口成绩本地复算，产出 get_cleared/get_remained 同构结果
