@@ -22,6 +22,8 @@ from maimai_py import (
 from maimai_py.models import BuddyNotes, CurveObject, SongDifficultyUtage
 
 if TYPE_CHECKING:
+    from maimai_py import FCType, FSType, ScoreExtend
+
     from nonebot_plugin_awmc_helper.core.songs import SongService
 
 # NB 版视觉移植的底图来自本地素材包 static/（永不入库，见 AGENTS.md 硬性规则 5）；
@@ -483,4 +485,40 @@ def load_yuzu_plate() -> dict:
         (Path(__file__).parent / "data" / "snapshots" / "yuzu_plate.json").read_text(
             encoding="utf-8"
         )
+    )
+
+
+def make_score(
+    song_id: int,
+    ach: float = 100.0,
+    *,
+    version: int = 26000,
+    li: "LevelIndex | None" = None,
+    fc: "FCType | None" = None,
+    fs: "FSType | None" = None,
+    song_type: "SongType | None" = None,
+) -> "ScoreExtend":
+    """真实形状的 SSSP/AP 成绩（199 DX MASTER 系数）；song_type 可换条目类型。"""
+    from maimai_py import FCType, RateType, SongType, LevelIndex, ScoreExtend
+    from maimai_py.utils import ScoreCoefficient
+
+    level_value = 13.5
+    return ScoreExtend(
+        id=song_id,
+        level="13+",
+        level_index=li or LevelIndex.MASTER,
+        achievements=ach,
+        fc=fc if fc is not None else (FCType.AP if ach >= 100 else None),
+        fs=fs,
+        dx_score=2000,
+        dx_rating=int(ScoreCoefficient(ach).ra(level_value)),
+        play_count=1,
+        play_time=None,
+        rate=RateType._from_achievement(ach),
+        type=song_type or SongType.DX,
+        title="t",
+        level_value=level_value,
+        level_dx_score=3000,
+        dx_star=None,
+        version=version,
     )

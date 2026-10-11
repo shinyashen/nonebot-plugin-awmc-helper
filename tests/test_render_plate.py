@@ -391,3 +391,61 @@ async def test_plate_template_legacy_no_fp_rerenders(songs, tmp_path, monkeypatc
     )
     assert png is not None
     assert await store.kv_get("plate_fp:真极") is not None
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_plate_cross_type_charts(songs, tmp_path, monkeypatch):
+    """跨类型追加谱面（2026-10-11 类型门槛移除）：同曲 DX 条目归熊&华、
+    SD 条目归宙&星；盖章只认曲内条目类型，他牌条目成绩不串槽。"""
+    from mocks import make_diff, make_song, make_score, seed_service
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.render.plate_table_draw import (
+        draw_plate_table,
+    )
+
+    out = tmp_path / "plate_table"
+    monkeypatch.setattr(table_template, "plate_table_dir", lambda: out)
+
+    song = make_song(
+        8031,
+        "（构造）DX曲追加SD谱",
+        diffs=[
+            make_diff(type=SongType.DX, level_index=LevelIndex.MASTER, version=20003),
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.MASTER,
+                version=22005,
+            ),
+        ],
+    )
+    await seed_service(song_service, [song])
+
+    # DX 条目（20003）→ 熊&华 1 格；SD 条目（22005）→ 宙&星 1 格（门槛移除前为 0）
+    assert await table_template.generate_plate_template("熊", "将", song_service) == 1
+    assert await table_template.generate_plate_template("宙", "将", song_service) == 1
+
+    # 盖章：SD 成绩清 Master 槽；混入 DX 成绩（他牌条目）不得改变成图
+    entries = [(song, d) for d in song.difficulties.standard]
+    base = draw_plate_table("宙", "将", [], entries, page=1)
+    stamped = draw_plate_table(
+        "宙", "将", [make_score(8031, song_type=SongType.STANDARD)], entries, page=1
+    )
+    polluted = draw_plate_table(
+        "宙",
+        "将",
+        [
+            make_score(8031, song_type=SongType.STANDARD),
+            make_score(8031, song_type=SongType.DX),
+        ],
+        entries,
+        page=1,
+    )
+    assert base is not None
+    assert stamped is not None
+    assert polluted is not None
+    assert stamped != base  # SD 成绩产生盖章
+    assert polluted == stamped  # DX 成绩（他牌条目）不串槽

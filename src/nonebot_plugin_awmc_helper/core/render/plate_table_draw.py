@@ -13,7 +13,7 @@ from . import table_template
 from .fonts import FONT_RODIN, font
 from .tools import WHITE, TEXT_BLUE, ID_TEXT_COLORS, scale_output, image_to_bytes
 from .assets import assets
-from ..plates import plate_score_ok, major_type_of_plate
+from ..plates import plate_score_ok
 from ...constants import SYNC_FILE, COMBO_FILE, THEME_PRISM_PLUS
 from .table_layout import (
     PLATE_COLS,
@@ -57,14 +57,13 @@ def draw_plate_table(
     page: int = 1,
     jp: bool = False,
 ) -> bytes | None:
-    """绘制牌子完成表。``entries`` 为牌子范围内主类型谱面（与模板同源）。
+    """绘制牌子完成表。``entries`` 为牌子范围内全部谱面（与模板同源）。
 
     底图名分口径（``-jp`` 后缀，2026-10-05）：CN/JP 共用牌字（华/爽 等）
     两口径网格不同（区间/曲集都异），同名底图会让日服查询读到 CN 预渲染
     网格、叠章错位——CN 维持裸名（存量部署缓存不用重渲），JP 一律带后缀。
     """
     is_wu = version in ("舞", "霸")
-    major = major_type_of_plate(version)
     slot_num = 5 if is_wu else 4
     # 底图名/口径后缀单源 table_template（存图/读图/sidecar 共用，防手拼漂移）
     path = table_template.plate_template_file(version, kind, page, jp=jp)
@@ -104,10 +103,18 @@ def draw_plate_table(
         played.setdefault(level, {}).setdefault(
             song_id, [None] * song_slot_size[song_id]
         )
+    # 成绩按曲内条目类型对位（2026-10-11 类型门槛移除后，同曲可能以 SD 或
+    # DX 条目进牌——DX 曲的 SD 追加谱在 DX 牌、SD 曲的 DX 追加谱在旧框之后
+    # 的 DX 牌；槽位只认 entries 里实际存在的类型，防他牌谱面串槽）
+    entry_types: dict[int, set] = {
+        sid: {d.type for d in diffs} for sid, diffs in all_slots.items()
+    }
     for score in play_result:
-        if score.type != major or score.level_index.value >= slot_num:
+        if score.level_index.value >= slot_num:
             continue
         if score.id not in song_level:
+            continue
+        if score.type not in entry_types[score.id]:
             continue
         slots = played[song_level[score.id]].setdefault(
             score.id, [None] * song_slot_size[score.id]

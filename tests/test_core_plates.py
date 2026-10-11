@@ -2,6 +2,7 @@
 判牌单源（plate_score_ok）与日服本地判牌（build_local_plates）。"""
 
 from mocks import make_diff, make_song
+from mocks import make_score as _score
 
 # ---------------------------------------------------------------- 牌单口径
 
@@ -100,32 +101,6 @@ def test_plate_jp_leading_and_latest_name():
 # ---------------------------------------------------------------- 判牌与本地判牌
 
 
-def _score(song_id, ach=100.0, *, version=26000, li=None, fc=None, fs=None):
-    from maimai_py import FCType, RateType, SongType, LevelIndex, ScoreExtend
-    from maimai_py.utils import ScoreCoefficient
-
-    level_value = 13.5
-    return ScoreExtend(
-        id=song_id,
-        level="13+",
-        level_index=li or LevelIndex.MASTER,
-        achievements=ach,
-        fc=fc if fc is not None else (FCType.AP if ach >= 100 else None),
-        fs=fs,
-        dx_score=2000,
-        dx_rating=int(ScoreCoefficient(ach).ra(level_value)),
-        play_count=1,
-        play_time=None,
-        rate=RateType._from_achievement(ach),
-        type=SongType.DX,
-        title="t",
-        level_value=level_value,
-        level_dx_score=3000,
-        dx_star=None,
-        version=version,
-    )
-
-
 def _jp_songs():
     """四曲样例：CiRCLE / MAGiCAL / PRiSM PLUS / CiRCLE PLUS 各一（DX MASTER）。"""
     return [
@@ -197,3 +172,71 @@ async def test_build_local_plates_kind_semantics():
     plates = build_local_plates("丸", "舞舞", songs, scores)
     assert [p.song.id for p in await plates.get_cleared()] == []
     assert [p.song.id for p in await plates.get_remained()] == [8001]
+
+
+async def test_in_plate_scope_both_types():
+    """跨类型追加谱面按条目登场版本归属（2026-10-11 定案）：DX 曲追加的 SD 谱
+    进追加版本的牌（Technicians High 形态），SD 曲追加的 DX 谱同理。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.plates import in_plate_scope
+
+    song = make_song(
+        8021,
+        "（构造）DX曲追加SD谱",
+        diffs=[
+            make_diff(type=SongType.DX, version=20003),
+            make_diff(type=SongType.STANDARD, version=22005),
+        ],
+    )
+    dx_diff = song.difficulties.dx[0]
+    sd_diff = song.difficulties.standard[0]
+    # 熊&华 [20000, 20999]：DX 条目计入、SD 条目（22005）出区间
+    assert in_plate_scope(song, dx_diff, 20000, 20999)
+    assert not in_plate_scope(song, sd_diff, 20000, 20999)
+    # 宙&星 [22000, 22999]：SD 条目计入（类型门槛移除前此处被排除）、DX 出区间
+    assert in_plate_scope(song, sd_diff, 22000, 22999)
+    assert not in_plate_scope(song, dx_diff, 22000, 22999)
+
+
+async def test_build_local_plates_cross_type_scores():
+    """本地判牌双类型：跨类型追加曲的要求槽按牌内条目计，他牌类型成绩不串槽。"""
+    from mocks import make_diff, make_song
+    from maimai_py import SongType
+
+    from nonebot_plugin_awmc_helper.core.plates import build_local_plates
+
+    song = make_song(
+        8022,
+        "（构造）DX曲追加SD谱",
+        diffs=[
+            make_diff(type=SongType.DX, version=20003),
+            make_diff(type=SongType.STANDARD, version=22005),
+        ],
+    )
+
+    # JP 星（UNIVERSE [22000,22499]）：只要求 SD 条目——DX 成绩（他牌条目）不得清槽
+    plates = build_local_plates(
+        "星",
+        "将",
+        [song],
+        [_score(8022, 100.0, song_type=SongType.DX)],
+    )
+    assert [p.song.id for p in await plates.get_remained()] == [8022]
+    plates = build_local_plates(
+        "星",
+        "将",
+        [song],
+        [_score(8022, 100.0, song_type=SongType.STANDARD)],
+    )
+    assert [p.song.id for p in await plates.get_remained()] == []
+    assert [p.song.id for p in await plates.get_cleared()] == [8022]
+    # JP 熊（DX [20000,20499]）：只要求 DX 条目——SD 成绩不得清槽
+    plates = build_local_plates(
+        "熊",
+        "将",
+        [song],
+        [_score(8022, 100.0, song_type=SongType.STANDARD)],
+    )
+    assert [p.song.id for p in await plates.get_remained()] == [8022]

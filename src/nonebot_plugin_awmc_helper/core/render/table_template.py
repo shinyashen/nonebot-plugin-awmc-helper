@@ -42,7 +42,6 @@ from .assets import assets
 from ..plates import (
     PLATE_FULL_SET_VERSIONS,
     in_plate_scope,
-    major_type_of_plate,
     plate_entry_allowed,
     plate_version_range,
 )
@@ -507,7 +506,6 @@ async def generate_plate_template(
     牌单指纹落 kv（查询侧比对失效即重渲）。
     """
     songs = await (song_service.jp_all() if jp else song_service.get_all())
-    major = major_type_of_plate(version)
     rng = plate_version_range(version, jp=jp)
     if rng is None:
         return 0
@@ -524,7 +522,7 @@ async def generate_plate_template(
     entries: list[tuple[Song, SongDifficulty]] = []
     for song in songs:
         for diff in song.get_difficulties():
-            if in_plate_scope(song, diff, lo, hi, major) and plate_entry_allowed(
+            if in_plate_scope(song, diff, lo, hi) and plate_entry_allowed(
                 plate_ids, song, diff, remaster_ids=remaster_ids
             ):
                 entries.append((song, diff))

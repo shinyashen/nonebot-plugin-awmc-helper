@@ -26,7 +26,7 @@ from ...core.plates import (
     PLATE_LATEST_VERSION_NAME,
     PLATE_VERSION_ALIAS_CHARS,
     in_plate_scope,
-    major_type_of_plate,
+    version_code_of,
     plate_entry_allowed,
     plate_version_range,
 )
@@ -98,7 +98,6 @@ async def plate_completion_sheet(
     # JP 限定曲在牌范围内，缺了永远差曲（CN 口径维持国服网格不变）；
     # 预览查询同走日服视图（领先牌的曲目只在日服视图里）
     jp = preview or score_service.view_of(binding.service) == "jp"
-    major = major_type_of_plate(version)
     rng = plate_version_range(version, jp=jp)
     entries = []
     if rng is not None:
@@ -114,7 +113,7 @@ async def plate_completion_sheet(
         songs = await (song_service.jp_all() if jp else song_service.get_all())
         for song in songs:
             for d in song.get_difficulties():
-                if in_plate_scope(song, d, lo, hi, major) and plate_entry_allowed(
+                if in_plate_scope(song, d, lo, hi) and plate_entry_allowed(
                     plate_ids, song, d, remaster_ids=remaster_ids
                 ):
                     entries.append((song, d))
@@ -177,9 +176,10 @@ async def plate_progress_overview(
 
     is_wu = version in ("舞", "霸")
     slot_count = 5 if is_wu else 4
-    # 牌子主类型：DX 世代牌推 DX 谱，旧作牌（含舞/霸）推 SD 谱——决定未达成
-    # 网格的 per-type 游戏 id 与定数取哪侧谱面（判定下沉 core/plates）
-    major_type = major_type_of_plate(version)
+    # 未达成谱面取侧按版本区间（2026-10-11 类型门槛移除后，同曲可能以 SD 或
+    # DX 条目进牌，主类型不能再当取侧依据）；区间外的谱面（他牌条目）不取
+    jp = score_service.view_of(binding.service) == "jp"
+    rng = plate_version_range(version, jp=jp)
     slot_total = [0] * slot_count
     slot_cleared = [0] * slot_count
     remained_by_slot: list[list[tuple[int, int, float, str]]] = [
@@ -200,7 +200,10 @@ async def plate_progress_overview(
                 (
                     x
                     for x in song.get_difficulties()
-                    if x.level_index == li and x.type == major_type
+                    if x.level_index == li
+                    and rng is not None
+                    and (code := version_code_of(x)) is not None
+                    and rng[0] <= code <= rng[1]
                 ),
                 None,
             )

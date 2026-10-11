@@ -19,10 +19,10 @@ import asyncio
 import hashlib
 
 from nonebot import logger
-from maimai_py import SongType, LevelIndex, PlateObject
+from maimai_py import LevelIndex, PlateObject
 
 from . import store
-from .plates import PLATE_FULL_SET_VERSIONS, norm_plate, major_type_of_plate
+from .plates import PLATE_FULL_SET_VERSIONS, norm_plate
 from .ext.yuzu import get_plate_list
 from ..constants import DX_ID_OFFSET
 
@@ -175,25 +175,21 @@ class _FilteredPlates:
         *,
         ids: frozenset[int] | None,
         remaster_ids: frozenset[int] | None,
-        major: SongType,
         full_set: bool,
     ) -> None:
         self._inner = inner
         self._ids = ids
         self._remaster_ids = remaster_ids
-        self._major = major
         self._full_set = full_set
 
     def _apply(self, objs: list[PlateObject]) -> list[PlateObject]:
         out: list[PlateObject] = []
         for obj in objs:
-            # 全量 id 按牌子主类型换算（牌内谱面恒主类型，与谱面级换算同源）
-            full = (
-                obj.song.id + DX_ID_OFFSET
-                if self._major is SongType.DX
-                else obj.song.id
-            )
-            if self._ids is not None and full not in self._ids:
+            # 柚子牌单按**条目**记曲（SD 条目 = 根 id、DX 条目 = 根 + 10000），
+            # 同曲双组跨牌归属后任一条目在单内即在牌（库对象按根 id 给曲）
+            if self._ids is not None and not (
+                obj.song.id in self._ids or obj.song.id + DX_ID_OFFSET in self._ids
+            ):
                 continue
             levels = obj.levels
             if (
@@ -229,7 +225,6 @@ async def filter_cn_plates(plate: str, plates):
         plates,
         ids=ids,
         remaster_ids=remaster_ids,
-        major=major_type_of_plate(version),
         full_set=full_set,
     )
 

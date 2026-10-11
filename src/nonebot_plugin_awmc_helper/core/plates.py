@@ -265,12 +265,18 @@ def version_code_of(diff: SongDifficulty) -> int | None:
     return ver.value if ver is not None else None
 
 
-def in_plate_scope(
-    song: Song, diff: SongDifficulty, lo: int, hi: int, major_type: SongType
-) -> bool:
-    """谱面是否落在牌子范围内（主类型 + 版本区间；version 归一后比较）。"""
+def in_plate_scope(song: Song, diff: SongDifficulty, lo: int, hi: int) -> bool:
+    """谱面是否落在牌子范围内（版本区间；SD/DX 谱都计，宴谱除外）。
+
+    类型不设门槛（2026-10-11 用户口径定案）：跨类型追加谱面按其登场条目
+    版本归属牌子——DX 曲追加的 SD 谱（Technicians High SD@22005 → 宙&星）
+    与 SD 曲追加的 DX 谱（ハッピーシンセサイザ DX@25000 → 镜）都计入；
+    旧框区间（<20000）天然只含 SD 谱，无需特判。同条目内的谱面追加（ReM）
+    不换牌：非舞/霸不要求 ReM（调用方经 ``no_remaster``/槽位数收敛），
+    舞/霸仅计旧框 ReM（柚子牌单过筛的 ``remaster_ids`` 收口）。
+    """
     code = version_code_of(diff)
-    return diff.type == major_type and code is not None and lo <= code <= hi
+    return diff.type != SongType.UTAGE and code is not None and lo <= code <= hi
 
 
 def plate_entry_allowed(
@@ -351,33 +357,35 @@ def build_local_plates(
 ) -> LocalPlates:
     """日服口径本地判牌（库 ``MaimaiPlates`` 只认 CN 版本映射与曲库版本缓存）。
 
-    范围/主类型走 :func:`plate_version_range`（jp）/ :func:`major_type_of_plate`，
-    曲集为**日服视图**（JP 限定曲在牌范围内，缺席会永远差曲）；谱面级范围匹配
-    （:func:`in_plate_scope`），要求槽 = 该曲主类型全部谱面（Re:MASTER 仅
-    舞/霸 计入，库 ``no_remaster`` 同语义），达成判定 = :func:`plate_score_ok`。
+    范围走 :func:`plate_version_range`（jp），曲集为**日服视图**（JP 限定曲
+    在牌范围内，缺席会永远差曲）；谱面级范围匹配（:func:`in_plate_scope`，
+    SD/DX 都计），要求槽 = 牌区间内全部谱面（Re:MASTER 仅舞/霸 计入——
+    同条目追加不换牌，库 ``no_remaster`` 同语义），达成判定 =
+    :func:`plate_score_ok`。成绩按 (谱面类型, 槽位) 对位填槽（同曲双组跨牌
+    归属后，单看 level_index 会串类型）。
     """
     version, kind = norm_plate(version), norm_plate(kind)
-    major = major_type_of_plate(version)
     rng = plate_version_range(version, jp=True)
     matched: dict[int, Song] = {}
     if rng is not None:
         lo, hi = rng
         for song in songs:
-            if any(
-                in_plate_scope(song, d, lo, hi, major) for d in song.get_difficulties()
-            ):
+            if any(in_plate_scope(song, d, lo, hi) for d in song.get_difficulties()):
                 matched[song.id] = song
     no_remaster = version not in _LEGACY_PLATES
     cleared: dict[int, set[LevelIndex]] = {}
     required: dict[int, set[LevelIndex]] = {}
+    scope_types: dict[int, set[SongType]] = {}
     for song in matched.values():
-        levels = {d.level_index for d in song.get_difficulties(major)}
+        in_scope = [d for d in song.get_difficulties() if in_plate_scope(song, d, *rng)]
+        levels = {d.level_index for d in in_scope}
         if no_remaster:
             levels.discard(LevelIndex.ReMASTER)
         cleared[song.id] = set()
         required[song.id] = levels
+        scope_types[song.id] = {d.type for d in in_scope}
     for score in scores:
-        if score.id not in required or score.type != major:
+        if score.id not in required or score.type not in scope_types[score.id]:
             continue
         if score.level_index not in required[score.id]:
             continue
