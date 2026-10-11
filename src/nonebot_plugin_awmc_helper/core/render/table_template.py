@@ -23,6 +23,7 @@ from PIL import Image, ImageDraw
 from nonebot import logger
 from maimai_py import Song, SongType, SongDifficulty
 
+from .. import store
 from .fonts import FONT_HAN, FONT_RODIN, font
 from .tools import (
     WHITE,
@@ -38,7 +39,13 @@ from .tools import (
     generate_frosted_card,
 )
 from .assets import assets
-from ..plates import in_plate_scope, major_type_of_plate, plate_version_range
+from ..plates import (
+    PLATE_FULL_SET_VERSIONS,
+    in_plate_scope,
+    major_type_of_plate,
+    plate_entry_allowed,
+    plate_version_range,
+)
 from .nb_chart import version_image
 from ...constants import LEVEL_INDEX_EN, chart_display_id
 from .table_layout import (
@@ -65,6 +72,7 @@ from .table_layout import (
     group_by_level,
     level_page_key,
 )
+from ..plate_source import cn_plate_ids, cn_remaster_ids, plate_fingerprint
 
 FONT_BLUE = TITLE_BLUE
 
@@ -380,6 +388,11 @@ _FULL_SET_PLATE_VERSIONS = ("舞", "霸")
 _COVER_RETRY_INTERVAL = 3600
 """sidecar 缺口重试间隔（秒）：查询触发、限频一小时，官方站抖动自愈。"""
 
+_PLATE_FP_KV = "plate_fp:"
+"""底图牌单指纹 kv 键前缀（+ :func:`plate_template_name`）：柚子牌单变化
+即失效重渲。指纹存 DB kv 而非 sidecar——sidecar 的「缺口清空即删档」语义
+不动，指纹需常驻。"""
+
 
 def plate_template_name(version: str, kind: str, page: int, *, jp: bool = False) -> str:
     """完成表底图文件名（去扩展名）单源：预渲染存图、查询读图、sidecar
@@ -458,6 +471,29 @@ async def _plate_sidecar_heal(
     return False
 
 
+async def _save_plate_fp(
+    version: str, kind: str, page: int, *, jp: bool, fp: str
+) -> None:
+    """底图生成时的牌单指纹落 kv（:data:`_PLATE_FP_KV` + 底图名），查询侧
+    据此检测柚子牌单变化。"""
+    await store.kv_set(
+        f"{_PLATE_FP_KV}{plate_template_name(version, kind, page, jp=jp)}", fp
+    )
+
+
+async def _plate_fp_stale(
+    version: str, kind: str, page: int, *, jp: bool, fp: str
+) -> bool:
+    """底图生成时的牌单指纹与当前不一致（柚子牌单变化）→ 重渲。
+
+    无指纹记录同样判失效：存量部署升级前生成的底图网格未过筛（含 23 首
+    排除曲与未收口 ReM），与过筛后的叠章 entries 必然错位——升级后首个
+    查询触发该底图重渲（一次性惰性自愈），重渲即写指纹、此后按比对。"""
+    name = plate_template_name(version, kind, page, jp=jp)
+    saved = await store.kv_get(f"{_PLATE_FP_KV}{name}")
+    return saved != fp
+
+
 async def generate_plate_template(
     version: str, kind: str, song_service, *, jp: bool = False
 ) -> int:
@@ -466,7 +502,9 @@ async def generate_plate_template(
     ``jp=True`` 用日服视图曲集与日服版本区间（丸/回 等日服牌；仅查询兜底
     现场生成，预渲染枚举 ``refresh_all_plate_tables`` 仍只做国服牌单）。
     底图名带 ``-jp`` 后缀与 CN 分图：共用牌字（华/爽 等）两口径网格不同，
-    同名会让日服查询读到 CN 预渲染网格（2026-10-05 修）。
+    同名会让日服查询读到 CN 预渲染网格、叠章错位（2026-10-05 修）。
+    CN 口径另过柚子牌单（Q60）：逐牌白名单 + 舞/霸 ReM 槽名单收口，并把
+    牌单指纹落 kv（查询侧比对失效即重渲）。
     """
     songs = await (song_service.jp_all() if jp else song_service.get_all())
     major = major_type_of_plate(version)
@@ -474,19 +512,28 @@ async def generate_plate_template(
     if rng is None:
         return 0
     lo, hi = rng
-    # 单趟双收：entries（牌区间内全部谱面）与 remaster（舞/霸的 ReM 槽），
-    # 免对全库 get_difficulties 展开两遍
-    want_remaster = version in _FULL_SET_PLATE_VERSIONS
+    # 柚子牌单过筛（Q60，仅国服）：逐牌白名单 + 舞/霸 ReM 槽按舞ReMASTER
+    # 名单收口；双双 None = 牌单不可用不过筛（既有口径）
+    plate_ids = None if jp else await cn_plate_ids(version)
+    remaster_ids = (
+        None
+        if jp or version not in PLATE_FULL_SET_VERSIONS
+        else await cn_remaster_ids()
+    )
+    fp = plate_fingerprint(plate_ids)
     entries: list[tuple[Song, SongDifficulty]] = []
-    remaster: list[tuple[Song, SongDifficulty]] = []
     for song in songs:
         for diff in song.get_difficulties():
-            if in_plate_scope(song, diff, lo, hi, major):
+            if in_plate_scope(song, diff, lo, hi, major) and plate_entry_allowed(
+                plate_ids, song, diff, remaster_ids=remaster_ids
+            ):
                 entries.append((song, diff))
-            if want_remaster and diff.type == major and diff.level_index.value == 4:
-                remaster.append((song, diff))
     if not entries:
         return 0
+    # ReM 槽（紫框 + 分组代表谱）直接取自过筛后 entries 的 ReM 谱面——
+    # 与网格天然同集，不再独立收集（原收集无范围校验，会把 DX 时代追加的
+    # 旧曲 ReM 一并收入）
+    remaster = [pair for pair in entries if pair[1].level_index.value == 4]
     # 底图内嵌曲绘批量补齐（2026-10-05 服务器实测补缺）：卡片渲染的逐卡
     # ensure 惯例在底图路径缺失，JP 曲缺缓存全落 0.png；CN 曲静态命中零开销。
     # 仍缺失的（官方站抖动）留档 sidecar，查询侧择机重试重渲
@@ -526,6 +573,7 @@ async def generate_plate_template(
             await _save_plate_sidecar(
                 version, kind, pages + 1, jp=jp, missing=still_missing
             )
+            await _save_plate_fp(version, kind, pages + 1, jp=jp, fp=fp)
             total += sum(len(v) for v in group.values())
         return total
     img = await asyncio.to_thread(_plate_grid, entries)
@@ -533,6 +581,7 @@ async def generate_plate_template(
         img.save, out_dir / f"{plate_template_name(version, kind, 1, jp=jp)}.png"
     )
     await _save_plate_sidecar(version, kind, 1, jp=jp, missing=still_missing)
+    await _save_plate_fp(version, kind, 1, jp=jp, fp=fp)
     return len(entries)
 
 
@@ -639,16 +688,23 @@ async def draw_plate_table_with_fallback(
 ) -> bytes | None:
     """牌子完成表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。
 
-    底图在但 sidecar 有封面缺口（生成时官方站抖动）→ :func:`_plate_sidecar_heal`
-    择机重试，封面补齐即重渲（否则占位图烙死到下次指纹变化）。
+    底图在但生成时的牌单指纹已变（柚子牌单更新，Q60）或 sidecar 有封面缺口
+    → 重渲（前者网格换新曲集、后者择机重试，封面补齐即重渲，否则占位图
+    烙死到下次指纹变化）。
     """
     from .plate_table_draw import draw_plate_table
 
+    # 指纹按当前牌单算（CN；jp 恒 "off"）：与生成时不一致即重渲，保证
+    # 叠章 entries（调用方按同牌单过滤）与底图网格不错位
+    fp = plate_fingerprint(None if jp else await cn_plate_ids(version))
     png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)
-    if png is not None and await _plate_sidecar_heal(
-        version, kind, page, jp=jp, song_service=song_service
+    if png is not None and (
+        await _plate_fp_stale(version, kind, page, jp=jp, fp=fp)
+        or await _plate_sidecar_heal(
+            version, kind, page, jp=jp, song_service=song_service
+        )
     ):
-        png = None  # 缺口已愈：走下方重渲分支
+        png = None  # 指纹失效或缺口已愈：走下方重渲分支
     if png is None:
         await generate_plate_template(version, kind, song_service, jp=jp)
         png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)

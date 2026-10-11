@@ -66,6 +66,7 @@ from .binding import (
 )
 from .ext.net import NET_ERROR_MESSAGES, NetError
 from .net_score import NetScoreError, net_score_service
+from .plate_source import filter_cn_plates
 
 if TYPE_CHECKING:
     from maimai_py import ScoreExtend
@@ -503,7 +504,11 @@ class ProberSource(SourceBase):
     async def get_plates(
         self, binding: UserBinding, plate: str, notify_slow=None
     ) -> MaimaiPlates:
-        """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，凭据按绑定标志路由。"""
+        """牌子进度（判牌语义在 maimai-py 内置）：全量成绩，凭据按绑定标志路由。
+
+        出口过柚子牌单（Q60）：库按版本区间匹配（含「日服已删・国服在列」
+        曲），包一层白名单过滤视图（舞/霸 ReM 槽同按舞ReMASTER 名单收口）；
+        牌单不可用原样返回。"""
         await song_service.ensure_loaded()
 
         def make(get_ident):
@@ -511,7 +516,8 @@ class ProberSource(SourceBase):
                 get_ident(), plate, provider=binding_service.provider(binding)
             )
 
-        return await _run_full(binding, make, notify_slow)
+        plates = await _run_full(binding, make, notify_slow)
+        return await filter_cn_plates(plate, plates)
 
 
 class DivingFishSource(ProberSource):

@@ -13,3 +13,8 @@
 2026-10-06 增补 munet_inarau.json（三源一档的场景文件）：居並ぶ穀物と溜息まじりの
 運送屋 MAGiCAL 标准谱面追加——MuNET GetById 实时取回、otoge/maimaiinfo 裁自本地
 克隆（commit 见 meta.json munet_inarau 条目），供「既有曲追加谱面组」批次路径用例。
+
+2026-10-11 增补 yuzu_plate.json（全量未裁剪）：柚子逐牌曲单（maimaidxplate
+等价的 v2 get_plate 端点，Hoshino 完成表曲单同源）——国服牌子过筛（Q60）
+的基准数据；含「日服已删・国服在列」23 首的排除语义与舞ReMASTER 名单
+（DX 时代追加的旧曲 ReM 不计入舞/霸）。

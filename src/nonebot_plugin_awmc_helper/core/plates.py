@@ -24,10 +24,15 @@ from maimai_py import (
 from maimai_py.enums import plate_aliases
 from maimai_py.models import PlateObject
 
-from ..constants import PLATE_CHARS
+from ..constants import PLATE_CHARS, chart_display_id
 
 _LEGACY_PLATES = ("舞", "霸")
 """旧作全集牌：横跨全部旧框版本，主类型为 SD。"""
+
+PLATE_FULL_SET_VERSIONS = _LEGACY_PLATES
+"""旧作全集牌公开别名（舞/霸）：Re:MASTER 谱计入的仅此两牌（库
+``no_remaster`` 同语义）；牌单过筛（:func:`plate_entry_allowed`）的
+舞ReMASTER 名单仅对这两牌生效。"""
 
 
 def norm_plate(text: str) -> str:
@@ -266,6 +271,35 @@ def in_plate_scope(
     """谱面是否落在牌子范围内（主类型 + 版本区间；version 归一后比较）。"""
     code = version_code_of(diff)
     return diff.type == major_type and code is not None and lo <= code <= hi
+
+
+def plate_entry_allowed(
+    ids: frozenset[int] | None,
+    song: Song,
+    diff: SongDifficulty,
+    *,
+    remaster_ids: frozenset[int] | None = None,
+) -> bool:
+    """柚子牌单过筛（Q60，白名单交集）：谱面 id 是否在该牌曲单内。
+
+    - id 空间换算单源 :func:`constants.chart_display_id`（SD = 根 id、
+      DX = 根 + DX_ID_OFFSET）——CN 视图是根 id 空间，柚子/水鱼是全量空间；
+    - ``ids is None`` = 牌单不可用或该牌无键 → 不过筛（维持既有口径），
+      该语义同时是全部过筛触点的统一降级出口；
+    - ``remaster_ids``：舞/霸的舞ReMASTER 名单（Hoshino 同语义：ReM 槽仅
+      名单内曲存在，DX 时代追加的旧曲 ReM 不属旧作谱）——传入时对 ReM 谱
+      面在白名单之上再收窄，与 ``ids`` 是否可用无关（两者同源缺失时同为
+      None）。
+    """
+    if ids is not None and chart_display_id(song, diff) not in ids:
+        return False
+    if (
+        remaster_ids is not None
+        and diff.level_index.value == 4
+        and song.id not in remaster_ids
+    ):
+        return False
+    return True
 
 
 def plate_score_ok(kind: str, score) -> bool:

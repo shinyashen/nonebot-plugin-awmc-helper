@@ -268,3 +268,126 @@ async def test_plate_sidecar_written_and_heals(songs, tmp_path, monkeypatch):
     )
     assert png is not None
     assert not sidecar.exists()
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_plate_template_filtered_by_yuzu_list(songs, tmp_path, monkeypatch):
+    """柚子牌单过筛（Q60）：白名单滤曲 + 舞/霸 ReM 槽名单收口 + 指纹失效重渲。
+
+    构造曲（牌单成员身份取自真实快照）：
+    - 8（True Love Song）：真单计入 → 真/舞都出（柚子尚未跟进其日服删除）；
+    - 44（ハッピーシンセサイザ）：真/舞单均排除 → 全部不出；
+    - 70（ジングルベル）：真单排除、舞单计入且在舞ReMASTER 名单 → 真不出、
+      舞出主+ReM 两张（逐牌策展粒度锚点）；
+    - 17（Future）：真/舞单计入且在名单 → 真/舞各出主+ReM 两张；
+    - 131（Link，v14000 橙代区间）：舞单计入但不在 ReM 名单（模拟 DX 时代
+      追加的旧曲 ReM）→ ReM 谱面被收口剔除、舞只出主谱。
+    """
+    from mocks import (
+        make_diff,
+        make_song,
+        seed_service,
+        load_yuzu_plate,
+        seed_plate_cache,
+    )
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+
+    out = tmp_path / "plate_table"
+    monkeypatch.setattr(table_template, "plate_table_dir", lambda: out)
+
+    def sd(level_index, version=11000):
+        return make_diff(
+            type=SongType.STANDARD,
+            level_index=level_index,
+            version=version,
+        )
+
+    await seed_service(
+        song_service,
+        [
+            make_song(8, "（构造）真代曲-柚子计入", diffs=[sd(LevelIndex.MASTER)]),
+            make_song(44, "（构造）真代曲-柚子排除", diffs=[sd(LevelIndex.MASTER)]),
+            make_song(
+                70,
+                "（构造）真代曲-仅舞计入",
+                diffs=[sd(LevelIndex.MASTER), sd(LevelIndex.ReMASTER)],
+            ),
+            make_song(
+                17,
+                "（构造）真代曲-ReM名单内",
+                diffs=[sd(LevelIndex.MASTER), sd(LevelIndex.ReMASTER)],
+            ),
+            make_song(
+                131,
+                "（构造）橙代曲-ReM名单外",
+                diffs=[sd(LevelIndex.MASTER, 14000), sd(LevelIndex.ReMASTER, 14000)],
+            ),
+        ],
+    )
+    seed_plate_cache(load_yuzu_plate())
+
+    # 真（区间 10000-11999，非舞 4 槽口径）：8 一张、17 主+ReM 两张；
+    # 44/70 真单排除、131 版本出区间 → 3
+    assert await table_template.generate_plate_template("真", "极", song_service) == 3
+    # 舞：8 一张、70 主+ReM 两张（名单内）、17 两张、131 仅主谱一张
+    # （ReM 名单外收口；无收口时会多算一张）→ 6
+    assert await table_template.generate_plate_template("舞", "者", song_service) == 6
+    assert (out / "真极.png").exists()
+    assert (out / "舞-1.png").exists()
+
+    # 指纹落库且与当前牌单一致 → 查询不触发重渲
+    from nonebot_plugin_awmc_helper.core.plate_source import (
+        cn_plate_ids,
+        plate_fingerprint,
+    )
+
+    fp = plate_fingerprint(await cn_plate_ids("真"))
+    assert await store.kv_get("plate_fp:真极") == fp
+    stale_fp = await store.kv_get("plate_fp:真极")
+
+    # 牌单变化（真单剔除 8）→ 指纹失效 → 查询侧重渲并刷新指纹
+    snapshot = load_yuzu_plate()
+    seed_plate_cache({**snapshot, "真": [x for x in snapshot["真"] if x != 8]})
+    png = await table_template.draw_plate_table_with_fallback(
+        "真", "极", [], [], page=1, song_service=song_service
+    )
+    assert png is not None
+    assert await store.kv_get("plate_fp:真极") != stale_fp
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_plate_template_legacy_no_fp_rerenders(songs, tmp_path, monkeypatch):
+    """无指纹记录（升级前旧底图）判失效：首查重渲并补写指纹（一次性自愈）。"""
+    from mocks import load_yuzu_plate, seed_plate_cache
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+
+    out = tmp_path / "plate_table"
+    monkeypatch.setattr(table_template, "plate_table_dir", lambda: out)
+    seed_plate_cache(load_yuzu_plate())
+
+    # 先正常生成（底图 + 指纹），再删指纹 kv 模拟存量部署（底图在、无指纹）
+    assert await table_template.generate_plate_template("真", "极", song_service) > 0
+    from sqlmodel import delete
+
+    async with store.session() as session:
+        await session.exec(
+            delete(store.KvCache).where(store.KvCache.key == "plate_fp:真极")
+        )
+        await session.commit()
+    assert await store.kv_get("plate_fp:真极") is None
+
+    # 首查判失效 → 重渲并补写指纹（一次性惰性自愈）
+    png = await table_template.draw_plate_table_with_fallback(
+        "真", "极", [], [], page=1, song_service=song_service
+    )
+    assert png is not None
+    assert await store.kv_get("plate_fp:真极") is not None

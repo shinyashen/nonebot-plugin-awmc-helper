@@ -210,6 +210,27 @@ yuzu_client = YuzuClient()
 """ext 层柚子客户端单例（仅 REST；SSE 见下方常驻协程）。"""
 
 
+PLATE_ENDPOINT = "/maimaidx/music/get_plate"
+"""逐牌曲单端点（maimaidxplate 等价）：Hoshino 完成表曲单同源，国服牌子
+过筛基准（Q60 定案：只作查询时过筛，不进曲库管线）。"""
+
+
+async def get_plate_list() -> dict[str, list[int]]:
+    """拉取逐牌曲单：键 = 牌字（含繁体）/国服组合牌（熊&华 等）+ 舞ReMASTER，
+    值 = 该牌曲 id 全集（柚子全量 id 空间：SD = 根 id、DX = 根 + 10000）。"""
+    data = await _request("GET", f"{base_url()}{PLATE_ENDPOINT}")
+    if (
+        not isinstance(data, dict)
+        or not data
+        or not all(
+            isinstance(v, list) and all(isinstance(x, int) for x in v)
+            for v in data.values()
+        )
+    ):
+        raise ExtError("柚子牌单返回了意外结构")
+    return data
+
+
 # ---------------------------------------------------------------------------
 # SSE 常驻连接（断线指数退避 3s→60s + Last-Event-ID）
 # ---------------------------------------------------------------------------

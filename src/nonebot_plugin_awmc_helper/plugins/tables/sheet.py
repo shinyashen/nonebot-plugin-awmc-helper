@@ -22,14 +22,17 @@ from ...core.plates import (
     PLATE_CHARS_JP,
     PLATE_LATEST_CHAR,
     PLATE_KIND_ALIAS_CHARS,
+    PLATE_FULL_SET_VERSIONS,
     PLATE_LATEST_VERSION_NAME,
     PLATE_VERSION_ALIAS_CHARS,
     in_plate_scope,
     major_type_of_plate,
+    plate_entry_allowed,
     plate_version_range,
 )
 from ...core.binding import service_display
 from ...core.sources import Capability
+from ...core.plate_source import cn_plate_ids, cn_remaster_ids
 from ...core.render.score import (
     SCORE_LIST_PER_PAGE,
     SCORE_LIST_HEAD_HEIGHT,
@@ -100,10 +103,20 @@ async def plate_completion_sheet(
     entries = []
     if rng is not None:
         lo, hi = rng
+        # 柚子牌单过筛（Q60，仅国服口径）：逐牌白名单 + 舞/霸 ReM 槽按
+        # 舞ReMASTER 名单收口；牌单不可用（None）= 不过筛（既有口径）
+        plate_ids = None if jp else await cn_plate_ids(version)
+        remaster_ids = (
+            None
+            if jp or version not in PLATE_FULL_SET_VERSIONS
+            else await cn_remaster_ids()
+        )
         songs = await (song_service.jp_all() if jp else song_service.get_all())
         for song in songs:
             for d in song.get_difficulties():
-                if in_plate_scope(song, d, lo, hi, major):
+                if in_plate_scope(song, d, lo, hi, major) and plate_entry_allowed(
+                    plate_ids, song, d, remaster_ids=remaster_ids
+                ):
                     entries.append((song, d))
     if not entries:
         await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)

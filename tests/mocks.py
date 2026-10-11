@@ -459,3 +459,28 @@ async def seed_service(
     service._ready.clear()
     await service.inject(songs)
     return songs
+
+
+def seed_plate_cache(content: dict) -> None:
+    """注入柚子牌单进程内新鲜缓存（Q60 过筛测试用，绕过网络与 DB）。"""
+    import time
+
+    from nonebot_plugin_awmc_helper.core import plate_source
+
+    plate_source._cache_clear()
+    plate_source._cache = {
+        **plate_source._normalize(content),
+        "fetched_at": time.time(),
+    }
+
+
+def load_yuzu_plate() -> dict:
+    """真实柚子逐牌曲单快照（tests/data/snapshots/yuzu_plate.json 全量）。"""
+    import json
+    from pathlib import Path
+
+    return json.loads(
+        (Path(__file__).parent / "data" / "snapshots" / "yuzu_plate.json").read_text(
+            encoding="utf-8"
+        )
+    )
