@@ -554,18 +554,28 @@ _LINFO_POINTS = [
 ]
 
 
-async def _seed_199_levels(db, points):
-    _ = db  # db fixture 仅初始化库文件；会话走 store 模块单例
+async def _seed_levels(song_id: int, kind: str, level_id: int, points):
+    """向 store 种入指定谱面的定数历史（linfo 测试共用；db fixture 仅初始化
+    库文件，会话走 store 模块单例）。"""
     from nonebot_plugin_awmc_helper.core import store
 
     async with store.session() as session:
         for ver, val in points:
             session.add(
                 store.SongChartLevel(
-                    song_id=199, kind="dx", level_id=3, version=ver, level_value=val
+                    song_id=song_id,
+                    kind=kind,
+                    level_id=level_id,
+                    version=ver,
+                    level_value=val,
                 )
             )
         await session.commit()
+
+
+async def _seed_199_levels(db, points):
+    """199 DX MASTER 定数历史种入（便捷入口，委托 :func:`_seed_levels`）。"""
+    await _seed_levels(199, "dx", 3, points)
 
 
 def _expected_linfo_card():
@@ -594,6 +604,43 @@ async def test_linfo_renders_history_card(app: App, songs, db):
     await _seed_199_levels(db, _LINFO_POINTS)
     await _assert_image_reply(
         app, score_tools.linfo_cmd, "linfo 紫199", _expected_linfo_card
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_linfo_color_prefix_no_space_alias(app: App, songs, db):
+    """「linfo 紫会员制餐厅」：难度色与别名无空格连写，与分数线同一分离口径。
+
+    解析链单源（resolve.split_args）：色字前缀产出「剥色键 + 整串」双候选，
+    剥色候选按色过滤后唯一 → 直接出卡（会员制餐厅 = 8 号 True Love Song，
+    SD-only，紫 = MASTER 唯一谱面）。双谱曲（琪露诺）无空格连写仍列条目
+    请指定 id——与分数线一致，属正确行为。
+    """
+    from mocks import sample_songs
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.core.render.linfo import linfo_card
+
+    await _seed_levels(8, "sd", 3, _LINFO_POINTS)
+    song = next(s for s in sample_songs() if s.id == 8)
+    diff = next(
+        d for d in song.difficulties.standard if d.level_index == LevelIndex.MASTER
+    )
+    await _assert_image_reply(
+        app,
+        score_tools.linfo_cmd,
+        "linfo 紫会员制餐厅",
+        lambda: linfo_card(
+            song,
+            diff,
+            _LINFO_POINTS,
+            cn_current=25500,
+            jp=False,
+            theme=DEFAULT_THEME,
+        ),
     )
 
 
