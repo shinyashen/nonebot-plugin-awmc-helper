@@ -51,6 +51,7 @@ from ..constants import (
     SOURCE_NAME_TO_VERSION,
     normalize_text,
     level_from_value,
+    align_version_code,
 )
 
 Scope = Literal["cn", "jp"]
@@ -705,13 +706,21 @@ def with_cn_baseline(
 
     取值沿用 §5.3 ``cn_level_value`` 的「区间无值取首值（同步上线的曲）」
     同款 fallback（国服先行 = 在国服上线版本处区间无值）。日服先行曲不动
-    ——日服轴历史对国服用户仍是真实变迁；``cn_debut`` 钳到 DX 起点之上
-    （旧框上线的曲，其 DX 世代起点恒为 ``dx_begin``）。纯函数，与
+    ——日服轴历史对国服用户仍是真实变迁。
+
+    ⚠️ ``cn_debut`` 是国服自有码（世代基码 + 国服本地更新后缀，落雪实测
+    11004/18508/22007/25007 等，不在 maimai_py 枚举轴上）：先经
+    ``Version.from_value`` 对齐到轴上最近成员（25007→PRiSM 25000），再钳
+    到 DX 起点（旧框上线的曲，其 DX 世代起点恒为 ``dx_begin``）——否则
+    渲染层 ``Version(ver)`` 直接 ValueError。纯函数，与
     :func:`dx_history_points` 组成 linfo 的数据出口口径。
     """
     if cn_debut is None or not points:
         return points
-    debut = max(cn_debut, dx_begin)
+    aligned = align_version_code(cn_debut)
+    if aligned is None:
+        return points
+    debut = max(aligned, dx_begin)
     if debut >= points[0][0]:
         return points
     value = cn_level_value(points, debut)

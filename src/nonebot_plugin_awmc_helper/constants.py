@@ -395,6 +395,19 @@ def version_zh(version: int) -> str:
     return VERSION_TO_ZH.get(ver, str(version)) if ver is not None else str(version)
 
 
+def align_version_code(version: int) -> int | None:
+    """版本码 → 归一代码（``Version.from_value`` carry-forward）。
+
+    非枚举基码——otoge-db 的代内逐曲递增值（11007、19999）与国服自有
+    后缀码（落雪 11004/18508/22007/25007 等）——对齐到所属代基码
+    （from_value(11007)=11000、from_value(25007)=25000）：等值/区间比较
+    与枚举查表前必须先归一，否则漏匹配或 Version(val) 直接 ValueError。
+    轴外值（≥ FUTURE 占位等）返回 None。
+    """
+    ver = Version.from_value(version)
+    return ver.value if ver is not None else None
+
+
 # ---------------------------------------------------------------------------
 # 机台内部 id 规则（单一来源 maimai_py：Song.get_divingfish_id / diff_id；
 # 展示与解析两端的手写算术一律引用本组常量，勿再写裸数字）

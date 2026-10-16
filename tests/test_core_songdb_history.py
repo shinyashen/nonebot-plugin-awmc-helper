@@ -74,11 +74,24 @@ async def test_chart_history_reads_store(tmp_db):
 
 def test_with_cn_baseline_cn_first_shifts():
     """国服先行（如零号车辆）：首节点提前到国服上线版本，值取 §5.3
-    「区间无值取首值」fallback（= 日服轴首值）。"""
+    「区间无值取首值」fallback（= 日服轴首值）。cn_debut 用国服自有码
+    25007（PRiSM 代国服本地更新后缀）验证轴对齐。"""
     from nonebot_plugin_awmc_helper.core.songdb import with_cn_baseline
 
     points = [(26000, 13.6), (27000, 13.9)]
+    assert with_cn_baseline(points, 25007) == [(25000, 13.6), (27000, 13.9)]
     assert with_cn_baseline(points, 25000) == [(25000, 13.6), (27000, 13.9)]
+
+
+def test_with_cn_baseline_aligns_cn_suffix_codes():
+    """国服后缀码统一对齐到枚举轴（22007→UNiVERSE 22000 / 18508→MURASAKi+
+    18500）；对齐后晚于日服首点的国服版本不触发前移。"""
+    from nonebot_plugin_awmc_helper.core.songdb import with_cn_baseline
+
+    points = [(21000, 11.0), (22500, 12.0)]
+    assert with_cn_baseline(points, 22007) is points
+    old_frame = [(20000, 11.0), (20500, 12.0)]
+    assert with_cn_baseline(old_frame, 18508) is old_frame
 
 
 def test_with_cn_baseline_jp_first_untouched():

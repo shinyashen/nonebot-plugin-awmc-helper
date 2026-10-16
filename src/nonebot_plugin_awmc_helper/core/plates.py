@@ -25,7 +25,7 @@ from maimai_py import (
 from maimai_py.enums import plate_aliases
 from maimai_py.models import PlateObject
 
-from ..constants import PLATE_CHARS, chart_display_id
+from ..constants import PLATE_CHARS, chart_display_id, align_version_code
 
 _LEGACY_PLATES = ("舞", "霸")
 """旧作全集牌：横跨全部旧框版本，主类型为 SD。"""
@@ -264,10 +264,7 @@ def version_code_of(diff: SongDifficulty) -> int | None:
     否则「舞」类全集码等值匹配与牌子区间上界大量漏曲（19992–19999 的 FiNALE
     末期 lv15 ReM 谱被 19900 上界排除，舞将完成表缺 15）。
     """
-    if diff.version is None:
-        return None
-    ver = Version.from_value(diff.version)
-    return ver.value if ver is not None else None
+    return align_version_code(diff.version) if diff.version is not None else None
 
 
 def in_plate_scope(song: Song, diff: SongDifficulty, lo: int, hi: int) -> bool:
