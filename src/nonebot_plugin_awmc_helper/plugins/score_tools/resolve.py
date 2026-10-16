@@ -23,7 +23,6 @@ from ...core.songs import (
 )
 from ...core.types import Song, SongType, LevelIndex, SongDifficultyUtage
 from ...core.binding import UserBinding
-from ...core.chart_card import song_lookup_reply
 
 _LINE_RE = re.compile(r"^-?[0-9]+(\.[0-9]+)?$")
 UTAGE_PREFIX = "宴"
@@ -96,8 +95,9 @@ async def resolve_color_chart(
     后命中异曲，如 绿9→ケロ⑨destiny、白银→銀のめぐり——剥色命中不可盲
     信）：剥色/整串两候选都解析后按根 id 交集判定——都命中且有交集 →
     首字符是难度色，用剥色结果按色过滤谱面；都命中但无交集 / 仅整串命中
-    → 首字符属于别名（如 白雪、绿9），用整串结果走「是什么歌」同款回复
-    + 缺色提示；仅剥色命中 → 首字符是难度色（紫琪露诺 形态）。数字候选
+    → 首字符属于别名（如 白雪、绿9），等效缺色 → 直接提示补难度色
+    （2026-10-16 起不再出「是什么歌」查歌卡）；仅剥色命中 → 首字符是
+    难度色（紫琪露诺 形态）。数字候选
     （紫799）按 id 解析优先（旧「色+id」格式兼容，id 无别名歧义）。宴前
     缀同理但无难度色：宴谱 6 位 diff_id 本身即完整规格（曲+谱面）。
     """
@@ -141,10 +141,11 @@ async def resolve_color_chart(
             return None, entries_list_text(entries, flags, hint=pick_hint), True
         return None, "", False
 
-    async def _no_color_reply(entries):
-        """无难度色但有命中：「是什么歌」同款回复 + 缺色提示（回复单源复用）。"""
-        msg = await song_lookup_reply(entries, binding, extra_note=hint)
-        await msg.finish(at_sender=True)
+    async def _no_color_reply(_entries):
+        """无难度色但有命中：不出查歌卡（与 minfo/info 指令的查歌卡无法
+        区分，会被误读为解析成 info），直接提示补难度色（2026-10-16 定案，
+        分数线/linfo 同规则；条目仅用于判定「有命中」，不再展示）。"""
+        await UniMessage.text(hint).finish(at_sender=True)
 
     async def _same_song(entries_a, entries_b) -> bool:
         """两组条目是否存在同曲（根 id 交集，别名按根 id 合并）。"""

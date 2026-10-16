@@ -400,16 +400,17 @@ async def test_score_line_utage_buddy_card(app: App, db):
 @requires_assets
 @pytest.mark.asyncio
 async def test_score_line_missing_color_feedback(app: App, db):
-    """无难度色但有命中：复用「是什么歌」同款回复（谱面卡）+ 缺色提示。
+    """色字属于别名（白雪）→ 等效缺色：文本提示补难度色，不出查歌卡。
 
     「白雪」首字符为颜色字（白）但剥色后「雪」不命中、整串命中别名 →
-    白属于别名，不算难度色（快照无颜色开头别名原型，构造补位并注明）。"""
+    白属于别名，不算难度色（快照无颜色开头别名原型，构造补位并注明）。
+    2026-10-16 起缺色不再回「是什么歌」卡（与 minfo/info 的查歌卡无法
+    区分，会被误读为解析成 info）。"""
     from mocks import make_diff, make_song, seed_service
     from maimai_py import SongType, LevelIndex
 
     from nonebot_plugin_awmc_helper.plugins import score_tools
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     song = make_song(
         903,
@@ -425,14 +426,10 @@ async def test_score_line_missing_color_feedback(app: App, db):
         ],
     )
     await seed_service(song_service, [song])
-    # 与「是什么歌」同一渲染：谱面卡（绑定无凭据 → 不嵌 B50）+ 提示语
-    png = await chart_card_bytes(song, None, SongType.STANDARD, False)
-    await _assert_image_reply(
+    await _assert_reply(
         app,
         score_tools.score_line_cmd,
         "分数线 白雪 100",
-        lambda: png,
-        suffix="您要找的是不是这首？\n"
         "※ 分数线需指定难度色：分数线 <绿/黄/红/紫/白><id/别名> <线>",
     )
 
@@ -450,7 +447,6 @@ async def test_score_line_color_alias_conflict_prefers_full(app: App, db):
 
     from nonebot_plugin_awmc_helper.plugins import score_tools
     from nonebot_plugin_awmc_helper.core.songs import song_service
-    from nonebot_plugin_awmc_helper.core.chart_card import chart_card_bytes
 
     host = make_song(
         904,
@@ -479,13 +475,10 @@ async def test_score_line_color_alias_conflict_prefers_full(app: App, db):
         ],
     )
     await seed_service(song_service, [host, decoy])
-    png = await chart_card_bytes(host, None, SongType.STANDARD, False)
-    await _assert_image_reply(
+    await _assert_reply(
         app,
         score_tools.score_line_cmd,
         "分数线 绿9 100",
-        lambda: png,
-        suffix="您要找的是不是这首？\n"
         "※ 分数线需指定难度色：分数线 <绿/黄/红/紫/白><id/别名> <线>",
     )
 
