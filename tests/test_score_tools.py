@@ -632,3 +632,80 @@ async def test_linfo_utage_direct_id(app: App, db):
     await _assert_reply(
         app, score_tools.linfo_cmd, "linfo 100199", "宴谱不提供定数历史"
     )
+
+
+@pytest.mark.asyncio
+async def test_linfo_missing_color_hints_text(app: App):
+    """无难度色：不出查歌卡（与 minfo/info 的查歌卡无法区分），文本提示补色。"""
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+
+    await _assert_reply(
+        app,
+        score_tools.linfo_cmd,
+        "linfo 表情人",
+        "※ linfo需指定难度色：linfo <绿/黄/红/紫/白><id/别名>",
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_linfo_cn_absent_uses_jp_scope(app: App, songs, db, monkeypatch):
+    """国服缺席曲（仅日服视图）：日服口径出卡 + 回复附日服限定提示。
+
+    テリトリーバトル(1396) 真实日服限定曲形态（构造定数历史补位，注明）；
+    国服缺席判定走 cn_song_map（国服视图无此曲）。
+    """
+    from mocks import make_diff, make_song
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.chart_card import JP_ONLY_NOTE
+    from nonebot_plugin_awmc_helper.core.render.linfo import linfo_card
+
+    territory = make_song(
+        1396,
+        "テリトリーバトル",
+        artist="MASAKI",
+        aliases=["领土战争"],
+        diffs=[make_diff(type=SongType.DX)],
+    )
+    await store.save_song_aliases("munet", {1396: ["领土战争"]})
+
+    async def fake_jp_map():
+        return {1396: territory}
+
+    monkeypatch.setattr(song_service, "_jp_songs_map", fake_jp_map)
+    async with store.session() as session:
+        for ver, val in [(22500, 13.0), (23000, 13.2), (23500, 13.5)]:
+            session.add(
+                store.SongChartLevel(
+                    song_id=1396, kind="dx", level_id=3, version=ver, level_value=val
+                )
+            )
+        await session.commit()
+
+    def expected():
+        diff = next(
+            d
+            for d in territory.get_difficulties(SongType.DX)
+            if d.level_index == LevelIndex.MASTER
+        )
+        return linfo_card(
+            territory,
+            diff,
+            [(22500, 13.0), (23000, 13.2), (23500, 13.5)],
+            cn_current=25500,
+            jp=True,
+            theme=DEFAULT_THEME,
+        )
+
+    await _assert_image_reply(
+        app,
+        score_tools.linfo_cmd,
+        "linfo 紫 领土战争",
+        expected,
+        suffix=f"\n{JP_ONLY_NOTE}",
+    )

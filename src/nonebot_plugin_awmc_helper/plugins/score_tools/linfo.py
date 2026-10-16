@@ -9,7 +9,11 @@
 - 按数据源分口径：日服视图（NET 等）大数字 = 日服现行定数、无「日服
   最新」概念；国服视图大数字 = 国服现行定数，日服已调至更新值时红字
   提示并粉框标记末节点；
-- DX 世代全程未调整的谱面不出卡，纯文本提示。
+- DX 世代全程未调整的谱面不出卡，纯文本提示；
+- 无难度色不出查歌卡（与 minfo/info 的查歌卡无法区分），直接文本提示
+  补难度色；带色时宴谱条目本就被剔除，不进选择列表；
+- 国服缺席（仅日服视图有）的曲走日服口径（日服现行定数），并附日服
+  限定提示——「国服现行」等字样对国服未上线的曲不成立。
 """
 
 from nonebot import on_command
@@ -17,7 +21,7 @@ from nonebot.params import CommandArg
 from nonebot.adapters import Message
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from .resolve import split_args, resolve_color_chart
+from .resolve import color_hint, split_args, resolve_color_chart
 from ...core.dan import cn_current_version
 from ...constants import (
     DEFAULT_THEME,
@@ -25,7 +29,7 @@ from ...constants import (
     ds_text,
 )
 from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
-from ...core.songs import chart_of_color
+from ...core.songs import cn_song_map, song_service, chart_of_color
 from ...core.types import SongType
 from ...core.utils import handle_errors
 from ...core.songdb import (
@@ -35,7 +39,7 @@ from ...core.songdb import (
     dx_history_points,
 )
 from ...core.binding import UserBinding, SessionBinding
-from ...core.chart_card import resolve_card_view
+from ...core.chart_card import JP_ONLY_NOTE, resolve_card_view
 from ...core.render.linfo import linfo_card
 
 linfo_cmd = on_command("linfo", aliases={"定数历史"}, block=True)
@@ -68,8 +72,17 @@ async def _(
         # linfo 无「线」参数：纯数字输入（6 位宴 id / 裸 id）被 split_args
         # 当作线吞掉，还原为查询键（小数形态本就不是 id，仍走未找到兜底）
         candidates = [str(int(line)) if line.is_integer() else str(line)]
+    if level_index is None:
+        # 无难度色：不出查歌卡（与 minfo/info 指令的查歌卡无法区分，会被
+        # 误读为解析成 info），直接提示补难度色（用户定案 2026-10-16）；
+        # 6 位宴 id 直查仍先行拦截为「宴谱不提供」
+        if candidates[0].isdigit():
+            found = await song_service.resolve_raw_chart(int(candidates[0]))
+            if found is not None and found[3] is not None:
+                await UniMessage.text(_UTAGE_TEXT).finish(at_sender=True)
+        await UniMessage.text(color_hint("linfo")).finish(at_sender=True)
     resolved = await resolve_color_chart(
-        level_index, False, candidates, binding=binding, command="linfo"
+        level_index, is_utage, candidates, binding=binding, command="linfo"
     )
     if resolved is None:
         await UniMessage.text(
@@ -83,7 +96,10 @@ async def _(
 
     # NET 等日服视图换日服曲对象（定数/版本口径一致，与查歌卡同路由）
     card_song, jp_card = await resolve_card_view(song, binding)
-    jp_view = jp or jp_card
+    # 国服缺席（仅日服视图有此曲）同样走日服口径——「国服现行」等字样
+    # 对国服未上线的曲不成立；回复末尾附日服限定提示（与查歌卡同款）
+    cn_absent = (await cn_song_map([card_song]))[card_song.id] is None
+    jp_view = jp or jp_card or cn_absent
     prefer_type = SongType.STANDARD if prefer == SongType.STANDARD else None
     diff = chart_of_color(card_song, level_index, prefer=prefer_type or SongType.DX)
     if diff is None:
@@ -113,7 +129,10 @@ async def _(
         jp=jp_view,
         theme=binding.theme or DEFAULT_THEME,
     )
-    await UniMessage.image(raw=png).finish(at_sender=True)
+    reply = UniMessage.image(raw=png)
+    if cn_absent:
+        reply = reply.text(f"\n{JP_ONLY_NOTE}")
+    await reply.finish(at_sender=True)
 
 
 # ---------------------------------------------------------------- 帮助声明

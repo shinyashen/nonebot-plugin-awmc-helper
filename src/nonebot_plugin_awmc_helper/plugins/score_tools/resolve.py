@@ -67,6 +67,13 @@ _PICK_HINT = "※ 请使用「分数线 <难度色><id> <线>」指定谱面"
 _UTAGE_HINT = "※ 请使用「分数线 宴<id> <线>」指定谱面"
 
 
+def color_hint(command: str) -> str:
+    """缺色提示按指令取措辞（分数线带「线」段，其余指令不带）。"""
+    if command == "分数线":
+        return _COLOR_HINT
+    return f"※ {command}需指定难度色：{command} <绿/黄/红/紫/白><id/别名>"
+
+
 async def resolve_color_chart(
     level_index: LevelIndex | None,
     is_utage: bool,
@@ -94,10 +101,10 @@ async def resolve_color_chart(
     （紫799）按 id 解析优先（旧「色+id」格式兼容，id 无别名歧义）。宴前
     缀同理但无难度色：宴谱 6 位 diff_id 本身即完整规格（曲+谱面）。
     """
+    hint = color_hint(command)
     if command == "分数线":
-        color_hint, pick_hint, utage_hint = _COLOR_HINT, _PICK_HINT, _UTAGE_HINT
+        pick_hint, utage_hint = _PICK_HINT, _UTAGE_HINT
     else:
-        color_hint = f"※ {command}需指定难度色：{command} <绿/黄/红/紫/白><id/别名>"
         pick_hint = f"※ 请使用「{command} <难度色><id>」指定谱面"
         utage_hint = f"※ 请使用「{command} 宴<id>」指定谱面"
     resolved: tuple | None = None
@@ -136,7 +143,7 @@ async def resolve_color_chart(
 
     async def _no_color_reply(entries):
         """无难度色但有命中：「是什么歌」同款回复 + 缺色提示（回复单源复用）。"""
-        msg = await song_lookup_reply(entries, binding, extra_note=color_hint)
+        msg = await song_lookup_reply(entries, binding, extra_note=hint)
         await msg.finish(at_sender=True)
 
     async def _same_song(entries_a, entries_b) -> bool:
