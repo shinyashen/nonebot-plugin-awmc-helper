@@ -657,6 +657,46 @@ def cn_level_value(history: list[tuple[int, float]], cn_current: int) -> float |
     return history[0][1] if history else None
 
 
+async def chart_history(
+    song_id: int, kind: str, level_id: int
+) -> list[tuple[int, float]]:
+    """规范表单谱面定数变化点（运行时库读取，版本升序；无记录返回空表）。
+
+    ``kind`` 为库口径 ``sd``/``dx``；宴谱不建 levels 行（宴定数不采信），
+    恒返回空表。与 ``dan._chart_info`` 同款查询，改查询口径须同步。
+    """
+    async with store.session() as db:
+        rows = (
+            await db.exec(
+                select(store.SongChartLevel)
+                .where(
+                    store.SongChartLevel.song_id == song_id,
+                    store.SongChartLevel.kind == kind,
+                    store.SongChartLevel.level_id == level_id,
+                )
+                .order_by(col(store.SongChartLevel.version))
+            )
+        ).all()
+    return [(r.version, r.level_value) for r in rows if r.level_value is not None]
+
+
+def dx_history_points(
+    history: list[tuple[int, float]], dx_begin: int = Version.MAIMAI_DX.value
+) -> list[tuple[int, float]]:
+    """定数历史裁到 DX 世代：旧框末值折成 ``(dx_begin, 值)`` 基线首节点。
+
+    变化点语义与规范表一致（值不变不出点），故返回长度 1 即「DX 世代
+    定数从未调整」。入参按版本升序排序（存储读取本身有序，此处是对调
+    用方的健壮性保险）。纯函数，linfo 指令与渲染层共用同一裁剪口径。
+    """
+    if not history:
+        return []
+    ordered = sorted(history, key=lambda p: p[0])
+    old = [p for p in ordered if p[0] < dx_begin]
+    era = [p for p in ordered if p[0] >= dx_begin]
+    return ([(dx_begin, old[-1][1])] if old else []) + era
+
+
 # ---------------------------------------------------------------------------
 # 合并管线
 # ---------------------------------------------------------------------------

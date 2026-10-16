@@ -73,6 +73,8 @@ LEVEL_INDEX_BY_EN: dict[str, LevelIndex] = {
 }
 # 显示名 = 统计卡/进度总览表头
 DIFF_DISPLAY_NAMES: tuple[str, ...] = tuple(v[3] for v in _LEVEL_INDEX_META.values())
+# 难度（LevelIndex）→ 色字（绿黄红紫白）：文本回复按用户输入色字回显用
+LEVEL_COLOR_ZH: dict[LevelIndex, str] = {k: v[1] for k, v in _LEVEL_INDEX_META.items()}
 
 # 达成率评级（RateType）→ 显示名，值越小评级越高
 RATE_TO_ZH: dict[RateType, str] = {

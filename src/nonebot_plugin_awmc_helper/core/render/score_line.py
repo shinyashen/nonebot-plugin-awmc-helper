@@ -66,21 +66,27 @@ def _theme_style(theme: str) -> dict:
     }
 
 
-def _theme_bg(theme: str) -> Image.Image:
+def _theme_bg(theme: str, height: int | None = None) -> Image.Image:
     """主题底图：prism_plus 程序渐变（generate_prism_bg）；circle 用主题
-    b50.png 大底图（1400×1600 RGB）缩放到画布尺寸。"""
+    b50.png 大底图（1400×1600 RGB）缩放到画布尺寸。
+
+    ``height`` 缺省取本卡画布高 ``H``；其他卡面（linfo 定数历史卡等）
+    复用同款主题底图时传入自身高度——渐变/渐隐区间随之自适应，避免
+    绑死 1400 留下大片空底。"""
+    h = height if height is not None else H
     if theme == THEME_CIRCLE:
         im = assets.pic("b50.png", theme).convert("RGBA")
-        im = im.resize((W, H), Image.Resampling.LANCZOS)
+        im = im.resize((W, h), Image.Resampling.LANCZOS)
         # 底图自带的游乐园装饰带（下部 ~1129-1400）会干扰页脚文字：
-        # 叠一层向下渐隐的粉白，装饰淡出、署名可读
-        fade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        # 叠一层向下渐隐的粉白，装饰淡出、署名可读（起点按高度等比）
+        fade = Image.new("RGBA", (W, h), (0, 0, 0, 0))
         fade_draw = ImageDraw.Draw(fade)
-        for y in range(1120, H):
-            alpha = min(235, int((y - 1120) * 235 / (H - 1120)))
+        y0 = round(h * 1120 / H)
+        for y in range(y0, h):
+            alpha = min(235, int((y - y0) * 235 / (h - y0)))
             fade_draw.line(((0, y), (W, y)), fill=(255, 235, 245, alpha))
         return Image.alpha_composite(im, fade)
-    return generate_prism_bg(H, width=W)
+    return generate_prism_bg(h, width=W)
 
 
 def _card(im: Image.Image, box: tuple[int, int, int, int]) -> None:

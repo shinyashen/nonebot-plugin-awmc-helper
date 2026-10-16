@@ -538,3 +538,97 @@ async def test_score_line_help(app: App):
         )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
+
+
+# ---------------------------------------------------------------- linfo 定数历史
+
+# 199 チルノ DX MASTER 定数历史样例（旧框末值折 DX 基线 + DX 世代调整点；
+# 值为构造的合理数值——快照无该曲定数历史断言原型，取值参照 BAD∞END∞NIGHT
+# 真实形态）
+_LINFO_POINTS = [
+    (20000, 12.3),
+    (20500, 12.5),
+    (22000, 12.8),
+    (22500, 13.0),
+    (25000, 13.5),
+]
+
+
+async def _seed_199_levels(db, points):
+    _ = db  # db fixture 仅初始化库文件；会话走 store 模块单例
+    from nonebot_plugin_awmc_helper.core import store
+
+    async with store.session() as session:
+        for ver, val in points:
+            session.add(
+                store.SongChartLevel(
+                    song_id=199, kind="dx", level_id=3, version=ver, level_value=val
+                )
+            )
+        await session.commit()
+
+
+def _expected_linfo_card():
+    """「linfo 紫199」期望图：与 handler 同管线（dx 裁剪 → 渲染）。"""
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.core.songdb import dx_history_points
+    from nonebot_plugin_awmc_helper.core.render.linfo import linfo_card
+
+    song, diff = _dx_199_master()
+    return linfo_card(
+        song,
+        diff,
+        dx_history_points(_LINFO_POINTS),
+        cn_current=25500,
+        jp=False,
+        theme=DEFAULT_THEME,
+    )
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_linfo_renders_history_card(app: App, songs, db):
+    """「linfo 紫199」：多变化点 → 图片出定数历史时间轴卡。"""
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+
+    await _seed_199_levels(db, _LINFO_POINTS)
+    await _assert_image_reply(
+        app, score_tools.linfo_cmd, "linfo 紫199", _expected_linfo_card
+    )
+
+
+@pytest.mark.asyncio
+async def test_linfo_single_point_text(app: App, songs, db):
+    """DX 世代全程未调整：不出卡，纯文本告知现行定数。"""
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+
+    await _seed_199_levels(db, [(20500, 12.5)])
+    song, _diff = _dx_199_master()
+    await _assert_reply(
+        app,
+        score_tools.linfo_cmd,
+        "linfo 紫199",
+        f"「{song.title}」紫谱面定数没变过（国服现行 12.5）",
+    )
+
+
+@pytest.mark.asyncio
+async def test_linfo_utage_rejected(app: App, songs):
+    """宴前缀入口即拦截：宴谱定数不采信、规范表不存其历史。"""
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+
+    await _assert_reply(app, score_tools.linfo_cmd, "linfo 宴蛸", "宴谱不提供定数历史")
+
+
+@pytest.mark.asyncio
+async def test_linfo_utage_direct_id(app: App, db):
+    """6 位宴 diff_id 直查形态：解析链直出宴谱后同样拦截。"""
+    from mocks import seed_service
+
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    await seed_service(song_service, [_utage_host()])
+    await _assert_reply(
+        app, score_tools.linfo_cmd, "linfo 100199", "宴谱不提供定数历史"
+    )
