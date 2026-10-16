@@ -28,7 +28,12 @@ from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
 from ...core.songs import chart_of_color
 from ...core.types import SongType
 from ...core.utils import handle_errors
-from ...core.songdb import chart_history, dx_history_points
+from ...core.songdb import (
+    chart_history,
+    group_cn_version,
+    with_cn_baseline,
+    dx_history_points,
+)
 from ...core.binding import UserBinding, SessionBinding
 from ...core.chart_card import resolve_card_view
 from ...core.render.linfo import linfo_card
@@ -78,6 +83,7 @@ async def _(
 
     # NET 等日服视图换日服曲对象（定数/版本口径一致，与查歌卡同路由）
     card_song, jp_card = await resolve_card_view(song, binding)
+    jp_view = jp or jp_card
     prefer_type = SongType.STANDARD if prefer == SongType.STANDARD else None
     diff = chart_of_color(card_song, level_index, prefer=prefer_type or SongType.DX)
     if diff is None:
@@ -87,7 +93,10 @@ async def _(
     points = dx_history_points(
         await chart_history(song.id, kind, diff.level_index.value)
     )
-    jp_view = jp or jp_card
+    if not jp_view:
+        # 国服视图基线校准：国服先行曲首节点提前到国服上线版本（§5.3 同款
+        # 「区间无值取首值」fallback），否则起始版本错归因到日服追加版本
+        points = with_cn_baseline(points, await group_cn_version(song.id, kind))
     if len(points) <= 1:
         # DX 世代全程未调整：不出卡，纯文本告知（值取不到时回落当前定数）
         value = points[-1][1] if points else diff.level_value

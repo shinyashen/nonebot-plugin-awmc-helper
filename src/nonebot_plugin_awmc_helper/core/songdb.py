@@ -680,6 +680,44 @@ async def chart_history(
     return [(r.version, r.level_value) for r in rows if r.level_value is not None]
 
 
+async def group_cn_version(song_id: int, kind: str) -> int | None:
+    """规范表组级国服上线版本（``version_cn``）；NULL/无组 = 国服未上线。"""
+    async with store.session() as db:
+        group = (
+            await db.exec(
+                select(store.SongSheetGroup).where(
+                    store.SongSheetGroup.song_id == song_id,
+                    store.SongSheetGroup.kind == kind,
+                )
+            )
+        ).first()
+    return group.version_cn if group else None
+
+
+def with_cn_baseline(
+    points: list[tuple[int, float]],
+    cn_debut: int | None,
+    dx_begin: int = Version.MAIMAI_DX.value,
+) -> list[tuple[int, float]]:
+    """国服视图基线校准：国服先行曲（上线版本早于日服轴首点）把首节点
+    版本提前到国服上线版本——否则该定数的起始会被错归因到日服追加版本
+    （如零号车辆：国服 PRiSM 上线、日服 CiRCLE 追加，首节点错标 CiRCLE）。
+
+    取值沿用 §5.3 ``cn_level_value`` 的「区间无值取首值（同步上线的曲）」
+    同款 fallback（国服先行 = 在国服上线版本处区间无值）。日服先行曲不动
+    ——日服轴历史对国服用户仍是真实变迁；``cn_debut`` 钳到 DX 起点之上
+    （旧框上线的曲，其 DX 世代起点恒为 ``dx_begin``）。纯函数，与
+    :func:`dx_history_points` 组成 linfo 的数据出口口径。
+    """
+    if cn_debut is None or not points:
+        return points
+    debut = max(cn_debut, dx_begin)
+    if debut >= points[0][0]:
+        return points
+    value = cn_level_value(points, debut)
+    return [(debut, points[0][1] if value is None else value), *points[1:]]
+
+
 def dx_history_points(
     history: list[tuple[int, float]], dx_begin: int = Version.MAIMAI_DX.value
 ) -> list[tuple[int, float]]:

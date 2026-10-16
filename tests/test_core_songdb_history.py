@@ -67,3 +67,56 @@ async def test_chart_history_reads_store(tmp_db):
     assert await chart_history(199, "dx", 4) == []
     # 宴谱不建 levels 行：恒空表
     assert await chart_history(100199, "utage", 0) == []
+
+
+# ---------------- 国服先行基线校准（with_cn_baseline / group_cn_version）
+
+
+def test_with_cn_baseline_cn_first_shifts():
+    """国服先行（如零号车辆）：首节点提前到国服上线版本，值取 §5.3
+    「区间无值取首值」fallback（= 日服轴首值）。"""
+    from nonebot_plugin_awmc_helper.core.songdb import with_cn_baseline
+
+    points = [(26000, 13.6), (27000, 13.9)]
+    assert with_cn_baseline(points, 25000) == [(25000, 13.6), (27000, 13.9)]
+
+
+def test_with_cn_baseline_jp_first_untouched():
+    """日服先行曲（cn_debut 晚于首点）：日服轴历史不动。"""
+    from nonebot_plugin_awmc_helper.core.songdb import with_cn_baseline
+
+    points = [(21000, 11.0), (22500, 12.0)]
+    assert with_cn_baseline(points, 23000) is points
+    assert with_cn_baseline(points, 21000) is points  # 同版本亦不动
+
+
+def test_with_cn_baseline_clamps_to_dx_begin():
+    """旧框上线的曲：cn_debut 钳到 DX 起点，基线恒为 dx_begin 不前移。"""
+    from nonebot_plugin_awmc_helper.core.songdb import (
+        with_cn_baseline,
+        dx_history_points,
+    )
+
+    points = dx_history_points([(15000, 11.0), (20500, 12.0)])
+    assert points == [(20000, 11.0), (20500, 12.0)]
+    assert with_cn_baseline(points, 15000) is points
+    assert with_cn_baseline(points, None) is points
+
+
+@pytest.mark.asyncio
+async def test_group_cn_version_reads_store(tmp_db):
+    """group_cn_version：读组级 version_cn；NULL/无组返回 None。"""
+    from nonebot_plugin_awmc_helper.core.songdb import group_cn_version
+
+    async with tmp_db.session() as db:
+        db.add(
+            tmp_db.SongSheetGroup(
+                song_id=11946, kind="dx", version=26000, version_cn=25000
+            )
+        )
+        db.add(tmp_db.SongSheetGroup(song_id=11946, kind="sd", version=26000))
+        await db.commit()
+
+    assert await group_cn_version(11946, "dx") == 25000
+    assert await group_cn_version(11946, "sd") is None  # version_cn NULL
+    assert await group_cn_version(999999, "dx") is None  # 无组
