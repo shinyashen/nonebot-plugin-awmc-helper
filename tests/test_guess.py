@@ -202,9 +202,9 @@ async def _run_one(app, matcher, text: str, *, finished: bool = True):
 @pytest.mark.asyncio
 async def test_guess_cmd_stray_tail_silent(app, songs, monkeypatch):
     """「猜歌啊」类闲聊残片静默不开局（2026-10-19 误触发排查：on_command
-    尾巴守卫，残片＝不是指令）。三个残片消息各打各的 matcher——同一
-    matcher 类在同一 driver 内第二次运行会复用 DI 依赖缓存（UniSession
-    不再解析），期望会漂移，故本用例每个 matcher 只驱动一次。"""
+    尾巴守卫，残片＝不是指令）。三个残片消息各打各的 matcher（猜歌/猜曲绘/
+    重置猜歌本属不同指令）；规则不匹配的事件 matcher 不运行、零 API 调用，
+    不可注册期望。"""
     from nonebot_plugin_awmc_helper.plugins.guess import game as guess_game
     from nonebot_plugin_awmc_helper.plugins.guess import matchers
 
