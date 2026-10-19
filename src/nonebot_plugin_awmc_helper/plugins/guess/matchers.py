@@ -9,7 +9,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .game import GUESS_FEATURE, _games, _reveal, _game_of, _start_game, _handle_answer
 from ...core.help import CommandSpec, help_registry
-from ...core.utils import group_id_of, handle_errors, apply_group_switch
+from ...core.utils import NoTail, group_id_of, handle_errors, apply_group_switch
 
 guess = on_command("猜歌", block=True)
 guess_pic = on_command("猜曲绘", block=True)
@@ -45,19 +45,29 @@ async def _(event: Event, session: Session = UniSession()):
 
 @guess.handle()
 @handle_errors()
-async def _(bot: Bot, event: Event, session: Session = UniSession()):
+async def _(
+    _: NoTail,  # 「猜歌啊」类闲聊不开局（首位：先于会话构建取消，见 core.NoTail）
+    bot: Bot,
+    event: Event,
+    session: Session = UniSession(),
+):
     await _start_game(session, pic_mode=False, bot=bot, event=event)
 
 
 @guess_pic.handle()
 @handle_errors()
-async def _(bot: Bot, event: Event, session: Session = UniSession()):
+async def _(
+    _: NoTail,
+    bot: Bot,
+    event: Event,
+    session: Session = UniSession(),
+):
     await _start_game(session, pic_mode=True, bot=bot, event=event)
 
 
 @guess_reset.handle()
 @handle_errors()
-async def _(session: Session = UniSession()):
+async def _(_: NoTail, session: Session = UniSession()):
     group_id = group_id_of(session)
     game = _game_of(group_id)
     if game is None:

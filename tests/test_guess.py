@@ -160,3 +160,80 @@ async def test_guess_reveal_idempotent(songs, monkeypatch):
     finally:
         if not game.task.done():
             game.task.cancel()
+
+
+async def _run_one(app, matcher, text: str, *, finished: bool = True):
+    """驱动单个 matcher：残片静默＝API 调用 + finished 无回复；
+    finished=False＝裸指令走完 handler 正常返回（无 FinishedException）。
+    依赖解析被 shield，UniSession 恒解析、uninfo 两次取群信息恒发生。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    event = fake_group_message_event_v11(message=text, user_id=12345678)
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        if finished:
+            ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_guess_cmd_stray_tail_silent(app, songs, monkeypatch):
+    """「猜歌啊」类闲聊残片静默不开局（2026-10-19 误触发排查：on_command
+    尾巴守卫，残片＝不是指令）。三个残片消息各打各的 matcher——同一
+    matcher 类在同一 driver 内第二次运行会复用 DI 依赖缓存（UniSession
+    不再解析），期望会漂移，故本用例每个 matcher 只驱动一次。"""
+    from nonebot_plugin_awmc_helper.plugins.guess import game as guess_game
+    from nonebot_plugin_awmc_helper.plugins.guess import matchers
+
+    started: list[bool] = []
+
+    async def fake_start(session, *, pic_mode: bool, bot, event):
+        started.append(pic_mode)
+
+    monkeypatch.setattr(matchers, "_start_game", fake_start)
+
+    await _run_one(app, matchers.guess, "猜歌啊")
+    await _run_one(app, matchers.guess_pic, "猜曲绘吗")
+    await _run_one(app, matchers.guess_reset, "重置猜歌吧")
+    assert not started  # 残片全部被守卫拦下，未开局
+    # 按群断言（全局 _games 可能残留其他用例的对局，不作全局空断言）
+    assert guess_game._game_of("87654321") is None
+
+
+@pytest.mark.asyncio
+async def test_guess_cmd_bare_starts(app, songs, monkeypatch):
+    """裸「猜歌」照常开局（守卫只拦残片）；handler 正常返回、无 finish。"""
+    from nonebot_plugin_awmc_helper.plugins.guess import matchers
+
+    started: list[bool] = []
+
+    async def fake_start(session, *, pic_mode: bool, bot, event):
+        started.append(pic_mode)
+
+    monkeypatch.setattr(matchers, "_start_game", fake_start)
+
+    await _run_one(app, matchers.guess, "猜歌", finished=False)
+    assert started == [False]

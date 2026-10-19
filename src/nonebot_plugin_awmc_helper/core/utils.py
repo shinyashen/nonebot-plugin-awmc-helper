@@ -1,12 +1,13 @@
 """核心层通用工具：分页、统一异常兜底装饰器。"""
 
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, Annotated, cast
 from functools import wraps
 from collections.abc import Callable, Awaitable
 
 from nonebot import logger
+from nonebot.params import Depends, CommandArg
 from nonebot.adapters import Bot, Event, Message
-from nonebot.exception import MatcherException
+from nonebot.exception import MatcherException, FinishedException
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 T = TypeVar("T")
@@ -133,6 +134,32 @@ def handle_errors(
         return wrapper
 
     return decorator
+
+
+async def _no_tail(message: Message = CommandArg()) -> None:
+    """NoTail 守卫本体：指令头后有非空白残片即视作闲聊，静默终止。
+
+    FinishedException 在依赖解析阶段上穿，``Matcher.run`` 统一捕获为
+    finished（无回复），效果等同裸 ``matcher.finish()`` 但无需注入 Matcher。
+    """
+    if message.extract_plain_text().strip():
+        raise FinishedException
+
+
+NoTail = Annotated[None, Depends(_no_tail)]
+"""无参数指令的「残片静默」守卫（2026-10-19 误触发排查拍板：残片＝不是指令）。
+
+用法 ``_: NoTail``。部署 ``COMMAND_START`` 含空串时 on_command 是
+startswith 前缀匹配，「段位啊」「解绑了」「上机咯」等闲聊同样进 handler，
+本守卫把指令头后的非空白残片一律静默终止（FinishedException → 无回复）。
+异常在依赖解析阶段上穿，handler 体不再执行；注意 NoneBot 对各依赖解析
+均 shield（dependencies.solve 的 run_coro_with_shield），其余依赖（uninfo
+会话构建等）仍会完成，本守卫省的只是 handler 体与其后续发送。
+
+仅适用于**无参数形态**指令（解绑/猜歌/上机类）；带解析器的指令
+（段位/主题/分数线类）静默点在其自身解析失败分支；自由参数指令
+（查歌 <标题>、b50 <水鱼用户名> 类）残片与真实参数不可区分，不得套用。
+"""
 
 
 def slow_notice(text: str = " 比预期时间要长，再稍等一下…"):

@@ -18,7 +18,7 @@ from ...core.ext import lxns as lxns_ext
 from ...core.ext import divingfish as df_ext
 from ...constants import SERVICE_ZH, THEME_CIRCLE, THEME_PRISM_PLUS
 from ...core.help import CommandSpec, help_registry
-from ...core.utils import handle_errors, is_private_session
+from ...core.utils import NoTail, handle_errors, is_private_session
 from ...core.binding import (
     SERVICE_NET,
     QQ_PLATFORMS,
@@ -398,7 +398,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 
 @unbind.handle()
 @handle_errors("操作失败，请稍后再试")
-async def _(session: Session = UniSession()):
+async def _(_: NoTail, session: Session = UniSession()):
     platform, user_id = session_keys(session)
     if await binding_service.unbind(platform, user_id):
         await UniMessage.text(" 已解除绑定").finish(at_sender=True)
@@ -409,11 +409,15 @@ async def _(session: Session = UniSession()):
 @handle_errors("设置失败，请稍后再试", except_with_message=(BindingError,))
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = message.extract_plain_text().strip()
-    service = {"0": SERVICE_DIVINGFISH, "1": SERVICE_LXNS, "2": SERVICE_NET}.get(arg)
-    if service is None:
+    if not arg:
         await UniMessage.text(
             " 用法：数据源 <0|1|2>（0 = 水鱼，1 = 落雪，2 = 日服 NET）"
         ).finish(at_sender=True)
+    service = {"0": SERVICE_DIVINGFISH, "1": SERVICE_LXNS, "2": SERVICE_NET}.get(arg)
+    if service is None:
+        # 残片（「数据源有哪些」类闲聊）静默：参数表为严格枚举，非 0/1/2
+        # 的尾巴不是指令（裸发仍出用法）
+        return
     platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.set_service(binding, service)
@@ -426,10 +430,14 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @handle_errors("设置失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = message.extract_plain_text().strip()
-    if arg not in ("0", "1"):
+    if not arg:
         await UniMessage.text(
             f" 用法：主题 <0|1>（0 = {THEME_PRISM_PLUS}，1 = {THEME_CIRCLE}）"
         ).finish(at_sender=True)
+    if arg not in ("0", "1"):
+        # 残片（「主题是什么」类闲聊）静默：参数表为严格枚举，非 0/1 的
+        # 尾巴不是指令（裸发仍出用法）
+        return
     platform, user_id = session_keys(session)
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.set_theme(
@@ -440,7 +448,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 
 @my_bind.handle()
 @handle_errors("查询失败，请稍后再试")
-async def _(session: Session = UniSession()):
+async def _(_: NoTail, session: Session = UniSession()):
     platform, user_id = session_keys(session)
     binding = await binding_service.get(platform, user_id)
     if binding is None:

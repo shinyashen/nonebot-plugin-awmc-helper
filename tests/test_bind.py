@@ -437,3 +437,59 @@ def test_bind_command_names_disjoint():
                     f"命令撞名：「{name}」同时属于 {owners[name]} 与 {matcher}"
                 )
                 owners[name] = str(matcher)
+
+
+async def _run_silent(app: App, matcher, text: str, *, user_id=12345678):
+    """残片静默路径：NoTail 守卫在依赖解析阶段终止（无回复、handler 体不执行）。
+    NoneBot 对依赖解析 shield，uninfo 会话构建照常发生，两次取群信息照常注册。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    event = fake_group_message_event_v11(message=text, user_id=user_id)
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "测试群",
+                "member_count": 10,
+                "max_member_count": 100,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": user_id, "no_cache": True},
+            result={
+                "user_id": user_id,
+                "role": "member",
+                "card": "",
+                "nickname": "test",
+            },
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_stray_tail_silent(app: App, db):
+    """闲聊残片静默（2026-10-19 误触发排查）：「解绑了」不再真的解绑、
+    「我的绑定呢」「主题是什么」「数据源有哪些」不再回话。"""
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.set_theme(binding, "circle")
+
+    await _run_silent(app, bind.unbind, "解绑了")
+    await _run_silent(app, bind.my_bind, "我的绑定呢")
+    await _run_silent(app, bind.set_theme, "主题是什么")
+    await _run_silent(app, bind.set_provider, "数据源有哪些")
+
+    # 静默路径无副作用：绑定行未被解绑、主题未被改动
+    binding = await binding_service.get("OneBot V11", "12345678")
+    assert binding is not None
+    assert binding.theme == "circle"
