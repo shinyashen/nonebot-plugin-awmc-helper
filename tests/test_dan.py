@@ -1,7 +1,7 @@
 """awmc.dan 段位子插件 handler 测试（nonebug + onebot v11 假事件）。
 
 覆盖边界：只覆盖不依赖真实曲库重设施的分支——裸「段位」列表回复、未识别
-段位名报错、段位名出卡（版本前缀解析 + 渲染层 mock，成绩链以未绑定降级）、
+段位名静默、段位名出卡（版本前缀解析 + 渲染层 mock，成绩链以未绑定降级）、
 随机档位总览（合并转发成功与协议端失败降级两分支）。段位表数据沿用
 test_core_dan 的内联 fixture 口径（真实快照同构构造）；课题曲 join 走
 song_id=None 降级（离线口径见 test_core_dan.test_card_data_degrades_without_binding），
@@ -142,17 +142,48 @@ async def test_dan_list_reply(app: App, dan_ready):
     )
 
 
+async def _run_silent(app: App, matcher, text: str, *, user_id=12345678):
+    """残片静默路径：handler 正常运行但 finished，无任何回复。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    event = fake_group_message_event_v11(message=text, user_id=user_id)
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": user_id, "no_cache": True},
+            result={
+                "user_id": user_id,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_finished()
+
+
 @pytest.mark.asyncio
 async def test_dan_unknown_name(app: App, dan_ready):
-    """未识别段位名：报错并引导回列表（不再尝试出卡）。"""
+    """未识别段位名：静默终止（打错段位名与闲聊残片同路，裸「段位」仍出列表）。"""
     from nonebot_plugin_awmc_helper.plugins.dan import matchers
 
-    await _run(
-        app,
-        matchers.dan_cmd,
-        "段位 不存在的段位",
-        "未识别的段位名；发送「段位」查看可用段位",
-    )
+    await _run_silent(app, matchers.dan_cmd, "段位 不存在的段位")
+    await _run_silent(app, matchers.dan_cmd, "段位啊")
+    await _run_silent(app, matchers.dan_cmd, "段位原来也能开随机吗")
 
 
 @pytest.mark.asyncio

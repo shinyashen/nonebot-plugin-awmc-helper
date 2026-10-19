@@ -186,9 +186,11 @@ async def _(
             "「段位 舞萌2022十段」），不带前缀为当前版本；"
             "「段位 随机」查看随机段位规则总览"
         ).finish(at_sender=True)
-    await UniMessage.text("未识别的段位名；发送「段位」查看可用段位").finish(
-        at_sender=True
-    )
+    # 残片（「段位啊」「段位原来也能开随机吗」类闲聊，及打错的段位名）静默
+    # 终止：COMMAND_START 含空串时 on_command 是 startswith 匹配，尾巴解析
+    # 不出段位名即非指令（2026-10-19 误触发排查拍板；裸「段位」仍出列表，
+    # mag+ 等显式版本前缀语法错误保留上方报错）
+    return
 
 
 @dan_refresh.handle()
