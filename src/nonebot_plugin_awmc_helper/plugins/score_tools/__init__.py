@@ -79,10 +79,9 @@ async def _(
     if line is None or (
         level_index is None and not is_utage and not is_digit_candidate
     ):
-        await UniMessage.text(
-            " 格式错误：分数线 <难度色/宴><id/别名/曲名> <线>\n"
-            "例：分数线 紫799 100.5（难度色：绿黄红紫白）；宴谱：分数线 宴100199 100.5"
-        ).finish(at_sender=True)
+        # 格式错误静默：「分数线多少」类闲聊与漏写线的残片同路，不回话
+        # （裸发仍出用法；曲目解析未命中保留下方「未找到」回复）
+        return
 
     # 解析链单源在 core 侧 resolve.resolve_color_chart（linfo 定数历史共用，
     # 难度色归属决策与缺色/歧义回复口径见彼处）；未命中由本 handler 按候选

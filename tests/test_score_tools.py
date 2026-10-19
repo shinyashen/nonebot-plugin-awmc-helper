@@ -749,3 +749,44 @@ async def test_linfo_cn_absent_uses_jp_scope(app: App, songs, db, monkeypatch):
         expected,
         suffix=f"\n{JP_ONLY_NOTE}",
     )
+
+
+@pytest.mark.asyncio
+async def test_score_line_stray_tail_silent(app: App, songs):
+    """「分数线多少」类闲聊残片静默（2026-10-19 误触发排查）：格式错误
+    分支不再回话，裸「分数线」仍出用法（既有用例覆盖）。"""
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.plugins import score_tools
+
+    for text in ("分数线多少", "分数线啊", "分数线 是什么"):
+        event = fake_group_message_event_v11(message=text, user_id=12345678)
+        async with app.test_matcher(score_tools.score_line_cmd) as ctx:
+            bot = ctx.create_bot(
+                base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+            )
+            ctx.receive_event(bot, event)
+            ctx.should_call_api(
+                "get_group_info",
+                {"group_id": 87654321},
+                result={
+                    "group_id": 87654321,
+                    "group_name": "g",
+                    "member_count": 1,
+                    "max_member_count": 10,
+                },
+            )
+            ctx.should_call_api(
+                "get_group_member_info",
+                {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+                result={
+                    "user_id": 12345678,
+                    "role": "member",
+                    "card": "",
+                    "nickname": "t",
+                },
+            )
+            ctx.should_finished()

@@ -44,9 +44,6 @@ from ...core.render.linfo import linfo_card
 
 linfo_cmd = on_command("linfo", aliases={"定数历史"}, block=True)
 
-_USAGE = (
-    " 格式错误：linfo <难度色><id/别名/曲名>\n例：linfo 紫799（难度色：绿黄红紫白）"
-)
 _UTAGE_TEXT = " 宴谱不提供定数历史"
 
 
@@ -68,7 +65,9 @@ async def _(
         await UniMessage.text(_UTAGE_TEXT).finish(at_sender=True)
     if not candidates:
         if line is None:
-            await UniMessage.text(_USAGE).finish(at_sender=True)
+            # 不可解析残片（纯空白/标点）静默；无色补色提示为 2026-10-16
+            # 定案，见下方 level_index None 分支
+            return
         # linfo 无「线」参数：纯数字输入（6 位宴 id / 裸 id）被 split_args
         # 当作线吞掉，还原为查询键（小数形态本就不是 id，仍走未找到兜底）
         candidates = [str(int(line)) if line.is_integer() else str(line)]
