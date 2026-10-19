@@ -375,20 +375,15 @@ async def test_switch_private_follows_default(app: App, arcade_seed, monkeypatch
 @pytest.mark.asyncio
 async def test_add_person_silent_no_name(app: App, arcade_enabled):
     """无店名消息（如「+2」「=5」）静默忽略，对齐 Hoshino 原版
-    （if match.group(1) 无 else）。「1+1」的店名为「1」，属有店名路径：
-    未订阅时与原版一样拒绝（不静默）。
+    （if match.group(1) 无 else）。纯数字店名（「1+1」类算式闲聊）同样
+    静默——非机厅操作，订阅与否无关（2026-10-19 误触发排查，排卡仓
+    parse_count 同款口径）。
     """
     from nonebot_plugin_awmc_helper.plugins import arcade
 
     await _run_silent(app, arcade.arcade_add_person, "+2")
     await _run_silent(app, arcade.arcade_add_person, "=5")
-    await _run(
-        app,
-        arcade.arcade_add_person,
-        "1+1",
-        "该群未订阅机厅，无法更改机厅人数",
-        session_fetches=1,
-    )
+    await _run_silent(app, arcade.arcade_add_person, "1+1")
 
 
 @pytest.mark.asyncio

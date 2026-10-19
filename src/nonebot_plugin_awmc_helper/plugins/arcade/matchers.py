@@ -370,18 +370,23 @@ async def _(
     name_raw, op, amount_raw, unit = groups
     if not name_raw:
         # 无店名（如「+1」「=5」）静默忽略，对齐 Hoshino 原版（逻辑全在
-        # if match.group(1) 内）；「1+1」属有店名路径，照常查订阅机厅
+        # if match.group(1) 内）
+        return
+    # 店名先剥「人数/卡」后缀再验形：纯数字店名（「1+1」类算式闲聊）非机厅
+    # 操作，订阅与否一律静默（排卡仓 service.parse_count 同款防误触口径，
+    # 2026-10-19 误触发排查补齐）
+    name = name_raw.strip()
+    if name.endswith("人数"):
+        name = name[:-2]
+    elif name.endswith("卡"):
+        name = name[:-1]
+    if name.isdigit():
         return
     sub_ids = await store.get_subscriptions(group_id)
     if not sub_ids:
         await UniMessage.text(" 该群未订阅机厅，无法更改机厅人数").finish(
             at_sender=True
         )
-    name = name_raw.strip()
-    if name.endswith("人数"):
-        name = name[:-2]
-    elif name.endswith("卡"):
-        name = name[:-1]
     subs = await store.get_arcade_by_ids(sub_ids)
     # 订阅机厅的别称集合（按机厅分组；多别称必须全部参与匹配）
     alias_by_arcade: dict[int, set[str]] = {}
