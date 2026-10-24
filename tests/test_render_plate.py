@@ -58,6 +58,45 @@ def test_plate_progress_card_smoke():
     assert Assets.plate_version("丸", "极") is not None
 
 
+@requires_assets
+def test_cover_cell_dx_display_id_hits_root_cover():
+    """DX 展示 id 封面回归（2026-10-24）：进度总览 items 传 chart_display_id
+    （DX = 根 id + DX_ID_OFFSET，如 835 → 10835），draw_cover_cell 曾直接按
+    该值找封面文件——素材包/日服缓存封面都按根 id 命名，DX 封面全落 0.png
+    占位（SD 展示 id 恰等于根 id 故无症状）。归一取图后展示 id 与根 id 同图，
+    id 小字仍显示调用方传入的展示 id。"""
+    from PIL import Image, ImageDraw
+
+    from nonebot_plugin_awmc_helper.core.render.tools import (
+        CELL_COVER_80,
+        draw_cover_cell,
+    )
+    from nonebot_plugin_awmc_helper.core.render.assets import assets
+
+    def cell(song_id: int, id_text: str) -> bytes:
+        im = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
+        dr = ImageDraw.Draw(im)
+        draw_cover_cell(
+            im,
+            dr,
+            10,
+            10,
+            song_id=song_id,
+            id_text=id_text,
+            cover_size=CELL_COVER_80,
+            border=assets.pic("border_table_base.png"),
+            font_size=16,
+            fill=(255, 255, 255, 255),
+        )
+        return im.crop((10, 10, 90, 90)).tobytes()
+
+    # 素材包实证：cover/835.png（DX 根 id）存在且非占位图
+    assert assets.cover_candidates(835)[0].exists()
+    # DX 展示 id 归一根 id 取图：与根 id 直取同图、与 0.png 占位不同
+    # （id_text 固定同串排除 id 小字位数差异——小字仍由调用方传展示 id）
+    assert cell(10835, "835") == cell(835, "835") != cell(0, "835")
+
+
 @pytest.mark.asyncio
 async def test_plate_qualified_kinds(songs):
     """各牌种达标判定边界：舞舞须 FSD/FSDp（曾把方向写反漏 FSDp、误纳 Sync/FS/FSP）。

@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from .fonts import FONT_HAN, FONT_NUM, font
 from .assets import assets
 from ...config import NICKNAME
-from ...constants import THEME_CIRCLE
+from ...constants import DX_ID_OFFSET, THEME_CIRCLE
 
 DEFAULT_TEXT_SIZE = 28
 
@@ -346,8 +346,13 @@ def draw_cover_cell(
     坐标算式逐字保持原三处口径：封面贴 (x, y)、框贴 (x-5, y-5)、id 小字
     锚 (x+56, y+4) mm、Torus（FONT_NUM）字体。``border`` 由调用方取图
     （保留各处预载/内联取图的既有行为），封面尺寸用 CELL_COVER_75/80。
+
+    ``song_id`` 可为任意机台 id 空间（SD 根 id / DX 展示 id = 根+DX_ID_OFFSET /
+    宴 6 位 diff_id）：封面统一按 ``% DX_ID_OFFSET`` 归一根 id 取图（NB
+    ``song_chart`` 同款）——素材包与日服缓存封面都按根 id 命名，DX 展示 id
+    直查必落 0.png 占位（2026-10-24 修）；``id_text`` 独立传展示串，不受归一影响。
     """
-    im.alpha_composite(assets.cover(song_id).resize(cover_size), (x, y))
+    im.alpha_composite(assets.cover(song_id % DX_ID_OFFSET).resize(cover_size), (x, y))
     im.alpha_composite(border, (x - 5, y - 5))
     dr.text(
         (x + 56, y + 4),
