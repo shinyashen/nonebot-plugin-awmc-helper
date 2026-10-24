@@ -30,7 +30,9 @@ _LARK: Lark | None = None
 def _get_lark() -> Lark:
     global _LARK
     if _LARK is None:
-        _LARK = Lark.open("simai_fragment.lark", rel_to=Path(__file__), parser="lalr")
+        _LARK = Lark.open(
+            "simai_fragment.lark", rel_to=str(Path(__file__)), parser="lalr"
+        )
     return _LARK
 
 

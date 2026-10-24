@@ -404,7 +404,7 @@ def _build_note(raw: _RawNote, bpm: float) -> list[SimaiNote]:
         delay = _SLIDE_DELAY_MEASURE
         if eq := d["equivalent_bpm"]:
             delay *= bpm / eq
-        notes = [
+        notes: list[SimaiNote] = [
             SimaiSlide(
                 time=raw.measure,
                 duration=raw.duration,
@@ -481,7 +481,8 @@ def parse_simai(text: str) -> SimaiSong:
             if key in _HEADER_INT_KEYS:
                 setattr(song, key, int(value))
             elif key in _HEADER_FLOAT_KEYS:
-                setattr(song, _HEADER_KEY_MAP.get(key, key), float(value))
+                mapped = _HEADER_KEY_MAP[key] if key in _HEADER_KEY_MAP else key
+                setattr(song, mapped, float(value))
             elif key in _HEADER_TEXT_KEYS:
                 setattr(song, key, value)
         except ValueError:

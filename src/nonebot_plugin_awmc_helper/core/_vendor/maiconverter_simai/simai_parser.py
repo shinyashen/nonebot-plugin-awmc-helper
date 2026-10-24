@@ -38,7 +38,11 @@ class FragmentTransformer(Transformer):
         num = None
 
         for item in items:
-            if isinstance(item, str) and item.type == "INT" and den is None:
+            if (
+                isinstance(item, str)
+                and getattr(item, "type", None) == "INT"
+                and den is None
+            ):
                 den = int(item)
                 if den <= 0:
                     return {
@@ -46,7 +50,11 @@ class FragmentTransformer(Transformer):
                         "equivalent_bpm": equivalent_bpm,
                         "duration": 0,
                     }
-            elif isinstance(item, str) and item.type == "INT" and num is None:
+            elif (
+                isinstance(item, str)
+                and getattr(item, "type", None) == "INT"
+                and num is None
+            ):
                 num = int(item)
             elif isinstance(item, str) and item[-1] == "#":
                 equivalent_bpm = float(item[:-1])
