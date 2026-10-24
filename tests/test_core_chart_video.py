@@ -38,7 +38,6 @@ def test_button_angles(cv):
 def test_note_position_travel(cv):
     """运动：前半窗 0.25R 驻留淡入 → 后半窗到 R → tap 判定后消失。"""
     note = cv._Note("tap", 6, 6734.7)
-    half = cv._HALF_APPROACH
     # 前半窗起点（接近窗开端）：驻留 0.25R、alpha=0
     p = cv._note_position(note, 6734.7 - cv._APPROACH_MS + 1, 300, 300, 270)
     assert math.hypot(p.x - 300, p.y - 300) == pytest.approx(270 * 0.25, abs=2)

@@ -1396,11 +1396,9 @@ class _TouchRenderer:
             outer_pts = _rounded_tri_points(tip, left, right, corner)
             inner_pts = _rounded_tri_points(*inner, corner * 0.4)
             a255 = int(255 * alpha)
-            # 层1 sb：黑边（外+内）×3 宽（阴影省略）
-            c.polygon(outer_pts, outline=(*C_BLACK, a255), width=sw * 3)
-            if not is_hold:
-                c.polygon(inner_pts, outline=(*C_BLACK, a255), width=sw * 3)
-            # 层2 f：渐变填充（花瓣中心→尖；hold 走四段渐变、普通青→蓝、each 黄→金）
+            # 层序等价 JS sprite(sb→f→w)：黑边 L×3 的内半被渐变填充覆盖 →
+            # 视觉黑边 = L×1.5；PIL 宽描边在圆角点列上会溢出覆盖，改为
+            # 「先填充后细描边」的等价画法；内三角只描边不填充（空心）
             if is_hold:
                 col = C_TOUCH_HOLD[k]
                 stops = (
@@ -1414,10 +1412,32 @@ class _TouchRenderer:
             else:
                 stops = ((0.0, C_TOUCH_CYAN), (1.0, C_TOUCH_BLUE))
             self._fill_stops(c, outer_pts, stops, (pcx, pcy), tip, alpha)
-            # 层3 w：白边（外+内）×1 宽
-            c.polygon(outer_pts, outline=(*C_WHITE, a255), width=sw)
+            c.d.line(
+                c.pts([*outer_pts, outer_pts[0]]),
+                fill=(*C_BLACK, a255),
+                width=max(1, round(c.s(sw * 1.5))),
+                joint="curve",
+            )
             if not is_hold:
-                c.polygon(inner_pts, outline=(*C_WHITE, a255), width=sw)
+                c.d.line(
+                    c.pts([*inner_pts, inner_pts[0]]),
+                    fill=(*C_BLACK, a255),
+                    width=max(1, round(c.s(sw * 1.5))),
+                    joint="curve",
+                )
+            c.d.line(
+                c.pts([*outer_pts, outer_pts[0]]),
+                fill=(*C_WHITE, a255),
+                width=max(1, round(c.s(sw))),
+                joint="curve",
+            )
+            if not is_hold:
+                c.d.line(
+                    c.pts([*inner_pts, inner_pts[0]]),
+                    fill=(*C_WHITE, a255),
+                    width=max(1, round(c.s(sw))),
+                    joint="curve",
+                )
         # 中心点（center L6951）：黑描边×3 + 填色 + 白描边
         cr = c.radius * (1 / 37.5) * 0.8
         c.stroke_circle(pos[0], pos[1], cr, C_BLACK, self.r.sw * 3)
@@ -1586,8 +1606,13 @@ class _ChartRenderer:
             dt = now_ms - n.timing
             if 0 <= dt <= _HIT_MS:
                 self._tap_hit_effect(fc, n, dt / _HIT_MS)
-        # clip 圆合成（静态 mask）
-        c.img.paste(field, (0, 0), self._clip_mask)
+        # clip 圆合成（静态 mask）：field 的 alpha 圈外清零后 alpha_composite
+        # 叠加——底图的判定区/判定圈/按钮点保留（paste 语义是整块替换，会把
+        # 圈内底图抹成 field 的透明像素，实测把判定线全部吃掉）
+        from PIL import ImageChops
+
+        field.putalpha(ImageChops.darker(field.getchannel("A"), self._clip_mask))
+        c.img.alpha_composite(field)
         return c.img
 
     def _draw_tracks(self, fc: _Canvas, note: _Note, now: float) -> None:
