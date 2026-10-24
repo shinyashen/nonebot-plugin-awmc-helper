@@ -103,6 +103,7 @@ class SimaiDifficulty:
     suffix: int  # simai 难度后缀（2=BASIC … 6=Re:MASTER；宴谱 1/2 等）
     notes: list[SimaiNote] = field(default_factory=list)
     bpm_events: list[tuple[float, float]] = field(default_factory=list)  # (秒, BPM)
+    divisor_events: list[tuple[float, int]] = field(default_factory=list)  # (秒, 细分)
     chart_end: float = 0.0  # 谱面正文走完时刻（秒，含尾部空拍）
     warnings: list[str] = field(default_factory=list)
 
@@ -210,6 +211,7 @@ def _parse_body(body: str, suffix: int, base_bpm: float) -> SimaiDifficulty:
     measure = 0.0
     bpm = base_bpm if base_bpm > 0 else 120.0
     bpm_events: list[tuple[float, float]] = [(0.0, bpm)]
+    divisor_events: list[tuple[float, int]] = [(0.0, 1)]
     divisor = 1
 
     for raw_step in body.split(","):
@@ -230,7 +232,10 @@ def _parse_body(body: str, suffix: int, base_bpm: float) -> SimaiDifficulty:
                 bpm = new_bpm
             step = step[: m.start()] + step[m.end() :]
         if m := _RE_SUB.search(step):
-            divisor = max(1, int(m.group(1)))
+            new_div = max(1, int(m.group(1)))
+            if new_div != divisor:
+                divisor_events.append((measure, new_div))
+                divisor = new_div
             step = step[: m.start()] + step[m.end() :]
         step = step.strip()
 
@@ -368,6 +373,7 @@ def _parse_body(body: str, suffix: int, base_bpm: float) -> SimaiDifficulty:
     # 小节 → 秒换算（BPM 分段积分）
     to_seconds = _make_seconds_fn(bpm_events)
     diff.bpm_events = [(to_seconds(m), b) for m, b in bpm_events]
+    diff.divisor_events = [(to_seconds(m), v) for m, v in divisor_events]
     for n in diff.notes:
         _convert_note_times(n, to_seconds)
     diff.chart_end = to_seconds(measure)

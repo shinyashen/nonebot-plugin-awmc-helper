@@ -21,22 +21,23 @@ class ChartNotAvailableError(ExtError):
     """素材站无该谱面/音频（404；国服先行曲无谱面、个别老歌缺失）。"""
 
 
-async def fetch_chart_text(root_id: int, *, dx: bool) -> str:
-    """拉取 simai 谱面文本。
+async def fetch_chart_text(root_id: int, *, dx: bool) -> tuple[str, int]:
+    """拉取 simai 谱面文本，返回 (文本, 命中的官方 id)。
 
     ``root_id`` 为 CN 根 id（lxns 口径）；``dx`` 为谱面类型（DX 谱面官方 id
     恒为根 id+10000，含老歌 DX 版）。SD 侧官方 id 与根 id 相同、个别缺失
-    时回退 +10000 兜底（同曲 SD/DX 文件分立）。
+    时回退 +10000 兜底（同曲 SD/DX 文件分立）。官方 id 同时供预览页
+    ``chart_id`` 参数使用。
     """
     primary = root_id + (_DX_ID_OFFSET if dx else 0)
     text = await _fetch_chart_file(primary)
     if text is not None:
-        return text
+        return text, primary
     fallback = primary + _DX_ID_OFFSET if not dx else root_id
     if fallback != primary:
         text = await _fetch_chart_file(fallback)
         if text is not None:
-            return text
+            return text, fallback
     raise ChartNotAvailableError(
         f"素材站没有该谱面数据（id {root_id} {'DX' if dx else 'SD'}）"
     )

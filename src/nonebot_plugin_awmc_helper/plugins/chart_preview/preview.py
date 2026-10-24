@@ -93,7 +93,7 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
     if out.exists():
         return out, level_label
 
-    simai_text = await fetch_chart_text(song.id, dx=dx)
+    simai_text, _official_id = await fetch_chart_text(song.id, dx=dx)
     parsed = parse_simai(simai_text)
     if is_utage:
         suffix = _pick_utage_suffix(parsed.difficulties, utage_diff)
@@ -108,7 +108,7 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
     try:
         audio = await fetch_music(song.id)
     except ChartNotAvailableError:
-        audio = None  # 宴谱 6 位 id 等无音频场景：出无声视频
+        audio = None  # 个别无音频场景：出无声视频
 
     limit = plugin_config.awmc_chart_preview_limit_seconds or None
     await asyncio.to_thread(

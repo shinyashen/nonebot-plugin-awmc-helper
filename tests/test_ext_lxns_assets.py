@@ -18,8 +18,9 @@ async def test_fetch_chart_dx_uses_offset_id(lxns_assets):
     """DX 谱面：官方 id = 根 id+10000（BLACK ROSE 1001 → 11001）。"""
     with respx.mock(assert_all_called=False) as m:
         m.get(f"{BASE}/maimai/chart/11001.txt").respond(text="&title=BLACK ROSE [DX]\n")
-        text = await lxns_assets.fetch_chart_text(1001, dx=True)
+        text, official = await lxns_assets.fetch_chart_text(1001, dx=True)
     assert "BLACK ROSE" in text
+    assert official == 11001
 
 
 @pytest.mark.asyncio
@@ -27,8 +28,8 @@ async def test_fetch_chart_sd_direct_hit(lxns_assets):
     """SD 谱面：根 id 直接命中（True Love Song = 8）。"""
     with respx.mock(assert_all_called=False) as m:
         m.get(f"{BASE}/maimai/chart/8.txt").respond(text="&music_id=8\n")
-        text = await lxns_assets.fetch_chart_text(8, dx=False)
-    assert "8" in text
+        _text, official = await lxns_assets.fetch_chart_text(8, dx=False)
+    assert official == 8
 
 
 @pytest.mark.asyncio
@@ -37,8 +38,9 @@ async def test_fetch_chart_sd_fallback_offset(lxns_assets):
     with respx.mock(assert_all_called=False) as m:
         m.get(f"{BASE}/maimai/chart/1001.txt").respond(status_code=404)
         m.get(f"{BASE}/maimai/chart/11001.txt").respond(text="ok-sd-fallback")
-        text = await lxns_assets.fetch_chart_text(1001, dx=False)
-    assert text == "ok-sd-fallback"
+        text, official = await lxns_assets.fetch_chart_text(1001, dx=False)
+        assert text == "ok-sd-fallback"
+        assert official == 11001
 
 
 @pytest.mark.asyncio

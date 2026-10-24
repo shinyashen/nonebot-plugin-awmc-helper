@@ -7,7 +7,6 @@
   音频 = ffmpeg 生成静音 mp3）+ 真渲染 2.5s 限长（无 ffmpeg 跳过）。
 """
 
-import shutil
 from pathlib import Path
 
 import respx
@@ -37,6 +36,7 @@ def cache_dir(tmp_path, monkeypatch):
     from nonebot_plugin_awmc_helper.plugins.chart_preview import preview
 
     target = tmp_path / "preview_cache"
+    target.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(preview, "cache_dir", lambda: target)
     return target
 
@@ -47,11 +47,22 @@ def songs():
 
 
 @pytest.fixture
-def limit_short(monkeypatch):
-    """渲染限长 2.5s（编排用真渲染提速）。"""
-    from nonebot_plugin_awmc_helper.config import plugin_config
+def fake_render(monkeypatch, tmp_path):
+    """渲染打桩（抓流依赖 chromium+外网，编排测试不真渲染）。"""
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import preview
 
-    monkeypatch.setattr(plugin_config, "awmc_chart_preview_limit_seconds", 2.5)
+    calls = []
+
+    def fake(chart, *, title, level_label, suffix, audio, out_path,
+             limit_seconds=None):
+        calls.append({"title": title, "level_label": level_label,
+                      "has_audio": audio is not None})
+        out = Path(out_path)
+        out.write_bytes(b"\x00" * 64)
+        return out
+
+    monkeypatch.setattr(preview, "render_chart_video", fake)
+    return calls
 
 
 @pytest.mark.asyncio
@@ -164,53 +175,31 @@ async def test_command_single_hit_sends_video(
         ctx.should_finished()
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
 @pytest.mark.asyncio
-async def test_build_preview_orchestration(
-    app: App, db, cache_dir, songs, limit_short, tmp_path
-):
-    """编排链路：respx 命中真实 199 快照谱面 + 静音音频 → 产出 mp4 落缓存。"""
-    import subprocess
-
+async def test_build_preview_orchestration(app: App, db, cache_dir, songs, fake_render):
+    """编排链路：respx 命中真实 8 快照谱面 + 音频 → 渲染打桩 → mp4 落缓存。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.types import SongType
     from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import build_preview
 
     await song_service.inject(songs)
-    # 199 的 SD 条目（display_id=199, prefer=STANDARD）
     song_8 = next(s for s in songs if s.id == 8)
     entry = (8, song_8, SongType.STANDARD)
 
-    silence = tmp_path / "silence.mp3"
-    subprocess.run(  # noqa: ASYNC221 — 测试夹具一次性调用
-        [
-            "ffmpeg",
-            "-y",
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "anullsrc=r=44100:cl=stereo",
-            "-t",
-            "3",
-            "-b:a",
-            "32k",
-            str(silence),
-        ],
-        check=True,
-    )
     with respx.mock(assert_all_called=False) as m:
         m.get(f"{BASE}/maimai/chart/8.txt").respond(
-            text=(SNAPSHOTS / "199.txt").read_text()
+            text=(SNAPSHOTS / "8.txt").read_text()
         )
-        m.get(f"{BASE}/maimai/music/8.mp3").respond(content=silence.read_bytes())
+        m.get(f"{BASE}/maimai/music/8.mp3").respond(content=b"fake-audio")
         out, label = await build_preview(entry, 2)  # EXPERT
 
     assert out.exists()
-    assert out.stat().st_size > 10_000
     assert out.parent == cache_dir
     assert label == "10"  # TH SD EXPERT（样例库真实值）
-    # 二次调用命中缓存（respx 未再放行即触网必失败）
+    assert fake_render
+    assert fake_render[0]["level_label"] == "10"  # TH SD EXPERT（真实值）
+    # 二次调用命中缓存（渲染打桩不再被调）
+    calls_before = len(fake_render)
     out2, _ = await build_preview(entry, 2)
     assert out2 == out
+    assert len(fake_render) == calls_before

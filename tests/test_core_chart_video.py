@@ -1,21 +1,19 @@
-"""core/render/chart_video 渲染测试（ffmpeg 冒烟 + 滑键路径几何）。
+"""core/render/chart_video 渲染测试（PIL 移植版）。
 
-插件模块按项目测试惯例在用例内 import（nonebot 于 session fixture 初始化）。
+插件模块按项目测试惯例在用例内 import；渲染冒烟需 ffmpeg（缺失跳过）。
 """
 
 import math
 import shutil
-import itertools
 from pathlib import Path
 
 import pytest
 
 SNAPSHOTS = Path(__file__).parent / "data" / "snapshots" / "simai"
-CX, CY, R = 360.0, 367.0, 234.0  # 720 画布布局常量（与 _Canvas 一致的量级）
 
 
 @pytest.fixture
-def chart_video():
+def cv():
     from nonebot_plugin_awmc_helper.core.render import chart_video as mod
 
     return mod
@@ -28,45 +26,49 @@ def simai():
     return parse_simai
 
 
-def test_slide_path_straight_endpoints(chart_video, simai):
-    """`-` 直线滑路径端点 = 起/终按钮位。"""
-    chart = simai((SNAPSHOTS / "8.txt").read_text())
-    slide = next(
-        n
-        for n in chart.difficulties[5].notes
-        if (
-            isinstance(n, chart_video.SimaiSlide)
-            and n.shape == "-"
-            and n.start_pos != n.end_pos
-        )
-    )
-    path = chart_video._slide_path(slide, CX, CY, R)
-    assert len(path) == 2
-    for pos, pt in ((slide.start_pos, path[0]), (slide.end_pos, path[1])):
-        compass = math.radians(337.5 + pos * 45.0)
-        assert pt == pytest.approx(
-            (CX + R * math.sin(compass), CY - R * math.cos(compass)), abs=0.5
-        )
+def test_button_angles(cv):
+    """按钮角公式：-π/2+π/8+(k-1)π/4，pos1 在右上。"""
+    a1 = cv._button_angle(1)
+    assert a1 == pytest.approx(-math.pi / 2 + math.pi / 8)
+    # pos4 = 下偏右（67.5°）；pos5 = 下偏左（112.5°）——8 键位无正下键
+    assert cv._button_angle(4) == pytest.approx(math.pi * 3 / 8)
+    assert cv._button_angle(5) == pytest.approx(math.pi * 5 / 8)
 
 
-def test_slide_path_circle_same_position_is_full_loop(chart_video, simai):
-    """同位圆滑路径应为整圈（跨度 ≈ 2π；取材 700.txt 真实谱 `1<1[4:3]`）。"""
-    chart = simai((SNAPSHOTS / "700.txt").read_text())
-    slide = next(
-        n
-        for n in chart.difficulties[5].notes
-        if isinstance(n, chart_video.SimaiSlide) and n.start_pos == n.end_pos
-    )
-    path = chart_video._slide_path(slide, CX, CY, R)
-    length = sum(math.dist(a, b) for a, b in itertools.pairwise(path))
-    assert length == pytest.approx(2 * math.pi * R, rel=0.05)
+def test_note_position_travel(cv):
+    """运动：前半窗 0.25R 驻留淡入 → 后半窗到 R → tap 判定后消失。"""
+    note = cv._Note("tap", 6, 6734.7)
+    half = cv._HALF_APPROACH
+    # 前半窗起点（接近窗开端）：驻留 0.25R、alpha=0
+    p = cv._note_position(note, 6734.7 - cv._APPROACH_MS + 1, 300, 300, 270)
+    assert math.hypot(p.x - 300, p.y - 300) == pytest.approx(270 * 0.25, abs=2)
+    assert p.alpha == pytest.approx(0.0, abs=0.01)
+    # 判定时刻：正好在 R
+    p = cv._note_position(note, 6734.7, 300, 300, 270)
+    assert math.hypot(p.x - 300, p.y - 300) == pytest.approx(270, abs=1)
+    # 判定后：tap 不可见
+    p = cv._note_position(note, 6734.7 + 50, 300, 300, 270)
+    assert not p.visible
+
+
+def test_hold_flicker_range(cv):
+    assert cv._hold_flicker(-1) == 1.0
+    v = cv._hold_flicker(123.0)
+    assert 0.82 <= v <= 1.0
+
+
+def test_shape_map_circle(cv):
+    """ce()：同位 > 不镜像（flat 起点），跨距映射 circle1-8。"""
+    m = cv._SlideRenderer._shape_map(">", 1, 1, None)
+    assert m == ("circle1", False)
+    m = cv._SlideRenderer._shape_map("-", 1, 4, None)
+    assert m == ("line4", False)  # dist=((4-1)%8+8)%8+1=4
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
-def test_render_smoke(chart_video, simai, tmp_path: Path):
-    """真实谱面 2.5s 渲染冒烟：产出非空 mp4。"""
+def test_render_smoke(cv, simai, tmp_path: Path):
     chart = simai((SNAPSHOTS / "8.txt").read_text()).difficulties[5]
-    out = chart_video.render_chart_video(
+    out = cv.render_chart_video(
         chart,
         title="True Love Song",
         level_label="12",
@@ -80,8 +82,7 @@ def test_render_smoke(chart_video, simai, tmp_path: Path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
-def test_render_with_audio_mux(chart_video, simai, tmp_path: Path):
-    """带音频渲染：ffmpeg 合成成功（音频为生成的静音 mp3）。"""
+def test_render_with_audio(cv, simai, tmp_path: Path):
     import subprocess
 
     audio = tmp_path / "silence.mp3"
@@ -104,7 +105,7 @@ def test_render_with_audio_mux(chart_video, simai, tmp_path: Path):
         check=True,
     )
     chart = simai((SNAPSHOTS / "8.txt").read_text()).difficulties[2]
-    out = chart_video.render_chart_video(
+    out = cv.render_chart_video(
         chart,
         title="True Love Song",
         level_label="5",
