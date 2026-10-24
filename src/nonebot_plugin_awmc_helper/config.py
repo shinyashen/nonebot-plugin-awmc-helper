@@ -92,6 +92,13 @@ class Config(BaseModel):
     # 落雪令牌每日保活（refresh_token 30 天不刷新即失效；每日 4:30 对全部
     # 持有 refresh_token 的绑定续期一次，防止闲置绑定走进续期死局）
     awmc_lxns_keepalive: bool = True
+    # 谱面预览（渲染 mp4，CPU 密集 + 热链落雪素材站）部署级开关
+    awmc_chart_preview_enabled: bool = True
+    # 谱面预览单视频渲染时长上限（秒，0=整曲；QQ 对长视频有压缩/限制风险，
+    # 可设 60 只渲染前 60 秒）
+    awmc_chart_preview_limit_seconds: int = 0
+    # 谱面预览渲染缓存总量上限（MB，超限按最旧清理）
+    awmc_chart_preview_cache_mb: int = 800
 
 
 plugin_config: Config = get_plugin_config(Config)

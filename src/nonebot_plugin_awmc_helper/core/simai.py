@@ -463,6 +463,8 @@ def _convert_note_times(note: SimaiNote, to_seconds) -> None:
 _HEADER_INT_KEYS = {"music_id"}
 _HEADER_FLOAT_KEYS = {"bpm", "pvstart", "pvend"}
 _HEADER_TEXT_KEYS = ("title", "artist", "genre", "version")
+# simai 头部键 → SimaiSong 字段（pvstart/pvend 字段名带下划线）
+_HEADER_KEY_MAP = {"pvstart": "pv_start", "pvend": "pv_end"}
 
 
 def parse_simai(text: str) -> SimaiSong:
@@ -479,7 +481,7 @@ def parse_simai(text: str) -> SimaiSong:
             if key in _HEADER_INT_KEYS:
                 setattr(song, key, int(value))
             elif key in _HEADER_FLOAT_KEYS:
-                setattr(song, key, float(value))
+                setattr(song, _HEADER_KEY_MAP.get(key, key), float(value))
             elif key in _HEADER_TEXT_KEYS:
                 setattr(song, key, value)
         except ValueError:

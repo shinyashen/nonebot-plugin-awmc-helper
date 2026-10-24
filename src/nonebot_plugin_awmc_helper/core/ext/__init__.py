@@ -3,6 +3,7 @@
 - :mod:`.yuzu`：柚子别名申请/投票/进行中投票 + SSE 常驻推送；
 - :mod:`.divingfish`：水鱼 RA 排行；
 - :mod:`.lxns`：落雪 OAuth 换 token / 曲库列表；
+- :mod:`.lxns_assets`：落雪素材站 assets2（simai 谱面文本 / 整曲 mp3，谱面预览用）；
 - :mod:`.wahlap`：华立机厅 location；
 - :mod:`.maimaiinfo`：日服曲库骨架/定数历史（GitHub raw）；
 - :mod:`.otoge_db`：otoge-db 日服谱面/版本/宴谱数据（GitHub raw）；
