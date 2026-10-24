@@ -54,7 +54,7 @@ def fake_render(monkeypatch, tmp_path):
     calls = []
 
     def fake(chart, *, title, level_label, suffix, audio, out_path,
-             limit_seconds=None):
+             limit_seconds=None, sensor_image=None):
         calls.append({"title": title, "level_label": level_label,
                       "has_audio": audio is not None})
         out = Path(out_path)

@@ -19,6 +19,7 @@ from ...core.ext.lxns_assets import (
     ChartNotAvailableError,
     fetch_music,
     fetch_chart_text,
+    fetch_sensor_image,
 )
 from ...core.render.chart_video import render_chart_video
 
@@ -69,6 +70,19 @@ def cached_path(entry: ChartEntry, index: int) -> Path | None:
     return out if out.exists() else None
 
 
+async def _sensor_image() -> bytes | None:
+    """判定区底图（磁盘缓存，首次热链拉取；失败退回纯圈渲染）。"""
+    cache = cache_dir() / "sensor.webp"
+    if cache.exists():
+        return cache.read_bytes()
+    try:
+        data = await fetch_sensor_image()
+    except Exception:
+        return None
+    cache.write_bytes(data)
+    return data
+
+
 async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
     """谱面类型条目 + 难度序 → 渲染好的 mp4 路径与难度标签。
 
@@ -111,6 +125,7 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         audio = None  # 个别无音频场景：出无声视频
 
     limit = plugin_config.awmc_chart_preview_limit_seconds or None
+    sensor = await _sensor_image()
     await asyncio.to_thread(
         render_chart_video,
         simai_diff,
@@ -120,6 +135,7 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         audio=audio,
         out_path=out,
         limit_seconds=limit,
+        sensor_image=sensor,
     )
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)
     return out, level_label

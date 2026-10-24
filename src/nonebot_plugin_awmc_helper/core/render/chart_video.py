@@ -111,6 +111,43 @@ _RIPPLE_QE = 11 / 60
 _RIPPLE_MIN_ALPHA = 8 / 255  # nt
 
 
+def _rounded_tri_points(
+    p0: tuple[float, float],
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    radius: float,
+) -> list[tuple[float, float]]:
+    """drawRoundedTriangle：每角按半径切角，二次曲线（控制点=角点）过角。"""
+    pts = (p0, p1, p2)
+    out: list[tuple[float, float]] = []
+    for i in range(3):
+        cur = pts[i]
+        prev = pts[i - 1]
+        nxt = pts[(i + 1) % 3]
+        din = math.hypot(prev[0] - cur[0], prev[1] - cur[1]) or 1.0
+        dout = math.hypot(nxt[0] - cur[0], nxt[1] - cur[1]) or 1.0
+        rr = min(radius, din / 2, dout / 2)
+        a_pt = (
+            cur[0] + (prev[0] - cur[0]) / din * rr,
+            cur[1] + (prev[1] - cur[1]) / din * rr,
+        )
+        b_pt = (
+            cur[0] + (nxt[0] - cur[0]) / dout * rr,
+            cur[1] + (nxt[1] - cur[1]) / dout * rr,
+        )
+        out.append(a_pt)
+        for k in (1, 2, 3):
+            t = k / 4
+            out.append(
+                (
+                    (1 - t) ** 2 * a_pt[0] + 2 * (1 - t) * t * cur[0] + t**2 * b_pt[0],
+                    (1 - t) ** 2 * a_pt[1] + 2 * (1 - t) * t * cur[1] + t**2 * b_pt[1],
+                )
+            )
+        out.append(b_pt)
+    return out
+
+
 def _mirror_pair(pos: int) -> int:
     """ae()：圆滑镜像位（re 表）。"""
     return (-1, 1, 8, 7, 6, 5, 4, 3, 2)[pos]
@@ -696,8 +733,9 @@ class _Renderer:
         if active:
             self._hold_ripples(c, note, now)
 
-    def _poly_gradient(self, c: _Canvas, poly: list, c0, c1,
-                       g0: tuple, g1: tuple) -> None:
+    def _poly_gradient(
+        self, c: _Canvas, poly: list, c0, c1, g0: tuple, g1: tuple
+    ) -> None:
         path = c.pts(poly)
         bbox = (
             int(min(x for x, _ in path) - 2),
@@ -792,7 +830,13 @@ class _Renderer:
             arr[msk, 0] = np.round(color[0] * (r0 + (r1 - r0) * frac)).clip(0, 255)
             arr[msk, 1] = np.round(color[1] * (g0 + (g1 - g0) * frac)).clip(0, 255)
             arr[msk, 2] = np.round(color[2] * (b0 + (b1 - b0) * frac)).clip(0, 255)
-        arr[..., 3] = np.round(255 * np.clip(1 - dist, 0, 1)).astype(np.uint8)
+        # JS 表覆盖 0..0.9（不透明），0.9..1.0 向 rgba(0,0,0,0) 插值淡出
+        fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
+        fade = np.where(dist <= 0.9, 1.0, fade)
+        arr[..., :3] = (arr[..., :3].astype(np.float32) * fade[..., None]).astype(
+            np.uint8
+        )
+        arr[..., 3] = np.round(255 * fade).astype(np.uint8)
         glow = Image.fromarray(arr, "RGBA")
         c.img.alpha_composite(glow, (int(x * _SS - size / 2), int(y * _SS - size / 2)))
 
@@ -1324,6 +1368,8 @@ class _TouchRenderer:
         alpha = fade * flick
         if alpha <= 0:
             return
+        corner = c.radius * (8 / 300)  # je：圆角半径
+        sw = self.r.sw
         for k in range(4):
             a = quad[k] + base_off
             pcx = pos[0] + math.cos(a) * h
@@ -1340,25 +1386,38 @@ class _TouchRenderer:
                 pcx + math.cos(a - math.pi / 2) * petal,
                 pcy + math.sin(a - math.pi / 2) * petal,
             )
+            # 内三角：顶点向质心收缩 40%（w=0.4）；非 hold 才有（f || inner 语义）
+            gx = (tip[0] + left[0] + right[0]) / 3
+            gy = (tip[1] + left[1] + right[1]) / 3
+            inner = [
+                (gx + (p[0] - gx) * 0.4, gy + (p[1] - gy) * 0.4)
+                for p in (tip, left, right)
+            ]
+            outer_pts = _rounded_tri_points(tip, left, right, corner)
+            inner_pts = _rounded_tri_points(*inner, corner * 0.4)
+            a255 = int(255 * alpha)
+            # 层1 sb：黑边（外+内）×3 宽（阴影省略）
+            c.polygon(outer_pts, outline=(*C_BLACK, a255), width=sw * 3)
+            if not is_hold:
+                c.polygon(inner_pts, outline=(*C_BLACK, a255), width=sw * 3)
+            # 层2 f：渐变填充（花瓣中心→尖；hold 走四段渐变、普通青→蓝、each 黄→金）
             if is_hold:
-                colors = (
-                    _mix(C_TOUCH_HOLD[k], C_WHITE, 0.24),
-                    C_TOUCH_HOLD[k],
-                    _mix(C_TOUCH_HOLD[k], C_BLACK, 0.22),
-                    _mix(C_TOUCH_HOLD[k], C_WHITE, 0.5),
+                col = C_TOUCH_HOLD[k]
+                stops = (
+                    (0.0, _mix(col, C_WHITE, 0.24)),
+                    (0.35, col),
+                    (0.72, _mix(col, C_BLACK, 0.22)),
+                    (1.0, _mix(col, C_WHITE, 0.5)),
                 )
-                self._tri_gradient(c, tip, left, right, colors, pos, alpha)
             elif simul:
-                self._tri_gradient(
-                    c, tip, left, right, (C_TOUCH_SIMUL_Y, C_TOUCH_SIMUL_G), pos, alpha
-                )
+                stops = ((0.0, C_TOUCH_SIMUL_Y), (1.0, C_TOUCH_SIMUL_G))
             else:
-                self._tri_gradient(
-                    c, tip, left, right, (C_TOUCH_CYAN, C_TOUCH_BLUE), pos, alpha
-                )
-            self._tri_outline(
-                c, tip, left, right, (*C_WHITE, int(255 * alpha)), self.r.sw
-            )
+                stops = ((0.0, C_TOUCH_CYAN), (1.0, C_TOUCH_BLUE))
+            self._fill_stops(c, outer_pts, stops, (pcx, pcy), tip, alpha)
+            # 层3 w：白边（外+内）×1 宽
+            c.polygon(outer_pts, outline=(*C_WHITE, a255), width=sw)
+            if not is_hold:
+                c.polygon(inner_pts, outline=(*C_WHITE, a255), width=sw)
         # 中心点（center L6951）：黑描边×3 + 填色 + 白描边
         cr = c.radius * (1 / 37.5) * 0.8
         c.stroke_circle(pos[0], pos[1], cr, C_BLACK, self.r.sw * 3)
@@ -1379,10 +1438,17 @@ class _TouchRenderer:
                 ]
                 c.polygon(pts, outline=(*C_SLIDE_SIMUL, alpha), width=self.r.sw)
 
-    def _tri_gradient(
-        self, c: _Canvas, tip, left, right, colors, origin, alpha
+    def _fill_stops(
+        self,
+        c: _Canvas,
+        poly: list,
+        stops: tuple,
+        g0: tuple,
+        g1: tuple,
+        alpha: float,
     ) -> None:
-        path = c.pts([tip, left, right])
+        """多边形多段线性渐变填充（g0→g1 轴）。"""
+        path = c.pts(poly)
         bbox = (
             max(0, int(min(x for x, _ in path) - 2)),
             max(0, int(min(y for _, y in path) - 2)),
@@ -1395,37 +1461,60 @@ class _TouchRenderer:
         ImageDraw.Draw(mask).polygon(
             [(x - bbox[0], y - bbox[1]) for x, y in path], fill=255
         )
-        grad = _linear_gradient(
-            mask.size,
-            origin[0] * _SS - bbox[0],
-            origin[1] * _SS - bbox[1],
-            tip[0] * _SS - bbox[0],
-            tip[1] * _SS - bbox[1],
-            colors[0],
-            colors[-1],
-        )
-        c.img.paste(grad, (bbox[0], bbox[1]), mask)
+        import numpy as np
 
-    def _tri_outline(self, c: _Canvas, tip, left, right, color, width) -> None:
-        c.d.line(
-            c.pts([tip, left, right, tip]),
-            fill=color,
-            width=max(1, round(c.s(width))),
-            joint="curve",
+        w, h = mask.size
+        ax, ay = g1[0] - g0[0], g1[1] - g0[1]
+        len2 = ax * ax + ay * ay or 1.0
+        xs = np.arange(w, dtype=np.float32)
+        ys = np.arange(h, dtype=np.float32)
+        t = np.clip(
+            (
+                (xs[None, :] - (g0[0] * _SS - bbox[0])) * ax
+                + (ys[:, None] - (g0[1] * _SS - bbox[1])) * ay
+            )
+            / len2,
+            0.0,
+            1.0,
         )
+        lut = np.zeros((257, 3), dtype=np.float32)
+        for i in range(len(stops) - 1):
+            t0, c0 = stops[i]
+            t1, c1 = stops[i + 1]
+            lo, hi = int(t0 * 256), int(t1 * 256)
+            for kk in range(lo, hi + 1):
+                f = (kk - lo) / max(hi - lo, 1)
+                lut[kk] = [c0[j] + (c1[j] - c0[j]) * f for j in range(3)]
+        rgb = lut[np.round(t * 256).astype(np.int32).clip(0, 256)]
+        arr = np.dstack(
+            [rgb.astype(np.uint8), np.full((h, w), int(255 * alpha), np.uint8)]
+        )
+        c.img.paste(Image.fromarray(arr, "RGBA"), (bbox[0], bbox[1]), mask)
 
 
 class _ChartRenderer:
     """整帧组合（renderFrame L7997 层序 + prepareRenderNotes L8232）。"""
 
-    def __init__(self, chart: SimaiDifficulty):
+    def __init__(self, chart: SimaiDifficulty, sensor_image: bytes | None = None):
         self.chart = chart
         self.notes = _map_notes(chart)
         self.slide_renderer = _SlideRenderer(_Renderer(self.notes))
         self.renderer = self.slide_renderer.r
         self.touches = _TouchRenderer(self.renderer)
-        # 静态底图（黑底 + 判定圈 + 按钮点）与 clip 圆 alpha mask：预生成，每帧 copy
+        # 静态底图（黑底 + 判定区 sensor.webp + 判定圈 + 按钮点）与 clip 圆
+        # alpha mask：预生成，每帧 copy。判定线按「判定区」设计（站内所见）：
+        # sensor 图先铺（logical (5,13) 起 590²，源码 L8093），圈与点叠加
         base = _Canvas()
+        if sensor_image:
+            try:
+                import io
+
+                sensor = Image.open(io.BytesIO(sensor_image)).convert("RGBA")
+                size = (_LOGICAL - 10) * _SS
+                sensor = sensor.resize((int(size), int(size)), Image.LANCZOS)
+                base.img.alpha_composite(sensor, (int(5 * _SS), int(13 * _SS)))
+            except Exception:  # 素材损坏等：退回纯圈
+                pass
         self._judgment_line(base)
         # FPS 行静态（渲染时 fps 参数恒定）
         r300 = _RADIUS / 300
@@ -1433,9 +1522,12 @@ class _ChartRenderer:
         n20, n4 = round(20 * r300) * _SS, round(4 * r300) * _SS
         n22 = round(22 * r300) * _SS
         base.d.text(
-            (n20, n20 + n22 + n4 + n16 + n4 * 2), "FPS: 30",
-            font=self._font(n16), fill=C_FPS_GREEN,
-            stroke_width=1, stroke_fill=(0, 0, 0, 191),
+            (n20, n20 + n22 + n4 + n16 + n4 * 2),
+            "FPS: 30",
+            font=self._font(n16),
+            fill=C_FPS_GREEN,
+            stroke_width=1,
+            stroke_fill=(0, 0, 0, 191),
         )
         self._base_img = base.img
         self._hud_cache: dict[str, str] = {}
@@ -1802,6 +1894,7 @@ def render_chart_video(
     fps: int = 30,
     size: int = 600,
     limit_seconds: float | None = None,
+    sensor_image: bytes | None = None,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
 
@@ -1813,7 +1906,7 @@ def render_chart_video(
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("未找到 ffmpeg，谱面预览渲染不可用（请安装 ffmpeg）")
     del title, level_label, suffix, size  # 画面元素由渲染器按谱面自持
-    renderer = _ChartRenderer(chart)
+    renderer = _ChartRenderer(chart, sensor_image=sensor_image)
     total = max(1.0, chart.note_end + 1.0)
     if limit_seconds is not None:
         total = min(total, limit_seconds)
