@@ -51,14 +51,16 @@ async def test_rebuild_full_union(db):
     result = await songdb.rebuild(full_payloads())
     state = await songdb.State.load()
     # 并集：快照 14 根曲 − 青春コンプレックス（maimaiinfo 滞留 × otoge 已下架
-    # 20260807 × 国服已无）+ 构造国服限定 9002 = 14
-    assert result["songs"] == 14
-    assert result["removed"] == 1
-    assert 1634 not in state.songs
-    # from=未知 且国服源没有（12 レーザービーム，otoge 亦无）：版本未知 ≠ 两侧
-    # 皆无，记录保留、不被误删（maimaiinfo 在列即 JP 在列信号）
-    assert 12 in state.songs
-    assert state.groups[(12, "sd")].version is None
+    # 20260807）− 12 レーザービーム（from=未知、otoge 现役/下架皆无）−
+    # 1396 テリトリーバトル（UNiVERSE PLUS、otoge 亦无——两首均为真实无记录
+    # 删除）+ 构造国服限定 9002 = 12
+    assert result["songs"] == 12
+    assert result["removed"] == 3
+    assert set(result["removed_ids"]) == {12, 1396, 1634}
+    # closed-world（2026-10-24 定案）：标题不在 otoge 现役集 = JP 已移除，
+    # maimaiinfo 机台全集的「在列」不构成反证
+    assert 12 not in state.songs
+    assert 1396 not in state.songs
     # 构造国服限定曲（日侧无）：version=None、version_cn=25500
     g = state.groups[(9002, "sd")]
     assert g.version is None
@@ -193,6 +195,46 @@ async def test_jp_missing_and_cn_absence_delete(db):
 
 
 @pytest.mark.asyncio
+async def test_closed_world_cn_keeps_jp_removed(db):
+    """closed-world：JP 移除（otoge 标题缺席）而国服在列 → JP 版本列置 NULL、
+    国服列与曲保留（人マニア形态：JP 已删・CN 在列，§2.17 逐源可用性）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    payloads = full_payloads()
+    # 构造：True Love Song 从 otoge 现役表移除（CN 仍在列）
+    payloads["otoge_db"] = [
+        m for m in payloads["otoge_db"] if m.get("title") != "True Love Song"
+    ]
+    await songdb.rebuild(payloads)
+    state = await songdb.State.load()
+    assert 8 in state.songs
+    g = state.groups[(8, "sd")]
+    assert g.version is None  # JP 移除
+    assert g.version_cn == 10000  # 国服在列保留
+
+
+@pytest.mark.asyncio
+async def test_closed_world_utage_group(db):
+    """closed-world 宴组：宿主标题不在现役宴宿主集 → 宴组 JP 版本置 NULL；
+    宿主 sd/dx 现役在列不受影响（下架粒度 = 单张宴谱，§2.17）。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    payloads = full_payloads()
+    # 构造：[蛸]チルノのパーフェクトさんすう教室 宴条目从现役表移除（宿主仍现役）
+    payloads["otoge_db"] = [
+        m
+        for m in payloads["otoge_db"]
+        if not (m.get("lev_utage") and "チルノ" in (m.get("title") or ""))
+    ]
+    await songdb.rebuild(payloads)
+    state = await songdb.State.load()
+    assert state.groups[(199, "utage")].version is None
+    # 宿主本体现役：sd/dx 组不动
+    assert state.groups[(199, "sd")].version == 12000
+    assert state.groups[(199, "dx")].version == 26000
+
+
+@pytest.mark.asyncio
 async def test_source_failure_tolerated(db):
     """单源失败：该源列不动、不做缺省同步（落雪失败时 version_cn 保持）。"""
     from nonebot_plugin_awmc_helper.core import songdb
@@ -205,6 +247,12 @@ async def test_source_failure_tolerated(db):
     # maimaiinfo 失败：otoge 充实跳过，JP/CN 列保持
     await songdb.rebuild(full_payloads(maimaiinfo=None, dschange=None))
     state = await songdb.State.load()
+    assert state.groups[(8, "sd")].version == 10000
+    # otoge 双文件失败：closed-world 主信号缺席 → maimaiinfo 在列回落
+    # （机台全集口径宁滥勿删，无记录删除曲暂回潮、下轮恢复后自愈）
+    await songdb.rebuild(full_payloads(otoge_db=None, otoge_deleted=None))
+    state = await songdb.State.load()
+    assert 12 in state.songs
     assert state.groups[(8, "sd")].version == 10000
 
 
@@ -588,14 +636,16 @@ async def test_external_source_current_level(db, tmp_path, monkeypatch):
                         }
                     }
                 },
-                # 无历史（from=未知、无 dschange）：登场版本在文档中给出
+                # 无历史（from=未知、无 dschange）：登场版本在文档中给出。
+                # 12 已被 closed-world 剔除 → 走外部源「创建缺失曲」路径（须带 title）
                 "12": {
+                    "title": "レーザービーム",
                     "sheets": {
                         "sd": {
                             "version": 23000,
                             "contents": [{"level_id": 0, "level": [5.2]}],
                         }
-                    }
+                    },
                 },
             },
             ensure_ascii=False,

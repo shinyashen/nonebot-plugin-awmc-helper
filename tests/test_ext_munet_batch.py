@@ -178,27 +178,59 @@ async def test_pending_titles_skip_over_attempts_threshold(db, monkeypatched_mun
     assert "超限曲" not in titles
 
 
-async def test_munet_ids_guard_against_otoge_rollback(db, monkeypatched_munet):
-    """otoge 侧回滚（三曲从现役表消失）后重建，MuNET 已入库曲不被误删。"""
+async def test_batch_song_presence_follows_otoge(db, monkeypatched_munet):
+    """closed-world（2026-10-24 定案）：批次曲在列随 otoge 标题走——MuNET 留痕
+    不再作在列信号（MuNET 自身含删除曲，双向皆不可靠）。
+
+    - otoge 现役标题在场：批次曲保留（本轮重建即验证）；
+    - otoge 现役与 PR 双双缺席（上游回滚/清理形态）：整曲移除，留痕不救；
+    - PR 预读标题仍在（day-0 窗口）：maimaiinfo 重建行保留。
+    """
     from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.core.ext import munet
 
     await songdb.rebuild(full_payloads())
     await munet.run_batch_supplement()
+    state = await songdb.State.load()
+    assert state.songs.get(BATCH_ENTRY_ID) is not None
+    # otoge 现役标题照旧：closed-world 保留
+    await songdb.rebuild(full_payloads())
+    assert (await songdb.State.load()).songs.get(BATCH_ENTRY_ID) is not None
 
-    # 模拟 otoge 回滚：现役表只剩旧曲（三曲从 PR/main 双双消失）
+    # otoge 标题消失（现役表剔除 = 回滚/清理形态）→ 整曲移除
     rollback = {
-        "maimaiinfo": make_all_data(),
+        "maimaiinfo": {
+            **make_all_data(),
+            # 真实骨架条目（全量 all_data 实键 12020，字段照抄上游）：现实中
+            # 该曲在 maimaiinfo 在列，删除/保留由 closed-world 标题判定
+            "12020": {
+                "type": "DX",
+                "ds": [4.0, 7.5, 10.9, 13.5],
+                "level": ["4", "7", "10+", "13"],
+                "charts": [{"notes": [192, 12, 4, 4, 4], "charter": "-"}],
+                "basic_info": {
+                    "title": "物語はここから",
+                    "artist": "OSTER project feat. Kanata.N",
+                    "genre": "舞萌",
+                    "bpm": "190",
+                    "from": "maimai でらっくす MAGiCAL",
+                },
+            },
+        },
         "dschange": make_dschange(),
-        "otoge_db": make_otoge_live(),  # otoge main 本来就无三曲
+        "otoge_db": [
+            m for m in make_otoge_live() if m.get("title") != "物語はここから"
+        ],
         "otoge_deleted": make_otoge_deleted(),
         "lxns": make_lxns(),
         "divingfish": make_divingfish(),
     }
-    # 机台/extra 无三曲（服务器实况：magical.json 是旧快照）
-    await songdb.rebuild(rollback, extra_jp_ids=await songdb._munet_known_ids())
-    state = await songdb.State.load()
-    assert state.songs.get(BATCH_ENTRY_ID) is not None  # 不被回滚误删
+    await songdb.rebuild(rollback)
+    assert (await songdb.State.load()).songs.get(BATCH_ENTRY_ID) is None
+
+    # PR 预读标题仍在（day-0 窗口）：maimaiinfo 重建行按现役集保留
+    await songdb.rebuild(rollback, jp_extra_titles={"物語はここから"})
+    assert (await songdb.State.load()).songs.get(BATCH_ENTRY_ID) is not None
 
 
 async def test_batch_corrects_unconfirmed_version(db, monkeypatched_munet, monkeypatch):
@@ -501,51 +533,45 @@ def _deleted_song_entry() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_munet_absent_filters_maimaiinfo_resurrection(db):
-    """缺席信号（2026-10-05）：rebuild 跳过 maimaiinfo 重建行并整曲剔除，
-    复活防护——maimaiinfo 持续收录的删除曲不再随重建回潮；缺席压过外部
-    补充源在列信号（机台快照残留）。"""
+async def test_closed_world_removes_maimaiinfo_resurrection(db):
+    """closed-world（2026-10-24）：otoge 无记录的 maimaiinfo 滞留曲（12055 形态
+    ——上线前删除）每轮重建即整曲剔除，无需任何缺席信号；屏蔽名单为语义
+    等价的双保险（显示 id 兼容），不再承载「无记录判删」职责。"""
     from nonebot_plugin_awmc_helper.core import songdb
 
     payloads = full_payloads()
     payloads["maimaiinfo"]["12055"] = _deleted_song_entry()
 
-    # 无缺席信号：maimaiinfo 在列 → 建行保留（回滚保护依赖此现状语义）
+    # closed-world：标题不在 otoge 现役集 → 建行当轮即删
     await songdb.rebuild(payloads)
-    assert 2055 in (await songdb.State.load()).songs
-
-    # 缺席信号：过滤重建行 + 整曲删除
-    await songdb.rebuild(payloads, excluded_ids={2055})
     assert 2055 not in (await songdb.State.load()).songs
 
     # 复活防护：再次重建（maimaiinfo 仍收录）不复现
-    await songdb.rebuild(payloads, excluded_ids={2055})
+    await songdb.rebuild(payloads)
     assert 2055 not in (await songdb.State.load()).songs
 
-    # 缺席压过「机台快照在列」（extra_jp_ids 单独存在时保留）
-    await songdb.rebuild(payloads, extra_jp_ids={2055})
-    assert 2055 in (await songdb.State.load()).songs
-    await songdb.rebuild(payloads, extra_jp_ids={2055}, excluded_ids={2055})
+    # 屏蔽名单同样剔除（双保险）
+    await songdb.rebuild(payloads, excluded_ids={2055})
     assert 2055 not in (await songdb.State.load()).songs
 
 
 @pytest.mark.asyncio
 async def test_excluded_song_ids_union(db, monkeypatch):
-    """剔除集（2026-10-05）：MuNET 缺席裁决 kv ∪ 部署屏蔽名单（显示 id
-    归一根 id）。"""
+    """剔除集：部署屏蔽名单（显示 id 归一根 id）——MuNET 缺席裁决信号已随
+    closed-world 定案退役（2026-10-24），历史 kv 不再被消费。"""
     from nonebot_plugin_awmc_helper.core import songdb
     from nonebot_plugin_awmc_helper.config import plugin_config
 
     await db.kv_set("munet_absent_ids", [845])
     monkeypatch.setattr(plugin_config, "awmc_song_denylist", [12055, 2056])
 
-    assert await songdb._excluded_song_ids() == {845, 2055, 2056}
+    assert await songdb._excluded_song_ids() == {2055, 2056}
 
 
 def test_denylist_default_pins_deleted_song():
-    """默认屏蔽名单烧入 12055（ループザルーム）：上线前删除曲，三方数据源
-    均无法自动判删（2026-10-05 定案），只靠这份人工知识兜底——改默认值须
-    有同等确凿的人工确认依据。"""
+    """默认屏蔽名单烧入 12055（ループザルーム）：closed-world（2026-10-24）下
+    otoge 无记录已自动判删，名单退居双保险——但快照重生成/外部源重放不保证
+    过滤删除曲，改默认值仍须有同等确凿的人工确认依据。"""
     from nonebot_plugin_awmc_helper.config import Config
 
     assert Config(awmc_static_path="static").awmc_song_denylist == [12055]

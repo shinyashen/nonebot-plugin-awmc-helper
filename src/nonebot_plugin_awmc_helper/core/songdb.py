@@ -424,6 +424,25 @@ def parse_otoge(music_ex: list[dict], deleted: list[dict]) -> OtogeData:
     return data
 
 
+_UTAGE_TITLE_PREFIX = re.compile(r"^\[[^\]]+\]\s*")
+
+
+def _otoge_utage_hosts(music_ex: list[dict]) -> set[str]:
+    """otoge 现役宴条目 → 宿主标题集（剥 ``[X]`` 前缀，无前缀原样并入）。
+
+    宴组的 JP 缺失判定按宿主标题 closed-world（§2.17「下架粒度含单张宴谱」
+    ——下架宴条目带前缀、与行标题不相等，song 级信号覆盖不到；现役宴条目
+    在场即宿主仍有活宴谱，整组缺席才判 JP 缺失）。"""
+    hosts: set[str] = set()
+    for item in music_ex:
+        if not item.get("lev_utage"):
+            continue
+        title = item.get("title") or ""
+        hosts.add(norm_title(_UTAGE_TITLE_PREFIX.sub("", title, count=1)))
+        hosts.add(norm_title(title))
+    return hosts
+
+
 def parse_lxns(song_list: dict) -> dict[int, Entry]:
     """落雪列表 → 国侧中间结构（version_cn / 国服谱面 / 宴 buddy，§3）。"""
     songs: dict[int, Entry] = {}
@@ -1188,63 +1207,67 @@ def apply_missing(
     cn_known: set[tuple[int, str]] | None,
     jp_known_songs: set[int] | None,
     jp_known_titles: set[str] | None,
-    jp_deleted_titles: set[str] | None = None,
-    extra_known_ids: set[int] | None = None,
+    jp_utage_hosts: set[str] | None = None,
     excluded_ids: set[int] | None = None,
-) -> int:
+) -> list[int]:
     """缺失/删除统一规则（§7.5-B）：一侧缺置该侧版本列 NULL，两侧皆无整曲删除。
 
     - ``cn_known``：国服在列 (song_id, kind) 集（禁用/消失不算在列）；
       None = 双源未齐，跳过 CN 缺省同步；
-    - ``jp_known_songs``：maimaiinfo 解出的 song_id 集；None = 跳过 JP 缺省同步；
-    - ``jp_known_titles``：otoge-db 现役归一标题集（None = 不强求）；
-    - ``jp_deleted_titles``：otoge 下架标题集（权威下架信号）；
-    - ``extra_known_ids``：外部补充源（机台快照等）给出的 id 集——在列信号最强
-      （日服当前机台数据），优先于 otoge 下架记录（§7.5-C）；
-    - ``excluded_ids``：重建剔除集（MuNET 留痕缺席裁决 ∪ 部署屏蔽名单
-      ``AWMC_SONG_DENYLIST``）——**最高优先删除信号**，压过 maimaiinfo
-      机台全集残留与机台快照。
+    - ``jp_known_titles``：otoge-db 现役归一标题集（调用方并入 PR 预读标题）。
+      **closed-world 主信号（2026-10-24 定案）**：现役曲目以国服 ∪ otoge 为准
+      ——otoge 现役表由 CI 直抓官方数据，标题缺席即 JP 已移除，下架记录内
+      （2024-03 起）与记录外（此前版权删除潮）的移除统一处理；maimaiinfo
+      机台全集含删除曲、「MuNET 在列」双向不可靠（12055 案），均不构成反证；
+    - ``jp_utage_hosts``：otoge 现役宴宿主标题集（[X] 前缀剥离，§2.17）——
+      宴组按宿主标题判定（下架宴条目带前缀，song 级信号覆盖不到单张宴谱）；
+    - ``jp_known_songs``：maimaiinfo 解出的 song_id 集——**仅 otoge 缺席时
+      回落**（单源故障容忍，机台全集口径宁滥勿删）；
+    - ``excluded_ids``：部署屏蔽名单 ``AWMC_SONG_DENYLIST``（人工确认删除曲）
+      ——无条件置空 JP 版本列并压过一切在列信号。
     整曲删除以**源在列信号**判定（任一信号源认为在列即保留；信号源全缺时回落
     版本列全空），避免「版本未知」与「该服未上线」混淆造成误删。
-    返回整曲删除数。
+    返回整曲删除的 song_id 列表（外部补充源合并据此排除，防机台快照复活）。
     """
     if cn_known is not None:
         for (song_id, kind), group in state.groups.items():
             if group.version_cn is not None and (song_id, kind) not in cn_known:
                 group.version_cn = None
-    if jp_known_songs is not None:
-        for (song_id, _kind), group in state.groups.items():
+    if jp_known_titles is not None:
+        for (song_id, kind), group in state.groups.items():
             if group.version is None:
+                continue
+            if excluded_ids is not None and song_id in excluded_ids:
+                group.version = None  # 屏蔽名单：人工确认删除，无条件置空
                 continue
             row = state.songs.get(song_id)
             title_key = norm_title(row.title) if row else ""
-            if song_id in jp_known_songs:
-                if title_key and title_key in (jp_deleted_titles or set()):
-                    group.version = None  # maimaiinfo 可能滞后，以 otoge 下架记录为准
+            if kind == "utage":
+                if jp_utage_hosts is None:
+                    continue  # 宿主集缺席不判宴组（宁滥勿删）
+                hosts: set[str] | None = jp_utage_hosts
+            else:
+                hosts = jp_known_titles
+            if title_key not in hosts:
+                group.version = None
+    elif jp_known_songs is not None:
+        for (song_id, _kind), group in state.groups.items():
+            if group.version is None:
                 continue
-            if jp_known_titles is not None and title_key in jp_known_titles:
-                continue
-            if extra_known_ids is not None and song_id in extra_known_ids:
-                continue  # 机台快照在列（maimaiinfo/otoge 均滞后），版本保留
-            group.version = None
+            if song_id not in jp_known_songs:
+                group.version = None
     # 两侧皆无（按源在列信号判定）→ 整曲删除；无信号源时回落版本列
-    removed = 0
+    removed_ids: list[int] = []
     for song_id in list(state.songs):
         row = state.songs[song_id]
         title_key = norm_title(row.title) if row.title else ""
         groups = state.groups_of_song(song_id)
-        if jp_known_songs is not None or jp_known_titles is not None:
-            jp_present = (jp_known_songs is not None and song_id in jp_known_songs) or (
-                jp_known_titles is not None and title_key in jp_known_titles
-            )
-            if title_key and title_key in (jp_deleted_titles or set()):
-                jp_present = (
-                    False  # otoge 下架记录为权威 JP 缺失信号（maimaiinfo 可能滞后）
-                )
-            if extra_known_ids is not None and song_id in extra_known_ids:
-                jp_present = True  # 机台当前数据在列，覆盖一切滞后信号
-            if excluded_ids is not None and song_id in excluded_ids:
-                jp_present = False  # MuNET 缺席复核确认，压过机台残留/快照
+        if jp_known_titles is not None:
+            jp_present = (
+                title_key in jp_known_titles or title_key in (jp_utage_hosts or ())
+            ) and not (excluded_ids is not None and song_id in excluded_ids)
+        elif jp_known_songs is not None:
+            jp_present = song_id in jp_known_songs
         else:
             jp_present = any(g.version is not None for g in groups)
         if cn_known is not None:
@@ -1259,27 +1282,28 @@ def apply_missing(
                 del state.charts[key]
             for key in [k for k in state.levels if k[0] == song_id]:
                 del state.levels[key]
-            removed += 1
+            removed_ids.append(song_id)
     # 懒索引按 song_id 键控：删除只影响被删曲自己的条目，循环内查其他曲仍准确
     # （循环里 groups_of_song 会命中 stale 索引而非触发全表重建）；整轮结束统一置空
     state._charts_by_song = None
     state._groups_by_song = None
-    return removed
+    return removed_ids
 
 
 async def rebuild(
     payloads: dict[str, Any],
     *,
-    extra_jp_ids: set[int] | None = None,
+    jp_extra_titles: set[str] | None = None,
     excluded_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     """规范表重建入口：接收各源 payload（None = 该源本次未拉取成功，跳过），写回 DB。
 
     payloads 键：``maimaiinfo`` / ``dschange`` / ``otoge_db`` / ``otoge_deleted`` /
-    ``lxns`` / ``divingfish``。``extra_jp_ids`` 为外部补充源的 id 集（JP 在列信号，
-    §7.5-C）。``excluded_ids`` 为 MuNET 复核确认的删除曲（缺席信号）：**在
-    apply_jp 之前过滤 maimaiinfo 条目**——缺席曲的行会随每次重建复活（maimaiinfo
-    机台全集持续收录），不过滤则删除无效。返回统计与告警（已写日志，供通知拼接）。
+    ``lxns`` / ``divingfish``。``jp_extra_titles`` 为 otoge PR 预读标题（day-0
+    窗口在列信号，并入 closed-world 现役集）。``excluded_ids``（部署屏蔽名单）：
+    **在 apply_jp 之前过滤 maimaiinfo 条目**——名单曲的行会随每次重建复活
+    （maimaiinfo 机台全集持续收录），不过滤则删除无效。返回统计与告警
+    （已写日志，供通知拼接）；``removed_ids`` 供外部补充源合并排除。
     """
     state = await State.load()
     jp: dict[int, Entry] = {}
@@ -1351,13 +1375,14 @@ async def rebuild(
             }
             cn_known |= _df_known_kinds(df)
         apply_cn(state, cn, df)
-    removed = apply_missing(
+    removed_ids = apply_missing(
         state,
         cn_known=cn_known,
         jp_known_songs=set(jp) if jp else None,
-        jp_known_titles=set(otoge.live_titles) if otoge else None,
-        jp_deleted_titles=set(otoge.deleted_titles) if otoge else set(),
-        extra_known_ids=extra_jp_ids,
+        jp_known_titles=(set(otoge.live_titles) | (jp_extra_titles or set()))
+        if otoge
+        else None,
+        jp_utage_hosts=_otoge_utage_hosts(payloads["otoge_db"]) if otoge else None,
         excluded_ids=excluded_ids,
     )
     await state.save()
@@ -1367,7 +1392,8 @@ async def rebuild(
         "groups": len(state.groups),
         "charts": len(state.charts),
         "level_points": sum(len(v) for v in state.levels.values()),
-        "removed": removed,
+        "removed": len(removed_ids),
+        "removed_ids": sorted(removed_ids),
         "warnings": state.warnings,
         "cn_current_version": state.cn_current_version(),
     }
@@ -1851,34 +1877,28 @@ async def refresh_all(
             _fetch("divingfish", ext_df.fetch_music_data),
         ]
     await asyncio.gather(*jobs)  # 单源容错在 _fetch 内，互不阻塞
-    # MuNET 缺席复核（2026-10-05）：maimaiinfo 独有（otoge 现役/下架皆无）且
-    # 已归入 DX 世代的候选，经 MuNET GetById 仲裁——在列 = otoge 滞后/回滚
-    # （保留），缺席 = 删除曲（权威剔除信号，压过 maimaiinfo 机台全集残留）
-    # 重建剔除集（2026-10-05）：MuNET 留痕在列复核（缺席裁决留档 kv）∪ 部署
-    # 级屏蔽名单。复核仅覆盖 MuNET 自建曲——MuNET 对删除曲的清理不可依赖
-    # （id12055 上线前删除曲实测仍收录、条目与现役完全同构），对宴/教程曲则
-    # 无收录（maimaiinfo 独有候选的缺席不作信号，曾据此误删三首活曲已回退）
-    try:
-        from .ext import munet as ext_munet
-
-        await ext_munet.run_deletion_sweep()
-    except Exception:
-        logger.exception("songdb: MuNET 留痕在列复核失败（不影响重建）")
     excluded = await _excluded_song_ids()
-    # 外部补充源：读取一次，id 集作 JP 在列信号参与删除判定，重建后合并（§7.5-C）
+    # otoge PR 预读标题并入现役集（day-0 窗口）：批次补充经 PR 分支建曲后、
+    # main 尚未合并的窗口内，closed-world 判定不得把仍属 otoge 数据的标题
+    # 误判为 JP 缺失（PR 分支解析失败时返回空集，窗口内批次曲退回暂存路径）
+    pr_titles: set[str] = set()
+    try:
+        from .ext import otoge_pr
+
+        for entry in await otoge_pr.load_open_pr_entries():
+            if entry.get("title"):
+                pr_titles.add(norm_title(entry["title"]))
+    except Exception as e:
+        logger.warning(f"songdb: otoge PR 预读失败（现役集不含 PR 标题）：{e}")
+    # 外部补充源：读取一次，重建后强制重放合并（§7.5-C）
     try:
         extra_docs = await _load_extra_docs()
     except Exception:
         logger.exception("songdb: 外部补充源读取失败（不影响规范表重建）")
         extra_docs = []
-    # MuNET 已知曲目 id 并入 JP 在列信号（§7.5-C'）：MuNET 在列 = 该曲真实在
-    # 日服运营——otoge 侧若发生数据回滚（2026-10-01 实测 PR 分支被重写致
-    # 三首 MAGiCAL 新曲从候选与在列信号同时消失、次日重建遭误删），已入库
-    # 曲目不随上游回滚丢失；重建后批次补充再从 MuNET 拉回字段。
-    munet_ids = await _munet_known_ids()
     result = await rebuild(
         payloads,
-        extra_jp_ids=extra_jp_ids(extra_docs) | munet_ids,
+        jp_extra_titles=pr_titles,
         excluded_ids=excluded or None,
     )
     logger.info(
@@ -1897,9 +1917,13 @@ async def refresh_all(
     if extra_docs:
         try:
             # force：重建已用基础源覆写外部字段（maimaiinfo 物量/定数历史无条件
-            # 写回），必须强制重放外部源，否则机台校正活不过下一次重建
+            # 写回），必须强制重放外部源，否则机台校正活不过下一次重建。
+            # 排除集并入本轮 closed-world 删除曲：机台快照若收录了已移除曲
+            # （快照重生成不保证过滤），不得经重放合并复活
             result["extra"] = await apply_external_sources(
-                preloaded=extra_docs, force=True, excluded_ids=excluded or None
+                preloaded=extra_docs,
+                force=True,
+                excluded_ids=(excluded or set()) | set(result["removed_ids"]),
             )
         except Exception:
             logger.exception("songdb: 外部补充源应用失败（不影响规范表）")
@@ -2230,46 +2254,21 @@ async def _load_extra_docs() -> list[tuple[str, str, dict]]:
     return docs
 
 
-def extra_jp_ids(docs: list[tuple[str, str, dict]]) -> set[int]:
-    """外部源文档给出的 id 集——JP 在列信号（apply_missing 删除判定用，§7.5-C）。"""
-    return {int(key) for _n, _m, doc in docs for key in doc if str(key).isdigit()}
-
-
 async def _excluded_song_ids() -> set[int]:
-    """重建剔除集：MuNET 留痕缺席裁决（kv）∪ 部署级屏蔽名单（归一根 id）。
+    """重建剔除集：部署级屏蔽名单（显示 id 归一根 id）。
 
-    屏蔽名单（``AWMC_SONG_DENYLIST``）为人工确认的删除曲——三方数据源
-    （maimaiinfo 机台全集/MuNET 未清理条目/otoge 从未记录）无法与在役曲区
-    分，只有人工知识可判（2026-10-05 id12055 定案）；缺席裁决仅来自 MuNET
-    留痕自建曲的复核（MuNET 自身清理不可依赖，见 run_deletion_sweep）。
+    屏蔽名单（``AWMC_SONG_DENYLIST``）为人工确认的删除曲（2026-10-05
+    id12055 定案保留）。曾是删除信号的 MuNET 缺席裁决已随 closed-world
+    定案退役（2026-10-24：MuNET 含删除曲、双向皆不可靠，现役以
+    国服 ∪ otoge 为准）——closed-world 标题缺席本身即为删除信号。
     """
-    raw = await store.kv_get("munet_absent_ids")
-    absent = (
-        {int(x) for x in raw if isinstance(x, (int, float))}
-        if isinstance(raw, list)
-        else set()
-    )
     from ..config import plugin_config
 
-    denied = {
+    return {
         int(x) % DX_ID_OFFSET
         for x in plugin_config.awmc_song_denylist
         if isinstance(x, (int, float)) and int(x) > 0
     }
-    return absent | denied
-
-
-async def _munet_known_ids() -> set[int]:
-    """MuNET 视角「日服真实在列」的规范表曲 id 集（批次补充成功入库过的曲）。
-
-    实现取巧：MuNET 入库曲的 `image_url` 由批次补充写入（otoge/机台源之外唯一
-    会给新曲写封面的信号），但 image_url 也可能来自 otoge——改用 kv 留痕：批次
-    补充每次合并的 id 集记 `munet_batch_ids`（累计并集），此处直接读。
-    """
-    raw = await store.kv_get("munet_batch_ids")
-    if not isinstance(raw, list):
-        return set()
-    return {int(x) for x in raw if isinstance(x, (int, float))}
 
 
 async def apply_external_sources(

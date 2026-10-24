@@ -770,6 +770,10 @@ async def run_deletion_sweep(check_ids: list[int] | None = None) -> list[int]:
     - 网络失败/WAF 走异常不计缺席（不确定性）；otoge 系曲的正常下架由
       otoge 下架记录直接判定，不经此。
     返回本次**新确认**的缺席 id。
+
+    **已退役（2026-10-24 closed-world 定案，函数与测试保留至下轮清理）**：
+    MuNET 自身含删除曲（现役快照实测混入 163 首已移除曲）、双向皆不可靠，
+    现役判定以国服 ∪ otoge 为准——本函数不再被重建管线调用。
     """
     known_raw = await store.kv_get("munet_batch_ids")
     known = (
