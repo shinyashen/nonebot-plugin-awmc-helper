@@ -858,12 +858,18 @@ def apply_jp(state: State, jp: dict[int, Entry], otoge: OtogeData | None) -> Non
                     )
                     if group.version is None:
                         group.version = _otoge_version(chart_items)
+                    _apply_revival_version(
+                        state, song_id, kind, level_id, entry.title, group, chart_items
+                    )
                     if kind == "utage":
                         _apply_otoge_utage(state, song_id, level_id, chart_items)
                 elif otoge_items and kind != "utage":
                     group.date = group.date or _otoge_date(kind, otoge_items)
                     if group.version is None:
                         group.version = _otoge_version(otoge_items)
+                    _apply_revival_version(
+                        state, song_id, kind, level_id, entry.title, group, otoge_items
+                    )
         # otoge 歌级充实：封面/BPM（join 失败置空 + 汇总告警）
         if otoge_items:
             row.image_url = row.image_url or (otoge_items[0].get("image_url") or None)
@@ -983,6 +989,69 @@ def _otoge_version(items: list[dict]) -> int | None:
         if version:
             return version
     return None
+
+
+_OTOGE_FAMILY_EXCLUDE: dict[str, tuple[str, ...]] = {
+    "sd": ("dx_lev_bas",),
+    "dx": ("lev_bas",),
+    # 宴条目单族 = 无 sd/dx 谱面字段（宿主曲的谱面在各自条目）
+    "utage": ("lev_bas", "dx_lev_bas"),
+}
+
+
+def _otoge_revival_version(items: list[dict], kind: str) -> int | None:
+    """otoge 复活/轮换批次码：单族条目（谱面字段仅含目标组一族）且
+    ``release`` ≠0 时的最大 ``version``，否则 None。
+
+    otoge ``release`` = 条目最近一次上架事件（初收录/复活/宴轮换/谱面族追加）
+    的日期、``version`` = 事件批次码——事件不区分复活与追加（居並ぶ穀物
+    MAGiCAL SD 追加同样置 release=261002），但族追加必使条目带双族字段、
+    整曲复活/轮换保持原族：单族才可判「本组以该批次码重新登场」。
+    """
+    exclude = _OTOGE_FAMILY_EXCLUDE[kind]
+    versions = [
+        code
+        for item in items
+        if _safe_int(item.get("release"))
+        and not any(item.get(f) for f in exclude)
+        and (code := _safe_int(item.get("version")))
+    ]
+    return max(versions) if versions else None
+
+
+def _apply_revival_version(
+    state: State,
+    song_id: int,
+    kind: str,
+    level_id: int,
+    title: str,
+    group: store.SongSheetGroup,
+    items: list[dict],
+) -> None:
+    """组级 version 复活码覆盖：otoge 上架事件码为准，maimaiinfo 只作初登场基线。
+
+    maimaiinfo 含删除曲（机台全集，§2.17），``from`` 恒为初登场版本；曲在后续
+    世代复活、宴谱轮换回归时「当前组登场」批次码只在 otoge。跨代更大才覆盖
+    （同代细粒码差异与轴外回落值不动，组级登场语义 §2.3 不让位）；幂等——
+    覆盖后下轮 ``revival <= group.version`` 自然跳过。宴谱定数历史恒为解析层
+    构造的登场版本单行，组级换锚后随行平移，保持「版本 = 登场批次」一致。
+    """
+    revival = _otoge_revival_version(items, kind)
+    if revival is None or group.version is None or revival <= group.version:
+        return
+    previous = group.version
+    base_revival = align_version_code(revival)
+    base_current = align_version_code(previous)
+    if base_revival is None or base_current is None or base_revival == base_current:
+        return
+    group.version = revival
+    if kind == "utage":
+        points = state.levels.get((song_id, kind, level_id))
+        if points and len(points) == 1 and points[0][0] == previous:
+            state.levels[(song_id, kind, level_id)] = [(revival, points[0][1])]
+    state.warn(
+        f"「{title}」{kind} 组级版本按 otoge 复活/轮换码覆盖：{previous} → {revival}"
+    )
 
 
 def _otoge_date(kind: str, items: list[dict]) -> int | None:

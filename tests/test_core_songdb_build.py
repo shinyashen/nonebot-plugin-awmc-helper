@@ -208,6 +208,166 @@ async def test_source_failure_tolerated(db):
     assert state.groups[(8, "sd")].version == 10000
 
 
+# ---------------------------------------------------------------------------
+# 复活/轮换码覆盖（2026-10-24）：条目取材真实场景——Can Do（2026-10-16 MAGiCAL
+# 复活，maimaiinfo/otoge 字段照抄上游实值）、居並ぶ穀物（2026-10-02 MAGiCAL SD
+# 追加）、[宴]Oshama（2023-10 轮换回归）；谱面列表为机制测试最小化裁剪。
+# ---------------------------------------------------------------------------
+
+_CAN_DO_INFO = {
+    "type": "SD",
+    "ds": [4.0, 6.8, 9.0, 11.8],
+    "level": ["4", "6", "9", "11+"],
+    "charts": [{"notes": [135, 6, 3, 7], "charter": "-"}],
+    "basic_info": {
+        "title": "Can Do",
+        "artist": "GRANRODEO [PV]",
+        "genre": "流行&动漫",
+        "bpm": "200",
+        "from": "maimai ORANGE PLUS",
+    },
+}
+_CAN_DO_OTOGE = {
+    "title": "Can Do",
+    "artist": "GRANRODEO",
+    "catcode": "POPS＆アニメ",
+    "version": "27003",
+    "bpm": "200",
+    "date_added": "20261016",
+    "release": "261016",
+    "lev_bas": "4",
+    "lev_bas_i": "4.0",
+    "lev_bas_notes_tap": "146",
+}
+_KOKUMOTO_INFO = {
+    "type": "DX",
+    "ds": [3.0, 6.5, 9.5, 12.5],
+    "level": ["3", "6", "9+", "13"],
+    "charts": [{"notes": [201, 12, 30, 4, 8], "charter": "奏"}],
+    "basic_info": {
+        "title": "居並ぶ穀物と溜息まじりの運送屋",
+        "artist": "kategaho",
+        "genre": "舞萌",
+        "bpm": "128",
+        "from": "maimai でらっくす Splash",
+    },
+}
+_KOKUMOTO_OTOGE = {
+    "title": "居並ぶ穀物と溜息まじりの運送屋",
+    "catcode": "maimai",
+    "version": "27002",
+    "date_added": "20200917",
+    "release": "261002",
+    # 双族字段：SD 追加使条目同时带 dx/sd 谱面——歌级码属追加批次
+    "dx_lev_bas": "4",
+    "dx_lev_bas_i": "4.0",
+    "lev_bas": "3",
+    "lev_bas_i": "3.0",
+}
+_OSHAMA_INFO = {
+    "type": "UTAGE",
+    "level": ["10+"],
+    "charts": [{"notes": [300, 20, 40, 10]}],
+    "basic_info": {
+        "title": "[宴]Oshama Scramble!",
+        "artist": "黒泽ダイスケ",
+        "genre": "ゲームバラエティ",
+        "bpm": "160",
+        "from": "maimai でらっくす BUDDiES",
+    },
+}
+_OSHAMA_OTOGE = {
+    "title": "[宴]Oshama Scramble!",
+    "catcode": "宴会場",
+    "version": "24003",
+    "date_added": "20170309",
+    "release": "231012",
+    "lev_utage": "10+",
+    "lev_utage_i": "10.6",
+}
+
+
+def _revival_payloads():
+    payloads = full_payloads()
+    payloads["maimaiinfo"] = {
+        **payloads["maimaiinfo"],
+        "397": _CAN_DO_INFO,
+        "11154": _KOKUMOTO_INFO,
+        "100845": _OSHAMA_INFO,
+    }
+    payloads["otoge_db"] = [
+        *payloads["otoge_db"],
+        _CAN_DO_OTOGE,
+        _KOKUMOTO_OTOGE,
+        _OSHAMA_OTOGE,
+    ]
+    return payloads
+
+
+@pytest.mark.asyncio
+async def test_revival_version_override(db):
+    """复活/轮换码覆盖：otoge 单族上架事件码 > maimaiinfo 初登场码 → 组级换锚。
+
+    maimaiinfo 含删除曲（机台全集），``from`` 恒为初登场版本；整曲复活（Can Do）
+    与宴轮换回归（Wonderland 形态）的当前批次码只在 otoge。追加形态（居並ぶ
+    穀物 SD 追加 → otoge 条目双族）的歌级码不归属先登组，DX 组保持登场版本；
+    同代细粒码（Oshama 24003 vs 24000）同样不动。
+    """
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    result = await songdb.rebuild(_revival_payloads())
+    state = await songdb.State.load()
+    # Can Do：sd 组 15000 → 复活码 27003，日期 = otoge date_added（复活收录日）
+    g = state.groups[(397, "sd")]
+    assert g.version == 27003
+    assert g.date == 20261016
+    assert any(
+        "Can Do」sd 组级版本按 otoge 复活/轮换码覆盖" in w for w in result["warnings"]
+    )
+    # 屠並ぶ穀物：双族条目（SD 追加）歌级码不归属 DX 组
+    assert state.groups[(1154, "dx")].version == 21000
+    # Oshama：同代细粒码（24003 vs 24000）不覆盖；宴历史锚随组级一致
+    assert state.groups[(845, "utage")].version == 24000
+    assert state.history_of(845, "utage", 0) == [(24000, 10.7)]
+
+
+@pytest.mark.asyncio
+async def test_revival_override_utage_history_anchors_to_rotation(db):
+    """宴轮换回归（Wonderland 形态）：组级换锚到轮换批次，定数历史随行平移。"""
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    payloads = _revival_payloads()
+    # Wonderland 宴轮换回归（真实原型：release=260401、ver=26501、宿主 from=BUDDiES）
+    payloads["maimaiinfo"]["100429"] = {
+        "type": "UTAGE",
+        "level": ["9+"],
+        "charts": [{"notes": [250, 15, 35, 8]}],
+        "basic_info": {
+            "title": "[宴]Wonderland Wars　オープニング",
+            "artist": "SEGA",
+            "genre": "ゲームバラエティ",
+            "bpm": "143",
+            "from": "maimai でらっくす BUDDiES",
+        },
+    }
+    payloads["otoge_db"].append(
+        {
+            "title": "[宴]Wonderland Wars　オープニング",
+            "catcode": "宴会場",
+            "version": "26501",
+            "date_added": "20260401",
+            "release": "260401",
+            "lev_utage": "9+",
+            "lev_utage_i": "9.6",
+        }
+    )
+    await songdb.rebuild(payloads)
+    state = await songdb.State.load()
+    assert state.groups[(429, "utage")].version == 26501
+    # 解析层按 from 锚的单行历史随组级换锚平移（9+ → 9.7）
+    assert state.history_of(429, "utage", 0) == [(26501, 9.7)]
+
+
 @pytest.mark.asyncio
 async def test_disabled_means_cn_absent(db):
     """落雪 disabled（删除/宴下架）= CN 缺失：version_cn 置 NULL；组粒度互不影响。
