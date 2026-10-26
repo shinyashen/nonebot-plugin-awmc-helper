@@ -623,12 +623,13 @@ class _Canvas:
         outline=None,
         width: float = 1.0,
     ) -> None:
-        self.d.polygon(
-            self.pts(points),
-            fill=fill,
-            outline=outline,
-            width=max(1, round(self.s(width))) if outline else 0,
-        )
+        pts = self.pts(points)
+        self.d.polygon(pts, fill=fill, outline=None, width=0)
+        if outline:
+            # canvas stroke 以路径为中心（±width/2）；Pillow 的 polygon outline
+            # 是向内画。改用 line 闭合描边以保持与站内一致的外观尺寸
+            w = max(1, round(self.s(width)))
+            self.d.line([*pts, pts[0]], fill=outline, width=w, joint="curve")
 
     def line(self, points: list[tuple[float, float]], color, width: float) -> None:
         self.d.line(
