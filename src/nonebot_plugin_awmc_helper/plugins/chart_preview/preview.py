@@ -39,7 +39,7 @@ _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
 _INDEX_NAMES = ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 _CACHE_SUBDIR = "chart_preview"
-_CACHE_REVISION = 6
+_CACHE_REVISION = 7
 
 
 @dataclass(frozen=True)

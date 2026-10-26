@@ -73,14 +73,49 @@ _LOGICAL = 600.0
 _SS = 2  # 超采样（站内 G=2 backing）
 _RADIUS = _LOGICAL * 0.45
 _CENTER = _LOGICAL / 2
-_BASE_APPROACH_MS = 2250.0
-_HI_SPEED = 7.0 * 0.6  # 默认谱面流速 7.0 × setHiSpeed 隐藏系数 0.6
-_APPROACH_MS = _BASE_APPROACH_MS / _HI_SPEED
+_BASE_APPROACH_MS = 2250.0  # lxns 渲染器「approach = base/hiSpeed」的基准值
+
+
+# ── 谱面流速标定来源（2026-10-27 调研定案）────────────────────────────────
+# 原先照搬 maimai.lxns.net：hiSpeed = 设定值 × 0.6，approach = 2250/hiSpeed。
+# 但该口径比 Majdata（simai 生态事实标准播放器）快约 17.7%，7.0 相当于
+# Majdata 的 8.4；群友反馈按官机手感 Majdata 的 7.0 已偏快，故改用 Majdata
+# 标定（源码核对自 MajdataView `HttpHandler.cs` / MajdataPlay
+# `GamePlayManager`，team-carol/carol `chartRenderer.ts` 亦独立移植同一公式）：
+#   内部速度 S(s) = 107.25 / (71.4184491 · (s + 0.9975)^-0.985558604)
+#   出现→判定时长 = 7.349 / S(s) 秒
+#   其中 7.349 = 4.8 − (−2.549)：4.8 为判定线距离，NoteAppearRate=0.265 时
+#   destScale=0 的起始距离为 −2.549。
+# lxns 的 hiSpeed 语义是 approach=2250/hiSpeed，因此换算：
+#   hiSpeed = 2250 / (7349 / S(s)) = 0.30616 · S(s)
+# TOUCH 在 Majdata 是独立速度公式（默认 TouchSpeed 7.5；此处沿用用户流速）：
+#   touch 出现→判定时长 = 3209.385682 · s^-0.9549621752 ms
+def _majdata_note_internal_speed(setting: float) -> float:
+    """谱面流速设定值 → lxns 渲染器内部 hiSpeed（Majdata 标定，见上方注释）。"""
+    s = 107.25 / (71.4184491 * (setting + 0.9975) ** -0.985558604)
+    return _BASE_APPROACH_MS / (7349.0 / s)
+
+
+def _majdata_note_approach_ms(setting: float) -> float:
+    """音符出现→判定总时长（ms），Majdata 标定。"""
+    s = 107.25 / (71.4184491 * (setting + 0.9975) ** -0.985558604)
+    return 7349.0 / s
+
+
+def _majdata_touch_approach_ms(setting: float) -> float:
+    """TOUCH 出现→判定时长（ms），Majdata `TouchDrop.wholeDuration` 公式。"""
+    return 3209.385682 * setting**-0.9549621752
+
+
+_DEFAULT_HI_SPEED = 7.0
+_HI_SPEED = _majdata_note_internal_speed(_DEFAULT_HI_SPEED)
+_APPROACH_MS = _majdata_note_approach_ms(_DEFAULT_HI_SPEED)
 _HALF_APPROACH = _APPROACH_MS / 2
+_TOUCH_APPROACH_MS = _majdata_touch_approach_ms(_DEFAULT_HI_SPEED)
+_SPEED_SETTING = _DEFAULT_HI_SPEED
 _HI_SPEED_MIN = 3.0
 _HI_SPEED_MAX = 9.75
 _HI_SPEED_STEP = 0.25
-_DEFAULT_HI_SPEED = 7.0
 DEFAULT_HI_SPEED = _DEFAULT_HI_SPEED
 
 
@@ -203,11 +238,14 @@ def normalize_hi_speed(value: float | None) -> float:
 
 
 def _apply_hi_speed(speed: float) -> None:
-    """设置模块级 hiSpeed/approach 时间（站内 setHiSpeed：×0.6 隐藏系数）。"""
-    global _HI_SPEED, _APPROACH_MS, _HALF_APPROACH
-    _HI_SPEED = speed * 0.6
-    _APPROACH_MS = _BASE_APPROACH_MS / _HI_SPEED
+    """设置模块级流速/approach 时间（Majdata 标定，来源见上方常量注释）。"""
+    global _HI_SPEED, _APPROACH_MS, _HALF_APPROACH, _TOUCH_APPROACH_MS
+    global _SPEED_SETTING
+    _SPEED_SETTING = speed
+    _APPROACH_MS = _majdata_note_approach_ms(speed)
+    _HI_SPEED = _BASE_APPROACH_MS / _APPROACH_MS
     _HALF_APPROACH = _APPROACH_MS / 2
+    _TOUCH_APPROACH_MS = _majdata_touch_approach_ms(speed)
 
 
 _R_NOTE = 1 / 12.5
@@ -2695,7 +2733,7 @@ class _TouchRenderer:
     def motion(self, note: _Note, now: float):
         is_hold = note.kind == "touch-hold"
         dt = note.timing - now
-        approach = _APPROACH_MS * 0.9  # getTouchApproachTimeMs D=0.9
+        approach = _TOUCH_APPROACH_MS  # Majdata TouchDrop.wholeDuration
         life = (note.duration + 50) if is_hold else 50.0
         if dt > approach or dt < -life:
             return None
@@ -4347,11 +4385,18 @@ def render_chart_video(
 ) -> Path:
     """渲染入口：设置超采样/谱面流速/ffmpeg 路径，串行化并发渲染。"""
     global _SS, _HI_SPEED, _APPROACH_MS, _HALF_APPROACH
+    global _TOUCH_APPROACH_MS, _SPEED_SETTING
     clamped = max(1.0, min(2.0, float(supersample)))
     speed = normalize_hi_speed(hi_speed)
     with _SS_LOCK:
         previous_ss = _SS
-        previous_speed = (_HI_SPEED, _APPROACH_MS, _HALF_APPROACH)
+        previous_speed = (
+            _HI_SPEED,
+            _APPROACH_MS,
+            _HALF_APPROACH,
+            _TOUCH_APPROACH_MS,
+            _SPEED_SETTING,
+        )
         _SS = clamped
         _apply_hi_speed(speed)
         try:
@@ -4373,7 +4418,13 @@ def render_chart_video(
             )
         finally:
             _SS = previous_ss
-            _HI_SPEED, _APPROACH_MS, _HALF_APPROACH = previous_speed
+            (
+                _HI_SPEED,
+                _APPROACH_MS,
+                _HALF_APPROACH,
+                _TOUCH_APPROACH_MS,
+                _SPEED_SETTING,
+            ) = previous_speed
 
 
 def _parse_loudnorm_json(text: str) -> dict[str, float] | None:

@@ -211,3 +211,20 @@ def test_check_ffmpeg_reports_usable_and_missing(cv, monkeypatch):
     assert not status.usable
     assert any("libx264" in item for item in status.missing)
     assert any("loudnorm" in item for item in status.missing)
+
+
+def test_speed_mapping_majdata(cv):
+    """流速按 Majdata 标定：7.0 → 音符 630.6ms / touch 500.5ms（见常量注释）。"""
+    import pytest
+
+    try:
+        cv._apply_hi_speed(7.0)
+        assert cv._APPROACH_MS == pytest.approx(630.56, abs=0.05)
+        assert cv._HALF_APPROACH == pytest.approx(315.28, abs=0.05)
+        assert cv._TOUCH_APPROACH_MS == pytest.approx(500.48, abs=0.05)
+        assert cv._SPEED_SETTING == 7.0
+        cv._apply_hi_speed(6.0)
+        assert cv._APPROACH_MS == pytest.approx(719.28, abs=0.05)
+        assert cv._TOUCH_APPROACH_MS == pytest.approx(579.85, abs=0.05)
+    finally:
+        cv._apply_hi_speed(cv._DEFAULT_HI_SPEED)
