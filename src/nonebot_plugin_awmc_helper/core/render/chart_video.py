@@ -174,6 +174,8 @@ _RIPPLE_PROFILE = (  # tt：16 停点轮廓（位置, 强度）
     (0.938, 0.03),
     (1.0, 0.01),
 )
+_RIPPLE_PROFILE_X = tuple(p[0] for p in _RIPPLE_PROFILE)
+_RIPPLE_PROFILE_Y = tuple(p[1] for p in _RIPPLE_PROFILE)
 
 # ---- touch 命中特效（Ft 类，L7350-7454）----
 _TOUCHHIT_LIFETIME = 0.5  # mt
@@ -588,15 +590,41 @@ def _note_position(
 class _Canvas:
     """单帧画布：logical 600 × SS 超采样，ImageDraw(RGBA) 直接混色。"""
 
-    def __init__(self, transparent: bool = False):
-        self.size = int(_LOGICAL * _SS)
-        fill = (0, 0, 0, 0) if transparent else (*C_BLACK, 255)
-        self.img = Image.new("RGBA", (self.size, self.size), fill)
+    def __init__(
+        self,
+        transparent: bool = False,
+        base_image: Image.Image | None = None,
+        rgb: bool = False,
+    ):
+        self.size = base_image.width if base_image is not None else int(_LOGICAL * _SS)
+        if base_image is not None:
+            self.img = base_image.copy()
+        elif rgb:
+            self.img = Image.new("RGB", (self.size, self.size), C_BLACK)
+        else:
+            fill = (0, 0, 0, 0) if transparent else (*C_BLACK, 255)
+            self.img = Image.new("RGBA", (self.size, self.size), fill)
         self.d = ImageDraw.Draw(self.img, "RGBA")
         self.radius = _RADIUS
         self.cx = _CENTER
         self.cy = _CENTER
         self.sw = _STROKE * _RADIUS  # note 描边宽（logical px）
+
+    def over(
+        self, layer: Image.Image, pos=None, mask: Image.Image | None = None
+    ) -> None:
+        """alpha 叠加到本画布：RGBA 走 alpha_composite；RGB 底板走 paste(mask)。
+
+        RGB 底图不需要整体 alpha_composite（两步 RGBA 合成 + 末尾 convert 约
+        4ms/帧），paste 用图层 alpha 作掩码与它逐像素等价（实测 diff=0）且快
+        约 10 倍。
+        """
+        if self.img.mode == "RGB":
+            self.img.paste(layer, pos or (0, 0), mask if mask is not None else layer)
+        elif pos is None:
+            self.img.alpha_composite(layer)
+        else:
+            self.img.alpha_composite(layer, pos)
 
     def s(self, v: float) -> float:
         return v * _SS
@@ -724,7 +752,10 @@ def _screen_composite(base: Image.Image, layer: Image.Image, box: tuple) -> None
     """globalCompositeOperation='screen'（不透明底）：out = dst + a·src·(1-dst)。"""
     x0, y0 = box[0], box[1]
     layer = _clip_layer(layer, box, base.width)
-    dst = np.asarray(base.crop(box).convert("RGB"), dtype=np.int32)
+    region = base.crop(box)
+    dst = np.asarray(
+        region if region.mode == "RGB" else region.convert("RGB"), dtype=np.int32
+    )
     src = np.asarray(layer.convert("RGBA"), dtype=np.int32)
     a = src[..., 3:4] / 255.0
     out = dst + (a * src[..., :3] * (255 - dst) // 255).astype(np.int32)
@@ -735,7 +766,10 @@ def _additive_composite(base: Image.Image, layer: Image.Image, box: tuple) -> No
     """globalCompositeOperation='lighter'（不透明底）：out = dst + a·src。"""
     x0, y0 = box[0], box[1]
     layer = _clip_layer(layer, box, base.width)
-    dst = np.asarray(base.crop(box).convert("RGB"), dtype=np.int32)
+    region = base.crop(box)
+    dst = np.asarray(
+        region if region.mode == "RGB" else region.convert("RGB"), dtype=np.int32
+    )
     src = np.asarray(layer.convert("RGBA"), dtype=np.int32)
     out = dst + (src[..., 3:4] * src[..., :3] // 255)
     base.paste(Image.fromarray(out.clip(0, 255).astype(np.uint8), "RGB"), (x0, y0))
@@ -1174,16 +1208,14 @@ class _Renderer:
                     fill=255,
                 )
                 lay.putalpha(ImageChops_darker(lay.getchannel("A"), hole))
-                c.img.alpha_composite(lay)
+                c.over(lay)
         sprite = self.sprites.tap(note.pos, note.is_break, note.is_each, note.is_ex)
         if abs(pos.alpha - 1) > 1e-3:
             new_size = max(2, round(sprite.width * pos.alpha))
             if new_size % 2 != sprite.width % 2:
                 new_size += 1
             sprite = sprite.resize((new_size, new_size), Image.BILINEAR)
-        c.img.alpha_composite(
-            sprite, (int(x - sprite.width / 2), int(y - sprite.height / 2))
-        )
+        c.over(sprite, (int(x - sprite.width / 2), int(y - sprite.height / 2)))
 
     def draw_approach_arc(
         self, c: _Canvas, pos_btn: int, dist: float, color: tuple
@@ -1263,7 +1295,7 @@ class _Renderer:
                 hi += math.tau
             pts = c.arc_points(c.cx, c.cy, dist, lo, hi)
         ld.line(c.pts(pts), fill=col, width=max(1, round(c.s(self.sw))), joint="curve")
-        c.img.alpha_composite(lay)
+        c.over(lay)
 
     # ------------------------------------------------------------ hold（Ce 类 L6429）
     def draw_hold(self, c: _Canvas, note: _Note, now: float) -> None:
@@ -1437,7 +1469,7 @@ class _Renderer:
         )
         arr[..., 3] = np.round(255 * fade).astype(np.uint8)
         glow = Image.fromarray(arr, "RGBA")
-        c.img.alpha_composite(glow, (int(x * _SS - size / 2), int(y * _SS - size / 2)))
+        c.over(glow, (int(x * _SS - size / 2), int(y * _SS - size / 2)))
 
     # ------------------------------------------------ 按压涟漪（it 类 L7186）
     def draw_press_ripple(
@@ -1496,7 +1528,9 @@ class _Renderer:
             if not msk.any():
                 continue
             v = np.zeros_like(t)
-            v[msk] = [_lerp_stops(_RIPPLE_PROFILE, tv) for tv in t[msk]]
+            # 原实现逐像素调用 _lerp_stops（每帧 4-5 万次），改用 np.interp
+            # 向量化线性插值，数值口径一致（落点仅取 16 个停点包络）。
+            v[msk] = np.interp(t[msk], _RIPPLE_PROFILE_X, _RIPPLE_PROFILE_Y)
             n_off = _RIPPLE_ET * v * alpha * alpha  # l = a/Je = alpha
             a_px = v * alpha
             col = np.zeros((h, w, 3), dtype=np.float32)
@@ -2015,7 +2049,7 @@ class _SlideRenderer:
             mask = mask.point(lambda v: int(v * alpha * shade))
             lay = Image.new("RGBA", (x1 - x0, y1 - y0), (*col, 255))
             lay.putalpha(mask)
-            c.img.alpha_composite(lay, (x0, y0))
+            c.over(lay, (x0, y0))
 
     def _wifi_chevron_points(
         self,
@@ -2082,7 +2116,7 @@ class _SlideRenderer:
             layer.img.putalpha(
                 layer.img.getchannel("A").point(lambda v: int(v * alpha))
             )
-            c.img.alpha_composite(layer.img)
+            c.over(layer.img)
             return
         s = size
         cc = s * 0.5
@@ -2650,7 +2684,7 @@ class _TouchRenderer:
         layer.paste(sprite, (0, 0), ImageChops_darker(sprite.getchannel("A"), pie))
         if alpha < 1:
             layer.putalpha(layer.getchannel("A").point(lambda v: int(v * alpha)))
-        c.img.alpha_composite(layer, (int(c.s(x) - size / 2), int(c.s(y) - size / 2)))
+        c.over(layer, (int(c.s(x) - size / 2), int(c.s(y) - size / 2)))
 
     # ---- renderTouch（L6854）+ Ae 部件排序（L6726）
     def collect(self, c: _Canvas, note: _Note, now: float) -> tuple | None:
@@ -2702,7 +2736,7 @@ class _TouchRenderer:
                     outline=(*C_WHITE, a255),
                     width=lw1,
                 )
-                c.img.alpha_composite(lay)
+                c.over(lay)
             elif part.startswith("petal-"):
                 k = int(part[-1])
                 if petal_alpha <= 0:
@@ -2716,7 +2750,7 @@ class _TouchRenderer:
                         spr.putalpha(
                             spr.getchannel("A").point(lambda v: int(v * petal_alpha))
                         )
-                    c.img.alpha_composite(
+                    c.over(
                         spr,
                         (
                             int(c.s(pcx) - spr.width / 2),
@@ -2827,7 +2861,7 @@ class _TouchRenderer:
             seg((left, mid_t), (left, top + corner_r))
             arc(left + corner_r, top + corner_r, math.pi, math.pi * 1.5)
             ld.line(c.pts(pts), fill=(*color, 255), width=lw, joint="curve")
-        c.img.alpha_composite(lay)
+        c.over(lay)
 
 
 class _Fireworks:
@@ -3024,7 +3058,7 @@ class _Fireworks:
             scratch.putalpha(
                 Image.fromarray((alpha * keep * 255).astype(np.uint8), "L")
             )
-        c.img.alpha_composite(_clip_layer(scratch))
+        c.over(_clip_layer(scratch))
 
     def _draw_wedges_vector(
         self, c: _Canvas, x: float, y: float, s: float, rot: float
@@ -3066,7 +3100,7 @@ class _Fireworks:
             arr[..., 0], arr[..., 1], arr[..., 2] = _FIREWORK_COLORS[e]
             arr[..., 3] = (fade * 0.589 * 255).astype(np.uint8)
             lay.paste(Image.fromarray(arr, "RGBA"), (x0, y0), mask)
-        c.img.alpha_composite(lay)
+        c.over(lay)
 
     def _blit_wedge(self, c: _Canvas, x: float, y: float, e: float, rot: float) -> None:
         wedge = self.wedge_sprite()
@@ -3079,7 +3113,7 @@ class _Fireworks:
         scaled = rotated.resize(
             (max(2, int(rotated.width * ratio)),) * 2, Image.BILINEAR
         )
-        c.img.alpha_composite(
+        c.over(
             _clip_layer(scaled),
             (int(c.s(x) - scaled.width / 2), int(c.s(y) - scaled.height / 2)),
         )
@@ -3340,7 +3374,19 @@ class _TouchHitEffects:
             else 0.0
         )
         sprites = self.star_sprites()
-        lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
+        # 星爆只覆盖命中点周围的小区域：原先建整帧 RGBA 层 + 整帧 additive
+        # 合成（900² 下约 24ms/次，84s 段落一次 7-8 个星爆），改为按解析
+        # 上界裁 bbox 层，结果一致但开销与面积成正比。
+        max_r = (start_r + abs(drift)) * r480 + peak_r * r480 * 0.847 + 2
+        region = int(max_r * _SS) + 2
+        cx, cy = c.s(x), c.s(y)
+        x0 = max(0, int(cx - region))
+        y0 = max(0, int(cy - region))
+        x1 = min(c.img.width, int(cx + region))
+        y1 = min(c.img.height, int(cy + region))
+        if x1 <= x0 or y1 <= y0:
+            return
+        lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
         for r_i in range(count):
             a1 = _hash01(seed + r_i * 4 + 1)
             s2 = _hash01(seed + r_i * 4 + 2)
@@ -3367,9 +3413,12 @@ class _TouchHitEffects:
                 )
             lay.alpha_composite(
                 scaled,
-                (int(c.s(px) - scaled.width / 2), int(c.s(py) - scaled.height / 2)),
+                (
+                    int(c.s(px) - scaled.width / 2) - x0,
+                    int(c.s(py) - scaled.height / 2) - y0,
+                ),
             )
-        _additive_composite(c.img, lay, (0, 0, c.img.width, c.img.height))
+        _additive_composite(c.img, lay, (x0, y0, x1, y1))
 
 
 class _ChartRenderer:
@@ -3398,7 +3447,7 @@ class _ChartRenderer:
                 )
             previous_bpm = bpm
         # 静态底图（黑底 + 判定圈 + 按钮点）与 clip 圆 alpha mask：预生成每帧 copy
-        base = _Canvas()
+        base = _Canvas(rgb=True)
         self._judgment_line(base)
         self._base_img = base.img
         size = base.img.width
@@ -3406,14 +3455,14 @@ class _ChartRenderer:
         circle = np.hypot(xx - size / 2, yy - size / 2) <= size / 2 - 1
         self._clip_mask = Image.fromarray((circle * 255).astype(np.uint8), "L")
         self._hit_sprite_cache: dict[tuple, Image.Image] = {}
+        # HUD 文本缓存：(文本, 字号, 颜色, 锚点) → (阴影+文字的合成图, 粘贴偏移)
+        self._text_cache: dict[tuple, tuple[Image.Image, int, int]] = {}
 
     # ---- 帧渲染
     def render_frame(self, now_ms: float, fps: int) -> Image.Image:
         from PIL import ImageChops
 
-        c = _Canvas()
-        c.img = self._base_img.copy()
-        c.d = ImageDraw.Draw(c.img, "RGBA")
+        c = _Canvas(base_image=self._base_img)
         # 花火（clip 圆内、HUD 之下，L8101）——直接画在最终画布（此刻只有底图，
         # 与 JS 在 clear/判定线之后立即绘制的背景一致；lighter 混合语义成立）
         fire_notes = [n for n in self.renderer.touches if n.fire]
@@ -3442,7 +3491,7 @@ class _ChartRenderer:
         # clip 圆合成（静态 mask）：field 的 alpha 圈外清零后 alpha_composite
         # 叠加——底图的判定圈/按钮点保留（paste 会整块替换，把圈内底图抹掉）
         field.putalpha(ImageChops.darker(field.getchannel("A"), self._clip_mask))
-        c.img.alpha_composite(field)
+        c.over(field)
         # 6) 特效阶段（L8136-8139）：screen/lighter 混合必须对最终画面进行
         # （JS 直接画在主画布上；画在透明 field 层会把底图盖黑）——按 clip 掩码
         # 裁剪后逐一绘制：hold 涟漪 → touch hold 按压/松手 → 命中 → 打击
@@ -3707,14 +3756,39 @@ class _ChartRenderer:
         blit(math.cos(w_ang) * h, math.sin(w_ang) * h, p)
         blit(math.cos(t_ang) * h, math.sin(t_ang) * h, m2)
         blit(math.cos(e_ang) * h, math.sin(e_ang) * h, m2)
-        if abs(rot) > 1e-9:
-            lay = lay.rotate(
-                -math.degrees(rot), resample=Image.BILINEAR, center=(center, center)
-            )
         x0 = int(fc.s(x) - center)
         y0 = int(fc.s(y) - center)
+        if abs(rot) > 1e-9:
+            # 旋转只作用于内容区域：整层 210² BILINEAR 旋转约 1ms/次，裁剪到
+            # 「内容外接圆 + 3px 余量」的正方形后再转，采样中心不变、结果一致。
+            bbox = lay.getbbox()
+            if bbox is None:
+                return
+            rx = max(abs(bbox[0] - center), abs(bbox[2] - center))
+            ry = max(abs(bbox[1] - center), abs(bbox[3] - center))
+            radius = math.hypot(rx, ry) + 3
+            side = min(size, int(radius * 2) + 1)
+            if side < size:
+                ox = int(center - side / 2)
+                oy = int(center - side / 2)
+                sub = lay.crop((ox, oy, ox + side, oy + side))
+                sub = sub.rotate(
+                    -math.degrees(rot),
+                    resample=Image.BILINEAR,
+                    center=(center - ox, center - oy),
+                )
+                lay = sub
+                x0 += ox
+                y0 += oy
+                size = side
+            else:
+                lay = lay.rotate(
+                    -math.degrees(rot),
+                    resample=Image.BILINEAR,
+                    center=(center, center),
+                )
         box = (x0, y0, x0 + size, y0 + size)
-        fc.img.alpha_composite(_clip_layer(lay, box, fc.img.width), (x0, y0))
+        fc.over(_clip_layer(lay, box, fc.img.width), (x0, y0))
 
     def _judgment_line(self, c: _Canvas) -> None:
         """renderJudgmentLine（L8086）simple 设计：白圈 + 8 按钮点。"""
@@ -3735,14 +3809,7 @@ class _ChartRenderer:
         shadow_col = (0, 0, 0, 191)
 
         def text(x, y, txt, px, color, anchor="la"):
-            c.d.text(
-                (x + shadow_off, y + shadow_off),
-                txt,
-                font=self._font(px),
-                fill=shadow_col,
-                anchor=anchor,
-            )
-            c.d.text((x, y), txt, font=self._font(px), fill=color, anchor=anchor)
+            self._hud_text(c, x, y, txt, px, color, anchor, shadow_off, shadow_col)
 
         beat = self.chart.timeline.beat_from_ms(now)
         bpm = self.chart.timeline.bpm_at_beat(beat)
@@ -3787,6 +3854,64 @@ class _ChartRenderer:
         bottom = _LOGICAL * s - n20
         text(right_x, bottom, f"BREAK: {nx_done} / {nx_total}", n22, C_ORANGE, "rb")
         text(right_x, bottom - n22 - n4, "无保护", n18, C_ORANGE, "rb")
+
+    def _hud_text(
+        self,
+        c: _Canvas,
+        x: float,
+        y: float,
+        txt: str,
+        px: int,
+        color,
+        anchor: str,
+        shadow_off: float,
+        shadow_col,
+    ) -> None:
+        """缓存 HUD 文本（Font.render 约占单帧 20%）。
+
+        阴影与文字先合成到一张透明小图缓存，再整体 paste：文本内容/字号/颜色/
+        锚点相同的帧重复率很高（BPM、连击、BREAK、无保护），而 canvas 的
+        alpha 叠加满足结合律，缓存合成结果与逐次绘制等价。
+        """
+        key = (txt, px, color, anchor)
+        entry = self._text_cache.get(key)
+        if entry is None:
+            font = self._font(px)
+            bbox_la = c.d.textbbox((0, 0), txt, font=font, anchor="la")
+            bbox_a = c.d.textbbox((0, 0), txt, font=font, anchor=anchor)
+            w = bbox_la[2] - bbox_la[0]
+            h = bbox_la[3] - bbox_la[1]
+            pad = int(shadow_off) + 4
+            size = (max(1, w + pad * 2), max(1, h + pad * 2))
+            # 文字/阴影各存一张：两次 alpha_composite 与「直接画两遍」逐像素等价
+            text_img = Image.new("RGBA", size, (0, 0, 0, 0))
+            ImageDraw.Draw(text_img, "RGBA").text(
+                (pad - bbox_la[0], pad - bbox_la[1]),
+                txt,
+                font=font,
+                fill=color,
+                anchor="la",
+            )
+            shadow_img = Image.new("RGBA", size, (0, 0, 0, 0))
+            ImageDraw.Draw(shadow_img, "RGBA").text(
+                (pad - bbox_la[0], pad - bbox_la[1]),
+                txt,
+                font=font,
+                fill=shadow_col,
+                anchor="la",
+            )
+            entry = (
+                text_img,
+                shadow_img,
+                bbox_a[0] - pad,
+                bbox_a[1] - pad,
+            )
+            if len(self._text_cache) > 512:
+                self._text_cache.clear()
+            self._text_cache[key] = entry
+        text_img, shadow_img, dx, dy = entry
+        c.over(shadow_img, (int(x + dx + shadow_off), int(y + dy + shadow_off)))
+        c.over(text_img, (int(x + dx), int(y + dy)))
 
     def _font(self, px: int):
         cached = self.renderer._fonts.get(px)
@@ -3955,11 +4080,10 @@ def _worker_render_chunk(args: tuple[int, int]) -> list[bytes]:
     frames: list[bytes] = []
     for index in range(start, start + count):
         frame = _WORKER_RENDERER.render_frame(index / _WORKER_FPS * 1000.0, _WORKER_FPS)
+        rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
         frames.append(
             zlib.compress(
-                frame.convert("RGB")
-                .resize((_WORKER_SIZE, _WORKER_SIZE), Image.BILINEAR)
-                .tobytes(),
+                rgb.resize((_WORKER_SIZE, _WORKER_SIZE), Image.BILINEAR).tobytes(),
                 1,
             )
         )
@@ -4120,10 +4244,9 @@ def _render_chart_video_impl(
         else:
             for i in range(n_frames):
                 frame = renderer.render_frame(i / fps * 1000.0, fps)
+                rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
                 proc.stdin.write(
-                    frame.convert("RGB")
-                    .resize((int(_LOGICAL), int(_LOGICAL)), Image.BILINEAR)
-                    .tobytes()
+                    rgb.resize((int(_LOGICAL), int(_LOGICAL)), Image.BILINEAR).tobytes()
                 )
     finally:
         try:
