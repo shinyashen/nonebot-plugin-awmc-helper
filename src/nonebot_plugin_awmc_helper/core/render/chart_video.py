@@ -2727,27 +2727,37 @@ class _TouchRenderer:
             i = 2 * (n - axis * r)
             pts: list[tuple[float, float]] = []
 
-            def q(cx0, cy0, cx1, cy1):
+            def q(
+                c0: tuple[float, float],
+                ctrl: tuple[float, float],
+                c1: tuple[float, float],
+            ) -> None:
+                # 二次贝塞尔（与 JS quadraticCurveTo 一致）：
+                # B(t)=(1-t)²P0+2(1-t)tP1+t²P2。旧实现漏了 t²P2 项，
+                # 四个角被截成直线弦 → 四边缺角。
                 for k in (1, 2, 3):
                     t = k / 4
+                    w0 = (1 - t) ** 2
+                    w1 = 2 * (1 - t) * t
+                    w2 = t * t
                     pts.append(
                         (
-                            (1 - t) ** 2 * cx0 + 2 * (1 - t) * t * cx1,
-                            (1 - t) ** 2 * cy0 + 2 * (1 - t) * t * cy1,
+                            w0 * c0[0] + w1 * ctrl[0] + w2 * c1[0],
+                            w0 * c0[1] + w1 * ctrl[1] + w2 * c1[1],
                         )
                     )
 
             pts.append((-i, -n + i))
-            q(-i, -n + i, 0, -n)
+            q((-i, -n + i), (0, -n), (i, -n + i))
             pts.append((i, -n + i))
             pts.append((n - i, -i))
-            q(n - i, -i, n, 0)
+            q((n - i, -i), (n, 0), (n - i, i))
             pts.append((n - i, i))
             pts.append((i, n - i))
-            q(i, n - i, 0, n)
+            q((i, n - i), (0, n), (-i, n - i))
             pts.append((-i, n - i))
             pts.append((-n + i, i))
-            q(-n + i, i, -n, 0)
+            q((-n + i, i), (-n, 0), (-n + i, -i))
             pts.append((-n + i, -i))
             return pts
 

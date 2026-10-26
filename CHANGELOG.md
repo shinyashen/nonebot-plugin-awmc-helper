@@ -43,6 +43,9 @@
 
 ### Changed
 
+- 修复 touch-hold 进度环四角缺失：二次贝塞尔采样漏了 t²P2 项，四个角被
+  直线弦截断（表现为四条粗边缺角），补全后是不缺角的圆角菱形，与 JS
+  `quadraticCurveTo` 一致。
 - 谱面预览右下角「无保护」改为统计 **EX break**（无保护 break，仅 CP/Miss
   判定；11820 等含 EX break 的谱面会显示其数量）；谱面无 EX break 时不再
   绘制该行。此前按站内源码口径统计非 EX break，与实际语义相反。
