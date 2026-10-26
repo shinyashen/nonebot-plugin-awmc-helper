@@ -298,9 +298,7 @@ async def test_command_range_hint_and_build(
             Message(
                 [
                     MessageSegment.at(event.user_id),
-                    MessageSegment.text(
-                        " 片段渲染中：约需 20–60 秒，完成后自动发送。"
-                    ),
+                    MessageSegment.text(" 片段渲染中：约需 20–60 秒，完成后自动发送。"),
                 ]
             ),
             result=None,

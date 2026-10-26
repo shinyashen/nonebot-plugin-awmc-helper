@@ -1,6 +1,6 @@
 """落雪谱面预览渲染器的滑键路径数据（自动生成，勿手改）。
 
-提取自 maimai.lxns.net 渲染器 bundle 的 ue（形状→单位坐标点列，
+提取自 maimai.lxns.net 渲染器 bundle 的单位坐标表（形状→点列，
 x/y 为半径比例、r 为该点箭头朝向角）/ le（形状→关键帧索引，末位为
 路径长度哨兵）表；生成脚本见 local/scratch/extract_slide_tables.js
 （node 求值对象字面量，保留 JS 指数写法精度）。

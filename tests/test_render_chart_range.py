@@ -18,9 +18,7 @@ def cr():
 def chart():
     from nonebot_plugin_awmc_helper.core.render.chart_notes import parse_site_chart
 
-    return parse_site_chart(
-        (SNAPSHOTS / "11355.txt").read_text(), difficulty=5
-    )[5]
+    return parse_site_chart((SNAPSHOTS / "11355.txt").read_text(), difficulty=5)[5]
 
 
 def test_parse_range_formats(cr):

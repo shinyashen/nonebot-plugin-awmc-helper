@@ -56,7 +56,7 @@ def compute_chart_stats(
     tap 551 = 我方纯 tap 456 + 95 个非无头 slide），用户要求与谱面信息
     对齐；EX 数量官方无此字段，仍按解析结果统计（SLIDE 的 EX 归 TAP）。
     """
-    ex_counts = dict.fromkeys(_GROUPS, 0)
+    ex_counts: dict[str, int] = dict.fromkeys(_GROUPS, 0)
     for note in chart.notes:
         group = _TYPE_GROUP.get(note.type)
         if group is None or not note.is_ex:
@@ -69,8 +69,8 @@ def compute_chart_stats(
         else:
             ex_counts[group] += 1
 
-    counts = dict.fromkeys(_GROUPS, 0)
-    official = None
+    counts: dict[str, int] = dict.fromkeys(_GROUPS, 0)
+    official: dict[str, int] | None = None
     if difficulty is not None:
         official = {
             "TAP": difficulty.tap_num,

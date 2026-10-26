@@ -53,7 +53,7 @@ from pathlib import Path
 from dataclasses import field, dataclass
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from .fonts import font as _load_font
 from .chart_audio import MIX_RATE, build_effect_track
@@ -328,7 +328,7 @@ _TOUCHHIT_RING_SPLINE = (  # Dt
     (0.3209003, 0.834577, 0.592962, 0.592962),
     (1.0, 1.0, 0.180534, 0.180534),
 )
-_TOUCHHIT_RING_ALPHA = (  # Ot
+_TOUCHHIT_RING_ALPHA = (
     (0.0, 1.0),
     (5484 / 65535, 1.0),
     (18591 / 65535, 0.141176),
@@ -561,15 +561,15 @@ def _rounded_tri_points(
         prev = pts[i - 1]
         nxt = pts[(i + 1) % 3]
         din = math.hypot(prev[0] - cur[0], prev[1] - cur[1]) or 1.0
-        dout = math.hypot(nxt[0] - cur[0], nxt[1] - cur[1]) or 1.0
-        rr = min(radius, din / 2, dout / 2)
+        dist_out = math.hypot(nxt[0] - cur[0], nxt[1] - cur[1]) or 1.0
+        rr = min(radius, din / 2, dist_out / 2)
         a_pt = (
             cur[0] + (prev[0] - cur[0]) / din * rr,
             cur[1] + (prev[1] - cur[1]) / din * rr,
         )
         b_pt = (
-            cur[0] + (nxt[0] - cur[0]) / dout * rr,
-            cur[1] + (nxt[1] - cur[1]) / dout * rr,
+            cur[0] + (nxt[0] - cur[0]) / dist_out * rr,
+            cur[1] + (nxt[1] - cur[1]) / dist_out * rr,
         )
         out.append(a_pt)
         for k in (1, 2, 3):
@@ -1050,8 +1050,9 @@ class _Sprites:
             return cached
         d_size = _RADIUS * _R_NOTE * 1.36 * 1.5  # 形状半径 d
         c_blur = _RADIUS * (4 / 300 * 0.7)  # at
-        l_blur = c_blur * 2.4  # at×ot
-        # JS getHitEffectShapeSprite L7329-7332：l = at·R·ot·X，pad = s + u + l/X·ct + 1
+        l_blur = c_blur * 2.4  # 系数乘积
+        # JS getHitEffectShapeSprite L7329-7332：
+        # l = at·R·coef·X，pad = s + u + l/X·ct + 1
         half = d_size + _STROKE * _RADIUS + l_blur * 2.5 + 1
         size = math.ceil(half * 2 * _SS)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -1088,7 +1089,7 @@ class _Sprites:
             )
             return lay
 
-        # 辉光层：α.55 + blur(l)（L7338 st/ot），主层：α1 + blur(c)
+        # 辉光层：α.55 + blur(l)（L7338 系数），主层：α1 + blur(c)
         glow = stroke_layer().filter(ImageFilter.GaussianBlur(l_blur * _SS))
         ga = glow.getchannel("A").point(lambda v: int(v * 0.55))
         glow.putalpha(ga)
@@ -1143,7 +1144,9 @@ class _Sprites:
         inner_pts = [
             (gx + (q[0] - gx) * 0.4, gy + (q[1] - gy) * 0.4) for q in (tip, left, right)
         ]
-        inner = _rounded_tri_points(*inner_pts, corner * 0.4)
+        inner = _rounded_tri_points(
+            inner_pts[0], inner_pts[1], inner_pts[2], corner * 0.4
+        )
 
         if layer_kind == "sb":
             # 投影（shadow 层 L6798）：canvas shadowBlur=8/300·R 是设备像素
@@ -1301,7 +1304,7 @@ class _Renderer:
         self.break_completions = break_completion_times(site.notes)
         self.ex_break_completions = break_ex_completion_times(site.notes)
         self.sprites = _Sprites()
-        self._fonts: dict[int, object] = {}
+        self._fonts: dict[int, ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
     # ------------------------------------------------------------ 通用
     def button_position(self, pos: int) -> tuple[float, float]:
@@ -1348,7 +1351,7 @@ class _Renderer:
             new_size = max(2, round(sprite.width * pos.alpha))
             if new_size % 2 != sprite.width % 2:
                 new_size += 1
-            sprite = sprite.resize((new_size, new_size), Image.BILINEAR)
+            sprite = sprite.resize((new_size, new_size), Image.Resampling.BILINEAR)
         c.over(sprite, (int(x - sprite.width / 2), int(y - sprite.height / 2)))
 
     def draw_approach_arc(
@@ -1690,7 +1693,7 @@ class _SlideRenderer:
 
     def __init__(self, renderer: _Renderer):
         self.r = renderer
-        self._chain_cache: dict[tuple, list] = {}
+        self._chain_cache: dict[tuple, list | None] = {}
         self._lut_cache: dict[tuple, list] = {}
         self._metrics_cache: dict[tuple, float] = {}
 
@@ -1745,7 +1748,7 @@ class _SlideRenderer:
 
     @staticmethod
     def _shape_map(shape: str, start: int, end: int, mid: int | None):
-        """ce()（L553）：形状串 → (ue 表键, 是否镜像)。"""
+        """ce()（L553）：形状串 → (单位坐标表键, 是否镜像)。"""
         dist = ((end - start) % 8 + 8) % 8 + 1
         if shape == "-":
             if dist < 3 or dist > 7:
@@ -2143,10 +2146,10 @@ class _SlideRenderer:
         main_polys: list[list[tuple[float, float]]] = []
         for e in range(last_kf - 1, hidden - 1, -1):
             t = e / (last_kf - 1)
-            nd = m0 + (h0 - m0) * _WIFI_EASE[e]
-            arm_len = cos_d * nd + g0 * (1 - t)
+            along_t = m0 + (h0 - m0) * _WIFI_EASE[e]
+            arm_len = cos_d * along_t + g0 * (1 - t)
             width = _RADIUS * _WIFI_WIDTH_BASE * (0.7 + 0.3 * t)
-            tip = (a0[0] + ux * nd, a0[1] + uy * nd)
+            tip = (a0[0] + ux * along_t, a0[1] + uy * along_t)
             # 手臂定义在路径局部系（+x 前向），按路径方向旋转到世界系（L6106）
             al1x, al1y = -arm_len * cos_d, arm_len * sin_d
             al2x, al2y = -arm_len * cos_d, -arm_len * sin_d
@@ -3178,7 +3181,7 @@ class _Fireworks:
         scratch = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         rotated = wedge.rotate(
             -math.degrees(rot),
-            resample=Image.BILINEAR,
+            resample=Image.Resampling.BILINEAR,
             center=(wedge.width / 2, wedge.height / 2),
         )
         scratch.alpha_composite(
@@ -3255,12 +3258,16 @@ class _Fireworks:
         wedge = self.wedge_sprite()
         rotated = wedge.rotate(
             -math.degrees(rot),
-            resample=Image.BILINEAR,
+            resample=Image.Resampling.BILINEAR,
             center=(wedge.width / 2, wedge.height / 2),
         )
         ratio = c.s(e) * 2 / wedge.width
         scaled = rotated.resize(
-            (max(2, int(rotated.width * ratio)),) * 2, Image.BILINEAR
+            (
+                max(2, int(rotated.width * ratio)),
+                max(2, int(rotated.height * ratio)),
+            ),
+            Image.Resampling.BILINEAR,
         )
         c.over(
             _clip_layer(scaled),
@@ -3553,9 +3560,15 @@ class _TouchHitEffects:
             sprite = sprites[frame]
             ratio = c.s(s_px) * 2 / sprite.width
             scaled = sprite.resize(
-                (max(2, int(sprite.width * ratio)),) * 2, Image.BILINEAR
+                (
+                    max(2, int(sprite.width * ratio)),
+                    max(2, int(sprite.height * ratio)),
+                ),
+                Image.Resampling.BILINEAR,
             )
-            scaled = scaled.rotate(math.degrees(u2 * math.tau), resample=Image.BILINEAR)
+            scaled = scaled.rotate(
+                math.degrees(u2 * math.tau), resample=Image.Resampling.BILINEAR
+            )
             if m_alpha < 1:
                 scaled.putalpha(
                     scaled.getchannel("A").point(lambda v: int(v * m_alpha))
@@ -3605,7 +3618,9 @@ class _ChartRenderer:
         self._clip_mask = Image.fromarray((circle * 255).astype(np.uint8), "L")
         self._hit_sprite_cache: dict[tuple, Image.Image] = {}
         # HUD 文本缓存：(文本, 字号, 颜色, 锚点) → (阴影+文字的合成图, 粘贴偏移)
-        self._text_cache: dict[tuple, tuple[Image.Image, int, int]] = {}
+        self._text_cache: dict[
+            tuple, tuple[Image.Image, Image.Image, float, float]
+        ] = {}
 
     # ---- 帧渲染
     def render_frame(self, now_ms: float, fps: int) -> Image.Image:
@@ -3877,7 +3892,11 @@ class _ChartRenderer:
                     sprite
                     if abs(ratio - 1) < 1e-6
                     else sprite.resize(
-                        (max(2, int(sprite.width * ratio)),) * 2, Image.BILINEAR
+                        (
+                            max(2, int(sprite.width * ratio)),
+                            max(2, int(sprite.height * ratio)),
+                        ),
+                        Image.Resampling.BILINEAR,
                     )
                 )
                 if len(self._hit_sprite_cache) > 64:
@@ -3923,7 +3942,7 @@ class _ChartRenderer:
                 sub = lay.crop((ox, oy, ox + side, oy + side))
                 sub = sub.rotate(
                     -math.degrees(rot),
-                    resample=Image.BILINEAR,
+                    resample=Image.Resampling.BILINEAR,
                     center=(center - ox, center - oy),
                 )
                 lay = sub
@@ -3933,7 +3952,7 @@ class _ChartRenderer:
             else:
                 lay = lay.rotate(
                     -math.degrees(rot),
-                    resample=Image.BILINEAR,
+                    resample=Image.Resampling.BILINEAR,
                     center=(center, center),
                 )
         box = (x0, y0, x0 + size, y0 + size)
@@ -4000,9 +4019,7 @@ class _ChartRenderer:
         # 谱面无 EX break 时不显示这一行（避免 0/0 的空统计）
         ex_total = len(self.renderer.ex_break_completions)
         if ex_total:
-            ex_done = self.renderer.count_done(
-                self.renderer.ex_break_completions, now
-            )
+            ex_done = self.renderer.count_done(self.renderer.ex_break_completions, now)
             right_x = _LOGICAL * s - n20
             bottom = _LOGICAL * s - n20
             text(
@@ -4039,10 +4056,10 @@ class _ChartRenderer:
             font = self._font(px)
             bbox_la = c.d.textbbox((0, 0), txt, font=font, anchor="la")
             bbox_a = c.d.textbbox((0, 0), txt, font=font, anchor=anchor)
-            w = bbox_la[2] - bbox_la[0]
-            h = bbox_la[3] - bbox_la[1]
+            w = int(bbox_la[2] - bbox_la[0])
+            h = int(bbox_la[3] - bbox_la[1])
             pad = int(shadow_off) + 4
-            size = (max(1, w + pad * 2), max(1, h + pad * 2))
+            size: tuple[int, int] = (max(1, w + pad * 2), max(1, h + pad * 2))
             # 文字/阴影各存一张：两次 alpha_composite 与「直接画两遍」逐像素等价
             text_img = Image.new("RGBA", size, (0, 0, 0, 0))
             ImageDraw.Draw(text_img, "RGBA").text(
@@ -4073,7 +4090,7 @@ class _ChartRenderer:
         c.over(shadow_img, (int(x + dx + shadow_off), int(y + dy + shadow_off)))
         c.over(text_img, (int(x + dx), int(y + dy)))
 
-    def _font(self, px: int):
+    def _font(self, px: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         cached = self.renderer._fonts.get(px)
         if cached is None:
             try:
@@ -4238,7 +4255,9 @@ def _thread_render_chunk(args: tuple[int, int]) -> list[bytes]:
         rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
         frames.append(
             zlib.compress(
-                rgb.resize((_WORKER_SIZE, _WORKER_SIZE), Image.BILINEAR).tobytes(),
+                rgb.resize(
+                    (_WORKER_SIZE, _WORKER_SIZE), Image.Resampling.BILINEAR
+                ).tobytes(),
                 1,
             )
         )
@@ -4538,8 +4557,8 @@ def _render_chart_video_impl(
         # 两遍 loudnorm（linear 模式）：先测「音乐+音效」整体响度，再按测量值
         # 一次性加增益，避免动态压缩破坏听感；响度不到位时退回不处理。
         measured = _probe_loudness(
-        audio_file, fx_file, base_chain, loudness_lufs, ffmpeg_bin
-    )
+            audio_file, fx_file, base_chain, loudness_lufs, ffmpeg_bin
+        )
         if measured is not None:
             base_chain += (
                 f";[mixed]loudnorm=I={loudness_lufs}:TP=-1.5:LRA=11:"
@@ -4594,7 +4613,9 @@ def _render_chart_video_impl(
                 frame = renderer.render_frame(now_ms, fps)
                 rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
                 proc.stdin.write(
-                    rgb.resize((int(_LOGICAL), int(_LOGICAL)), Image.BILINEAR).tobytes()
+                    rgb.resize(
+                        (int(_LOGICAL), int(_LOGICAL)), Image.Resampling.BILINEAR
+                    ).tobytes()
                 )
     finally:
         try:

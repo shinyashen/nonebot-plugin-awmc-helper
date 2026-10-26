@@ -73,9 +73,7 @@ def test_hold_end_gets_answer_sound(ca, chart):
     events = ca._collect_events(chart)
     hold_ends = [e for e in events if e["hold_end"]]
     assert hold_ends, "11355 应包含 hold-end 事件"
-    wav, _scale = ca.build_effect_track(
-        chart, {"answer": _tone(ca)}, offset_ms=0.0
-    )
+    wav, _scale = ca.build_effect_track(chart, {"answer": _tone(ca)}, offset_ms=0.0)
     track = ca._decode_wav(wav)
     assert _peak_at(track, ca, hold_ends[0]["time_ms"]) > 0.05
 
