@@ -57,4 +57,3 @@ def test_hud_beat_roundtrip(notes):
         assert timeline.beat_from_ms(timeline.ms_from_beat(beat)) == pytest.approx(
             beat, abs=1e-6
         )
-
