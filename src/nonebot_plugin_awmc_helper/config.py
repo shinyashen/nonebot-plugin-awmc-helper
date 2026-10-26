@@ -99,6 +99,8 @@ class Config(BaseModel):
     awmc_chart_preview_limit_seconds: int = 0
     # 谱面预览渲染缓存总量上限（MB，超限按最旧清理）
     awmc_chart_preview_cache_mb: int = 800
+    # 谱面预览 ffmpeg 可执行文件（命令名或绝对路径；空=从 PATH 自动查找）
+    awmc_chart_preview_ffmpeg: str | None = None
     # 谱面预览分帧渲染线程数（0=自动：上限 4；1=串行）
     awmc_chart_preview_workers: int = 0
     # 谱面预览超采样倍率（画质档）：2.0=最清、1.5=肉眼几乎无感但整曲快约

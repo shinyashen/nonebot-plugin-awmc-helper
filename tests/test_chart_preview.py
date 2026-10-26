@@ -84,6 +84,7 @@ def fake_render(monkeypatch, tmp_path):
         notes_start_ms=None,
         fade_in_ms=None,
         hi_speed=7.0,
+        ffmpeg=None,
     ):
         calls.append(
             {
@@ -671,3 +672,59 @@ async def test_deliver_node_order(monkeypatch, tmp_path):
     assert "【调整提示】" in entries[2]
     assert captured["group_id"] == 87654321
     assert captured["user_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_command_ffmpeg_unavailable_message(
+    app: App, db, cache_dir, songs, monkeypatch
+):
+    """ffmpeg 不可用 → 用户看到具体排查文案，而非笼统「出错了」。"""
+    from fake import fake_group_message_event_v11
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.core.render.chart_video import (
+        FFmpegUnavailableError,
+    )
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    async def fake_build(*args, **kwargs):
+        raise FFmpegUnavailableError(
+            "谱面预览需要服务器安装 ffmpeg，但当前未找到（PATH 中没有 ffmpeg）。"
+        )
+
+    monkeypatch.setattr(matchers, "build_preview", fake_build)
+    await song_service.inject(songs)
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message="谱面预览 紫+8")
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
+                        "同一谱面再次请求命中缓存秒回"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 谱面预览需要服务器安装 ffmpeg，但当前未找到"
+                        "（PATH 中没有 ffmpeg）。"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()

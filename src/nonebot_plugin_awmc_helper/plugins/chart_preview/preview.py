@@ -264,6 +264,7 @@ async def build_preview(
         end_ms=clip_end,
         notes_start_ms=notes_start,
         hi_speed=hi_speed,
+        ffmpeg=plugin_config.awmc_chart_preview_ffmpeg,
     )
     result = PreviewResult(
         path=out,

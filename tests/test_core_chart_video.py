@@ -149,3 +149,65 @@ def test_normalize_hi_speed(cv):
         assert cv.normalize_hi_speed(value) == float(value)
     for bad in (0, 0.25, 9.3, 10, -3, "x", None):
         assert cv.normalize_hi_speed(bad) == 7.0
+
+
+def test_resolve_ffmpeg_missing(cv, monkeypatch):
+    """PATH 无 ffmpeg 且未配置 → 面向用户的 ValueError（含配置项提示）。"""
+    import shutil
+
+    monkeypatch.delenv("AWMC_FFMPEG", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(cv.FFmpegUnavailableError) as exc_info:
+        cv.resolve_ffmpeg(None)
+    message = str(exc_info.value)
+    assert "aws" not in message  # 不泄漏无关内容
+    assert "awmc_chart_preview_ffmpeg" in message
+    assert "ffmpeg" in message
+
+
+def test_resolve_ffmpeg_explicit_path(cv, tmp_path):
+    """显式配置可执行文件路径 → 直接使用。"""
+    fake = tmp_path / "ffmpeg"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    assert cv.resolve_ffmpeg(str(fake)) == str(fake)
+
+
+def test_check_ffmpeg_reports_usable_and_missing(cv, monkeypatch):
+    """探测：完整构建 usable；缺 libx264/loudnorm 时报 missing 条目。"""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cv, "resolve_ffmpeg", lambda _ffmpeg=None: "/usr/bin/ffmpeg")
+
+    def fake_run(cmd, **kwargs):
+        if "-version" in cmd:
+            return SimpleNamespace(
+                returncode=0, stdout="ffmpeg version 6.1.1 Copyright\n", stderr=""
+            )
+        if "-encoders" in cmd:
+            return SimpleNamespace(
+                returncode=0, stdout=" V....D libx264  H.264\n A....D aac  AAC\n"
+            )
+        return SimpleNamespace(
+            returncode=0, stdout=" T.. amix  Audio mix\n .. loudnorm  EBU R128\n"
+        )
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    status = cv.check_ffmpeg("/usr/bin/ffmpeg")
+    assert status.usable
+    assert "6.1.1" in status.version
+
+    def fake_run_missing(cmd, **kwargs):
+        if "-version" in cmd:
+            return SimpleNamespace(
+                returncode=0, stdout="ffmpeg version 5.0\n", stderr=""
+            )
+        if "-encoders" in cmd:
+            return SimpleNamespace(returncode=0, stdout=" A....D aac  AAC\n")
+        return SimpleNamespace(returncode=0, stdout=" T.. amix  Audio mix\n")
+
+    monkeypatch.setattr("subprocess.run", fake_run_missing)
+    status = cv.check_ffmpeg("/usr/bin/ffmpeg")
+    assert not status.usable
+    assert any("libx264" in item for item in status.missing)
+    assert any("loudnorm" in item for item in status.missing)

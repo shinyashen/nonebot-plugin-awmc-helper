@@ -84,6 +84,110 @@ _DEFAULT_HI_SPEED = 7.0
 DEFAULT_HI_SPEED = _DEFAULT_HI_SPEED
 
 
+class FFmpegUnavailableError(ValueError):
+    """服务器缺少可用的 ffmpeg（或缺少所需编码器/滤镜）：面向用户的错误。
+
+    继承 ValueError 以便 matcher 的 handle_errors(except_with_message=(...))
+    把消息原样发给用户，而不是笼统的「出错了」。
+    """
+
+
+def resolve_ffmpeg(ffmpeg: str | None = None) -> str:
+    """定位 ffmpeg：显式配置 > 环境变量 AWMC_FFMPEG > PATH 中的 ffmpeg。
+
+    返回可直接执行的路径/命令名；找不到时抛 :class:`FFmpegUnavailableError`
+    （消息含排查提示，会原样发给用户）。
+    """
+    import os
+    import shutil
+
+    candidate = (ffmpeg or "").strip() or os.environ.get("AWMC_FFMPEG", "").strip()
+    if candidate:
+        if Path(candidate).is_file():
+            return candidate
+        found = shutil.which(candidate)
+        if found is not None:
+            return found
+        raise FFmpegUnavailableError(
+            f"谱面预览需要可用的 ffmpeg，但配置的路径「{candidate}」不存在；"
+            "请检查 awmc_chart_preview_ffmpeg 配置或服务器 PATH。"
+        )
+    found = shutil.which("ffmpeg")
+    if found is None:
+        raise FFmpegUnavailableError(
+            "谱面预览需要服务器安装 ffmpeg，但当前未找到（PATH 中没有 ffmpeg）。"
+            "请安装 ffmpeg，或在 .env 配置 awmc_chart_preview_ffmpeg 指向可执行文件"
+            "（如 /usr/bin/ffmpeg）后重启。"
+        )
+    return found
+
+
+@dataclass(frozen=True)
+class FFmpegStatus:
+    """ffmpeg 可用性探测结果。"""
+
+    path: str
+    version: str
+    missing: tuple[str, ...]  # 缺少的编码器/滤镜名（空=完全可用）
+
+    @property
+    def usable(self) -> bool:
+        return not self.missing
+
+
+def check_ffmpeg(ffmpeg: str | None = None) -> FFmpegStatus:
+    """探测 ffmpeg 是否可执行，以及是否带渲染所需编码器/滤镜。
+
+    谱面预览依赖：``libx264``/``aac`` 编码器、``loudnorm``/``amix`` 滤镜
+    （响度归一与音乐+音效混音）。启动时调用本函数写日志，部署排查也可
+    单独跑（见 local/deployment.md）。
+    """
+    import subprocess
+
+    path = resolve_ffmpeg(ffmpeg)
+    try:
+        version = subprocess.run(
+            [path, "-hide_banner", "-version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        encoders = subprocess.run(
+            [path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        filters = subprocess.run(
+            [path, "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise FFmpegUnavailableError(
+            f"谱面预览需要可用的 ffmpeg，但「{path}」无法执行（{exc}）；"
+            "请检查安装与执行权限。"
+        ) from exc
+    if version.returncode != 0:
+        raise FFmpegUnavailableError(
+            f"谱面预览需要可用的 ffmpeg，但「{path}」执行失败"
+            f"（exit {version.returncode}）；请检查安装是否完整。"
+        )
+    version_text = (version.stdout or version.stderr).splitlines()
+    first_line = version_text[0].strip() if version_text else path
+    missing: list[str] = []
+    encoder_text = encoders.stdout or ""
+    for encoder in ("libx264", "aac"):
+        if encoder not in encoder_text:
+            missing.append(f"编码器 {encoder}")
+    filter_text = filters.stdout or ""
+    for name in ("loudnorm", "amix"):
+        if name not in filter_text:
+            missing.append(f"滤镜 {name}")
+    return FFmpegStatus(path=path, version=first_line, missing=tuple(missing))
+
+
 def normalize_hi_speed(value: float | None) -> float:
     """谱面流速参数校验：3–9.75、步长 0.25；非法回退默认 7.0。"""
     try:
@@ -4199,8 +4303,9 @@ def render_chart_video(
     notes_start_ms: float | None = None,
     fade_in_ms: float | None = None,
     hi_speed: float = _DEFAULT_HI_SPEED,
+    ffmpeg: str | None = None,
 ) -> Path:
-    """渲染入口：设置超采样/谱面流速，串行化并发渲染。"""
+    """渲染入口：设置超采样/谱面流速/ffmpeg 路径，串行化并发渲染。"""
     global _SS, _HI_SPEED, _APPROACH_MS, _HALF_APPROACH
     clamped = max(1.0, min(2.0, float(supersample)))
     speed = normalize_hi_speed(hi_speed)
@@ -4224,6 +4329,7 @@ def render_chart_video(
                 end_ms=end_ms,
                 notes_start_ms=notes_start_ms,
                 fade_in_ms=fade_in_ms,
+                ffmpeg=ffmpeg,
             )
         finally:
             _SS = previous_ss
@@ -4262,6 +4368,7 @@ def _probe_loudness(
     fx_file: Path | None,
     base_chain: str,
     target_lufs: float,
+    ffmpeg: str = "ffmpeg",
 ) -> dict[str, float] | None:
     """测量「音乐+音效」混音的整体响度/真峰值（loudnorm 两遍法的第一遍）。"""
     import subprocess
@@ -4273,7 +4380,7 @@ def _probe_loudness(
     # 与正式 mux 的输入序号保持一致（0=视频管道，1=音乐，2=音效）；探针这里用
     # 一个不会被 map 的 lavfi 视频占位，避免 [1:a]/[2:a] 指错输入。
     cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-hide_banner",
         "-nostats",
         "-v",
@@ -4312,6 +4419,7 @@ def _render_chart_video_impl(
     end_ms: float | None = None,
     notes_start_ms: float | None = None,
     fade_in_ms: float | None = None,
+    ffmpeg: str | None = None,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
 
@@ -4327,11 +4435,9 @@ def _render_chart_video_impl(
     ``limit_seconds`` 截断渲染时长；音频 None 时出无声视频。
     """
     import os
-    import shutil
     import subprocess
 
-    if shutil.which("ffmpeg") is None:
-        raise RuntimeError("未找到 ffmpeg，谱面预览渲染不可用（请安装 ffmpeg）")
+    ffmpeg_bin = resolve_ffmpeg(ffmpeg)
     renderer = _ChartRenderer(chart)
     if workers <= 0:  # 0=自动：线程池受益有限，实测 2–4 线程最佳（上限 4）
         workers = max(1, min(4, os.cpu_count() or 1))
@@ -4354,7 +4460,7 @@ def _render_chart_video_impl(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-y",
         "-v",
         "error",
@@ -4420,7 +4526,9 @@ def _render_chart_video_impl(
             base_chain = f"[1:a]{delay_filter}[mixed]"
         # 两遍 loudnorm（linear 模式）：先测「音乐+音效」整体响度，再按测量值
         # 一次性加增益，避免动态压缩破坏听感；响度不到位时退回不处理。
-        measured = _probe_loudness(audio_file, fx_file, base_chain, loudness_lufs)
+        measured = _probe_loudness(
+        audio_file, fx_file, base_chain, loudness_lufs, ffmpeg_bin
+    )
         if measured is not None:
             base_chain += (
                 f";[mixed]loudnorm=I={loudness_lufs}:TP=-1.5:LRA=11:"
