@@ -34,12 +34,12 @@ def test_completion_tables(notes):
     from nonebot_plugin_awmc_helper.core.render.chart_notes import (
         note_completion_times,
         break_completion_times,
-        break_ex_completion_times,
+        break_noex_completion_times,
     )
 
     assert len(note_completion_times(notes.notes)) == 772
     assert len(break_completion_times(notes.notes)) == 11
-    assert len(break_ex_completion_times(notes.notes)) == 0  # 11355 无 EX break
+    assert len(break_noex_completion_times(notes.notes)) == 11  # 非 EX break
 
 
 def test_lead_in_shift(notes):
@@ -58,31 +58,3 @@ def test_hud_beat_roundtrip(notes):
             beat, abs=1e-6
         )
 
-
-def test_break_ex_completion_times_ex_only():
-    """「无保护」= EX break：只统计 is_ex 的 break（含 break hold/slide 头）。"""
-    from nonebot_plugin_awmc_helper.core.render.chart_notes import (
-        ChartNote,
-        break_ex_completion_times,
-    )
-
-    notes = [
-        ChartNote(type="break", position=1, timing=1.0, timing_ms=1000.0),
-        ChartNote(type="break", position=2, timing=2.0, timing_ms=2000.0, is_ex=True),
-        ChartNote(
-            type="hold-start",
-            position=3,
-            timing=3.0,
-            timing_ms=3000.0,
-            is_break_hold=True,
-            is_ex=True,
-        ),
-        ChartNote(
-            type="hold-start",
-            position=4,
-            timing=4.0,
-            timing_ms=4000.0,
-            is_break_hold=True,
-        ),
-    ]
-    assert break_ex_completion_times(notes) == [2000.0, 3000.0]

@@ -7,7 +7,9 @@
 
 import json
 import asyncio
+import hashlib
 from pathlib import Path
+from functools import lru_cache
 from dataclasses import dataclass
 
 from nonebot import logger
@@ -39,7 +41,61 @@ _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
 _INDEX_NAMES = ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 _CACHE_SUBDIR = "chart_preview"
-_CACHE_REVISION = 7
+
+
+# 渲染引擎源码文件：内容变化即视为输出可能变化（缓存指纹的一部分）。
+_RENDER_ENGINE_FILES = (
+    "chart_video.py",
+    "chart_notes.py",
+    "chart_audio.py",
+    "chart_range.py",
+    "fonts.py",
+)
+# 输出相关配置项（与帧内容/编码有关；workers 不影响输出故不含）。
+_OUTPUT_CONFIG_KEYS = (
+    "awmc_chart_preview_fps",
+    "awmc_chart_preview_supersample",
+    "awmc_chart_preview_hit_sounds",
+    "awmc_chart_preview_sound_offset_ms",
+    "awmc_chart_preview_loudness_lufs",
+    "awmc_chart_preview_preroll_measures",
+    "awmc_chart_preview_limit_seconds",
+    "awmc_chart_preview_ffmpeg",
+)
+_FONT_FILES = (
+    "ResourceHanRoundedCN-Bold.ttf",
+    "Torus SemiBold.otf",
+    "FOT-NewRodin Pro EB.otf",
+    "ShangguMonoSC-Regular.otf",
+)
+
+
+def _hash_file(digest, path: Path) -> None:
+    digest.update(path.name.encode())
+    try:
+        digest.update(path.read_bytes())
+    except OSError:
+        digest.update(b"<missing>")
+
+
+@lru_cache(maxsize=16)
+def _render_fingerprint(hi_speed: float) -> str:
+    """渲染指纹：源码/字体/输出相关配置/流速任一变化 → 缓存键变化并重渲。
+
+    不再用硬编码 ``_CACHE_REVISION``（容易忘记 bump）：改渲染逻辑、字体或
+    fps/超采样/音效/响度/前置等配置后，指纹自动变化，旧缓存自然失效。
+    """
+    digest = hashlib.sha256()
+    render_dir = Path(__file__).resolve().parents[2] / "core" / "render"
+    for name in _RENDER_ENGINE_FILES:
+        _hash_file(digest, render_dir / name)
+    _hash_file(digest, Path(__file__).resolve())
+    font_dir = Path(plugin_config.awmc_static_path) / "font"
+    for name in _FONT_FILES:
+        _hash_file(digest, font_dir / name)
+    params = [hi_speed] + [getattr(plugin_config, key) for key in _OUTPUT_CONFIG_KEYS]
+    digest.update(repr(params).encode())
+    return digest.hexdigest()[:12]
 
 
 @dataclass(frozen=True)
@@ -155,7 +211,8 @@ def cached_path(
     is_utage = prefer is None
     type_key = "ut" if is_utage else ("dx" if prefer is SongType.DX else "sd")
     suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
-    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}{suffix}.mp4"
+    fp = _render_fingerprint(hi_speed)
+    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{fp}{suffix}.mp4"
     return out if out.exists() else None
 
 
@@ -186,7 +243,8 @@ async def build_preview(
 
     type_key = "ut" if is_utage else ("dx" if dx else "sd")
     suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
-    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}{suffix}.mp4"
+    fp = _render_fingerprint(hi_speed)
+    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{fp}{suffix}.mp4"
     if out.exists():
         cached = _read_stats(out)
         if cached is not None:

@@ -64,7 +64,7 @@ from .chart_notes import (
     SlideSegment,
     note_completion_times,
     break_completion_times,
-    break_ex_completion_times,
+    break_noex_completion_times,
 )
 from ._lxns_slide_data import SLIDE_POINTS, SLIDE_KEYFRAMES
 
@@ -1340,7 +1340,7 @@ class _Renderer:
         # 完成时刻表（noteCompletionTimes/breakCompletionTimes L8251）
         self.completions = note_completion_times(site.notes)
         self.break_completions = break_completion_times(site.notes)
-        self.ex_break_completions = break_ex_completion_times(site.notes)
+        self.noex_break_completions = break_noex_completion_times(site.notes)
         self.sprites = _Sprites()
         self._fonts: dict[int, ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
@@ -4063,22 +4063,14 @@ class _ChartRenderer:
             C_BREAK_DOT,
             "lb",
         )
-        # 右下两行：EX break（无保护 break，仅 CP/Miss 判定）计数；
-        # 谱面无 EX break 时不显示这一行（避免 0/0 的空统计）
-        ex_total = len(self.renderer.ex_break_completions)
-        if ex_total:
-            ex_done = self.renderer.count_done(self.renderer.ex_break_completions, now)
-            right_x = _LOGICAL * s - n20
-            bottom = _LOGICAL * s - n20
-            text(
-                right_x,
-                bottom,
-                f"BREAK: {ex_done} / {ex_total}",
-                n22,
-                C_ORANGE,
-                "rb",
-            )
-            text(right_x, bottom - n22 - n4, "无保护", n18, C_ORANGE, "rb")
+        # 右下「无保护 BREAK」：非 EX break（EX 是保护音符）计数，与站内 JS
+        # （L8649-8651）一致：无条件绘制该行，不做 0/0 隐藏。
+        nx_total = len(self.renderer.noex_break_completions)
+        nx_done = self.renderer.count_done(self.renderer.noex_break_completions, now)
+        right_x = _LOGICAL * s - n20
+        bottom = _LOGICAL * s - n20
+        text(right_x, bottom, f"BREAK: {nx_done} / {nx_total}", n22, C_ORANGE, "rb")
+        text(right_x, bottom - n22 - n4, "无保护", n18, C_ORANGE, "rb")
 
     def _hud_text(
         self,

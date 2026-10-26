@@ -806,3 +806,16 @@ async def test_command_alias_duplicate_views_not_listed(
             bot=bot,
         )
         ctx.should_finished()
+
+
+def test_render_fingerprint_stable_and_sensitive():
+    """缓存键用渲染指纹（源码/字体/配置/流速）：稳定且随流速变化。"""
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import (
+        _render_fingerprint,
+    )
+
+    fp7 = _render_fingerprint(7.0)
+    assert len(fp7) == 12
+    assert all(ch in "0123456789abcdef" for ch in fp7)
+    assert _render_fingerprint(7.0) == fp7
+    assert _render_fingerprint(7.5) != fp7
