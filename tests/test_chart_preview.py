@@ -53,7 +53,16 @@ def fake_render(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake(chart, *, audio, out_path, fps=30, limit_seconds=None, workers=0):
+    def fake(
+        chart,
+        *,
+        audio,
+        out_path,
+        fps=30,
+        limit_seconds=None,
+        workers=0,
+        supersample=2.0,
+    ):
         calls.append(
             {"chart": chart, "has_audio": audio is not None, "workers": workers}
         )

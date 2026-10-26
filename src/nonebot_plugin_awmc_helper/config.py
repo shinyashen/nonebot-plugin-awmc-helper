@@ -99,8 +99,13 @@ class Config(BaseModel):
     awmc_chart_preview_limit_seconds: int = 0
     # 谱面预览渲染缓存总量上限（MB，超限按最旧清理）
     awmc_chart_preview_cache_mb: int = 800
-    # 谱面预览分帧渲染进程数（0=自动：min(CPU-1, 4)；1=单进程）
+    # 谱面预览分帧渲染进程数（0=自动：CPU-1、上限 8；1=单进程）
     awmc_chart_preview_workers: int = 0
+    # 谱面预览超采样倍率（画质档）：2.0=最清、1.5=肉眼几乎无感但整曲快约
+    # 1.7 倍（默认）、1.0=最快（边缘锯齿可见）。有效范围 1.0-2.0
+    awmc_chart_preview_supersample: float = 1.5
+    # 谱面预览输出帧率（30=站内一致；24/20 更省渲染时间，静态画质不变）
+    awmc_chart_preview_fps: int = 30
 
 
 plugin_config: Config = get_plugin_config(Config)

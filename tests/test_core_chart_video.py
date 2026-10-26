@@ -93,6 +93,23 @@ def test_render_parallel_workers(cv, site, tmp_path: Path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
+def test_render_quality_knob(cv, site, tmp_path: Path):
+    """低画质档（1× 超采样 + 24fps + 单进程）可正常产出视频。"""
+    chart = site((SNAPSHOTS / "8.txt").read_text(), difficulty=3)[3]
+    out = cv.render_chart_video(
+        chart,
+        audio=None,
+        out_path=tmp_path / "low.mp4",
+        limit_seconds=1.5,
+        supersample=1.0,
+        fps=24,
+        workers=1,
+    )
+    assert out.exists()
+    assert out.stat().st_size > 5_000
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
 def test_render_with_audio(cv, site, tmp_path: Path):
     import subprocess
 

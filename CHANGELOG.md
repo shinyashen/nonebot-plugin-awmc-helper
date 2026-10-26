@@ -34,6 +34,9 @@
   语义）——目标曲不再被子串命中群（⑨周年版/[蛸] Remix 版等）淹没在按 id 排的
   中间页。
 
+- 配置 `AWMC_CHART_PREVIEW_SUPERSAMPLE` / `AWMC_CHART_PREVIEW_FPS`：画质档
+  （默认 1.5× 超采样，整曲约 44s；2.0 最清 75s；1.0 约 26s 边缘锯齿可见）与
+  输出帧率（默认 30）。
 - 配置 `AWMC_CHART_PREVIEW_WORKERS`：谱面预览分帧渲染进程数（0=自动
   CPU-1、上限 8；1=串行）。Linux 用 fork 继承谱面对象，不可用时自动退回
   串行；实测整曲渲染约 4–5 倍加速。

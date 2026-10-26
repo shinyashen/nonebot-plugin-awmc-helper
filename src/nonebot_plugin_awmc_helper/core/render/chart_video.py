@@ -47,6 +47,8 @@ showHitEffect 开；播放时钟在 chart beat 0 起、音频从 beat 4（1 小�
 """
 
 import math
+import zlib
+import threading
 from pathlib import Path
 from dataclasses import field, dataclass
 
@@ -3933,24 +3935,33 @@ _WORKER_FPS: int = 30
 _WORKER_SIZE: int = int(_LOGICAL)
 
 
-def _worker_init(chart: SiteChart, fps: int) -> None:
+def _worker_init(chart: SiteChart, fps: int, supersample: float) -> None:
     """子进程初始化：各自持有一个渲染器（fork 继承谱面对象，无需重解析）。"""
-    global _WORKER_RENDERER, _WORKER_FPS
+    global _WORKER_RENDERER, _WORKER_FPS, _SS
+    _SS = supersample
     _WORKER_RENDERER = _ChartRenderer(chart)
     _WORKER_FPS = fps
 
 
 def _worker_render_chunk(args: tuple[int, int]) -> list[bytes]:
-    """渲染 [start, start+count) 帧并缩到输出尺寸（按块回传，保序由 imap 保证）。"""
+    """渲染 [start, start+count) 帧并缩到输出尺寸。
+
+    回传 **zlib 压缩帧**（1080KB→约 80KB）：原始 RGB 逐帧过管道/反序列化会在
+    父进程形成约 10ms/帧 的固定瓶颈，压缩后只剩约 1ms 解压（压缩本身在子进程
+    并行完成）。保序由 pool.map 保证。
+    """
     start, count = args
     assert _WORKER_RENDERER is not None
     frames: list[bytes] = []
     for index in range(start, start + count):
         frame = _WORKER_RENDERER.render_frame(index / _WORKER_FPS * 1000.0, _WORKER_FPS)
         frames.append(
-            frame.convert("RGB")
-            .resize((_WORKER_SIZE, _WORKER_SIZE), Image.BILINEAR)
-            .tobytes()
+            zlib.compress(
+                frame.convert("RGB")
+                .resize((_WORKER_SIZE, _WORKER_SIZE), Image.BILINEAR)
+                .tobytes(),
+                1,
+            )
         )
     return frames
 
@@ -3984,11 +3995,11 @@ def _write_frames_parallel(
             max_workers=workers,
             mp_context=context,
             initializer=_worker_init,
-            initargs=(chart, fps),
+            initargs=(chart, fps, _SS),
         ) as pool:
             for frames in pool.map(_worker_render_chunk, tasks):
                 for frame in frames:
-                    proc.stdin.write(frame)
+                    proc.stdin.write(zlib.decompress(frame))
                     wrote += 1
         return True
     except (OSError, RuntimeError) as exc:
@@ -3999,7 +4010,39 @@ def _write_frames_parallel(
         return False
 
 
+_SS_LOCK = threading.Lock()
+
+
 def render_chart_video(
+    chart: SiteChart,
+    *,
+    audio: bytes | None,
+    out_path: Path,
+    fps: int = 30,
+    limit_seconds: float | None = None,
+    workers: int = 0,
+    supersample: float = 2.0,
+) -> Path:
+    """渲染入口：按质量档设置超采样倍率（1.0–2.0），串行化并发渲染。"""
+    global _SS
+    clamped = max(1.0, min(2.0, float(supersample)))
+    with _SS_LOCK:
+        previous = _SS
+        _SS = clamped
+        try:
+            return _render_chart_video_impl(
+                chart,
+                audio=audio,
+                out_path=out_path,
+                fps=fps,
+                limit_seconds=limit_seconds,
+                workers=workers,
+            )
+        finally:
+            _SS = previous
+
+
+def _render_chart_video_impl(
     chart: SiteChart,
     *,
     audio: bytes | None,
