@@ -39,7 +39,7 @@ _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
 _INDEX_NAMES = ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 _CACHE_SUBDIR = "chart_preview"
-_CACHE_REVISION = 4
+_CACHE_REVISION = 6
 
 
 @dataclass(frozen=True)
@@ -175,6 +175,7 @@ async def build_preview(
     dx = prefer is SongType.DX
 
     utage_diff = utage_diff_of(song, display_id) if is_utage else None
+    diff = None
     if is_utage:
         level_label = utage_diff.kanji if utage_diff else "宴"
     else:
@@ -206,7 +207,7 @@ async def build_preview(
     if site_chart is None:
         raise ValueError("素材站的谱面数据缺少该难度")
 
-    stats = compute_chart_stats(site_chart)
+    stats = compute_chart_stats(site_chart, utage_diff or diff)
     clip = None
     clip_start = 0.0
     clip_end = None

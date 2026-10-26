@@ -1,8 +1,16 @@
-"""谱面统计（合并转发歌曲信息节点用）：谱面真实时长、各类型音符与 EX 计数。"""
+"""谱面统计（合并转发歌曲信息节点用）：谱面真实时长、各类型音符与 EX 计数。
+
+EX 口径（萌娘百科「Maimai系列」EX-NOTE 条）：EX 音符 = 只有 CRITICAL
+PERFECT / MISS 判定的音符，包含 EX-TAP（**含 SLIDE 的星星头部**）、EX-HOLD、
+EX-BREAK；**SLIDE 本体 / TOUCH（含烟花）没有 EX**。因此 SLIDE 的 ``is_ex``
+归到 TAP 的 EX 计数（星星头按 TAP 判定），SLIDE 自身 EX 恒为 0。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from maimai_py import SongDifficulty
 
 from .chart_notes import SiteChart
 
@@ -26,7 +34,7 @@ class ChartStats:
 
     chart_ms: float
     measures: int
-    counts: dict[str, int]
+    counts: dict[str, int]  # 与谱面信息一致（官方 tap/hold/slide/touch/break）
     ex_counts: dict[str, int]
 
     @property
@@ -38,17 +46,47 @@ class ChartStats:
         return sum(self.ex_counts.values())
 
 
-def compute_chart_stats(chart: SiteChart) -> ChartStats:
-    """从 SiteChart 统计各类音符/EX 数量与谱面真实时长（不含音源时长）。"""
-    counts = dict.fromkeys(_GROUPS, 0)
+def compute_chart_stats(
+    chart: SiteChart, difficulty: SongDifficulty | None = None
+) -> ChartStats:
+    """统计各类型音符/EX 数量与谱面真实时长（不含音源时长）。
+
+    ``difficulty`` 传入时优先用官方谱面信息（水鱼/落雪 ``tap_num`` 等）作为
+    各类型数量：官方口径把 SLIDE 星星头计入 TAP（例：11355 MASTER
+    tap 551 = 我方纯 tap 456 + 95 个非无头 slide），用户要求与谱面信息
+    对齐；EX 数量官方无此字段，仍按解析结果统计（SLIDE 的 EX 归 TAP）。
+    """
     ex_counts = dict.fromkeys(_GROUPS, 0)
     for note in chart.notes:
         group = _TYPE_GROUP.get(note.type)
-        if group is None:
+        if group is None or not note.is_ex:
             continue
-        counts[group] += 1
-        if note.is_ex:
+        if group == "SLIDE":
+            # 星星头是 TAP 判定：EX 记到 EX-TAP，SLIDE 本体不计 EX
+            ex_counts["TAP"] += 1
+        elif group == "TOUCH":
+            continue  # TOUCH（含烟花）没有 EX 判定
+        else:
             ex_counts[group] += 1
+
+    counts = dict.fromkeys(_GROUPS, 0)
+    official = None
+    if difficulty is not None:
+        official = {
+            "TAP": difficulty.tap_num,
+            "HOLD": difficulty.hold_num,
+            "SLIDE": difficulty.slide_num,
+            "TOUCH": difficulty.touch_num,
+            "BREAK": difficulty.break_num,
+        }
+    if official is not None and sum(official.values()) > 0:
+        counts.update(official)
+    else:
+        # 官方物量缺失（如部分宴谱 buddy）：回退解析口径
+        for note in chart.notes:
+            group = _TYPE_GROUP.get(note.type)
+            if group is not None:
+                counts[group] += 1
     chart_ms = chart.timeline.ms_from_beat(float(chart.total_beats))
     return ChartStats(
         chart_ms=chart_ms,

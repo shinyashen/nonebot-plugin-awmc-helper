@@ -487,7 +487,7 @@ async def test_command_requires_difficulty_color(app: App, db, cache_dir, songs)
 
 
 def test_forward_texts_order_and_stats():
-    """合并转发信息文案：歌曲信息含谱面时长/EX 分布，视频信息含流速与提示。"""
+    """合并转发文案：歌曲信息含谱面时长/EX 分布；第 3 条为纯调参提示。"""
     from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
 
     base = _preview_result(
@@ -509,18 +509,17 @@ def test_forward_texts_order_and_stats():
     assert "ラグトレイン" in song_text
     assert "1:40.0" in song_text  # chart_ms=100000
     assert "TAP 100（EX 10）" in song_text
-    video_text = matchers._video_info_text(result, 7.5)
-    assert "7.5" in video_text
-    assert "3–9.75" in video_text
-    assert "0:36-1:20" in video_text
-    assert "前置 2 小节" in video_text
+    tips = matchers._tips_text()
+    assert "3–9.75" in tips
+    assert "0:35-1:20" in tips
+    assert "谱面预览 紫+曲名 7.5 0:35-1:20" in tips
 
 
 @pytest.mark.asyncio
 async def test_command_forward_message(
     app: App, db, cache_dir, songs, monkeypatch, tmp_path
 ):
-    """OneBot v11 下发合并转发：视频/歌曲信息/视频信息 3 节点同一 API。"""
+    """OneBot v11 下发合并转发：视频/歌曲信息/提示 3 节点同一 API。"""
     from unittest.mock import ANY
 
     from fake import fake_group_message_event_v11
@@ -591,9 +590,7 @@ async def test_command_forward_fallback(
     monkeypatch.setattr(matchers, "build_preview", fake_build)
     await song_service.inject(songs)
     expected_text = (
-        matchers._song_info_text(entry, result)
-        + "\n\n"
-        + matchers._video_info_text(result, 7.0)
+        matchers._song_info_text(entry, result) + "\n\n" + matchers._tips_text()
     )
     async with app.test_matcher(chart_preview) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
@@ -635,7 +632,7 @@ async def test_command_forward_fallback(
 
 @pytest.mark.asyncio
 async def test_deliver_node_order(monkeypatch, tmp_path):
-    """合并转发节点顺序：视频 → 歌曲信息 → 视频信息（_deliver 单测）。"""
+    """合并转发节点顺序：视频 → 歌曲信息 → 提示（_deliver 单测）。"""
     from types import SimpleNamespace
 
     from nonebot.exception import FinishedException
@@ -671,6 +668,6 @@ async def test_deliver_node_order(monkeypatch, tmp_path):
     assert isinstance(entries[0], UniMessage)
     assert "video" in [seg.type for seg in entries[0]]
     assert "【歌曲信息】" in entries[1]
-    assert "【视频信息】" in entries[2]
+    assert "【调整提示】" in entries[2]
     assert captured["group_id"] == 87654321
     assert captured["user_id"] is None

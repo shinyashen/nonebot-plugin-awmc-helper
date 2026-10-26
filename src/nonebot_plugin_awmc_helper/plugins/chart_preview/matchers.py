@@ -89,33 +89,13 @@ def _song_info_text(entry, result: PreviewResult) -> str:
     )
 
 
-def _format_speed(hi_speed: float) -> str:
-    """流速展示：整数补一位小数（7 → 7.0），0.25 步长原样。"""
-    text = f"{hi_speed:.2f}".rstrip("0")
-    return text + "0" if text.endswith(".") else text
-
-
-def _video_info_text(result: PreviewResult, hi_speed: float) -> str:
-    """合并转发第 3 条：视频必要信息与调参提示。"""
-    fps = plugin_config.awmc_chart_preview_fps
-    super_ = plugin_config.awmc_chart_preview_supersample
-    if result.range_text:
-        clip_text = (
-            f"{result.range_text}（前置 {result.preroll_measures} 小节，"
-            "前置段打击音效静音、音乐渐入）"
-        )
-    else:
-        clip_text = "整曲"
+def _tips_text() -> str:
+    """合并转发第 3 条：纯调参提示（不展示视频参数）。"""
     return (
-        "【视频信息】\n"
-        f"600×600 · {fps}fps · 谱面流速 {_format_speed(hi_speed)}"
-        "（可调 3–9.75，步长 0.25，"
-        f"默认 {DEFAULT_HI_SPEED:.1f}）· 超采样 {super_:g}×\n"
-        f"片段：{clip_text}\n"
-        "音频：站内打击音效 · 响度归一（-16 LUFS）\n"
-        "提示：在指令后加流速/时间范围即可调整，例如\n"
-        "  谱面预览 紫+曲名 7.5\n"
-        "  谱面预览 紫+曲名 0:35-1:20（- 前后可省一侧）"
+        "【调整提示】\n"
+        "· 谱面流速：3–9.75（步长 0.25，默认 7.0），在指令后加数值，如 7.5\n"
+        "· 时间范围：如 0:35-1:20、-1:20（从头）、0:35-（到结尾）\n"
+        "示例：谱面预览 紫+曲名 7.5 0:35-1:20"
     )
 
 
@@ -129,19 +109,19 @@ async def _deliver(
     """发送视频 + 歌曲信息 + 视频信息：优先合并转发，失败/不支持降级普通消息。"""
     video = UniMessage.video(path=str(result.path))
     song_text = _song_info_text(entry, result)
-    video_text = _video_info_text(result, hi_speed)
+    tips_text = _tips_text()
     if is_ob11(bot):
         group_id = getattr(event, "group_id", None)
         user_id = None if group_id is not None else getattr(event, "user_id", None)
         if await try_send_forward(
             bot,
-            [video, song_text, video_text],
+            [video, song_text, tips_text],
             group_id=group_id,
             user_id=user_id,
         ):
             raise FinishedException
     await video.send()
-    await UniMessage.text(f"{song_text}\n\n{video_text}").send()
+    await UniMessage.text(f"{song_text}\n\n{tips_text}").send()
     raise FinishedException
 
 
@@ -210,7 +190,7 @@ help_registry.declare(
                 "归一（-16 LUFS）。国服先行曲等无谱面数据的曲目不支持。"
                 "渲染结果有缓存，重复请求秒回。\n"
                 "结果为合并转发（视频 + 歌曲信息（谱面真实时长/各类型音符与 EX "
-                "分布）+ 视频信息（帧率/流速/片段等调参提示））；协议端不支持"
+                "分布）+ 调参提示（改流速/指定时间范围））；协议端不支持"
                 "时自动降级为普通消息。"
             ),
         ),
