@@ -89,6 +89,12 @@ def _song_info_text(entry, result: PreviewResult) -> str:
     )
 
 
+def _format_speed(hi_speed: float) -> str:
+    """流速展示：整数补一位小数（7 → 7.0），0.25 步长原样。"""
+    text = f"{hi_speed:.2f}".rstrip("0")
+    return text + "0" if text.endswith(".") else text
+
+
 def _video_info_text(result: PreviewResult, hi_speed: float) -> str:
     """合并转发第 3 条：视频必要信息与调参提示。"""
     fps = plugin_config.awmc_chart_preview_fps
@@ -102,8 +108,9 @@ def _video_info_text(result: PreviewResult, hi_speed: float) -> str:
         clip_text = "整曲"
     return (
         "【视频信息】\n"
-        f"600×600 · {fps}fps · 谱面流速 {hi_speed:g}（可调 3–9.75，步长 0.25，"
-        f"默认 {DEFAULT_HI_SPEED:g}）· 超采样 {super_:g}×\n"
+        f"600×600 · {fps}fps · 谱面流速 {_format_speed(hi_speed)}"
+        "（可调 3–9.75，步长 0.25，"
+        f"默认 {DEFAULT_HI_SPEED:.1f}）· 超采样 {super_:g}×\n"
         f"片段：{clip_text}\n"
         "音频：站内打击音效 · 响度归一（-16 LUFS）\n"
         "提示：在指令后加流速/时间范围即可调整，例如\n"
