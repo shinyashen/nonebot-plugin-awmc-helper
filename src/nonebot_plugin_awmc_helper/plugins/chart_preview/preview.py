@@ -131,7 +131,7 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         supersample=plugin_config.awmc_chart_preview_supersample,
         fps=plugin_config.awmc_chart_preview_fps,
         sound_effects=hit_sounds,
-        metronome=plugin_config.awmc_chart_preview_metronome,
+        sound_offset_ms=plugin_config.awmc_chart_preview_sound_offset_ms,
         loudness_lufs=plugin_config.awmc_chart_preview_loudness_lufs,
     )
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)

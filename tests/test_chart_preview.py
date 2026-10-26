@@ -63,7 +63,7 @@ def fake_render(monkeypatch, tmp_path):
         workers=0,
         supersample=2.0,
         sound_effects=None,
-        metronome=True,
+        sound_offset_ms=-50.0,
         loudness_lufs=-16.0,
     ):
         calls.append(

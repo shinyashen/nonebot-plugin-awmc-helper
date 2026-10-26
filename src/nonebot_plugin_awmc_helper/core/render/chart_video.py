@@ -4148,7 +4148,7 @@ def render_chart_video(
     workers: int = 0,
     supersample: float = 2.0,
     sound_effects: dict[str, bytes] | None = None,
-    metronome: bool = True,
+    sound_offset_ms: float = -50.0,
     loudness_lufs: float = -16.0,
 ) -> Path:
     """渲染入口：按质量档设置超采样倍率（1.0–2.0），串行化并发渲染。"""
@@ -4166,7 +4166,7 @@ def render_chart_video(
                 limit_seconds=limit_seconds,
                 workers=workers,
                 sound_effects=sound_effects,
-                metronome=metronome,
+                sound_offset_ms=sound_offset_ms,
                 loudness_lufs=loudness_lufs,
             )
         finally:
@@ -4192,6 +4192,10 @@ def _parse_loudnorm_json(text: str) -> dict[str, float] | None:
     try:
         values = {key: float(data[key]) for key in keys}
     except (KeyError, TypeError, ValueError):
+        return None
+    # 静音/异常素材会测出 -inf（loudnorm JSON 里写作 "-inf"），filter 参数
+    # 不接受 ±inf，直接视为测量失败、回退到不归一。
+    if not all(math.isfinite(item) for item in values.values()):
         return None
     return values
 
@@ -4245,7 +4249,7 @@ def _render_chart_video_impl(
     limit_seconds: float | None = None,
     workers: int = 0,
     sound_effects: dict[str, bytes] | None = None,
-    metronome: bool = True,
+    sound_offset_ms: float = -50.0,
     loudness_lufs: float = -16.0,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
@@ -4296,8 +4300,8 @@ def _render_chart_video_impl(
             f"adelay={int(audio_delay)}:all=1" if audio_delay > 0 else "anull"
         )
         effects = (
-            build_effect_track(chart, sound_effects, metronome=metronome)
-            if (sound_effects or metronome)
+            build_effect_track(chart, sound_effects, offset_ms=sound_offset_ms)
+            if sound_effects
             else None
         )
         if effects is not None:

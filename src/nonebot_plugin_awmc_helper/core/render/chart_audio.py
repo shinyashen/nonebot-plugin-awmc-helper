@@ -1,12 +1,12 @@
-"""谱面预览音频合成：打击音效 + 开篇空小节节拍器。
+"""谱面预览音频合成：站内打击音效。
 
-对齐站内播放器的打击音效实现（``chunk-BS312iYd.js`` 的 AnswerSound 管理器，
-L7430-8000）：按 note 类型把 11 个 wav 采样混成一条音轨（answer 层 / judge
-层），再与整曲音乐在 mux 阶段混合。站内音量默认 music=0.8、sound(answer)=0.6、
-judge=1.0，因此相对音乐的系数是 answer 0.75、judge 1.25（与站内口径一致）。
+对齐站内播放器的 AnswerSound 管理器（``chunk-BS312iYd.js`` L7430-8000）：
+按 note 类型把 11 个 wav 采样混成一条音轨（answer 层 / judge 层），再与整曲
+音乐在 mux 阶段混合。站内音量默认 music=0.8、sound(answer)=0.6、judge=1.0，
+因此相对音乐的系数是 answer 0.75、judge 1.25。
 
-节拍器：舞萌谱面开头的空小节是节拍器报拍（站内播放器只放歌不带）。这里在
-第一个判定点之前按 BPM 每拍合成短促 click，空小节的小节首重音。
+时间口径：站内 schedule() 的播放时刻 = 音符时刻 + timingOffsetMs（默认
+-50ms，即**提前 50ms** 触发，用于抵消输出/采样延迟），由 ``offset_ms`` 控制。
 """
 
 from __future__ import annotations
@@ -184,6 +184,18 @@ def _collect_events(chart: SiteChart) -> list[dict[str, Any]]:
     return events.sorted()
 
 
+def _should_play_answer(event: dict[str, Any]) -> bool:
+    """站内 shouldPlaySound：底层 answer 音在基础音/触控/长按结束等都会响。"""
+    return bool(
+        event["base"]
+        or event["touch"]
+        or event["firework"]
+        or event["hold_end"]
+        or event["touch_hold_end"]
+        or event["touch_hold_end_firework"]
+    )
+
+
 def _fill_gaps(events: list[dict[str, Any]]) -> None:
     """同类型音效到下一次的间隔（站内截断用，L7500-7530）。"""
     gaps = {
@@ -222,8 +234,9 @@ def _add_segment(
     gain: float,
     *,
     max_ms: float | None = None,
+    release_ms: float = _RELEASE_MS,
 ) -> None:
-    """把采样叠加到音轨（max_ms 非 None 时截断并做 8ms 释放淡出）。"""
+    """把采样叠加到音轨（max_ms 非 None 时截断，末尾做 release_ms 淡出）。"""
     rate = MIX_RATE
     start = round(start_ms / 1000.0 * rate)
     if start < 0 or start >= mix.size:
@@ -239,7 +252,7 @@ def _add_segment(
         return
     seg = crop[:length].astype(np.float32, copy=True)
     if max_ms is not None and length < crop.size:
-        release = min(length, int(_RELEASE_MS / 1000.0 * rate))
+        release = min(length, int(release_ms / 1000.0 * rate))
         if release > 0:
             seg[-release:] *= np.linspace(1.0, 0.0, release, dtype=np.float32)
     mix[start : start + length] += seg * gain
@@ -258,7 +271,7 @@ def _add_touch_hold(
     length = round(duration_ms / 1000.0 * rate)
     if start < 0 or length <= 0:
         return
-    loop_start = 50.0  # 站内 touchHoldLoopStartSec ≈ (50+8)/1000
+    loop_start = 58.0  # 站内 touchHoldLoopStartSec = (50+8)/1000s
     loop = sample[int(loop_start / 1000.0 * rate) :]
     if loop.size == 0:
         return
@@ -272,43 +285,17 @@ def _add_touch_hold(
     mix[start:end] += seg[: end - start] * gain
 
 
-def _click(accent: bool) -> np.ndarray:
-    """节拍器 click：短促正弦 + 指数衰减（小节首重音更高更响）。"""
-    rate = MIX_RATE
-    freq = 1568.0 if accent else 1046.5
-    length = int(0.045 * rate)
-    t = np.arange(length, dtype=np.float32) / rate
-    env = np.exp(-t / 0.010).astype(np.float32)
-    tone = np.sin(2 * math.pi * freq * t).astype(np.float32)
-    return tone * env * (0.30 if accent else 0.19)
-
-
-def _add_metronome(mix: np.ndarray, first_ms: float, beat_ms: float) -> None:
-    """第一个判定点之前的空小节按拍合成节拍器（小节首重音）。"""
-    click = _click(False)
-    accent = _click(True)
-    measure_ms = beat_ms * 4.0
-    t = 0.0
-    while t < first_ms - 1e-6:
-        pos = round(t / 1000.0 * MIX_RATE)
-        if pos < 0 or pos >= mix.size:
-            pos = 0
-        sample = accent if abs(t % measure_ms) < 1e-6 else click
-        end = min(mix.size, pos + sample.size)
-        mix[pos:end] += sample[: end - pos]
-        t += beat_ms
-
-
 def build_effect_track(
     chart: SiteChart,
     sounds: dict[str, bytes] | None,
     *,
-    metronome: bool = True,
+    offset_ms: float = -50.0,
 ) -> tuple[bytes, float] | None:
-    """合成打击音效 + 节拍器音轨。
+    """合成打击音效音轨。
 
     返回 ``(wav 字节, 幅度还原系数)``；没有可合成内容时返回 None。系数用于
     混音阶段补偿「为避免 16bit 截断做的整体缩放」（ffmpeg ``volume=``）。
+    ``offset_ms`` 对应站内 timingOffsetMs（负数=提前触发）。
     """
     buffers: dict[str, np.ndarray] = {}
     if sounds:
@@ -320,27 +307,36 @@ def build_effect_track(
                 except (ValueError, wave.Error):
                     continue
 
-    lead_ms = 240000.0 / chart.bpm
-    # 节拍器一直拍到第一个判定点：开头可能不止一个空小节（11355 是 2 个）。
-    note_times = [n.timing_ms for n in chart.notes]
-    first_ms = min(note_times) if note_times else lead_ms
-    beat_ms = 60000.0 / chart.bpm
     events = _collect_events(chart) if buffers else []
     if events:
         _fill_gaps(events)
     last = max((e["time_ms"] for e in events), default=0.0)
-    total_ms = max(last + _TAIL_S * 1000.0, first_ms + 1000.0)
-    if metronome:
-        total_ms = max(total_ms, first_ms + 1000.0)
+    total_ms = last + _TAIL_S * 1000.0
     mix = np.zeros(int(total_ms / 1000.0 * MIX_RATE) + 1, dtype=np.float32)
 
     answer = buffers.get("answer")
     tap = buffers.get("tap")
     touch = buffers.get("touch")
-    for event in events:
-        t = event["time_ms"]
-        if event["base"] and answer is not None:
-            _add_segment(mix, answer, t, _ANSWER_GAIN)
+    for index, event in enumerate(events):
+        # 站内：音符时刻 + timingOffsetMs（默认 -50ms 提前），不得早于 0。
+        t = max(0.0, event["time_ms"] + offset_ms)
+        if answer is not None and _should_play_answer(event):
+            # 站内 answerBuffer 在「下一事件 < 40ms」时只播 max(3·gap, 30)ms
+            # （playBufferAt 再叠加 $=50ms），稀疏处播完整 0.4s。
+            next_gap = 1e9
+            if index + 1 < len(events):
+                next_gap = events[index + 1]["time_ms"] - event["time_ms"]
+            if next_gap < 40.0:
+                _add_segment(
+                    mix,
+                    answer,
+                    t,
+                    _ANSWER_GAIN,
+                    max_ms=50.0 + max(3.0 * next_gap, 30.0),
+                    release_ms=0.0,  # 站内 answerBuffer 的 releaseMs=0（硬切）
+                )
+            else:
+                _add_segment(mix, answer, t, _ANSWER_GAIN)
         if (event["tap_judge"] or event["hold_end"]) and tap is not None:
             _add_segment(mix, tap, t, _JUDGE_GAIN)
         if event["ex_judge"] and "ex" in buffers:
@@ -405,9 +401,6 @@ def build_effect_track(
                 _JUDGE_GAIN,
                 max_ms=event["break_slide_cheer_gap"] + 50.0,
             )
-
-    if metronome:
-        _add_metronome(mix, first_ms, beat_ms)
 
     peak = float(np.abs(mix).max()) if mix.size else 0.0
     if peak <= 1e-6:
