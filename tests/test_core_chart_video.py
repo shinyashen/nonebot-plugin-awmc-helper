@@ -78,6 +78,21 @@ def test_render_smoke(cv, site, tmp_path: Path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
+def test_render_parallel_workers(cv, site, tmp_path: Path):
+    """多进程分帧渲染路径（fork 不可用时内部自动退回串行，仍应产出视频）。"""
+    chart = site((SNAPSHOTS / "8.txt").read_text(), difficulty=5)[5]
+    out = cv.render_chart_video(
+        chart,
+        audio=None,
+        out_path=tmp_path / "parallel.mp4",
+        limit_seconds=2.0,
+        workers=2,
+    )
+    assert out.exists()
+    assert out.stat().st_size > 10_000
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
 def test_render_with_audio(cv, site, tmp_path: Path):
     import subprocess
 

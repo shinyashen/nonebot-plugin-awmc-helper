@@ -123,6 +123,7 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         audio=audio,
         out_path=out,
         limit_seconds=limit,
+        workers=plugin_config.awmc_chart_preview_workers,
     )
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)
     return out, level_label

@@ -99,6 +99,8 @@ class Config(BaseModel):
     awmc_chart_preview_limit_seconds: int = 0
     # 谱面预览渲染缓存总量上限（MB，超限按最旧清理）
     awmc_chart_preview_cache_mb: int = 800
+    # 谱面预览分帧渲染进程数（0=自动：min(CPU-1, 4)；1=单进程）
+    awmc_chart_preview_workers: int = 0
 
 
 plugin_config: Config = get_plugin_config(Config)

@@ -53,8 +53,10 @@ def fake_render(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake(chart, *, audio, out_path, fps=30, limit_seconds=None):
-        calls.append({"chart": chart, "has_audio": audio is not None})
+    def fake(chart, *, audio, out_path, fps=30, limit_seconds=None, workers=0):
+        calls.append(
+            {"chart": chart, "has_audio": audio is not None, "workers": workers}
+        )
         out = Path(out_path)
         out.write_bytes(b"\x00" * 64)
         return out

@@ -2141,8 +2141,14 @@ class _SlideRenderer:
         is_break: bool,
         is_each: bool,
         split: bool = False,
+        rotation: float = 0.0,
     ) -> None:
-        """renderExStarRing（L6249）：1.19× 十角环覆盖（pinkSlideStart 关）。"""
+        """renderExStarRing（L6249）：1.19× 十角环覆盖（pinkSlideStart 关）。
+
+        ``rotation`` 与星体同角度：站内 JS 的环不参与 ctx.rotate，slideRotation
+        开启时星体自旋而环不动，视觉上会看到「两颗错位的星」；这里让环跟随
+        星体旋转，保持环-星同心（与站内视频的稳定观感一致）。
+        """
         overlay = C_EX_BREAK if is_break else C_EX_SIMUL if is_each else C_EX_SLIDE
         scale = _EX_ALPHA
         outer, outer_mid = size * scale, size * 0.5 * scale
@@ -2152,10 +2158,10 @@ class _SlideRenderer:
             return [
                 (
                     x
-                    + math.cos(k * math.pi / 5 - math.pi / 2 + rot)
+                    + math.cos(k * math.pi / 5 - math.pi / 2 + rot + rotation)
                     * (radius_outer if k % 2 == 0 else radius_inner),
                     y
-                    + math.sin(k * math.pi / 5 - math.pi / 2 + rot)
+                    + math.sin(k * math.pi / 5 - math.pi / 2 + rot + rotation)
                     * (radius_outer if k % 2 == 0 else radius_inner),
                 )
                 for k in range(10)
@@ -2346,7 +2352,9 @@ class _SlideRenderer:
         )
         rotation = -now * _QT if note.is_spinning_star else 0.0
         if note.is_ex:
-            self.draw_ex_star_ring(c, pos.x, pos.y, size, note.is_break, note.is_each)
+            self.draw_ex_star_ring(
+                c, pos.x, pos.y, size, note.is_break, note.is_each, False, rotation
+            )
         self.draw_star(c, pos.x, pos.y, size, color, rotation, note.is_ex)
 
     # ---- slide 起点星形头（renderSingleSlideStart L8411）
@@ -2385,7 +2393,8 @@ class _SlideRenderer:
                 size,
                 note.is_break,
                 is_simul,
-                note.parts and len(note.parts) > 1,
+                bool(note.parts and len(note.parts) > 1),
+                rotation,
             )
         if len(note.parts) > 1:
             self._draw_split_slide_star(
@@ -3755,8 +3764,6 @@ class _ChartRenderer:
             n16,
             C_HUD_GRAY,
         )
-        fps_col = C_FPS_GREEN if fps >= 55 else C_FPS_YELLOW if fps >= 30 else C_FPS_RED
-        text(n20, n20 + n22 + n4 + n16 + n4 * 2, f"FPS: {fps}", n16, fps_col)
         total = len(self.renderer.completions)
         combo = self.renderer.count_done(self.renderer.completions, now)
         text(_LOGICAL * s - n20, n20, f"连击: {combo} / {total}", n22, C_WHITE, "ra")
@@ -3920,6 +3927,77 @@ def _map_notes(chart: SiteChart) -> list[_Note]:
     return notes
 
 
+_WORKER_RENDERER: "_ChartRenderer | None" = None
+_WORKER_FPS: int = 30
+_WORKER_SIZE: int = int(_LOGICAL)
+
+
+def _worker_init(chart: SiteChart, fps: int) -> None:
+    """子进程初始化：各自持有一个渲染器（fork 继承谱面对象，无需重解析）。"""
+    global _WORKER_RENDERER, _WORKER_FPS
+    _WORKER_RENDERER = _ChartRenderer(chart)
+    _WORKER_FPS = fps
+
+
+def _worker_render_chunk(args: tuple[int, int]) -> list[bytes]:
+    """渲染 [start, start+count) 帧并缩到输出尺寸（按块回传，保序由 imap 保证）。"""
+    start, count = args
+    assert _WORKER_RENDERER is not None
+    frames: list[bytes] = []
+    for index in range(start, start + count):
+        frame = _WORKER_RENDERER.render_frame(index / _WORKER_FPS * 1000.0, _WORKER_FPS)
+        frames.append(
+            frame.convert("RGB")
+            .resize((_WORKER_SIZE, _WORKER_SIZE), Image.BILINEAR)
+            .tobytes()
+        )
+    return frames
+
+
+def _write_frames_parallel(
+    proc, chart: SiteChart, n_frames: int, fps: int, workers: int
+) -> bool:
+    """多进程分帧渲染并保序写入 ffmpeg 管道。
+
+    fork 不可用时（Windows/受限环境）返回 False，由调用方退回串行渲染。
+    渲染与 x264 编码同时进行，故 workers 取 min(CPU-1, 上限) 留一个核给 ffmpeg。
+    """
+    import multiprocessing
+
+    try:
+        context = multiprocessing.get_context("fork")
+    except ValueError:
+        return False
+    workers = max(1, min(workers, (multiprocessing.cpu_count() or 1) - 1))
+    if workers <= 1:
+        return False
+    chunk = max(1, min(30, n_frames // (workers * 4) or 1))
+    tasks = [
+        (start, min(chunk, n_frames - start)) for start in range(0, n_frames, chunk)
+    ]
+    from concurrent.futures import ProcessPoolExecutor
+
+    wrote = 0
+    try:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=context,
+            initializer=_worker_init,
+            initargs=(chart, fps),
+        ) as pool:
+            for frames in pool.map(_worker_render_chunk, tasks):
+                for frame in frames:
+                    proc.stdin.write(frame)
+                    wrote += 1
+        return True
+    except (OSError, RuntimeError) as exc:
+        # 池创建/子进程启动失败且尚未写入任何帧 → 允许调用方退回串行；
+        # 已写入部分帧时不能重来（会重复帧），直接上抛由 finally 收尾报错。
+        if wrote:
+            raise RuntimeError(f"并行渲染中断（已写入 {wrote} 帧）") from exc
+        return False
+
+
 def render_chart_video(
     chart: SiteChart,
     *,
@@ -3927,6 +4005,7 @@ def render_chart_video(
     out_path: Path,
     fps: int = 30,
     limit_seconds: float | None = None,
+    workers: int = 0,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
 
@@ -3934,12 +4013,15 @@ def render_chart_video(
     音频从 beat 4 起播（chartpage.js syncFrame 的 240000/bpm 偏移）。
     ``limit_seconds`` 截断渲染时长；音频 None 时出无声视频。
     """
+    import os
     import shutil
     import subprocess
 
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("未找到 ffmpeg，谱面预览渲染不可用（请安装 ffmpeg）")
     renderer = _ChartRenderer(chart)
+    if workers <= 0:  # 0=自动：CPU-1（给 ffmpeg 留一核），上限 8
+        workers = max(1, min(8, (os.cpu_count() or 1) - 1))
     total = max(1.0, chart.timeline.ms_from_beat(chart.total_beats) / 1000.0)
     if limit_seconds is not None:
         total = min(total, limit_seconds)
@@ -3989,13 +4071,16 @@ def render_chart_video(
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     assert proc.stdin is not None
     try:
-        for i in range(n_frames):
-            frame = renderer.render_frame(i / fps * 1000.0, fps)
-            proc.stdin.write(
-                frame.convert("RGB")
-                .resize((int(_LOGICAL), int(_LOGICAL)), Image.BILINEAR)
-                .tobytes()
-            )
+        if workers > 1 and _write_frames_parallel(proc, chart, n_frames, fps, workers):
+            pass
+        else:
+            for i in range(n_frames):
+                frame = renderer.render_frame(i / fps * 1000.0, fps)
+                proc.stdin.write(
+                    frame.convert("RGB")
+                    .resize((int(_LOGICAL), int(_LOGICAL)), Image.BILINEAR)
+                    .tobytes()
+                )
     finally:
         try:
             proc.stdin.close()
