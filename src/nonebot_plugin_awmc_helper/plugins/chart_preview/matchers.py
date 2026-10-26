@@ -79,9 +79,10 @@ async def _(args=CommandArg()):
         entry = entries[0]
 
     if cached_path(entry, index) is None:
-        await UniMessage.text(" 谱面预览渲染中，整曲约需 1 分钟，请稍等…").send(
-            at_sender=True
-        )
+        await UniMessage.text(
+            " 谱面预览渲染中：整曲约需 3–8 分钟（视 CPU），完成后自动发送；"
+            "同一谱面再次请求命中缓存秒回"
+        ).send(at_sender=True)
     out, _label = await build_preview(entry, index)
     await UniMessage.video(path=str(out)).finish(at_sender=True)
 
@@ -97,7 +98,7 @@ help_registry.declare(
         CommandSpec(
             matcher=chart_preview,
             name="谱面预览",
-            brief="渲染谱面预览视频（simai+整曲音频，首次约 1 分钟）",
+            brief="渲染谱面预览视频（simai+整曲音频，首次约数分钟，之后命中缓存）",
             detail=(
                 "格式：谱面预览 <曲名/别名/id> [难度]\n"
                 "难度默认 Master；支持 大师/宗师/专家/高级/基础、紫/白/红/黄/绿、"

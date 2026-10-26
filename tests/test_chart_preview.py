@@ -153,7 +153,10 @@ async def test_command_single_hit_sends_video(
             Message(
                 [
                     MessageSegment.at(event.user_id),
-                    MessageSegment.text(" 谱面预览渲染中，整曲约需 1 分钟，请稍等…"),
+                    MessageSegment.text(
+                        " 谱面预览渲染中：整曲约需 3–8 分钟（视 CPU），完成后自动发送；"
+                        "同一谱面再次请求命中缓存秒回"
+                    ),
                 ]
             ),
             result=None,

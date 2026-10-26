@@ -697,8 +697,17 @@ def _clip_layer(
     """
     from PIL import ImageChops
 
+    out = Image.new("RGBA", layer.size, (0, 0, 0, 0))
     if box is None:
-        mask = _circle_mask(layer.width)
+        # 只处理非空区域：整帧 darker() 是每帧特效的主要开销之一
+        bbox = layer.getbbox()
+        if bbox is None:
+            return out
+        sub = layer.crop(bbox)
+        mask = _circle_mask(layer.width).crop(bbox)
+        sub.putalpha(ImageChops.darker(sub.getchannel("A"), mask))
+        out.paste(sub, bbox)
+        return out
     else:
         frame = frame_size if frame_size else box[2] - box[0]
         mask = _circle_mask(frame).crop((box[0], box[1], box[2], box[3]))
@@ -3384,6 +3393,7 @@ class _ChartRenderer:
         yy, xx = np.mgrid[0:size, 0:size]
         circle = np.hypot(xx - size / 2, yy - size / 2) <= size / 2 - 1
         self._clip_mask = Image.fromarray((circle * 255).astype(np.uint8), "L")
+        self._hit_sprite_cache: dict[tuple, Image.Image] = {}
 
     # ---- 帧渲染
     def render_frame(self, now_ms: float, fps: int) -> Image.Image:
@@ -3640,29 +3650,37 @@ class _ChartRenderer:
         m2 = f * 0.8
         h = d_size * u * 0.7
         sprite = self.renderer.sprites.hit(shape)
-        cos_r, sin_r = math.cos(rot), math.sin(rot)
-
-        lay = Image.new("RGBA", fc.img.size, (0, 0, 0, 0))
+        # JS 先 translate/rotate 画布再画 5 个 sprite：等价于在局部层画好后整体旋转
+        # 一次（比逐 sprite rotate 快数倍，也避免重复重采样）
+        half = d_size * 1.1 + _RADIUS * (4 / 300 * 0.7) * 2.4 * 3 + 4
+        size = math.ceil(half * 2 * _SS)
+        lay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        center = size / 2
 
         def blit(lx: float, ly: float, sz: float) -> None:
-            ratio = sz / d_size
-            img = (
-                sprite
-                if abs(ratio - 1) < 1e-6
-                else sprite.resize(
-                    (max(2, int(sprite.width * ratio)),) * 2, Image.BILINEAR
+            quantized = round(sz * 2) / 2
+            key = (shape, quantized)
+            img = self._hit_sprite_cache.get(key)
+            if img is None:
+                ratio = quantized / d_size
+                img = (
+                    sprite
+                    if abs(ratio - 1) < 1e-6
+                    else sprite.resize(
+                        (max(2, int(sprite.width * ratio)),) * 2, Image.BILINEAR
+                    )
                 )
-            )
-            if abs(rot) > 1e-9:
-                img = img.rotate(-math.degrees(rot), resample=Image.BILINEAR)
+                if len(self._hit_sprite_cache) > 64:
+                    self._hit_sprite_cache.clear()
+                self._hit_sprite_cache[key] = img
             if c_alpha < 1:
                 img = img.copy()
                 img.putalpha(img.getchannel("A").point(lambda v: int(v * c_alpha)))
             lay.alpha_composite(
                 img,
                 (
-                    int(fc.s(x + lx * cos_r - ly * sin_r) - img.width / 2),
-                    int(fc.s(y + lx * sin_r + ly * cos_r) - img.height / 2),
+                    int(center + lx * _SS - img.width / 2),
+                    int(center + ly * _SS - img.height / 2),
                 ),
             )
 
@@ -3677,7 +3695,14 @@ class _ChartRenderer:
         blit(math.cos(w_ang) * h, math.sin(w_ang) * h, p)
         blit(math.cos(t_ang) * h, math.sin(t_ang) * h, m2)
         blit(math.cos(e_ang) * h, math.sin(e_ang) * h, m2)
-        fc.img.alpha_composite(_clip_layer(lay))
+        if abs(rot) > 1e-9:
+            lay = lay.rotate(
+                -math.degrees(rot), resample=Image.BILINEAR, center=(center, center)
+            )
+        x0 = int(fc.s(x) - center)
+        y0 = int(fc.s(y) - center)
+        box = (x0, y0, x0 + size, y0 + size)
+        fc.img.alpha_composite(_clip_layer(lay, box, fc.img.width), (x0, y0))
 
     def _judgment_line(self, c: _Canvas) -> None:
         """renderJudgmentLine（L8086）simple 设计：白圈 + 8 按钮点。"""
@@ -3688,7 +3713,7 @@ class _ChartRenderer:
 
     def _hud(self, c: _Canvas, now: float, fps: int) -> None:
         """renderBpmDisplay（L8583）+ renderNoteCounts（L8637）。"""
-        d = c.d
+
         s = _SS
         r300 = c.radius / 300
         n22, n16 = round(22 * r300) * s, round(16 * r300) * s
@@ -3698,14 +3723,14 @@ class _ChartRenderer:
         shadow_col = (0, 0, 0, 191)
 
         def text(x, y, txt, px, color, anchor="la"):
-            d.text(
+            c.d.text(
                 (x + shadow_off, y + shadow_off),
                 txt,
                 font=self._font(px),
                 fill=shadow_col,
                 anchor=anchor,
             )
-            d.text((x, y), txt, font=self._font(px), fill=color, anchor=anchor)
+            c.d.text((x, y), txt, font=self._font(px), fill=color, anchor=anchor)
 
         beat = self.chart.timeline.beat_from_ms(now)
         bpm = self.chart.timeline.bpm_at_beat(beat)
@@ -3968,7 +3993,7 @@ def render_chart_video(
             frame = renderer.render_frame(i / fps * 1000.0, fps)
             proc.stdin.write(
                 frame.convert("RGB")
-                .resize((int(_LOGICAL), int(_LOGICAL)), Image.LANCZOS)
+                .resize((int(_LOGICAL), int(_LOGICAL)), Image.BILINEAR)
                 .tobytes()
             )
     finally:
