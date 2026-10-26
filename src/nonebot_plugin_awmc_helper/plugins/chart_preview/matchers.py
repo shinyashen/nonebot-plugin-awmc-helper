@@ -74,6 +74,25 @@ def _parse_args(
     return level, is_utage, query, speed, range_token
 
 
+def _dedupe_entries(entries: list) -> list:
+    """按「根 id + 谱面类型」去重（CN/日服视图同曲会各出一条，展示 id 相同）。
+
+    根 id = ``song.id % 10000``：CN 视图曲 id 带 10000 段，日服视图不带；同一
+    曲在别名链里可能同时命中两个视图对象，不去重就会在「请用 id 指定」列表里
+    出现重复行。SD/DX 双谱曲 prefer 不同 → 两条都保留，由用户按 id 选择。
+    """
+    seen: set[tuple[int, object]] = set()
+    result: list = []
+    for entry in entries:
+        song, prefer = entry[1], entry[2]
+        key = (song.id % 10000, prefer)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(entry)
+    return result
+
+
 def _song_info_text(entry, result: PreviewResult) -> str:
     """合并转发第 2 条：歌曲信息（谱面真实时长 + 各类型音符/EX 分布）。"""
     _display_id, song, prefer = entry
@@ -144,7 +163,7 @@ async def _(bot: Bot, event: Event, args=CommandArg()):
             song, prefer, _jp, _utage = hit
             entry = (int(name), song, prefer)
     if entry is None:
-        entries = await song_service.entries_for_name(name)
+        entries = _dedupe_entries(await song_service.entries_for_name(name))
         if not entries:
             await UniMessage.text(_NOT_FOUND).finish(at_sender=True)
         if len(entries) > 1:
@@ -156,11 +175,9 @@ async def _(bot: Bot, event: Event, args=CommandArg()):
 
     if cached_path(entry, index, range_token, speed) is None:
         hint = (
-            " 片段渲染中：约需 20–60 秒（视 CPU），完成后自动发送；"
-            "同一片段再次请求命中缓存秒回"
+            " 片段渲染中：约需 20–60 秒，完成后自动发送。"
             if range_token
-            else " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
-            "同一谱面再次请求命中缓存秒回"
+            else " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
         )
         await UniMessage.text(hint).send(at_sender=True)
     result = await build_preview(entry, index, range_token, speed)
@@ -178,7 +195,7 @@ help_registry.declare(
         CommandSpec(
             matcher=chart_preview,
             name="谱面预览",
-            brief="渲染谱面预览视频（simai+整曲音频+打击音效，可指定片段，命中缓存秒回）",
+            brief="渲染下落式谱面预览视频（含音频与打击音效，可指定片段）",
             detail=(
                 "格式：谱面预览 <难度色>+<歌名/别名/id> [谱面流速] [时间范围]\n"
                 "难度色：绿/黄/红/紫/白（宴谱用 宴+<id>）。\n"
@@ -186,9 +203,7 @@ help_registry.declare(
                 "时间范围：0:35-1:20 / -1:20 / 0:35-（- 前后可省略一侧），"
                 "自动按小节对齐；片段会带 2 小节前置（音乐渐入、打击音效从内容"
                 "起点开始）。\n"
-                "数据/音频热链落雪素材站；带站内打击音效（含提前 50ms 音效偏移），响度"
-                "归一（-16 LUFS）。国服先行曲等无谱面数据的曲目不支持。"
-                "渲染结果有缓存，重复请求秒回。\n"
+                "国服先行曲等暂无谱面数据的曲目无法预览。\n"
                 "结果为合并转发（视频 + 歌曲信息（谱面真实时长/各类型音符与 EX "
                 "分布）+ 调参提示（改流速/指定时间范围））；协议端不支持"
                 "时自动降级为普通消息。"

@@ -149,7 +149,11 @@ async def test_command_multi_hits_lists_ids(app: App, db, cache_dir, songs):
         event = fake_group_message_event_v11(message="谱面预览 紫+琪露诺")
         ctx.receive_event(bot, event)
         # 期望列表由同一数据源动态构造（199 宿主的多条目展开）
-        entries = await song_service.entries_for_name("琪露诺")
+        from nonebot_plugin_awmc_helper.plugins.chart_preview.matchers import (
+            _dedupe_entries,
+        )
+
+        entries = _dedupe_entries(await song_service.entries_for_name("琪露诺"))
         lines = "找到多首匹配曲目，请用 id 指定：\n" + "\n".join(
             f"「{display_song_id(s)}」{s.title}" for _i, s, _p in entries[:10]
         )
@@ -204,8 +208,7 @@ async def test_command_single_hit_sends_video(
                 [
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(
-                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
-                        "同一谱面再次请求命中缓存秒回"
+                        " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
                     ),
                 ]
             ),
@@ -296,8 +299,7 @@ async def test_command_range_hint_and_build(
                 [
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(
-                        " 片段渲染中：约需 20–60 秒（视 CPU），完成后自动发送；"
-                        "同一片段再次请求命中缓存秒回"
+                        " 片段渲染中：约需 20–60 秒，完成后自动发送。"
                     ),
                 ]
             ),
@@ -430,11 +432,9 @@ async def test_command_speed_and_range_args(
     monkeypatch.setattr(matchers, "_deliver", fake_deliver)
     await song_service.inject(songs)
     hint = (
-        " 片段渲染中：约需 20–60 秒（视 CPU），完成后自动发送；"
-        "同一片段再次请求命中缓存秒回"
+        " 片段渲染中：约需 20–60 秒，完成后自动发送。"
         if expect_range
-        else " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
-        "同一谱面再次请求命中缓存秒回"
+        else " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
     )
     async with app.test_matcher(chart_preview) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
@@ -547,8 +547,7 @@ async def test_command_forward_message(
                 [
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(
-                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
-                        "同一谱面再次请求命中缓存秒回"
+                        " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
                     ),
                 ]
             ),
@@ -603,8 +602,7 @@ async def test_command_forward_fallback(
                 [
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(
-                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
-                        "同一谱面再次请求命中缓存秒回"
+                        " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
                     ),
                 ]
             ),
@@ -705,8 +703,7 @@ async def test_command_ffmpeg_unavailable_message(
                 [
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(
-                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
-                        "同一谱面再次请求命中缓存秒回"
+                        " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
                     ),
                 ]
             ),
@@ -721,6 +718,89 @@ async def test_command_ffmpeg_unavailable_message(
                     MessageSegment.text(
                         " 谱面预览需要服务器安装 ffmpeg，但当前未找到"
                         "（PATH 中没有 ffmpeg）。"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+def test_dedupe_entries_by_root_id():
+    """根 id 去重：CN/日服视图同曲同类型只留一条，SD/DX 双谱保留两条。"""
+    from nonebot_plugin_awmc_helper.core.types import SongType
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.matchers import (
+        _dedupe_entries,
+    )
+
+    class Song:
+        def __init__(self, song_id: int):
+            self.id = song_id
+            self.title = f"song-{song_id}"
+
+    cn = Song(11355)  # 根 id 1355
+    jp = Song(1355)  # 同根 id，日服视图
+    sd = Song(8)
+    dx = Song(10008)  # 同根 id 8 的 DX 谱
+    entries = [
+        (11355, cn, SongType.DX),
+        (11355, jp, SongType.DX),
+        (8, sd, SongType.STANDARD),
+        (10008, dx, SongType.DX),
+    ]
+    deduped = _dedupe_entries(entries)
+    assert len(deduped) == 3
+    assert deduped[0][1] is cn  # 保留先出现的 CN 视图
+    assert {entry[2] for entry in deduped[1:]} == {SongType.STANDARD, SongType.DX}
+
+
+@pytest.mark.asyncio
+async def test_command_alias_duplicate_views_not_listed(
+    app: App, db, cache_dir, songs, monkeypatch, tmp_path
+):
+    """别名链同时命中 CN/日服视图（结果重复）→ 不再弹「用 id 指定」列表。"""
+    from fake import fake_group_message_event_v11
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    await song_service.inject(songs)
+    song_8 = next(s for s in songs if s.id == 8)
+    duplicated = [
+        (8, song_8, None),
+        (8, song_8, None),
+    ]
+
+    async def fake_entries(name, **kwargs):
+        return duplicated
+
+    fake_out = tmp_path / "dedupe.mp4"
+    fake_out.write_bytes(b"\x00" * 64)
+
+    async def fake_build(entry, index, range_token=None, hi_speed=7.0):
+        return _preview_result(fake_out)
+
+    async def fake_deliver(bot, event, entry, result, hi_speed):
+        from nonebot.exception import FinishedException
+
+        raise FinishedException
+
+    monkeypatch.setattr(song_service, "entries_for_name", fake_entries)
+    monkeypatch.setattr(matchers, "build_preview", fake_build)
+    monkeypatch.setattr(matchers, "_deliver", fake_deliver)
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message="谱面预览 紫+8")
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
                     ),
                 ]
             ),

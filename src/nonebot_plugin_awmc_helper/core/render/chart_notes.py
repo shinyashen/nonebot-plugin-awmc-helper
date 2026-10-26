@@ -764,12 +764,16 @@ def break_completion_times(notes: list[ChartNote]) -> list[float]:
     return times
 
 
-def break_noex_completion_times(notes: list[ChartNote]) -> list[float]:
-    """「无保护」计数（breakNoExCompletionTimes）：非 EX 的 break 事件。"""
+def break_ex_completion_times(notes: list[ChartNote]) -> list[float]:
+    """「无保护」计数：EX break 的完成时刻（EX break 只有 CP/Miss，无保护）。
+
+    此前按站内源码口径统计「非 EX break」，与实际语义相反：EX break 才是
+    无保护 break（11820 等谱面存在 EX break 时右下角应显示其数量）。
+    """
     times: list[float] = []
     for note in notes:
         kind = note.type
-        if note.is_ex:
+        if not note.is_ex:
             continue
         if (
             kind == "break"

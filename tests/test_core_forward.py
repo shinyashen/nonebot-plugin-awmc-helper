@@ -19,9 +19,11 @@ async def test_forward_send_timeout_returns_false(monkeypatch):
 
     started = asyncio.Event()
 
-    async def black_hole(*args, **kwargs):
-        started.set()
-        await asyncio.sleep(5)
+    async def black_hole(api, **kwargs):
+        if api == "send_group_forward_msg":
+            started.set()
+            await asyncio.sleep(5)
+        return {"messages": []}  # 历史核对：确认没有落地
 
     monkeypatch.setattr(bot, "call_api", black_hole)
     monkeypatch.setattr(forward_mod, "FORWARD_SEND_TIMEOUT", 0.05)
@@ -83,3 +85,54 @@ async def test_forward_video_node_uri(monkeypatch, tmp_path):
     assert [node["data"]["content"][0]["type"] for node in nodes] == ["video", "text"]
     video_seg = nodes[0]["data"]["content"][0]
     assert video_seg["data"]["file"] == video.as_uri()
+
+
+@pytest.mark.asyncio
+async def test_forward_timeout_but_landed_not_duplicated(monkeypatch):
+    """超时但历史里已有转发卡片（LLBot ack 慢）→ 返回 True，不降级重复发送。"""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core import forward as forward_mod
+
+    adapter = nonebot.get_adapter(OnebotV11Adapter)
+    bot = Bot(adapter=adapter, self_id="1234567890")
+    calls: list[str] = []
+
+    async def slow_ack(api, **kwargs):
+        calls.append(api)
+        if api == "send_group_forward_msg":
+            await asyncio.sleep(5)
+        return {
+            "messages": [
+                {"time": __import__("time").time(), "message": [{"type": "forward"}]}
+            ]
+        }
+
+    monkeypatch.setattr(bot, "call_api", slow_ack)
+    monkeypatch.setattr(forward_mod, "FORWARD_SEND_TIMEOUT", 0.05)
+    assert await forward_mod.try_send_forward(bot, ["hi"], group_id=123) is True
+    assert calls == ["send_group_forward_msg", "get_group_msg_history"]
+
+
+@pytest.mark.asyncio
+async def test_forward_timeout_unverifiable_assumed_sent(monkeypatch):
+    """超时且历史接口不可用（None）→ 按已发送处理，避免重复。"""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core import forward as forward_mod
+
+    adapter = nonebot.get_adapter(OnebotV11Adapter)
+    bot = Bot(adapter=adapter, self_id="1234567890")
+
+    async def slow_ack(api, **kwargs):
+        if api == "send_group_forward_msg":
+            await asyncio.sleep(5)
+        raise RuntimeError("history api 不支持")
+
+    monkeypatch.setattr(bot, "call_api", slow_ack)
+    monkeypatch.setattr(forward_mod, "FORWARD_SEND_TIMEOUT", 0.05)
+    assert await forward_mod.try_send_forward(bot, ["hi"], group_id=123) is True
