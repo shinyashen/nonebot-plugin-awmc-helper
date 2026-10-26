@@ -53,10 +53,8 @@ def fake_render(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake(chart, *, title, level_label, suffix, audio, out_path,
-             limit_seconds=None, sensor_image=None):
-        calls.append({"title": title, "level_label": level_label,
-                      "has_audio": audio is not None})
+    def fake(chart, *, audio, out_path, fps=30, limit_seconds=None):
+        calls.append({"chart": chart, "has_audio": audio is not None})
         out = Path(out_path)
         out.write_bytes(b"\x00" * 64)
         return out
@@ -197,7 +195,7 @@ async def test_build_preview_orchestration(app: App, db, cache_dir, songs, fake_
     assert out.parent == cache_dir
     assert label == "10"  # TH SD EXPERT（样例库真实值）
     assert fake_render
-    assert fake_render[0]["level_label"] == "10"  # TH SD EXPERT（真实值）
+    assert fake_render[0]["chart"].difficulty == 4  # 站内难度后缀 _4 = EXPERT
     # 二次调用命中缓存（渲染打桩不再被调）
     calls_before = len(fake_render)
     out2, _ = await build_preview(entry, 2)

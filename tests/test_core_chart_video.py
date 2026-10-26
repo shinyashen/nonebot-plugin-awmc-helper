@@ -20,10 +20,10 @@ def cv():
 
 
 @pytest.fixture
-def simai():
-    from nonebot_plugin_awmc_helper.core.simai import parse_simai
+def site():
+    from nonebot_plugin_awmc_helper.core.render.chart_notes import parse_site_chart
 
-    return parse_simai
+    return parse_site_chart
 
 
 def test_button_angles(cv):
@@ -65,13 +65,10 @@ def test_shape_map_circle(cv):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
-def test_render_smoke(cv, simai, tmp_path: Path):
-    chart = simai((SNAPSHOTS / "8.txt").read_text()).difficulties[5]
+def test_render_smoke(cv, site, tmp_path: Path):
+    chart = site((SNAPSHOTS / "8.txt").read_text(), difficulty=5)[5]
     out = cv.render_chart_video(
         chart,
-        title="True Love Song",
-        level_label="12",
-        suffix=5,
         audio=None,
         out_path=tmp_path / "preview.mp4",
         limit_seconds=2.5,
@@ -81,7 +78,7 @@ def test_render_smoke(cv, simai, tmp_path: Path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
-def test_render_with_audio(cv, simai, tmp_path: Path):
+def test_render_with_audio(cv, site, tmp_path: Path):
     import subprocess
 
     audio = tmp_path / "silence.mp3"
@@ -103,12 +100,9 @@ def test_render_with_audio(cv, simai, tmp_path: Path):
         ],
         check=True,
     )
-    chart = simai((SNAPSHOTS / "8.txt").read_text()).difficulties[2]
+    chart = site((SNAPSHOTS / "8.txt").read_text(), difficulty=2)[2]
     out = cv.render_chart_video(
         chart,
-        title="True Love Song",
-        level_label="5",
-        suffix=2,
         audio=audio.read_bytes(),
         out_path=tmp_path / "mux.mp4",
         limit_seconds=2.5,

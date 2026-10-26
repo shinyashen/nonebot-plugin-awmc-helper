@@ -62,27 +62,6 @@ async def test_fetch_music_root_id(lxns_assets):
 
 
 @pytest.mark.asyncio
-async def test_fetch_sensor_image(lxns_assets):
-    with respx.mock(assert_all_called=False) as m:
-        m.get(f"{BASE}/../maimai.lxns.net/assets/maimai/chart/sensor.webp")
-    # 独立域名（maimai.lxns.net），直接按完整 URL mock
-    with respx.mock(assert_all_called=False) as m:
-        m.get(lxns_assets.SENSOR_IMAGE_URL).respond(content=b"RIFF-webp")
-        data = await lxns_assets.fetch_sensor_image()
-    assert data == b"RIFF-webp"
-
-
-@pytest.mark.asyncio
-async def test_fetch_sensor_image_missing(lxns_assets):
-    from nonebot_plugin_awmc_helper.core.ext import ExtError
-
-    with respx.mock(assert_all_called=False) as m:
-        m.get(lxns_assets.SENSOR_IMAGE_URL).respond(status_code=404)
-        with pytest.raises(ExtError):
-            await lxns_assets.fetch_sensor_image()
-
-
-@pytest.mark.asyncio
 async def test_fetch_music_utage_reuses_base(lxns_assets):
     """宴谱音频按 %10000 取根复用原曲（111355 → music/1355.mp3）。"""
     with respx.mock(assert_all_called=False) as m:

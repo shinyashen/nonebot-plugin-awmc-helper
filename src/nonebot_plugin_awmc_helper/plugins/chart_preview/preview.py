@@ -19,8 +19,8 @@ from ...core.ext.lxns_assets import (
     ChartNotAvailableError,
     fetch_music,
     fetch_chart_text,
-    fetch_sensor_image,
 )
+from ...core.render.chart_notes import parse_site_chart
 from ...core.render.chart_video import render_chart_video
 
 _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
@@ -29,6 +29,8 @@ _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
 _INDEX_NAMES = ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 _CACHE_SUBDIR = "chart_preview"
+_CACHE_REVISION = 2
+"""渲染器版本：算法变更时递增，避免命中旧渲染器产物。"""
 
 
 def cache_dir() -> Path:
@@ -66,21 +68,8 @@ def cached_path(entry: ChartEntry, index: int) -> Path | None:
     _display_id, song, prefer = entry
     is_utage = prefer is None
     type_key = "ut" if is_utage else ("dx" if prefer is SongType.DX else "sd")
-    out = cache_dir() / f"{song.id}_{type_key}_{index}.mp4"
+    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}.mp4"
     return out if out.exists() else None
-
-
-async def _sensor_image() -> bytes | None:
-    """判定区底图（磁盘缓存，首次热链拉取；失败退回纯圈渲染）。"""
-    cache = cache_dir() / "sensor.webp"
-    if cache.exists():
-        return cache.read_bytes()
-    try:
-        data = await fetch_sensor_image()
-    except Exception:
-        return None
-    cache.write_bytes(data)
-    return data
 
 
 async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
@@ -103,20 +92,23 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         level_label = diff.level
 
     type_key = "ut" if is_utage else ("dx" if dx else "sd")
-    out = cache_dir() / f"{song.id}_{type_key}_{index}.mp4"
+    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}.mp4"
     if out.exists():
         return out, level_label
 
     simai_text, _official_id = await fetch_chart_text(song.id, dx=dx)
-    parsed = parse_simai(simai_text)
     if is_utage:
+        # 宴谱后缀与难度无固定对应：先用物量对拍（simai.py 的水鱼口径物量）
+        # 定位后缀，再用站内渲染口径的解析器重建 note
+        parsed = parse_simai(simai_text)
         suffix = _pick_utage_suffix(parsed.difficulties, utage_diff)
         if suffix is None:
             raise ValueError("该宴谱没有可渲染的谱面数据")
     else:
         suffix = _SUFFIX_BY_INDEX[index]
-    simai_diff = parsed.difficulties.get(suffix)
-    if simai_diff is None:
+    site_charts = parse_site_chart(simai_text, difficulty=suffix)
+    site_chart = site_charts.get(suffix)
+    if site_chart is None:
         raise ValueError("素材站的谱面数据缺少该难度")
 
     try:
@@ -125,17 +117,12 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         audio = None  # 个别无音频场景：出无声视频
 
     limit = plugin_config.awmc_chart_preview_limit_seconds or None
-    sensor = await _sensor_image()
     await asyncio.to_thread(
         render_chart_video,
-        simai_diff,
-        title=song.title,
-        level_label=level_label,
-        suffix=suffix,
+        site_chart,
         audio=audio,
         out_path=out,
         limit_seconds=limit,
-        sensor_image=sensor,
     )
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)
     return out, level_label

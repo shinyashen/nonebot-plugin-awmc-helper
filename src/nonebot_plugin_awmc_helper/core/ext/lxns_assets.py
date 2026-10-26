@@ -58,23 +58,6 @@ async def _fetch_chart_file(official_id: int) -> str | None:
     return resp.text
 
 
-SENSOR_IMAGE_URL = "https://maimai.lxns.net/assets/maimai/chart/sensor.webp"
-
-
-async def fetch_sensor_image() -> bytes:
-    """拉取判定区底图 sensor.webp（渲染器 sensor 判定线设计用，公开静态资源）。"""
-    resp = await ext_request(
-        "GET",
-        SENSOR_IMAGE_URL,
-        name="落雪判定区素材",
-        retries=1,
-        timeout=30,
-    )
-    if resp.status_code != 200:
-        raise ExtError(f"落雪判定区素材拉取失败（HTTP {resp.status_code}）")
-    return resp.content
-
-
 async def fetch_music(root_id: int) -> bytes:
     """拉取整曲 mp3（64kbps 整曲；404 抛 :class:`ChartNotAvailableError`）。"""
     resp = await ext_request(

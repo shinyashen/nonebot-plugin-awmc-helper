@@ -3,23 +3,30 @@
 绘制逻辑对照 maimai.lxns.net 渲染器 bundle（beautify 存档
 ``local/reference/lxns-renderer/chart-canvas.pretty.js``，各方法标注 L* 行号；
 逐函数对照档案见 ``local/reference/lxns-renderer/parity-notes.md``）。
+note 数据用 ``chart_notes.parse_site_chart``（同一 bundle 的解析器逐语句移植），
+不使用 ``core/simai.py``（那是物量对拍用的 MaiConverter 内核，note 切分口径
+不同：一个 token 的 ``*`` 分段在站内是同一 note 的多条并行动径）。
+
+站内页面实际生效的配置（chartpage.js 设置默认值 L881-902，勿用渲染器类默认值）：
+hiSpeed=6（回调 setHiSpeed → ×0.6 = 3.6）、alwaysKeepHiSpeed=false、
+slideDelay=0、**slideRotation=true**、mirrorMode=none、**judgmentLineDesign=simple**
+（白色判定圈 + 8 按钮点，无 sensor 底图）、pinkSlideStart/normalColorBreakSlide/
+highlightEx/ddr 均关、showBpm/showNoteTotal/showBreakCount/showFireworks/
+showHitEffect 开；播放时钟在 chart beat 0 起、音频从 beat 4（1 小节 lead-in）
+起播（chartpage.js syncFrame），因此视频前 4 拍为空场。
 
 关键语义（均引自源码，勿凭直觉改）：
-- 站内 config 默认值（L7893）：hiSpeed=6×0.6、**slideDelay=0**、
-  **slideRotation=false**（星不旋转）、pinkSlideStart/normalColorBreakSlide/
-  highlightEx/ddr 均关、showFireworks/showHitEffect 开、判定线 sensor 设计；
 - 运动（calculateNotePosition L307）：接近窗前半程 0.25R 驻留、scale 0→1
   （**尺寸渐显而非 alpha**，tap sprite 显示尺寸 ×scale L449），后半程
   0.25R→R；tap 判定后立即消失；hold 头判定后驻留 R；
-- 滑键头 = **星形头**（hasTapHead 仅 `@` 修饰，simai 数据恒 false → 星头，
-  L8411）；simai.py 为物量补发的头部 tap 在渲染层过滤（JS 无此 note）；
-  `!`/`?`（tapless）无头，星于起点按钮生长（renderSlideStar L6115）；
-- slide 轨道透明度 ge()（L5527）用 **config.slideDelay=0**（非谱面延迟）；
-  连段（`*` 链）在站内为单路径多段（getPointAlongPath 顺序跨越），
-  站内 isSplitSlide（`*` 分裂路径）在落雪谱面数据中不出现，本项目恒 False；
+- 滑键头 = **星形头**（hasTapHead 仅 `@` 修饰，simai 数据恒无 → 星头，
+  L8411）；`!`/`?`（headless）无头，星于起点按钮生长（renderSlideStar
+  L6115）；slideRotation 开 → 接近期星头自旋（calculateStarRotation L6321）、
+  移动星朝向路径切向 +π/2（getPathTangentAngle L6386）；
+- slide 轨道透明度 ge()（L5527）：普通段与 wifi 段（视作 fading 档）分别取，
+  slideDelay=0；单路径可含多段（[] 内多段），`*` 分段为并行动径；
 - tap = 四象限线性渐变环 + 双白环 + 黑描边 + 中心点（drawTapNoteVector L495）；
-  EX 环几何 = 1.19×scale（sprite 内），显示再 ×scale → 终效 1.19·s²
-  （接近期 s<1/1.19 时 EX 环藏于主体内）；
+  EX 覆盖环画在 scale=1 的 sprite 内（1.19×f），显示再 ×scale → 终效 1.19·f·s；
 - hold = 双六棱柱：EX 覆盖环顶点序 O,k,F,N,L,A（L6519）、六面渐变轴
   **os→oe 外边端点**（L6567）、进行中白色呼吸 Se 作用于渐变两端与白边、
   头部光晕 E 表径向渐变（drawActiveHeadGlow L6584）；
@@ -36,7 +43,7 @@
   升序**，L8271-8283) → touch 边框/部件 → 涟漪/touch hold 松手/命中/打击。
 
 帧在 2× 超采样画布绘制（等价站内 G=2 backing）后缩至 600²，rawvideo 管道
-喂 ffmpeg 合成 h264+aac mp4（音频 t=0 = 谱面 t=0，构造性同步）。
+喂 ffmpeg 合成 h264+aac mp4（音频前补 1 小节静音，与视频时间轴一致）。
 """
 
 import math
@@ -47,7 +54,15 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 from .fonts import font as _load_font
-from ..simai import SimaiTap, SimaiHold, SimaiSlide, SimaiTouch, SimaiDifficulty
+from .chart_notes import (
+    ChartNote,
+    SiteChart,
+    SlidePart,
+    SlideSegment,
+    note_completion_times,
+    break_completion_times,
+    break_noex_completion_times,
+)
 from ._lxns_slide_data import SLIDE_POINTS, SLIDE_KEYFRAMES
 
 # ------------------------------------------------- 常量（JS L15-60 / I 表 L66）
@@ -327,6 +342,7 @@ _GAUGE_GEO = {
 # wifi chevron 间距缓动表（y，L32）
 _WIFI_EASE = (0, 0.094, 0.178, 0.266, 0.355, 0.462, 0.57, 0.674, 0.779, 0.884, 1)
 _WIFI_WIDTH_BASE = 19.2 / 300  # v
+_QT = 2 * math.pi / 1000  # 星星 tap 自旋角速度（L7824 qt）
 
 
 def _sort_key(layer: int, order: int) -> int:
@@ -498,17 +514,23 @@ def _hold_flicker(elapsed_ms: float) -> float:
 
 @dataclass
 class _Note:
-    """渲染 note（由 SimaiDifficulty 映射；字段语义对齐 JS note 对象）。"""
+    """渲染 note（由 SiteChart 映射；字段语义对齐 JS note 对象）。"""
 
     kind: str  # tap / hold / slide / touch / touch-hold
     pos: int  # 按钮 1-8（touch 为 0）
-    timing: float  # ms
+    timing: float  # ms（含站内 +4 拍 lead-in）
     is_break: bool = False
     is_each: bool = False  # 渲染层重算的同刻旗标（calculateSimultaneousCounts）
     is_ex: bool = False
     duration: float = 0.0  # hold/touch-hold ms
-    segments: list = field(default_factory=list)
-    # slide 分段：(shape, start, end, mid, delay_ms, dur_ms, is_break)
+    # slide：并行动径（JS allSlideSegments/allDelayMs/allDurationMs/allSlideBreaks）
+    parts: list[SlidePart] = field(default_factory=list)
+    has_tap_head: bool = False
+    headless_mode: str | None = None
+    # tap 的星形变体（`$` 修饰，宴谱常见）
+    is_star: bool = False
+    is_spinning_star: bool = False
+    has_delay_marker: bool = False
     fire: bool = False
     sensor: str = ""
     touch_num: int | None = None
@@ -516,6 +538,13 @@ class _Note:
     visual_only: bool = False
     src_index: int = 0  # Le()：touch 部件排序用（全体 note 序）
     simul_slide_count: int = 1  # 同刻 slide 数（轨道/移动星配色专用，L8123）
+
+
+def _touch_position_name(note: _Note) -> str:
+    """JS note.position 字符串：中心为 "C"，其余 "A1".."E8"。"""
+    if (note.sensor or "C") == "C" or note.touch_num is None:
+        return "C"
+    return f"{note.sensor}{note.touch_num}"
 
 
 @dataclass
@@ -557,9 +586,10 @@ def _note_position(
 class _Canvas:
     """单帧画布：logical 600 × SS 超采样，ImageDraw(RGBA) 直接混色。"""
 
-    def __init__(self):
+    def __init__(self, transparent: bool = False):
         self.size = int(_LOGICAL * _SS)
-        self.img = Image.new("RGBA", (self.size, self.size), (*C_BLACK, 255))
+        fill = (0, 0, 0, 0) if transparent else (*C_BLACK, 255)
+        self.img = Image.new("RGBA", (self.size, self.size), fill)
         self.d = ImageDraw.Draw(self.img, "RGBA")
         self.radius = _RADIUS
         self.cx = _CENTER
@@ -611,9 +641,8 @@ class _Canvas:
     def arc_points(
         self, cx: float, cy: float, r: float, a0: float, a1: float
     ) -> list[tuple[float, float]]:
-        """ctx.arc 的折线近似（顺时针=角度增加方向，与 canvas 一致）。"""
-        rr = self.s(r)
-        cx, cy = self.s(cx), self.s(cy)
+        """ctx.arc 的折线近似（逻辑坐标；调用方用 c.pts()/c.line() 缩放到画布）。"""
+        rr = r
         span = a1 - a0
         n = max(2, math.ceil(abs(span) / (math.pi / 24)))
         return [
@@ -775,19 +804,20 @@ class _Sprites:
             ]
             return out + inn
 
-        # 四象限渐变环（renderDirectionalTapRing L423）：渐变轴随按钮角
+        # 四象限渐变环（renderDirectionalTapRing L423）：渐变轴 = 扇区起/止两条
+        # 半径在 mid 半径处的连线（切向，不加 π/4）
         rot = _button_angle(pos)
         mid = (p + f) / 2
         for k in range(4):
             a0 = rot + k * math.pi / 2
             a1 = a0 + math.pi / 2
             g0 = (
-                cx + math.cos(a0 + math.pi / 4) * mid * _SS,
-                cy + math.sin(a0 + math.pi / 4) * mid * _SS,
+                cx + math.cos(a0) * mid * _SS,
+                cy + math.sin(a0) * mid * _SS,
             )
             g1 = (
-                cx + math.cos(a1 + math.pi / 4) * mid * _SS,
-                cy + math.sin(a1 + math.pi / 4) * mid * _SS,
+                cx + math.cos(a1) * mid * _SS,
+                cy + math.sin(a1) * mid * _SS,
             )
             path = sector(p, f, a0, a1)
             bbox = (
@@ -841,7 +871,8 @@ class _Sprites:
         d_size = _RADIUS * _R_NOTE * 1.36 * 1.5  # 形状半径 d
         c_blur = _RADIUS * (4 / 300 * 0.7)  # at
         l_blur = c_blur * 2.4  # at×ot
-        half = d_size + _STROKE * _RADIUS + l_blur / 2 * 2.5 + 1
+        # JS getHitEffectShapeSprite L7329-7332：l = at·R·ot·X，pad = s + u + l/X·ct + 1
+        half = d_size + _STROKE * _RADIUS + l_blur * 2.5 + 1
         size = math.ceil(half * 2 * _SS)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         cx = cy = size / 2
@@ -935,8 +966,9 @@ class _Sprites:
         inner = _rounded_tri_points(*inner_pts, corner * 0.4)
 
         if layer_kind == "sb":
-            # 投影（shadow 层 L6798）：黑影 blur=8/300·R 偏移 (2/300,2/300)·R
-            blur_r = _RADIUS * (8 / 300) * _SS
+            # 投影（shadow 层 L6798）：canvas shadowBlur=8/300·R 是设备像素
+            # （不受 CTM 影响、且 blur≈2σ），offset=2/300·R；换到 2× 超采样画布
+            blur_r = _RADIUS * (8 / 300) * _SS / 2
             off = _RADIUS * (2 / 300) * _SS
             sil = Image.new("RGBA", img.size, (0, 0, 0, 0))
             ImageDraw.Draw(sil).polygon(outer, fill=(0, 0, 0, 255))
@@ -1041,28 +1073,40 @@ def _multi_stop_gradient(
 class _Renderer:
     """渲染器（U 基类 + 各渲染器合流；方法注释 L* = JS 源码行号）。"""
 
-    def __init__(self, notes: list[_Note]):
+    def __init__(
+        self,
+        notes: list[_Note],
+        site: SiteChart,
+        hit_notes: list[tuple[int, float, bool]],
+    ):
         self.notes = notes
+        self.site = site
         self.sw = _STROKE * _RADIUS  # note 描边宽（logical px）
         self.slides = [n for n in notes if n.kind == "slide"]
         self.holds = [n for n in notes if n.kind == "hold"]
         self.taps = [n for n in notes if n.kind == "tap"]
         self.touches = [n for n in notes if n.kind in ("touch", "touch-hold")]
-        self.hit_notes = [
-            n
-            for n in notes
-            if (n.kind == "tap" and not n.visual_only) or n.kind == "slide"
-        ]  # hitEffectNotes L8268：taps + 带位滑键（头 tap 已并入滑键本身）
-        # 同刻分组（calculateSimultaneousCounts L8191）：按 timing(3 位) 聚合
+        # hitEffectNotes（L8268）：带数字位的非 touch/非 hold-start 事件
+        # （tap/break/simultaneous、hold-end、非 headless slide），按时刻升序
+        self.hit_notes = sorted(hit_notes, key=lambda item: item[1])
+        # 同刻分组（calculateSimultaneousCounts L8191，按 timingMs.toFixed(3)）
         self._simul_groups: dict[float, list[_Note]] = {}
         for n in notes:
+            if n.has_delay_marker:  # JS L8193：反引号 pseudo-each 不参与同刻分组
+                continue
             self._simul_groups.setdefault(round(n.timing, 3), []).append(n)
+        # touch-hold-end 是独立 note（L8193 不跳过），参与同刻计数
+        for note in self.touches:
+            if note.kind != "touch-hold" or note.duration <= 0:
+                continue
+            end = round(note.timing + note.duration, 3)
+            self._simul_groups.setdefault(end, []).append(_Note("touch-end", 0, 0.0))
         for group in self._simul_groups.values():
             plain = [
                 n
                 for n in group
                 if (n.kind == "tap" and not n.is_break)
-                or n.kind in ("hold", "slide", "touch", "touch-hold")
+                or n.kind in ("hold", "slide", "touch", "touch-hold", "touch-end")
             ]
             breaks = [
                 n for n in group if n.is_break and n.kind in ("tap", "hold", "slide")
@@ -1072,47 +1116,10 @@ class _Renderer:
             for n in group:
                 n.is_each = is_simul
                 n.simul_slide_count = slide_count
-        # 完成时刻表（noteCompletionTimes L8251：头计数 + 路径末）
-        self.completions: list[float] = []
-        self.break_completions: list[float] = []
-        self.noex_break_completions: list[float] = []
-        for n in notes:
-            end = n.timing
-            if n.kind == "hold":
-                end = n.timing + n.duration
-            elif n.kind == "slide":
-                delay = n.segments[0][4] if n.segments else 0.0
-                end = n.timing + delay + sum(s[5] for s in n.segments)
-            elif n.kind == "touch-hold":
-                end = n.timing + n.duration
-            if n.kind == "tap":
-                self.completions.append(n.timing)
-            elif n.kind == "hold":
-                self.completions.append(end)  # hold-end 计数
-                if n.is_break:
-                    self.break_completions.append(n.timing)
-                    if not n.is_ex:
-                        self.noex_break_completions.append(n.timing)
-            elif n.kind == "slide":
-                for seg in n.segments:
-                    self.completions.append(n.timing + seg[4] + seg[5])
-                if not n.is_headless:
-                    self.completions.append(n.timing)
-                if n.is_break:
-                    self.break_completions.append(n.timing)
-                    if not n.is_ex:
-                        self.noex_break_completions.append(n.timing)
-                for seg in n.segments:
-                    if seg[6]:
-                        t_end = n.timing + seg[4] + seg[5]
-                        self.break_completions.append(t_end)
-                        if not n.is_ex:
-                            self.noex_break_completions.append(t_end)
-            else:  # touch / touch-hold
-                self.completions.append(end)
-        self.completions.sort()
-        self.break_completions.sort()
-        self.noex_break_completions.sort()
+        # 完成时刻表（noteCompletionTimes/breakCompletionTimes L8251）
+        self.completions = note_completion_times(site.notes)
+        self.break_completions = break_completion_times(site.notes)
+        self.noex_break_completions = break_noex_completion_times(site.notes)
         self.sprites = _Sprites()
         self._fonts: dict[int, object] = {}
 
@@ -1131,11 +1138,11 @@ class _Renderer:
         """renderTapNote L439：sprite 显示尺寸 ×scale（接近期缩小，非 alpha）。"""
         x, y = c.s(pos.x), c.s(pos.y)
         if note.is_ex:
-            # EX 覆盖环（renderExRing）：sprite 内 1.19×scale × 显示 scale
-            # → 终效半径 f·s .. 1.19·f·s²；s<1/1.19 时外缘缩进主体内不可见
+            # EX 覆盖环画在 scale=1 的 sprite 内（半径 f..1.19f），sprite 整体再按
+            # note scale 缩放（renderTapNote L439-449）→ 显示环 = [f·s, 1.19f·s]
             f = _RADIUS * _R_NOTE * 1.36
             s = pos.alpha
-            r0, r1 = f * s, f * _EX_ALPHA * s * s
+            r0, r1 = f * s, _EX_ALPHA * f * s
             if r1 > r0:
                 color = (
                     C_EX_BREAK
@@ -1212,7 +1219,13 @@ class _Renderer:
             if not pos.visible:
                 continue
             color = (
-                C_BREAK_DOT if n.is_break else C_SIMUL_DOT if n.is_each else C_TAP_DOT
+                C_BREAK_DOT
+                if n.is_break
+                else C_SIMUL_DOT
+                if n.is_each
+                else C_SLIDE_CYAN
+                if n.is_star
+                else C_TAP_DOT
             )
             self.draw_approach_arc(
                 c, n.pos, math.hypot(pos.x - c.cx, pos.y - c.cy), color
@@ -1446,27 +1459,26 @@ class _Renderer:
         if not rings:
             return
         rings.sort(key=lambda t: -t[0])
-        # 合并到单层后 screen 合成（screen 满足交换律，与逐环绘制等价）
-        max_r = max(r * _RIPPLE_QE_OUT for r, _ in rings)
+        # 逐环 screen 叠加（JS drawRipples L7203-7241：环之间会重叠，叠加是
+        # 1-(1-a1)(1-a2)，不能合并成单层取 max）
         cx, cy = c.s(x), c.s(y)
-        region = int(max_r * _SS) + 4
-        x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
-        x1, y1 = int(min(c.img.width, cx + region)), int(min(c.img.height, cy + region))
-        if x1 <= x0 or y1 <= y0:
-            return
-        w, h = x1 - x0, y1 - y0
-        yy, xx = np.mgrid[0:h, 0:w]
-        dx = xx - (cx - x0)
-        dy = yy - (cy - y0)
-        dist = np.hypot(dx, dy) / _SS  # logical
-        layer_rgb = np.zeros((h, w, 3), dtype=np.float32)
-        layer_a = np.zeros((h, w), dtype=np.float32)
         base = np.array(C_RIPPLE, dtype=np.float32)
         for radius, alpha in rings:
             r_in = radius * _RIPPLE_ZE
             r_out = radius * _RIPPLE_QE_OUT
             if r_out - r_in < 0.5:
                 continue
+            region = int(r_out * _SS) + 4
+            x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
+            x1, y1 = (
+                int(min(c.img.width, cx + region)),
+                int(min(c.img.height, cy + region)),
+            )
+            if x1 <= x0 or y1 <= y0:
+                continue
+            w, h = x1 - x0, y1 - y0
+            yy, xx = np.mgrid[0:h, 0:w]
+            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / _SS  # logical
             t = (dist - r_in) / (r_out - r_in)
             msk = (t >= 0) & (t <= 1)
             if not msk.any():
@@ -1478,16 +1490,13 @@ class _Renderer:
             col = np.zeros((h, w, 3), dtype=np.float32)
             for ch in range(3):
                 col[..., ch] = base[ch] + (255 - base[ch]) * n_off
-            layer_rgb[msk] = col[msk]
-            layer_a[msk] = np.maximum(layer_a[msk], a_px[msk])
-        arr = np.dstack(
-            [
-                layer_rgb.clip(0, 255).astype(np.uint8),
-                (layer_a.clip(0, 1) * 255).astype(np.uint8),
-            ]
-        )
-        layer = Image.fromarray(arr, "RGBA")
-        _screen_composite(c.img, layer, (x0, y0, x1, y1))
+            arr = np.dstack(
+                [
+                    col.clip(0, 255).astype(np.uint8),
+                    (a_px.clip(0, 1) * 255).astype(np.uint8),
+                ]
+            )
+            _screen_composite(c.img, Image.fromarray(arr, "RGBA"), (x0, y0, x1, y1))
 
 
 def ImageChops_darker(a: Image.Image, b: Image.Image) -> Image.Image:
@@ -1503,11 +1512,11 @@ class _SlideRenderer:
         self.r = renderer
         self._chain_cache: dict[tuple, list] = {}
         self._lut_cache: dict[tuple, list] = {}
-        self._metrics_cache: dict[tuple, list[float]] = {}
+        self._metrics_cache: dict[tuple, float] = {}
 
     # ---- getBarChain（L5580）：段 → 旋转后锚点列 [{x,y,angle}]
-    def bar_chain(self, seg: tuple) -> list | None:
-        shape_op, start, end, mid = seg[0], seg[1], seg[2], seg[3]
+    def bar_chain(self, seg: SlideSegment) -> list | None:
+        shape_op, start, end, mid = seg.type, seg.start_pos, seg.end_pos, seg.mid_pos
         key = (shape_op, start, end, mid)
         cached = self._chain_cache.get(key)
         if cached is not None:
@@ -1556,7 +1565,7 @@ class _SlideRenderer:
 
     @staticmethod
     def _shape_map(shape: str, start: int, end: int, mid: int | None):
-        """ce()（L553）。"""
+        """ce()（L553）：形状串 → (ue 表键, 是否镜像)。"""
         dist = ((end - start) % 8 + 8) % 8 + 1
         if shape == "-":
             if dist < 3 or dist > 7:
@@ -1623,6 +1632,9 @@ class _SlideRenderer:
             d += math.tau
         return d
 
+    def _lerp_angle(self, a: float, b: float, t: float) -> float:
+        return a + self._angle_delta(a, b) * t
+
     def _apply_game_arrow_angles(self, chain: list[dict]) -> None:
         """applyGameArrowAngles L5625：p/q/pp/qq/circle 的弦切角 lerp。"""
         n = len(chain)
@@ -1634,28 +1646,31 @@ class _SlideRenderer:
         raw[n - 1] = raw[n - 2]
         chain[0]["angle"] = raw[0]
         for i in range(1, n - 1):
-            chain[i]["angle"] += self._angle_delta(chain[i]["angle"], raw[i]) * 0.5
+            # JS L5630：以上一个**已更新**角度为基准插值，不是原表角度
+            chain[i]["angle"] = self._lerp_angle(chain[i - 1]["angle"], raw[i], 0.5)
         chain[n - 1]["angle"] = raw[n - 1]
 
     # ---- getHiddenCount（L5882）：le 关键帧 → 已被星星吃掉的箭头数
-    def hidden_count(self, seg: tuple, progress: float) -> int:
-        mapped = self._shape_map(seg[0], seg[1], seg[2], seg[3])
+    def hidden_count(self, seg: SlideSegment, progress: float) -> int:
+        mapped = self._shape_map(seg.type, seg.start_pos, seg.end_pos, seg.mid_pos)
         kf = SLIDE_KEYFRAMES.get(mapped[0], [0]) if mapped else [0]
         if len(kf) < 2:
             return 0
-        idx = kf[min(len(kf) - 1, int(progress * (len(kf) - 1)))]
-        if seg[0] == "w" and progress > 0:
-            return idx + 1
-        return idx
+        index = kf[min(len(kf) - 1, int(progress * (len(kf) - 1)))]
+        if seg.type == "w" and progress > 0:
+            return index + 1
+        return index
 
     # ---- getVisibleBarsForSegment（L5915）：可见箭头列（外推优先）
-    def visible_bars(self, seg: tuple, hidden: int, extend: bool) -> list[dict] | None:
-        if seg[0] == "w":
+    def visible_bars(
+        self, seg: SlideSegment, hidden: int, extend: bool
+    ) -> list[dict] | None:
+        if seg.type == "w":
             return None
         chain = self.bar_chain(seg)
         if not chain:
             return None
-        use_chain_angle = seg[0] != "-"
+        use_chain_angle = seg.type != "-"
         bars: list[dict] = []
         o = len(chain) - 1
         if extend and len(chain) >= 2 and hidden < len(chain):
@@ -1730,11 +1745,11 @@ class _SlideRenderer:
         return (x2 + (mx - x2) / p * g, y2 + (my - y2) / p * g)
 
     # ---- getPointOnSegment（L6338）：节点索引空间参数化
-    def point_on_segment(self, seg: tuple, t: float) -> tuple[float, float]:
+    def point_on_segment(self, seg: SlideSegment, t: float) -> tuple[float, float]:
         chain = self.bar_chain(seg)
         if chain and len(chain) >= 2:
-            start = self.r.button_position(seg[1])
-            end = self.r.button_position(seg[2])
+            start = self.r.button_position(seg.start_pos)
+            end = self.r.button_position(seg.end_pos)
             a = len(chain) + 2
             o = max(0.0, min(a - 1.0, t * (a - 1)))
             i = min(a - 2, int(o))
@@ -1749,16 +1764,16 @@ class _SlideRenderer:
 
             u, d = node(i), node(i + 1)
             return (u[0] + (d[0] - u[0]) * f, u[1] + (d[1] - u[1]) * f)
-        start = self.r.button_position(seg[1])
-        end = self.r.button_position(seg[2])
+        start = self.r.button_position(seg.start_pos)
+        end = self.r.button_position(seg.end_pos)
         return (
             start[0] + (end[0] - start[0]) * t,
             start[1] + (end[1] - start[1]) * t,
         )
 
     # ---- buildArcLut（L5952）：64 均匀参数采样 + 弧长累计
-    def segment_lut(self, seg: tuple, steps: int = 64) -> list[dict]:
-        key = (seg[0], seg[1], seg[2], seg[3])
+    def segment_lut(self, seg: SlideSegment, steps: int = 64) -> list[dict]:
+        key = (seg.type, seg.start_pos, seg.end_pos, seg.mid_pos)
         cached = self._lut_cache.get(key)
         if cached:
             return cached
@@ -1791,8 +1806,8 @@ class _SlideRenderer:
                 )
         return last["x"], last["y"]
 
-    def segment_length(self, seg: tuple) -> float:
-        key = (seg[0], seg[1], seg[2], seg[3])
+    def segment_length(self, seg: SlideSegment) -> float:
+        key = (seg.type, seg.start_pos, seg.end_pos, seg.mid_pos)
         cached = self._metrics_cache.get(key)
         if cached is None:
             cached = self.segment_lut(seg)[-1]["s"]
@@ -1800,19 +1815,23 @@ class _SlideRenderer:
         return cached
 
     # ---- getSlidePathMetrics（L5706）：多段路径按弧长的进度区间
-    def path_ranges(self, segments: list[tuple]) -> list[tuple[float, float]] | None:
+    def path_ranges(
+        self, segments: list[SlideSegment]
+    ) -> list[tuple[float, float]] | None:
         lengths = [self.segment_length(s) for s in segments]
         total = sum(lengths)
         if total <= 0:
             return None
         ranges = []
         acc = 0.0
-        for ln in lengths:
-            ranges.append((acc / total, (acc + ln) / total))
-            acc += ln
+        for length in lengths:
+            ranges.append((acc / total, (acc + length) / total))
+            acc += length
         return ranges
 
-    def point_along(self, t: float, segments: list[tuple]) -> tuple[float, float]:
+    def point_along(
+        self, t: float, segments: list[SlideSegment]
+    ) -> tuple[float, float]:
         """getPointAlongPath（L6362）：跨段弧长插值。"""
         if not segments:
             return (_CENTER, _CENTER)
@@ -1820,45 +1839,72 @@ class _SlideRenderer:
         lengths = [lut[-1]["s"] for lut in luts]
         total = sum(lengths)
         if total == 0:
-            return self.r.button_position(segments[0][1])
+            return self.r.button_position(segments[0].start_pos)
         target = t * total
         acc = 0.0
         for lut, length in zip(luts, lengths):
             if acc + length >= target:
                 return self._sample_lut(lut, target - acc)
             acc += length
-        return self.r.button_position(segments[-1][2])
+        return self.r.button_position(segments[-1].end_pos)
 
     # ---- 轨道透明度 ge()（L5527；config.slideDelay=0）
-    def track_alpha(self, note: _Note, now: float) -> float:
+    def _star_delay(self, note: _Note) -> float:
+        """me()（L5514）：轨道淡入起点。"""
         r = round((_SLIDE_DELAY + 1) * 10)
-        star_delay = note.timing - _APPROACH_MS + _APPROACH_MS * r / 21
-        is_split = False  # 落雪谱面无 `*` 分裂路径（连段并为单路径，见模块 docstring）
+        return note.timing - _APPROACH_MS + _APPROACH_MS * r / 21
+
+    def track_alpha(self, note: _Note, now: float, fading: bool) -> float:
+        """ge()（L5527）：fading=wifi 段（视作 split 档）。"""
+        r = self._star_delay(note)
+        if fading and now <= r:
+            return 0.0
         if now + _DELAY_FADE >= note.timing:
-            return (120 / 255) if is_split else 1.0
-        i = now - star_delay
+            return (120 / 255) if fading else 1.0
+        i = now - r
         if i <= 0:
             return 0.0
-        if is_split and i > _TRAIL_RAMP:
-            # he()：分裂轨道淡入上限（本项目不触发，保留语义完整）
-            return 0.5 if note.timing - now + _TRAIL_RAMP <= now else 120 / 255
-        a = note.timing - star_delay
-        if is_split or a >= _TRAIL_RAMP:
+        if fading and i > _TRAIL_RAMP:
+            return 0.5 if (note.timing - now + _TRAIL_RAMP <= now) else 120 / 255
+        a = note.timing - r
+        if fading or a >= _TRAIL_RAMP:
             return min(0.5, 0.5 * i / _TRAIL_RAMP)
         return max(0.0, min(0.5, 0.5 * (1 - (note.timing - now) / i)))
+
+    # ---- getRenderPathIndexes + renderSlide（L5556/5656）：去重 + wifi 先行
+    def ordered_parts(self, note: _Note) -> list[SlidePart]:
+        seen: set[tuple] = set()
+        unique: list[SlidePart] = []
+        for part in note.parts:
+            signature = (
+                tuple(
+                    (seg.type, seg.start_pos, seg.end_pos, seg.mid_pos)
+                    for seg in part.segments
+                ),
+                round(part.delay_ms, 3),
+                round(part.duration_ms, 3),
+                part.is_break,
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique.append(part)
+        wifi = [p for p in unique if p.segments and p.segments[0].type == "w"]
+        rest = [p for p in unique if not (p.segments and p.segments[0].type == "w")]
+        return wifi + rest
 
     # ---- drawSegmentArrows（L5889）：影→主填充→break 左半→黑描边
     def draw_segment_arrows(
         self,
         c: _Canvas,
-        seg: tuple,
+        seg: SlideSegment,
         progress: float,
         alpha: float,
         is_break: bool,
         is_simul: bool,
         extend: bool,
     ) -> None:
-        if seg[0] == "w":
+        if seg.type == "w":
             self.draw_wifi_bars(c, seg, progress, alpha, is_break, is_simul)
             return
         hidden = self.hidden_count(seg, progress)
@@ -1890,7 +1936,7 @@ class _SlideRenderer:
     def draw_wifi_bars(
         self,
         c: _Canvas,
-        seg: tuple,
+        seg: SlideSegment,
         progress: float,
         alpha: float,
         is_break: bool,
@@ -1899,8 +1945,8 @@ class _SlideRenderer:
         kf = SLIDE_KEYFRAMES.get("wifi", [0, 1, 4, 6, 11])
         last_kf = kf[-1]
         hidden = self.hidden_count(seg, progress)
-        a0 = self.r.button_position(seg[1])
-        b0 = self.r.button_position(seg[2])
+        a0 = self.r.button_position(seg.start_pos)
+        b0 = self.r.button_position(seg.end_pos)
         length = math.hypot(b0[0] - a0[0], b0[1] - a0[1])
         if length == 0:
             return
@@ -1910,32 +1956,54 @@ class _SlideRenderer:
         h0 = 0.975 * length
         g0 = _RADIUS * 0.075
         color = C_BREAK_DOT if is_break else C_SLIDE_SIMUL if is_simul else C_SLIDE_CYAN
-        # 影（后向偏移 5/300·R，α0.4×）与主链分两轮填充（L6113）
+        # 影（后向偏移 5/300·R，α0.4×）与主链各合成一次：JS 把全部 chevron 累进
+        # 同一个 Path2D 后一次性填充（L6106-6113），逐多边形填充会让重叠处变暗
         shadow_off = _RADIUS * (5 / 300)
-        lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-        ld = ImageDraw.Draw(lay, "RGBA")
-        for kind in ("shadow", "main"):
-            col = (
-                (*C_BLACK, int(102 * alpha))
-                if kind == "shadow"
-                else (*color, int(255 * alpha))
+        shadow_polys: list[list[tuple[float, float]]] = []
+        main_polys: list[list[tuple[float, float]]] = []
+        for e in range(last_kf - 1, hidden - 1, -1):
+            t = e / (last_kf - 1)
+            nd = m0 + (h0 - m0) * _WIFI_EASE[e]
+            arm_len = cos_d * nd + g0 * (1 - t)
+            width = _RADIUS * _WIFI_WIDTH_BASE * (0.7 + 0.3 * t)
+            tip = (a0[0] + ux * nd, a0[1] + uy * nd)
+            # 手臂定义在路径局部系（+x 前向），按路径方向旋转到世界系（L6106）
+            al1x, al1y = -arm_len * cos_d, arm_len * sin_d
+            al2x, al2y = -arm_len * cos_d, -arm_len * sin_d
+            arm1 = (ux * al1x - uy * al1y, uy * al1x + ux * al1y)
+            arm2 = (ux * al2x - uy * al2y, uy * al2x + ux * al2y)
+            shadow_pts = self._wifi_chevron_points(
+                tip, arm1, arm2, (ux, uy), width, shadow_off
             )
-            off = shadow_off if kind == "shadow" else 0.0
-            for e in range(last_kf - 1, hidden - 1, -1):
-                t = e / (last_kf - 1)
-                nd = m0 + (h0 - m0) * _WIFI_EASE[e]
-                arm_len = cos_d * nd + g0 * (1 - t)
-                width = _RADIUS * _WIFI_WIDTH_BASE * (0.7 + 0.3 * t)
-                tip = (a0[0] + ux * nd, a0[1] + uy * nd)
-                # 手臂定义在路径局部系（+x 前向），按路径方向旋转到世界系（L6106）
-                al1x, al1y = -arm_len * cos_d, arm_len * sin_d
-                al2x, al2y = -arm_len * cos_d, -arm_len * sin_d
-                arm1 = (ux * al1x - uy * al1y, uy * al1x + ux * al1y)
-                arm2 = (ux * al2x - uy * al2y, uy * al2x + ux * al2y)
-                pts = self._wifi_chevron_points(tip, arm1, arm2, (ux, uy), width, off)
-                if pts:
-                    ld.polygon(c.pts(pts), fill=col)
-        c.img.alpha_composite(lay)
+            if shadow_pts:
+                shadow_polys.append(shadow_pts)
+            main_pts = self._wifi_chevron_points(tip, arm1, arm2, (ux, uy), width, 0.0)
+            if main_pts:
+                main_polys.append(main_pts)
+        for polys, col, shade in (
+            (shadow_polys, C_BLACK, 0.4),
+            (main_polys, color, 1.0),
+        ):
+            if not polys:
+                continue
+            xs = [p[0] for poly in polys for p in poly]
+            ys = [p[1] for poly in polys for p in poly]
+            x0 = max(0, int(min(xs) * _SS) - 2)
+            y0 = max(0, int(min(ys) * _SS) - 2)
+            x1 = min(c.img.width, int(max(xs) * _SS) + 3)
+            y1 = min(c.img.height, int(max(ys) * _SS) + 3)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            mask = Image.new("L", (x1 - x0, y1 - y0), 0)
+            md = ImageDraw.Draw(mask)
+            for poly in polys:
+                md.polygon(
+                    [(px * _SS - x0, py * _SS - y0) for px, py in poly], fill=255
+                )
+            mask = mask.point(lambda v: int(v * alpha * shade))
+            lay = Image.new("RGBA", (x1 - x0, y1 - y0), (*col, 255))
+            lay.putalpha(mask)
+            c.img.alpha_composite(lay, (x0, y0))
 
     def _wifi_chevron_points(
         self,
@@ -1993,6 +2061,16 @@ class _SlideRenderer:
         alpha: float = 1.0,
     ) -> None:
         if alpha <= 0:
+            return
+        if alpha < 0.999:
+            # JS ctx.globalAlpha 作用于整颗星（黑/白边、填充、中心点），
+            # 不是只淡出填充——生长期的星整体半透明
+            layer = _Canvas(transparent=True)
+            self.draw_star(layer, x, y, size, color, rotation, is_ex, 1.0)
+            layer.img.putalpha(
+                layer.img.getchannel("A").point(lambda v: int(v * alpha))
+            )
+            c.img.alpha_composite(layer.img)
             return
         s = size
         cc = s * 0.5
@@ -2053,126 +2131,203 @@ class _SlideRenderer:
         size: float,
         is_break: bool,
         is_each: bool,
+        split: bool = False,
     ) -> None:
         """renderExStarRing（L6249）：1.19× 十角环覆盖（pinkSlideStart 关）。"""
         overlay = C_EX_BREAK if is_break else C_EX_SIMUL if is_each else C_EX_SLIDE
-        s = size * _EX_ALPHA
-        cc = size * 0.5 * _EX_ALPHA
-        inner_s = size
-        u = size * 0.5
+        scale = _EX_ALPHA
+        outer, outer_mid = size * scale, size * 0.5 * scale
+        inner, inner_mid = size, size * 0.5
 
-        def pts(outer: float, inner: float):
+        def pts(radius_outer: float, radius_inner: float, rot: float = 0.0):
             return [
                 (
                     x
-                    + math.cos(k * math.pi / 5 - math.pi / 2)
-                    * (outer if k % 2 == 0 else inner),
+                    + math.cos(k * math.pi / 5 - math.pi / 2 + rot)
+                    * (radius_outer if k % 2 == 0 else radius_inner),
                     y
-                    + math.sin(k * math.pi / 5 - math.pi / 2)
-                    * (outer if k % 2 == 0 else inner),
+                    + math.sin(k * math.pi / 5 - math.pi / 2 + rot)
+                    * (radius_outer if k % 2 == 0 else radius_inner),
                 )
                 for k in range(10)
             ]
 
-        path_o = c.pts(pts(s, cc))
-        path_i = c.pts(pts(inner_s, u))
-        bbox = (
-            int(min(p[0] for p in path_o)),
-            int(min(p[1] for p in path_o)),
-            int(max(p[0] for p in path_o)) + 1,
-            int(max(p[1] for p in path_o)) + 1,
-        )
-        bbox = (
-            max(0, bbox[0]),
-            max(0, bbox[1]),
-            min(c.img.width, bbox[2]),
-            min(c.img.height, bbox[3]),
-        )
-        if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
-            mask = _poly_mask(
-                (bbox[2] - bbox[0], bbox[3] - bbox[1]),
-                [(px - bbox[0], py - bbox[1]) for px, py in path_o],
-                [(px - bbox[0], py - bbox[1]) for px, py in path_i],
+        rotations = [0.0, math.pi] if split else [0.0]
+        for rot in rotations:
+            path_o = c.pts(pts(outer, outer_mid, rot))
+            path_i = c.pts(pts(inner, inner_mid, rot))
+            bbox = (
+                int(min(p[0] for p in path_o)),
+                int(min(p[1] for p in path_o)),
+                int(max(p[0] for p in path_o)) + 1,
+                int(max(p[1] for p in path_o)) + 1,
             )
-            fill_img = Image.new("RGBA", mask.size, overlay)
-            c.img.paste(fill_img, (bbox[0], bbox[1]), mask)
+            bbox = (
+                max(0, bbox[0]),
+                max(0, bbox[1]),
+                min(c.img.width, bbox[2]),
+                min(c.img.height, bbox[3]),
+            )
+            if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
+                mask = _poly_mask(
+                    (bbox[2] - bbox[0], bbox[3] - bbox[1]),
+                    [(px - bbox[0], py - bbox[1]) for px, py in path_o],
+                    [(px - bbox[0], py - bbox[1]) for px, py in path_i],
+                )
+                fill_img = Image.new("RGBA", mask.size, overlay)
+                c.img.paste(fill_img, (bbox[0], bbox[1]), mask)
 
-    # ---- renderSlideStar（L6115）：起点生长 → 沿路径移动（slideRotation 关）
-    def draw_slide_star(self, c: _Canvas, note: _Note, now: float) -> None:
-        if not note.segments:
-            return
-        delay = note.segments[0][4]
-        start = note.timing + delay
-        total = sum(s[5] for s in note.segments)
-        if now < note.timing:
-            return
-        # 移动星配色用同刻 slide 数（L6137 a = simultaneousSlideCount>=2）
-        is_simul_slide = note.simul_slide_count >= 2
-        color = (
-            C_BREAK_DOT
-            if note.is_break
-            else C_SLIDE_SIMUL
-            if is_simul_slide
-            else C_SLIDE_CYAN
-        )
-        if note.segments[0][0] == "w":
-            self._draw_wifi_stars(c, note, now)
-            return
-        if now >= start:
-            t = min(1.0, (now - start) / total if total > 0 else 1.0)
-            px, py = self.point_along(t, note.segments)
-            size = _RADIUS * _STAR
-            alpha = 1.0
-        else:
-            if note.is_headless:
-                return
-            px, py = self.r.button_position(note.segments[0][1])
-            r = min(1.0, (now - note.timing) / delay) if delay > 0 else 1.0
-            size = _RADIUS * _STAR * (_STAR_MIN + (1 - _STAR_MIN) * r)
-            alpha = r
-        self.draw_star(c, px, py, size, color, 0.0, note.is_ex, alpha)
+    # ---- getPathTangentAngle（L6386）：路径切向角（弧长 lerp）
+    def path_tangent_angle(self, t: float, segments: list[SlideSegment]) -> float:
+        total = 0.0
+        lengths: list[float] = []
+        angles: list[float] = []
+        for seg in segments:
+            chain = self.bar_chain(seg)
+            if not chain:
+                continue
+            start = self.r.button_position(seg.start_pos)
+            end = self.r.button_position(seg.end_pos)
+            last = len(chain) - 1
+            extended = [
+                {"x": start[0], "y": start[1], "angle": chain[0]["angle"]},
+                *chain,
+                {"x": end[0], "y": end[1], "angle": chain[last]["angle"]},
+            ]
+            prev = None
+            for point in extended:
+                if prev is not None:
+                    total += math.hypot(point["x"] - prev["x"], point["y"] - prev["y"])
+                lengths.append(total)
+                angles.append(point["angle"])
+                prev = point
+        if not angles:
+            return 0.0
+        if len(angles) == 1:
+            return angles[0]
+        target = max(0.0, min(1.0, t)) * total
+        for i in range(len(lengths) - 1):
+            if lengths[i] <= target <= lengths[i + 1]:
+                span = lengths[i + 1] - lengths[i]
+                return self._lerp_angle(
+                    angles[i],
+                    angles[i + 1],
+                    (target - lengths[i]) / span if span > 0 else 0.0,
+                )
+        return angles[-1]
 
-    def _draw_wifi_stars(self, c: _Canvas, note: _Note, now: float) -> None:
+    # ---- calculateStarRotation（L6321）：接近期星头自旋角
+    def calculate_star_rotation(self, note: _Note, now: float) -> float:
+        if not note.parts:
+            return 0.0
+        part = note.parts[0]
+        duration = part.duration_ms
+        if not part.segments or not duration:
+            return 0.0
+        length = sum(self.segment_length(s) for s in part.segments)
+        rate = length * (480.0 / _RADIUS) / math.pi / duration * 15 * 0.06
+        per_ms = -min(rate, 1.08) * (math.pi / 180)
+        start = note.timing - _APPROACH_MS
+        return 0.0 if now < start else per_ms * (now - start)
+
+    # ---- renderSlideStar（L6115）：起点生长 → 沿路径移动（每条并行动径一颗）
+    def draw_slide_stars(self, c: _Canvas, note: _Note, now: float) -> None:
+        if not note.parts or now < note.timing:
+            return
+        is_simul_slide = note.simul_slide_count >= 2 or len(note.parts) > 1
+        for part in self.ordered_parts(note):
+            start = note.timing + part.delay_ms
+            if now > start + part.duration_ms:
+                continue
+            segments = part.segments
+            if not segments:
+                continue
+            color = (
+                C_BREAK_DOT
+                if part.is_break
+                else C_SLIDE_SIMUL
+                if is_simul_slide
+                else C_SLIDE_CYAN
+            )
+            if segments[0].type == "w":
+                self._draw_wifi_stars(c, note, part, now, color)
+                continue
+            progress = 0.0
+            if now >= start:
+                progress = (
+                    min(1.0, (now - start) / part.duration_ms)
+                    if part.duration_ms > 0
+                    else 1.0
+                )
+                px, py = self.point_along(progress, segments)
+                size = _RADIUS * _STAR
+                alpha = 1.0
+            else:
+                if note.headless_mode == "pop":
+                    continue
+                px, py = self.r.button_position(segments[0].start_pos)
+                r = (
+                    min(1.0, (now - note.timing) / part.delay_ms)
+                    if part.delay_ms > 0
+                    else 1.0
+                )
+                size = _RADIUS * _STAR * (_STAR_MIN + (1 - _STAR_MIN) * r)
+                alpha = r
+            rotation = (
+                self.path_tangent_angle(progress if now >= start else 0.0, segments)
+                + math.pi / 2
+            )
+            self.draw_star(c, px, py, size, color, rotation, note.is_ex, alpha)
+
+    def _draw_wifi_stars(
+        self,
+        c: _Canvas,
+        note: _Note,
+        part: SlidePart,
+        now: float,
+        color: tuple,
+    ) -> None:
         """renderWifiStars（L6140）：主路 + 两侧 ±1 位三线三星。"""
-        seg = note.segments[0]
-        delay = seg[4]
-        start = note.timing + delay
-        total = seg[5]
-        is_simul_slide = note.simul_slide_count >= 2
-        color = (
-            C_BREAK_DOT
-            if note.is_break
-            else C_SLIDE_SIMUL
-            if is_simul_slide
-            else C_SLIDE_CYAN
-        )
-        a0, b0 = seg[1], seg[2]
+        segments = part.segments
+        if not segments:
+            return
+        start = note.timing + part.delay_ms
+        progress = 0.0
+        if now >= start:
+            progress = (
+                min(1.0, (now - start) / part.duration_ms)
+                if part.duration_ms > 0
+                else 1.0
+            )
+        a0, b0 = segments[0].start_pos, segments[0].end_pos
         targets = [b0, (b0 - 1 - 1 + 8) % 8 + 1, (b0 - 1 + 1) % 8 + 1]
         for end in targets:
             p_start = self.r.button_position(a0)
             p_end = self.r.button_position(end)
+            rotation = math.atan2(p_end[1] - p_start[1], p_end[0] - p_start[0]) + (
+                math.pi / 2
+            )
             if now < start:
-                if note.is_headless:
+                if note.headless_mode == "pop":
                     continue
                 px, py = p_start
-                r = min(1.0, (now - note.timing) / delay) if delay > 0 else 1.0
+                r = (
+                    min(1.0, (now - note.timing) / part.delay_ms)
+                    if part.delay_ms > 0
+                    else 1.0
+                )
                 size = _RADIUS * _STAR * (_STAR_MIN + (1 - _STAR_MIN) * r)
                 alpha = r
             else:
-                t = min(1.0, (now - start) / total if total > 0 else 1.0)
-                px = p_start[0] + (p_end[0] - p_start[0]) * t
-                py = p_start[1] + (p_end[1] - p_start[1]) * t
+                px = p_start[0] + (p_end[0] - p_start[0]) * progress
+                py = p_start[1] + (p_end[1] - p_start[1]) * progress
                 size = _RADIUS * _STAR
                 alpha = 1.0
-            self.draw_star(c, px, py, size, color, 0.0, note.is_ex, alpha)
+            self.draw_star(c, px, py, size, color, rotation, note.is_ex, alpha)
 
-    # ---- slide 起点星形头（renderSingleSlideStart L8411：simai 恒星头）
-    def draw_slide_head(self, c: _Canvas, note: _Note, now: float) -> None:
-        pos = _note_position(note, now, c.cx, c.cy, c.radius)
-        if not pos.visible:
-            return
-        # 尺寸随 note scale（接近期缩小），rotation=0（slideRotation 关）
-        size = c.radius / 12.5 * pos.alpha * _STAR_HEAD
+    # ---- 星星 tap 头（renderStarTapNote L8535）：`$` 修饰的 tap/break
+    def draw_star_tap(self, c: _Canvas, note: _Note, pos: _Pos, now: float) -> None:
+        size = c.radius / 12.5 * pos.alpha * 1.15 * 1.25
         color = (
             C_BREAK_DOT
             if note.is_break
@@ -2180,9 +2335,130 @@ class _SlideRenderer:
             if note.is_each
             else C_SLIDE_CYAN
         )
+        rotation = -now * _QT if note.is_spinning_star else 0.0
         if note.is_ex:
             self.draw_ex_star_ring(c, pos.x, pos.y, size, note.is_break, note.is_each)
-        self.draw_star(c, pos.x, pos.y, size, color, 0.0, note.is_ex)
+        self.draw_star(c, pos.x, pos.y, size, color, rotation, note.is_ex)
+
+    # ---- slide 起点星形头（renderSingleSlideStart L8411）
+    def draw_slide_head(self, c: _Canvas, note: _Note, now: float) -> None:
+        pos = _note_position(note, now, c.cx, c.cy, c.radius)
+        if not pos.visible:
+            return
+        is_simul = note.is_each
+        if note.has_tap_head:
+            self.r.draw_tap(
+                c,
+                _Note(
+                    "tap",
+                    note.pos,
+                    note.timing,
+                    is_break=note.is_break,
+                    is_ex=note.is_ex,
+                ),
+                pos,
+            )
+            return
+        size = c.radius / 12.5 * pos.alpha * 1.15 * 1.25
+        color = (
+            C_BREAK_DOT
+            if note.is_break
+            else C_SLIDE_SIMUL
+            if is_simul
+            else C_SLIDE_CYAN
+        )
+        rotation = self.calculate_star_rotation(note, now)
+        if note.is_ex:
+            self.draw_ex_star_ring(
+                c,
+                pos.x,
+                pos.y,
+                size,
+                note.is_break,
+                is_simul,
+                note.parts and len(note.parts) > 1,
+            )
+        if len(note.parts) > 1:
+            self._draw_split_slide_star(
+                c, pos.x, pos.y, size, color, rotation, note.is_ex
+            )
+        else:
+            self.draw_star(c, pos.x, pos.y, size, color, rotation, note.is_ex)
+
+    def _draw_split_slide_star(
+        self,
+        c: _Canvas,
+        x: float,
+        y: float,
+        size: float,
+        color: tuple,
+        rotation: float,
+        is_ex: bool,
+    ) -> None:
+        """renderSplitSlideStar（L8427）：`*` 分裂滑轨的双星头（正交两枚十角环）。"""
+
+        def star_pts(outer: float, inner: float, rot: float):
+            return [
+                (
+                    x
+                    + math.cos(k * math.pi / 5 + rot)
+                    * (outer if k % 2 == 0 else inner),
+                    y
+                    + math.sin(k * math.pi / 5 + rot)
+                    * (outer if k % 2 == 0 else inner),
+                )
+                for k in range(10)
+            ]
+
+        def ring_path(outer: float, inner_big: float, inner_small: float) -> list:
+            path = star_pts(outer, inner_big, 0.0)
+            path += star_pts(inner_big * 0.55, inner_small, 0.0)[::-1]
+            return path
+
+        if not is_ex:
+            for rot in (-math.pi / 2, math.pi / 2):
+                c.polygon(
+                    star_pts(size, size * 0.5, rot + rotation),
+                    outline=C_BLACK,
+                    width=self.r.sw * 3,
+                )
+        # 填充：两个朝向的环（外正向 + 内 0.55 反向）
+        for rot in (-math.pi / 2, math.pi / 2):
+            outer_ring = [
+                (
+                    x
+                    + math.cos(k * math.pi / 5 + rot + rotation)
+                    * (size if k % 2 == 0 else size * 0.5),
+                    y
+                    + math.sin(k * math.pi / 5 + rot + rotation)
+                    * (size if k % 2 == 0 else size * 0.5),
+                )
+                for k in range(10)
+            ]
+            inner_ring = [
+                (
+                    x
+                    + math.cos(k * math.pi / 5 + rot + rotation)
+                    * (size * 0.55 if k % 2 == 0 else size * 0.275),
+                    y
+                    + math.sin(k * math.pi / 5 + rot + rotation)
+                    * (size * 0.55 if k % 2 == 0 else size * 0.275),
+                )
+                for k in range(10)
+            ][::-1]
+            path = [*c.pts(outer_ring), *c.pts(inner_ring)]
+            mask = Image.new("L", (c.img.width, c.img.height), 0)
+            ImageDraw.Draw(mask).polygon(path, fill=255)
+            fill_img = Image.new("RGBA", c.img.size, (*color[:3], int(255 * 1.0)))
+            c.img.paste(fill_img, (0, 0), mask)
+        _ = ring_path
+        for rot in (-math.pi / 2, math.pi / 2):
+            c.polygon(
+                star_pts(size, size * 0.5, rot + rotation),
+                outline=C_WHITE,
+                width=self.r.sw,
+            )
+        c.fill_circle(x, y, size * 0.15, color)
 
 
 class _TouchRenderer:
@@ -2197,7 +2473,8 @@ class _TouchRenderer:
         sensor = note.sensor or "C"
         if sensor == "C":
             return _CENTER, _CENTER
-        num = note.touch_num or 1
+        # JS z()（L125）：u = 位置数字，无数字时 0（裸区 B/A/D/E 合法写法）
+        num = note.touch_num if note.touch_num is not None else 0
         ratio = {"A": 400 / 480, "B": 220 / 480, "D": 410 / 480, "E": 310 / 480}[sensor]
         base = (
             -math.pi / 2 + (num - 1) * math.pi / 4
@@ -2441,12 +2718,12 @@ class _TouchRenderer:
         """
 
         def oe(keys: list, src: int, is_hold: bool) -> None:
-            seq = 0
+            # Oe()（L6675）：同一 note 的全部部件共用一个 layer（touch-hold=4、
+            # touch=3），部件顺序靠 order 偏移；无名占位在 layer 5
+            layer = 4 if is_hold else 3
 
-            def push(layer: int, part: str | None) -> None:
-                nonlocal seq
-                keys.append((_sort_key(layer, -src + seq), src, part))
-                seq += 1
+            def push(order: int, part: str | None) -> None:
+                keys.append((_sort_key(layer, -src + order), src, part))
 
             push(3, "center")
             push(2, "petal-0")
@@ -2455,13 +2732,16 @@ class _TouchRenderer:
             push(1, "petal-3")
             if not is_hold:
                 push(4, None)
-            push(5, None)
+            keys.append((_sort_key(5, 2), src, None))
             if is_hold:
                 push(-1, "gauge")
 
         out = []
         for zone in _TOUCH_ZONES:
-            zone_entries = [e for e in entries if e[0] == zone]
+            zone_entries = sorted(
+                (e for e in entries if e[0] == zone),
+                key=lambda e: (e[1], -e[3]),
+            )
             if not zone_entries:
                 continue
             by_src = {e[3]: e[4] for e in zone_entries}
@@ -2602,21 +2882,24 @@ class _Fireworks:
         if t < 0:
             return
         i = _RADIUS / 4.5
+        # (起亮时刻, 起始半径, 峰值透明度, ramp 时长, 衰减寿命, 衰减窗口, 色)
         specs = (
-            (0.06, i * 1.3, 0.7, 1.173, (255, 235, 200), (255, 180, 100)),
-            (0.04, i * 0.55, 0.6, 0.51, (255, 245, 220), (255, 220, 160)),
+            (0.06, i * 1.3, 0.7, 0.04, 1.173, None, (255, 235, 200)),
+            (0.04, i * 0.55, 0.6, 0.02, 0.51, 0.55, (255, 245, 220)),
         )
         balls = []
-        for a, o, s, decay, c_in, c_out in specs:
-            if t < a:
-                m = t / a * o
-                p = s * min(1.0, t / (a * 2 / 3))
+        for start, radius, peak, ramp, decay, window, color in specs:
+            if t < start:
+                m = t / start * radius
+                p = peak * min(1.0, t / ramp)
+            elif window is None or t < window:
+                e = (t - start) / decay
+                m = radius * (1 - e)
+                p = peak * (1 - e)
             else:
-                e = (t - a) / decay
-                m = o * (1 - e)
-                p = s * (1 - e)
+                continue
             if p > 0 and m > 0:
-                balls.append((m, p, c_in, c_out))
+                balls.append((m, p, color))
         if not balls:
             return
         max_r = max(m for m, *_ in balls)
@@ -2630,13 +2913,14 @@ class _Fireworks:
         yy, xx = np.mgrid[0:h, 0:w]
         dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / _SS
         out = np.asarray(layer.crop((x0, y0, x1, y1)), dtype=np.float32)
-        for m, p, c_in, c_out in balls:
+        for m, p, c_in in balls:
             r_px = m
             t_arr = np.clip(dist / r_px, 0, 1)
-            alpha = (1.0 - t_arr) ** 1 * p
+            # canvas 径向渐变外圈 rgba(...,0)：预乘插值下 RGB 保持内色
+            alpha = (1.0 - t_arr) * p
             col = np.empty((h, w, 3), dtype=np.float32)
             for ch in range(3):
-                col[..., ch] = c_in[ch] + (c_out[ch] - c_in[ch]) * t_arr
+                col[..., ch] = c_in[ch]
             src_a = (alpha * 255)[..., None]
             if additive:
                 out[..., :3] += col * (src_a / 255.0)
@@ -2657,7 +2941,8 @@ class _Fireworks:
         for n in touches:
             end = n.timing + n.duration if n.kind == "touch-hold" else n.timing
             if end <= now and n.fire:
-                latest = (n, end)
+                if latest is None or end > latest[1]:
+                    latest = (n, end)
         if not latest:
             return
         note, end = latest
@@ -2688,7 +2973,7 @@ class _Fireworks:
         wedge = self.wedge_sprite()
         scratch = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         rotated = wedge.rotate(
-            math.degrees(rot),
+            -math.degrees(rot),
             resample=Image.BILINEAR,
             center=(wedge.width / 2, wedge.height / 2),
         )
@@ -2704,7 +2989,8 @@ class _Fireworks:
         g = min(1.0, (o - _FIREWORK_PHASE) / 0.5)
         hole_in = h * (0.05 + g * g * (3 - 2 * g) * 0.95)
         v = hole_in + h * 0.5
-        if v > 0:
+        cut_alpha = min(1.0, g / 0.2)  # JS L7813：切洞强度渐入
+        if v > 0 and cut_alpha > 0:
             yy, xx = np.mgrid[0 : scratch.height, 0 : scratch.width]
             dist = np.hypot(xx - c.s(pos[0]), yy - c.s(pos[1])) / _SS
             keep = np.ones_like(dist)
@@ -2713,6 +2999,7 @@ class _Fireworks:
             m2 = (dist > hole_in) & (dist < v)
             keep[m2] = (dist[m2] - hole_in) / (v - hole_in)
             alpha = np.asarray(scratch.getchannel("A"), dtype=np.float32) / 255.0
+            keep = 1.0 - cut_alpha * (1.0 - keep)
             scratch.putalpha(
                 Image.fromarray((alpha * keep * 255).astype(np.uint8), "L")
             )
@@ -2725,27 +3012,45 @@ class _Fireworks:
         if a <= 0:
             return
         lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-        ld = ImageDraw.Draw(lay, "RGBA")
-        alpha = int(255 * 0.589)
         n = len(_FIREWORK_COLORS)
         half_ang = math.pi / n * 0.45
+        cx, cy = x * _SS, y * _SS
         for e in range(n):
             t = e / n * math.tau + rot
-            p1 = (
-                (x + math.cos(t - half_ang) * a) * _SS,
-                (y + math.sin(t - half_ang) * a) * _SS,
+            pts = [
+                (cx, cy),
+                (
+                    cx + math.cos(t - half_ang) * a * _SS,
+                    cy + math.sin(t - half_ang) * a * _SS,
+                ),
+                (
+                    cx + math.cos(t + half_ang) * a * _SS,
+                    cy + math.sin(t + half_ang) * a * _SS,
+                ),
+            ]
+            x0 = int(max(0, min(px for px, _ in pts) - 1))
+            y0 = int(max(0, min(py for _, py in pts) - 1))
+            x1 = int(min(lay.width, max(px for px, _ in pts) + 2))
+            y1 = int(min(lay.height, max(py for _, py in pts) + 2))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            mask = Image.new("L", (x1 - x0, y1 - y0), 0)
+            ImageDraw.Draw(mask).polygon(
+                [(px - x0, py - y0) for px, py in pts], fill=255
             )
-            p2 = (
-                (x + math.cos(t + half_ang) * a) * _SS,
-                (y + math.sin(t + half_ang) * a) * _SS,
-            )
-            ld.polygon([(x * _SS, y * _SS), p1, p2], fill=(*_FIREWORK_COLORS[e], alpha))
+            yy, xx = np.mgrid[0 : y1 - y0, 0 : x1 - x0]
+            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / (a * _SS)
+            fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
+            arr = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
+            arr[..., 0], arr[..., 1], arr[..., 2] = _FIREWORK_COLORS[e]
+            arr[..., 3] = (fade * 0.589 * 255).astype(np.uint8)
+            lay.paste(Image.fromarray(arr, "RGBA"), (x0, y0), mask)
         c.img.alpha_composite(lay)
 
     def _blit_wedge(self, c: _Canvas, x: float, y: float, e: float, rot: float) -> None:
         wedge = self.wedge_sprite()
         rotated = wedge.rotate(
-            math.degrees(rot),
+            -math.degrees(rot),
             resample=Image.BILINEAR,
             center=(wedge.width / 2, wedge.height / 2),
         )
@@ -2886,7 +3191,7 @@ class _TouchHitEffects:
                 continue
             if n.timing > now or n.timing < now - _TOUCHHIT_LIFETIME * 1000:
                 continue
-            key = f"{n.sensor}{n.touch_num}"
+            key = _touch_position_name(n)
             if key not in latest or n.timing > latest[key]:
                 latest[key] = n.timing
         tr = _TouchRenderer(self.r)
@@ -2895,7 +3200,7 @@ class _TouchHitEffects:
                 continue
             if n.timing > now:
                 break
-            key = f"{n.sensor}{n.touch_num}"
+            key = _touch_position_name(n)
             if latest.get(key) != n.timing:
                 continue
             elapsed = (now - n.timing) / 1000
@@ -2905,7 +3210,7 @@ class _TouchHitEffects:
             seed = round(n.timing * 1000) & 0xFFFFFFFF
             if seed >= 2**31:
                 seed -= 2**32
-            for i, ch in enumerate(f"{n.sensor}{n.touch_num}"):
+            for i, ch in enumerate(_touch_position_name(n)):
                 seed = seed ^ (ord(ch) * (i + 1) * 73856093 & 0xFFFFFFFF)
                 if seed >= 2**31:
                     seed -= 2**32
@@ -3049,36 +3354,30 @@ class _TouchHitEffects:
 class _ChartRenderer:
     """整帧组合（renderFrame L7997 层序 + prepareRenderNotes L8232）。"""
 
-    def __init__(self, chart: SimaiDifficulty, sensor_image: bytes | None = None):
+    def __init__(self, chart: SiteChart):
         self.chart = chart
         self.notes = _map_notes(chart)
-        base_renderer = _Renderer(self.notes)
+        hit_notes = _collect_hit_notes(chart)
+        base_renderer = _Renderer(self.notes, chart, hit_notes)
         self.slide_renderer = _SlideRenderer(base_renderer)
         self.renderer = base_renderer
         self.touches = _TouchRenderer(base_renderer)
         self.fireworks = _Fireworks(base_renderer)
         self.touch_hits = _TouchHitEffects(base_renderer)
-        # BPM 变化点（HUD 闪色用：change 时刻表）
-        self._bpm_changes: list[tuple[float, float]] = []
-        prev_bpm = None
-        for t, b in chart.bpm_events:
-            if prev_bpm is not None and b != prev_bpm:
-                self._bpm_changes.append((t * 1000.0, 1 if b > prev_bpm else -1))
-            prev_bpm = b
-        # 静态底图（黑底 + 判定区 sensor.webp + 判定圈 + 按钮点）与 clip 圆
-        # alpha mask：预生成，每帧 copy。判定线按「判定区」设计（站内所见）：
-        # sensor 图先铺（logical (5,13) 起 590²，源码 L8093），圈与点叠加其上
+        # BPM 变化点（HUD 闪色：change 时刻表 + 方向）
+        self._bpm_changes: list[tuple[float, int]] = []
+        previous_bpm: float | None = None
+        for timing, bpm, _cumulative in chart.timeline.bpm_points:
+            if previous_bpm is not None and bpm != previous_bpm:
+                self._bpm_changes.append(
+                    (
+                        chart.timeline.ms_from_beat(timing),
+                        1 if bpm > previous_bpm else -1,
+                    )
+                )
+            previous_bpm = bpm
+        # 静态底图（黑底 + 判定圈 + 按钮点）与 clip 圆 alpha mask：预生成每帧 copy
         base = _Canvas()
-        if sensor_image:
-            try:
-                import io
-
-                sensor = Image.open(io.BytesIO(sensor_image)).convert("RGBA")
-                size = (_LOGICAL - 10) * _SS
-                sensor = sensor.resize((int(size), int(size)), Image.LANCZOS)
-                base.img.alpha_composite(sensor, (int(5 * _SS), int(13 * _SS)))
-            except Exception:  # 素材损坏等：退回纯圈
-                pass
         self._judgment_line(base)
         self._base_img = base.img
         size = base.img.width
@@ -3107,29 +3406,19 @@ class _ChartRenderer:
         now = now_ms
         # 1) 轨道 + 2) 移动星（slides 倒序：晚出的先画=在下，L8120/8126）
         for slide in reversed(self.renderer.slides):
-            self._draw_tracks(fc, slide, now)
+            for part in self.slide_renderer.ordered_parts(slide):
+                self._draw_tracks(fc, slide, part, now)
         for slide in reversed(self.renderer.slides):
-            self.slide_renderer.draw_slide_star(fc, slide, now)
+            self.slide_renderer.draw_slide_stars(fc, slide, now)
         # 3) 接近指示（hold/slide 弧 + 全对 GOLD 连接线，L8129）+ tap 弧批（L8131）
         self._draw_approach_indicators(fc, now)
         self.renderer.draw_tap_approach_arcs(fc, self.renderer.taps, now)
-        # 4) 分层头：taps 升序 → holds 升序 → slides 升序（L8271-8283）
-        for n in self.renderer.taps:
-            pos = _note_position(n, now, fc.cx, fc.cy, fc.radius)
-            if pos.visible:
-                self.renderer.draw_tap(fc, n, pos)
-        for n in self.renderer.holds:
-            head = _note_position(n, now, fc.cx, fc.cy, fc.radius)
-            if head.visible:
-                self.renderer.draw_hold(fc, n, now)
-        for n in self.renderer.slides:
-            if not n.is_headless:
-                self.slide_renderer.draw_slide_head(fc, n, now)
+        # 4) 分层头（L8271-8283：按时刻倒序绘制=晚出的在下）
+        self._draw_layered_heads(fc, now)
         # 5) touch：边框盒（L8133）→ 部件（ke/Ae 排序，L8135）
         self._draw_touches(fc, now)
         # clip 圆合成（静态 mask）：field 的 alpha 圈外清零后 alpha_composite
-        # 叠加——底图的判定区/判定圈/按钮点保留（paste 语义是整块替换，会把
-        # 圈内底图抹成 field 的透明像素，实测把判定线全部吃掉）
+        # 叠加——底图的判定圈/按钮点保留（paste 会整块替换，把圈内底图抹掉）
         field.putalpha(ImageChops.darker(field.getchannel("A"), self._clip_mask))
         c.img.alpha_composite(field)
         # 6) 特效阶段（L8136-8139）：screen/lighter 混合必须对最终画面进行
@@ -3139,10 +3428,7 @@ class _ChartRenderer:
         fx.img = c.img
         fx.d = ImageDraw.Draw(c.img, "RGBA")
         for n in self.renderer.holds:
-            if (
-                _note_position(n, now, fx.cx, fx.cy, fx.radius).visible
-                and n.timing <= now < n.timing + n.duration
-            ):
+            if n.timing <= now < n.timing + n.duration:
                 self.renderer.draw_press_ripple(
                     fx,
                     *self.renderer.button_position(n.pos),
@@ -3154,6 +3440,37 @@ class _ChartRenderer:
         self.touch_hits.render(fx, self.renderer.touches, now)
         self._draw_tap_hit_effects(fx, now)
         return c.img
+
+    def _draw_layered_heads(self, fc: _Canvas, now: float) -> None:
+        """renderLayeredHeads（L8500）：按时刻倒序绘制；同刻 tap→hold→slide。
+
+        JS 先按 timingMs 降序稳定排序再 reverse，再从尾部倒序绘制——效果是
+        晚出的头先画（在下）、早出的后画（在上）；同刻顺序 tap,hold,slide。
+        """
+        order = {"tap": 0, "hold": 1, "slide": 2}
+        items: list[tuple[float, int, _Note]] = []
+        for n in self.renderer.taps:
+            items.append((n.timing, order["tap"], n))
+        for n in self.renderer.holds:
+            items.append((n.timing, order["hold"], n))
+        for n in self.renderer.slides:
+            if not n.is_headless:
+                items.append((n.timing, order["slide"], n))
+        items.sort(key=lambda item: (-item[0], item[1]))
+        for _timing, kind_order, n in items:
+            if kind_order == 0:
+                pos = _note_position(n, now, fc.cx, fc.cy, fc.radius)
+                if pos.visible:
+                    if n.is_star:
+                        self.slide_renderer.draw_star_tap(fc, n, pos, now)
+                    else:
+                        self.renderer.draw_tap(fc, n, pos)
+            elif kind_order == 1:
+                head = _note_position(n, now, fc.cx, fc.cy, fc.radius)
+                if head.visible:
+                    self.renderer.draw_hold(fc, n, now)
+            else:
+                self.slide_renderer.draw_slide_head(fc, n, now)
 
     def _draw_approach_indicators(self, fc: _Canvas, now: float) -> None:
         """renderApproachIndicators（L8352）：hold/slide 接近组弧 + 全对连线。"""
@@ -3179,12 +3496,14 @@ class _ChartRenderer:
                         if n.is_each
                         else C_TAP_DOT
                     )
-                else:  # slide（hasTapHead=false → CYAN，L8366）
+                else:  # slide（hasTapHead → TAP_PINK，否则 CYAN，L8366）
                     color = (
                         C_BREAK_DOT
                         if n.is_break
                         else C_SIMUL_DOT
                         if n.is_each
+                        else C_TAP_DOT
+                        if n.has_tap_head
                         else C_SLIDE_CYAN
                     )
                 self.renderer.draw_approach_arc(
@@ -3211,8 +3530,6 @@ class _ChartRenderer:
                 key = (n.sensor, n.touch_num)
                 count_by_pos[key] = count_by_pos.get(key, 0) + 1
         for n in reversed(touches):
-            if n.kind == "touch-hold":
-                continue
             key = (n.sensor, n.touch_num)
             self.touches.draw_border(fc, n, count_by_pos.get(key, 0), now)
         # 部件（ke/Ae 排序）
@@ -3243,57 +3560,69 @@ class _ChartRenderer:
                     ang = math.atan2(fc.cy - y, fc.cx - x)
                 self._hit_effect_at(fc, x, y, ang, (now - end) / _HIT_MS, "hexagon")
 
-    def _draw_tracks(self, fc: _Canvas, note: _Note, now: float) -> None:
-        if not note.segments:
+    def _draw_tracks(
+        self, fc: _Canvas, note: _Note, part: SlidePart, now: float
+    ) -> None:
+        """renderSlidePath 的 tracks 分支（L5670）：按并行动径各自的 delay/duration。"""
+        if not part.segments:
             return
-        delay = note.segments[0][4]
-        total = sum(s[5] for s in note.segments)
-        end = note.timing + delay + total
-        if now > end:
+        start = note.timing + part.delay_ms
+        if now > start + part.duration_ms:
             return
-        alpha = self.slide_renderer.track_alpha(note, now)
-        if alpha <= 0:
+        # 普通段与 wifi 段分别取轨道透明度（JS L5682/5689）
+        alpha_plain = self.slide_renderer.track_alpha(note, now, False)
+        alpha_wifi = self.slide_renderer.track_alpha(note, now, True)
+        if alpha_plain <= 0 and alpha_wifi <= 0:
+            return
+        ranges = self.slide_renderer.path_ranges(part.segments)
+        if ranges is None:  # 零长度路径：getSlidePathMetrics 返回 null 不画
             return
         progress = 0.0
-        if now >= note.timing + delay and total > 0:
-            progress = min(1.0, (now - note.timing - delay) / total)
-        # 段进度按弧长（getSlidePathMetrics L5706）；轨道配色 = 同刻 slide≥2
-        is_simul_slide = note.simul_slide_count >= 2
-        ranges = self.slide_renderer.path_ranges(note.segments)
-        for i, seg in enumerate(note.segments):
+        if now >= start and part.duration_ms > 0:
+            progress = min(1.0, (now - start) / part.duration_ms)
+        # 轨道配色：同刻 slide≥2 或 `*` 分裂滑轨 → 黄（L5677 d = isSplitSlide）
+        is_simul_slide = note.simul_slide_count >= 2 or len(note.parts) > 1
+        # 段从后往前画（JS L5688）：第一段压在后段之上
+        for i in range(len(part.segments) - 1, -1, -1):
+            seg = part.segments[i]
+            alpha = alpha_wifi if seg.type == "w" else alpha_plain
+            if alpha <= 0:
+                continue
+            r0, r1 = ranges[i]
             seg_progress = 0.0
-            if ranges:
-                r0, r1 = ranges[i]
-                if progress > r0:
-                    seg_progress = (
-                        1.0 if progress >= r1 else (progress - r0) / (r1 - r0)
-                    )
-            extend = i < len(note.segments) - 1
+            if progress > r0:
+                seg_progress = 1.0 if progress >= r1 else (progress - r0) / (r1 - r0)
+            extend = i < len(part.segments) - 1
             self.slide_renderer.draw_segment_arrows(
-                fc, seg, seg_progress, alpha, seg[6], is_simul_slide, extend
+                fc, seg, seg_progress, alpha, part.is_break, is_simul_slide, extend
             )
 
     def _draw_tap_hit_effects(self, fc: _Canvas, now: float) -> None:
         """renderTapHitEffect（L8559）：同位去重（只画窗内最新）。"""
-        latest: dict[int, tuple[float, _Note]] = {}
-        for n in self.renderer.hit_notes:
-            if n.timing > now or n.timing < now - _HIT_MS:
+        window = [
+            (pos, timing, is_star)
+            for pos, timing, is_star in self.renderer.hit_notes
+            if now - _HIT_MS <= timing <= now
+        ]
+        latest: dict[int, float] = {}
+        for pos, timing, _is_star in window:
+            current = latest.get(pos)
+            if current is None or timing > current:
+                latest[pos] = timing
+        for pos, timing, is_star in window:
+            if latest.get(pos) != timing:
                 continue
-            cur = latest.get(n.pos)
-            if cur is None or n.timing > cur[0]:
-                latest[n.pos] = (n.timing, n)
-        for n in self.renderer.hit_notes:
-            if n.timing > now:
-                break
-            cur = latest.get(n.pos)
-            if cur is None or cur[1] is not n:
-                continue
-            dt = now - n.timing
-            shape = "star" if n.is_break else "hexagon"
-            ang = _button_angle(n.pos)
+            ang = _button_angle(pos)
             px = fc.cx + math.cos(ang) * fc.radius
             py = fc.cy + math.sin(ang) * fc.radius
-            self._hit_effect_at(fc, px, py, ang, dt / _HIT_MS, shape)
+            self._hit_effect_at(
+                fc,
+                px,
+                py,
+                ang,
+                (now - timing) / _HIT_MS,
+                "star" if is_star else "hexagon",
+            )
 
     def _hit_effect_at(
         self, fc: _Canvas, x: float, y: float, rot: float, progress: float, shape: str
@@ -3326,6 +3655,9 @@ class _ChartRenderer:
             )
             if abs(rot) > 1e-9:
                 img = img.rotate(-math.degrees(rot), resample=Image.BILINEAR)
+            if c_alpha < 1:
+                img = img.copy()
+                img.putalpha(img.getchannel("A").point(lambda v: int(v * c_alpha)))
             lay.alpha_composite(
                 img,
                 (
@@ -3345,11 +3677,10 @@ class _ChartRenderer:
         blit(math.cos(w_ang) * h, math.sin(w_ang) * h, p)
         blit(math.cos(t_ang) * h, math.sin(t_ang) * h, m2)
         blit(math.cos(e_ang) * h, math.sin(e_ang) * h, m2)
-        lay.putalpha(lay.getchannel("A").point(lambda v: int(v * c_alpha)))
         fc.img.alpha_composite(_clip_layer(lay))
 
     def _judgment_line(self, c: _Canvas) -> None:
-        """renderJudgmentLine（L8086）sensor 设计：白圈 + 8 按钮点叠加底图。"""
+        """renderJudgmentLine（L8086）simple 设计：白圈 + 8 按钮点。"""
         c.stroke_circle(c.cx, c.cy, c.radius, C_WHITE, _JLINE * c.radius)
         for pos in range(1, 9):
             bx, by = self.renderer.button_position(pos)
@@ -3376,10 +3707,11 @@ class _ChartRenderer:
             )
             d.text((x, y), txt, font=self._font(px), fill=color, anchor=anchor)
 
-        bpm = self._bpm_at(now)
+        beat = self.chart.timeline.beat_from_ms(now)
+        bpm = self.chart.timeline.bpm_at_beat(beat)
         bpm_col = C_WHITE
-        for t_chg, direction in self._bpm_changes:
-            dt = now - t_chg
+        for change_ms, direction in self._bpm_changes:
+            dt = now - change_ms
             if 0 <= dt < 500:
                 e = max(0.0, (dt - 50) / 450)
                 if direction > 0:
@@ -3387,8 +3719,7 @@ class _ChartRenderer:
                 else:
                     bpm_col = (round(255 * e), 255, round(255 * e))
         text(n20, n20, f"BPM: {math.floor(bpm)}", n22, bpm_col)
-        div = self._divisor_at(now)
-        beat = self._beat_at(now)
+        div = self.chart.timeline.divisor_at_beat(beat)
         measure = int(beat // 4)
         beat_in = int(beat % 4) + 1
         frac = beat % 1
@@ -3434,163 +3765,148 @@ class _ChartRenderer:
             self.renderer._fonts[px] = cached
         return cached
 
-    def _bpm_at(self, ms: float) -> float:
-        bpm = self.chart.bpm_events[0][1] if self.chart.bpm_events else 120.0
-        for t, b in self.chart.bpm_events:
-            if t * 1000.0 <= ms:
-                bpm = b
-            else:
-                break
-        return bpm or 120.0
 
-    def _divisor_at(self, ms: float) -> int:
-        div = self.chart.divisor_events[0][1] if self.chart.divisor_events else 4
-        for t, v in self.chart.divisor_events:
-            if t * 1000.0 <= ms:
-                div = v
-            else:
-                break
-        return div
+def _collect_hit_notes(chart: SiteChart) -> list[tuple[int, float, bool]]:
+    """hitEffectNotes（L8268）：(按钮位, 时刻 ms, 是否星形打击特效)。
 
-    def _beat_at(self, ms: float) -> float:
-        events = [
-            (0.0, self.chart.bpm_events[0][1] if self.chart.bpm_events else 120.0)
-        ]
-        events += [(t * 1000.0, b) for t, b in self.chart.bpm_events[1:]]
-        beat = 0.0
-        for i, (t0, b0) in enumerate(events):
-            t1 = events[i + 1][0] if i + 1 < len(events) else ms
-            span = min(ms, t1) - t0
-            if span > 0:
-                beat += span * b0 / 60000.0
-            if ms <= t1:
-                break
-        return beat
-
-
-def _map_notes(chart: SimaiDifficulty) -> list[_Note]:
-    """SimaiDifficulty → 渲染 note 序列。
-
-    与 JS prepareRenderNotes 的 note 对象对应关系：
-    - simai.py 为物量补发的滑键头 tap 在此**过滤**（JS 滑键头由 slide note
-      自绘星形头，不存在独立 tap note；两者同时画会出双头）；
-    - 连段（`*` 链）合并为单条多段 slide（= 站内单路径 slideSegments）。
+    JS 口径：带数字位的 note 中排除 touch/touch-hold/hold-start/headless slide；
+    星形 = break tap / `$` 星 tap / break hold 的 hold-end / break slide 头。
     """
-    notes: list[_Note] = []
-    slides: list[_Note] = []
-    # 非tapless 滑键的 (时刻, 位) 集合：用于过滤头部补发 tap
-    slide_heads: set[tuple[float, int]] = set()
-
-    def bpm_at(t_sec: float) -> float:
-        bpm = chart.bpm_events[0][1] if chart.bpm_events else 120.0
-        for t, b in chart.bpm_events:
-            if t <= t_sec:
-                bpm = b
-            else:
-                break
-        return bpm or 120.0
-
-    for n in sorted(chart.notes, key=lambda x: x.time):
-        ms = n.time * 1000.0
-        if isinstance(n, SimaiTap):
-            notes.append(
-                _Note(
-                    "tap",
-                    n.position + 1,
-                    ms,
-                    is_break=n.is_break,
-                    is_each=n.is_each,
-                    is_ex=n.is_ex,
-                    visual_only=getattr(n, "visual_only", False),
-                )
+    items: list[tuple[int, float, bool]] = []
+    for note in chart.notes:
+        if note.type in (
+            "tap",
+            "break",
+            "simultaneous",
+            "hold-end",
+            "hold-end-simultaneous",
+            "slide",
+        ):
+            if note.type == "slide" and note.is_headless:
+                continue
+            if not isinstance(note.position, int):
+                continue
+            is_star = (
+                note.type == "break"
+                or (note.type in ("tap", "simultaneous") and note.is_star)
+                or note.is_break_hold
+                or (note.type == "slide" and note.is_start_break)
             )
-        elif isinstance(n, SimaiHold):
+            items.append((note.position, note.timing_ms, is_star))
+    return items
+
+
+def _map_notes(chart: SiteChart) -> list[_Note]:
+    """SiteChart → 渲染 note 序列（字段/顺序对齐 JS preparedRenderNotes 输入）。"""
+    notes: list[_Note] = []
+    hold_starts: dict[tuple[int, float], ChartNote] = {}
+    # Le()（L7031）：touch 部件排序用的 sourceNoteIndex（hold-end 类不计）
+    source_index: dict[int, int] = {}
+    counter = 0
+    for note in chart.notes:
+        if note.type in ("hold-end", "hold-end-simultaneous", "touch-hold-end"):
+            continue
+        if note.type in ("touch", "touch-hold-start"):
+            source_index[id(note)] = counter
+        counter += 1
+
+    for note in chart.notes:
+        kind = note.type
+        if kind in ("hold-start", "hold-start-simultaneous"):
+            hold_starts[(int(note.position), round(note.timing, 3))] = note
+        elif kind in ("hold-end", "hold-end-simultaneous"):
+            start_key = (
+                int(note.position),
+                round(note.hold_start_timing or 0.0, 3),
+            )
+            start = hold_starts.pop(start_key, None)
+            if start is None:
+                continue
             notes.append(
                 _Note(
                     "hold",
-                    n.position + 1,
-                    ms,
-                    duration=n.duration * 1000.0,
-                    is_break=n.is_break,
-                    is_each=n.is_each,
-                    is_ex=n.is_ex,
+                    int(note.position),
+                    start.timing_ms,
+                    is_break=start.is_break_hold,
+                    is_ex=start.is_ex,
+                    duration=note.timing_ms - start.timing_ms,
                 )
             )
-        elif isinstance(n, SimaiSlide):
-            delay = 60000.0 / bpm_at(n.time)
-            seg = (
-                n.shape,
-                n.start_pos + 1,
-                n.end_pos + 1,
-                (n.reflect_pos + 1) if n.reflect_pos is not None else None,
-                delay,
-                n.duration * 1000.0,
-                n.is_break,
-            )
-            if not n.tapless:
-                slide_heads.add((round(ms, 3), n.start_pos + 1))
-            prev = slides[-1] if slides else None
-            if (
-                prev is not None
-                and prev.kind == "slide"
-                and abs(prev.timing + sum(s[5] for s in prev.segments) - ms) < 1.0
-                and prev.segments[-1][2] == seg[1]
-            ):
-                prev.segments.append(seg)
-            else:
-                slide = _Note(
-                    "slide",
-                    n.start_pos + 1,
-                    ms,
-                    is_break=n.is_break,
-                    is_each=n.is_each,
-                    is_ex=n.is_ex,
-                    segments=[seg],
-                    is_headless=n.tapless,
-                )
-                slides.append(slide)
-                notes.append(slide)
-        elif isinstance(n, SimaiTouch):
-            kind = "touch-hold" if n.duration > 0 else "touch"
+        elif kind == "slide":
             notes.append(
                 _Note(
-                    kind,
-                    0,
-                    ms,
-                    duration=n.duration * 1000.0,
-                    is_each=n.is_each,
-                    fire=n.fire,
-                    sensor=n.sensor,
-                    touch_num=(n.position + 1) if n.position is not None else None,
+                    "slide",
+                    int(note.position),
+                    note.timing_ms,
+                    is_break=note.is_start_break,
+                    is_ex=note.is_ex,
+                    parts=[
+                        SlidePart(
+                            segments=part.segments,
+                            delay_ms=part.delay_ms,
+                            duration_ms=part.duration_ms,
+                            is_break=part.is_break,
+                        )
+                        for part in note.parts
+                    ],
+                    has_tap_head=note.has_tap_head,
+                    headless_mode=note.headless_mode,
+                    is_headless=note.is_headless,
+                    has_delay_marker=note.has_delay_marker,
                 )
             )
-    # 过滤头部补发 tap（JS 无此 note；滑键头由 slide 星形头自绘）
-    filtered = [
-        n
-        for n in notes
-        if not (n.kind == "tap" and (round(n.timing, 3), n.pos) in slide_heads)
-    ]
-    # Le()：touch 部件排序用的全体序号
-    for i, n in enumerate(filtered):
-        n.src_index = i
-    return filtered
+        elif kind in ("tap", "break", "simultaneous"):
+            notes.append(
+                _Note(
+                    "tap",
+                    int(note.position),
+                    note.timing_ms,
+                    is_break=kind == "break",
+                    is_ex=note.is_ex,
+                    is_star=note.is_star,
+                    is_spinning_star=note.is_spinning_star,
+                    has_delay_marker=note.has_delay_marker,
+                )
+            )
+        elif kind in ("touch", "touch-hold-start"):
+            position = str(note.position)
+            sensor = position[:1]
+            number = None
+            if sensor != "C" and len(position) > 1:
+                try:
+                    number = int(position[1:])
+                except ValueError:
+                    number = None
+            duration = 0.0
+            if kind == "touch-hold-start":
+                duration = note.duration_ms
+            notes.append(
+                _Note(
+                    "touch-hold" if kind == "touch-hold-start" else "touch",
+                    0,
+                    note.timing_ms,
+                    duration=duration,
+                    fire=note.has_firework,
+                    sensor=sensor,
+                    touch_num=number,
+                    src_index=source_index.get(id(note), 0),
+                )
+            )
+    return notes
 
 
 def render_chart_video(
-    chart: SimaiDifficulty,
+    chart: SiteChart,
     *,
-    title: str,
-    level_label: str,
-    suffix: int,
     audio: bytes | None,
     out_path: Path,
     fps: int = 30,
-    size: int = 600,
     limit_seconds: float | None = None,
-    sensor_image: bytes | None = None,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
 
+    时间轴与站内播放器一致：视频从 chart beat 0 起（前 4 拍空场 lead-in），
+    音频从 beat 4 起播（chartpage.js syncFrame 的 240000/bpm 偏移）。
     ``limit_seconds`` 截断渲染时长；音频 None 时出无声视频。
     """
     import shutil
@@ -3598,12 +3914,13 @@ def render_chart_video(
 
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("未找到 ffmpeg，谱面预览渲染不可用（请安装 ffmpeg）")
-    del title, level_label, suffix, size  # 画面元素由渲染器按谱面自持
-    renderer = _ChartRenderer(chart, sensor_image=sensor_image)
-    total = max(1.0, chart.note_end + 1.0)
+    renderer = _ChartRenderer(chart)
+    total = max(1.0, chart.timeline.ms_from_beat(chart.total_beats) / 1000.0)
     if limit_seconds is not None:
         total = min(total, limit_seconds)
     n_frames = int(total * fps)
+    lead_ms = 240000.0 / chart.bpm
+    audio_delay = max(0.0, lead_ms - (chart.first_ms or 0.0))
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -3627,6 +3944,8 @@ def render_chart_video(
         audio_file = out_path.with_suffix(".audio.tmp")
         audio_file.write_bytes(audio)
         cmd += ["-i", str(audio_file), "-c:a", "aac", "-b:a", "160k"]
+        if audio_delay > 0:
+            cmd += ["-af", f"adelay={int(audio_delay)}:all=1"]
     cmd += [
         "-c:v",
         "libx264",
