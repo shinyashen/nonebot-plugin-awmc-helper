@@ -98,7 +98,9 @@ async def try_send_forward(
             # 形式在 LLOneBot 转发卡片下会渲染为「消息类型暂不支持查看」
             content = [{"type": seg.type, "data": dict(seg.data)} for seg in exported]
             for seg in content:
-                if seg["type"] == "image":
+                # 本地图片/视频都转 file:/// URI（同 image 的协议端口径；
+                # 谱面预览合并转发的视频节点走这里）
+                if seg["type"] in ("image", "video"):
                     file = str(seg["data"].get("file", ""))
                     if file.startswith("/"):
                         seg["data"]["file"] = Path(file).as_uri()

@@ -48,7 +48,6 @@ showHitEffect 开；播放时钟在 chart beat 0 起、音频从 beat 4（1 小�
 
 import math
 import zlib
-import warnings
 import threading
 from pathlib import Path
 from dataclasses import field, dataclass
@@ -78,15 +77,15 @@ _BASE_APPROACH_MS = 2250.0
 _HI_SPEED = 7.0 * 0.6  # 默认谱面流速 7.0 × setHiSpeed 隐藏系数 0.6
 _APPROACH_MS = _BASE_APPROACH_MS / _HI_SPEED
 _HALF_APPROACH = _APPROACH_MS / 2
-_HI_SPEED_MIN = 0.25
-_HI_SPEED_MAX = 10.0
+_HI_SPEED_MIN = 3.0
+_HI_SPEED_MAX = 9.75
 _HI_SPEED_STEP = 0.25
 _DEFAULT_HI_SPEED = 7.0
 DEFAULT_HI_SPEED = _DEFAULT_HI_SPEED
 
 
 def normalize_hi_speed(value: float | None) -> float:
-    """谱面流速参数校验：0.25–10、步长 0.25；非法回退默认 7.0。"""
+    """谱面流速参数校验：3–9.75、步长 0.25；非法回退默认 7.0。"""
     try:
         speed = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -4101,41 +4100,26 @@ def _map_notes(chart: SiteChart) -> list[_Note]:
     return notes
 
 
-_WORKER_RENDERER: "_ChartRenderer | None" = None
-_WORKER_FPS: int = 30
-_WORKER_SIZE: int = int(_LOGICAL)
-_WORKER_START_MS: float = 0.0
+_THREAD_STATE = threading.local()
+_CLIP_START_MS = 0.0
+_WORKER_SIZE = int(_LOGICAL)
 
 
-def _worker_init(
-    chart: SiteChart,
-    fps: int,
-    supersample: float,
-    start_ms: float = 0.0,
-    hi_speed: float = _DEFAULT_HI_SPEED,
-) -> None:
-    """子进程初始化：各自持有一个渲染器（fork 继承谱面对象，无需重解析）。"""
-    global _WORKER_RENDERER, _WORKER_FPS, _SS, _WORKER_START_MS
-    _SS = supersample
-    _apply_hi_speed(normalize_hi_speed(hi_speed))
-    _WORKER_RENDERER = _ChartRenderer(chart)
-    _WORKER_FPS = fps
-    _WORKER_START_MS = start_ms
+def _thread_worker_init(chart: SiteChart, fps: int) -> None:
+    """线程池 worker 初始化：每线程各持一个渲染器（共享只读谱面对象）。"""
+    _THREAD_STATE.renderer = _ChartRenderer(chart)
+    _THREAD_STATE.fps = fps
 
 
-def _worker_render_chunk(args: tuple[int, int]) -> list[bytes]:
-    """渲染 [start, start+count) 帧并缩到输出尺寸。
-
-    回传 **zlib 压缩帧**（1080KB→约 80KB）：原始 RGB 逐帧过管道/反序列化会在
-    父进程形成约 10ms/帧 的固定瓶颈，压缩后只剩约 1ms 解压（压缩本身在子进程
-    并行完成）。保序由 pool.map 保证。
-    """
+def _thread_render_chunk(args: tuple[int, int]) -> list[bytes]:
+    """渲染 [start, start+count) 帧（绝对时间）并返回 zlib 压缩帧。"""
     start, count = args
-    assert _WORKER_RENDERER is not None
+    renderer = _THREAD_STATE.renderer
+    fps = _THREAD_STATE.fps
     frames: list[bytes] = []
     for index in range(start, start + count):
-        now_ms = _WORKER_START_MS + index / _WORKER_FPS * 1000.0
-        frame = _WORKER_RENDERER.render_frame(now_ms, _WORKER_FPS)
+        now_ms = _CLIP_START_MS + index / fps * 1000.0
+        frame = renderer.render_frame(now_ms, fps)
         rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
         frames.append(
             zlib.compress(
@@ -4154,54 +4138,45 @@ def _write_frames_parallel(
     workers: int,
     start_ms: float = 0.0,
 ) -> bool:
-    """多进程分帧渲染并保序写入 ffmpeg 管道。
+    """多线程分帧渲染并保序写入 ffmpeg 管道。
 
-    fork 不可用时（Windows/受限环境）返回 False，由调用方退回串行渲染。
-    渲染与 x264 编码同时进行，故 workers 取 min(CPU-1, 上限) 留一个核给 ffmpeg。
+    用 :class:`ThreadPoolExecutor` 而不是 multiprocessing：渲染由 PIL/numpy
+    的 C 层主导、GIL 大部分时间释放（实测 8 线程 ≈ 2.4× 串行），且不需要在
+    多线程进程里 fork（Python 3.12 明确警告 multi-threaded fork 有死锁风险）。
+    每个线程各自持有一个渲染器（线程局部），共享只读谱面对象。
     """
-    import multiprocessing
+    import os
+    from concurrent.futures import ThreadPoolExecutor
 
-    try:
-        context = multiprocessing.get_context("fork")
-    except ValueError:
-        return False
-    workers = max(1, min(workers, (multiprocessing.cpu_count() or 1) - 1))
-    if workers <= 1:
-        return False
+    global _CLIP_START_MS
+
+    workers = max(1, min(workers, (os.cpu_count() or 1)))
     chunk = max(1, min(30, n_frames // (workers * 4) or 1))
     tasks = [
         (start, min(chunk, n_frames - start)) for start in range(0, n_frames, chunk)
     ]
-    from concurrent.futures import ProcessPoolExecutor
-
     wrote = 0
-    # 我们刻意用 fork（继承谱面对象，避免子进程重复 import/解析）；Python 3.12
-    # 对「多线程进程 fork」的 DeprecationWarning 属预期，渲染是纯 CPU 子任务，
-    # 在进程池创建/提交阶段静默该条告警，避免污染调用方/测试日志。
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="This process .* is multi-threaded.*",
-            category=DeprecationWarning,
-        )
-        try:
-            with ProcessPoolExecutor(
-                max_workers=workers,
-                mp_context=context,
-                initializer=_worker_init,
-                initargs=(chart, fps, _SS, start_ms, _HI_SPEED / 0.6),
-            ) as pool:
-                for frames in pool.map(_worker_render_chunk, tasks):
-                    for frame in frames:
-                        proc.stdin.write(zlib.decompress(frame))
-                        wrote += 1
-            return True
-        except (OSError, RuntimeError) as exc:
-            # 池创建/子进程启动失败且尚未写入任何帧 → 允许调用方退回串行；
-            # 已写入部分帧时不能重来（会重复帧），直接上抛由 finally 收尾报错。
-            if wrote:
-                raise RuntimeError(f"并行渲染中断（已写入 {wrote} 帧）") from exc
-            return False
+    previous_start = _CLIP_START_MS
+    _CLIP_START_MS = start_ms
+    try:
+        with ThreadPoolExecutor(
+            max_workers=workers,
+            initializer=_thread_worker_init,
+            initargs=(chart, fps),
+        ) as pool:
+            for frames in pool.map(_thread_render_chunk, tasks):
+                for frame in frames:
+                    proc.stdin.write(zlib.decompress(frame))
+                    wrote += 1
+        return True
+    except (OSError, RuntimeError):
+        # 已写入部分帧时不能退回串行（会重复帧），交由 finally 收尾报错；
+        # 未写入任何帧则允许调用方退回串行。
+        if wrote:
+            raise
+        return False
+    finally:
+        _CLIP_START_MS = previous_start
 
 
 _SS_LOCK = threading.Lock()
@@ -4358,8 +4333,8 @@ def _render_chart_video_impl(
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("未找到 ffmpeg，谱面预览渲染不可用（请安装 ffmpeg）")
     renderer = _ChartRenderer(chart)
-    if workers <= 0:  # 0=自动：CPU-1（给 ffmpeg 留一核），上限 8
-        workers = max(1, min(8, (os.cpu_count() or 1) - 1))
+    if workers <= 0:  # 0=自动：线程池受益有限，实测 2–4 线程最佳（上限 4）
+        workers = max(1, min(4, os.cpu_count() or 1))
     full_total_ms = max(1.0, chart.timeline.ms_from_beat(chart.total_beats))
     clip_start = max(0.0, min(start_ms, full_total_ms))
     clip_end = full_total_ms if end_ms is None else min(end_ms, full_total_ms)

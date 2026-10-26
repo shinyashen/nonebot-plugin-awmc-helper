@@ -52,3 +52,34 @@ async def test_forward_send_error_returns_false(monkeypatch):
 
     monkeypatch.setattr(bot, "call_api", rejected)
     assert await forward_mod.try_send_forward(bot, ["hi"], group_id=123) is False
+
+
+@pytest.mark.asyncio
+async def test_forward_video_node_uri(monkeypatch, tmp_path):
+    """视频节点：本地绝对路径转 file:/// URI（谱面预览合并转发用）。"""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    from nonebot_plugin_awmc_helper.core import forward as forward_mod
+
+    adapter = nonebot.get_adapter(OnebotV11Adapter)
+    bot = Bot(adapter=adapter, self_id="1234567890")
+    video = tmp_path / "preview.mp4"
+    video.write_bytes(b"\x00" * 16)
+    seen = {}
+
+    async def fake_call(api, **kwargs):
+        seen["api"] = api
+        seen["nodes"] = kwargs["messages"]
+        return {"message_id": 1}
+
+    monkeypatch.setattr(bot, "call_api", fake_call)
+    assert await forward_mod.try_send_forward(
+        bot, [UniMessage.video(path=str(video)), "信息"], group_id=123
+    )
+    nodes = seen["nodes"]
+    assert [node["data"]["content"][0]["type"] for node in nodes] == ["video", "text"]
+    video_seg = nodes[0]["data"]["content"][0]
+    assert video_seg["data"]["file"] == video.as_uri()

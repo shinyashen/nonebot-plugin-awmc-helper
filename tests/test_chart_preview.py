@@ -21,6 +21,20 @@ SNAPSHOTS = Path(__file__).parent / "data" / "snapshots" / "simai"
 BASE = "https://assets2.lxns.net"
 
 
+def _preview_result(path: Path, label: str = "13+", range_text: str | None = None):
+    """测试用 PreviewResult（统计字段填最小可用值）。"""
+    from nonebot_plugin_awmc_helper.core.render.chart_stats import ChartStats
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import PreviewResult
+
+    stats = ChartStats(
+        chart_ms=100_000.0,
+        measures=25,
+        counts={"TAP": 100, "HOLD": 20, "SLIDE": 30, "TOUCH": 5, "BREAK": 3},
+        ex_counts={"TAP": 10, "HOLD": 0, "SLIDE": 2, "TOUCH": 0, "BREAK": 0},
+    )
+    return PreviewResult(path=path, label=label, stats=stats, range_text=range_text)
+
+
 @pytest.fixture
 async def db(tmp_path):
     from nonebot_plugin_awmc_helper.core import store
@@ -168,9 +182,16 @@ async def test_command_single_hit_sends_video(
         assert index == 3  # 紫 → Master
         assert range_token is None
         assert hi_speed == 7.0
-        return fake_out, "13+"
+        return _preview_result(fake_out)
 
     monkeypatch.setattr(matchers, "build_preview", fake_build)
+
+    async def fake_deliver(bot, event, entry, result, hi_speed):
+        from nonebot.exception import FinishedException
+
+        raise FinishedException
+
+    monkeypatch.setattr(matchers, "_deliver", fake_deliver)
     await song_service.inject(songs)
     async with app.test_matcher(chart_preview) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
@@ -185,17 +206,6 @@ async def test_command_single_hit_sends_video(
                         " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
                         "同一谱面再次请求命中缓存秒回"
                     ),
-                ]
-            ),
-            result=None,
-            bot=bot,
-        )
-        ctx.should_call_send(
-            event,
-            Message(
-                [
-                    MessageSegment.at(event.user_id),
-                    MessageSegment.video(f"file://{fake_out}"),
                 ]
             ),
             result=None,
@@ -227,7 +237,8 @@ async def test_build_preview_orchestration(
             text=(SNAPSHOTS / "8.txt").read_text()
         )
         m.get(f"{BASE}/maimai/music/8.mp3").respond(content=b"fake-audio")
-        out, label = await build_preview(entry, 2)  # EXPERT
+        result = await build_preview(entry, 2)
+    out, label = result.path, result.label  # EXPERT
 
     assert out.exists()
     assert out.parent == cache_dir
@@ -239,8 +250,8 @@ async def test_build_preview_orchestration(
     assert fake_render[0]["hi_speed"] == 7.0
     # 二次调用命中缓存（渲染打桩不再被调）
     calls_before = len(fake_render)
-    out2, _ = await build_preview(entry, 2)
-    assert out2 == out
+    result2 = await build_preview(entry, 2)
+    assert result2.path == out
     assert len(fake_render) == calls_before
 
 
@@ -263,9 +274,16 @@ async def test_command_range_hint_and_build(
         seen["index"] = index
         seen["range"] = range_token
         seen["speed"] = hi_speed
-        return fake_out, "13+ · 0:35-1:20"
+        return _preview_result(fake_out, range_text="0:35-1:20")
 
     monkeypatch.setattr(matchers, "build_preview", fake_build)
+
+    async def fake_deliver(bot, event, entry, result, hi_speed):
+        from nonebot.exception import FinishedException
+
+        raise FinishedException
+
+    monkeypatch.setattr(matchers, "_deliver", fake_deliver)
     await song_service.inject(songs)
     async with app.test_matcher(chart_preview) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
@@ -280,17 +298,6 @@ async def test_command_range_hint_and_build(
                         " 片段渲染中：约需 20–60 秒（视 CPU），完成后自动发送；"
                         "同一片段再次请求命中缓存秒回"
                     ),
-                ]
-            ),
-            result=None,
-            bot=bot,
-        )
-        ctx.should_call_send(
-            event,
-            Message(
-                [
-                    MessageSegment.at(event.user_id),
-                    MessageSegment.video(f"file://{fake_out}"),
                 ]
             ),
             result=None,
@@ -325,7 +332,8 @@ async def test_build_preview_range(
             text=(SNAPSHOTS / "8.txt").read_text()
         )
         m.get(f"{BASE}/maimai/music/8.mp3").respond(content=b"fake-audio")
-        out, label = await build_preview(entry, 2, "0:05-0:10")
+        result = await build_preview(entry, 2, "0:05-0:10")
+    out, label = result.path, result.label
 
     assert out.exists()
     assert "_t0m05-0m10_p2_v7" in out.name
@@ -409,9 +417,16 @@ async def test_command_speed_and_range_args(
         seen["index"] = index
         seen["range"] = range_token
         seen["speed"] = hi_speed
-        return fake_out, "13+"
+        return _preview_result(fake_out)
 
     monkeypatch.setattr(matchers, "build_preview", fake_build)
+
+    async def fake_deliver(bot, event, entry, result, hi_speed):
+        from nonebot.exception import FinishedException
+
+        raise FinishedException
+
+    monkeypatch.setattr(matchers, "_deliver", fake_deliver)
     await song_service.inject(songs)
     hint = (
         " 片段渲染中：约需 20–60 秒（视 CPU），完成后自动发送；"
@@ -430,17 +445,6 @@ async def test_command_speed_and_range_args(
                 [
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(hint),
-                ]
-            ),
-            result=None,
-            bot=bot,
-        )
-        ctx.should_call_send(
-            event,
-            Message(
-                [
-                    MessageSegment.at(event.user_id),
-                    MessageSegment.video(f"file://{fake_out}"),
                 ]
             ),
             result=None,
@@ -480,3 +484,193 @@ async def test_command_requires_difficulty_color(app: App, db, cache_dir, songs)
             bot=bot,
         )
         ctx.should_finished()
+
+
+def test_forward_texts_order_and_stats():
+    """合并转发信息文案：歌曲信息含谱面时长/EX 分布，视频信息含流速与提示。"""
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+
+    base = _preview_result(
+        Path("/tmp/x.mp4"), label="13+ · 0:36-1:20", range_text="0:36-1:20"
+    )
+    result = base.__class__(
+        path=base.path,
+        label=base.label,
+        stats=base.stats,
+        range_text=base.range_text,
+        preroll_measures=2,
+    )
+
+    class Song:
+        title = "ラグトレイン"
+        id = 11355
+
+    song_text = matchers._song_info_text((11355, Song(), None), result)
+    assert "ラグトレイン" in song_text
+    assert "1:40.0" in song_text  # chart_ms=100000
+    assert "TAP 100（EX 10）" in song_text
+    video_text = matchers._video_info_text(result, 7.5)
+    assert "7.5" in video_text
+    assert "3–9.75" in video_text
+    assert "0:36-1:20" in video_text
+    assert "前置 2 小节" in video_text
+
+
+@pytest.mark.asyncio
+async def test_command_forward_message(
+    app: App, db, cache_dir, songs, monkeypatch, tmp_path
+):
+    """OneBot v11 下发合并转发：视频/歌曲信息/视频信息 3 节点同一 API。"""
+    from unittest.mock import ANY
+
+    from fake import fake_group_message_event_v11
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    fake_out = tmp_path / "forward.mp4"
+    fake_out.write_bytes(b"\x00" * 64)
+
+    async def fake_build(entry, index, range_token=None, hi_speed=7.0):
+        return _preview_result(fake_out)
+
+    monkeypatch.setattr(matchers, "build_preview", fake_build)
+    await song_service.inject(songs)
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message="谱面预览 紫+8")
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
+                        "同一谱面再次请求命中缓存秒回"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_api(
+            "send_group_forward_msg",
+            {"group_id": ANY, "message": ANY, "messages": ANY},
+            result={"message_id": 1},
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_command_forward_fallback(
+    app: App, db, cache_dir, songs, monkeypatch, tmp_path
+):
+    """合并转发失败（协议端不支持/报错）→ 降级普通视频 + 信息文本。"""
+    from unittest.mock import ANY
+
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import ActionFailed
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    fake_out = tmp_path / "fallback.mp4"
+    fake_out.write_bytes(b"\x00" * 64)
+    from nonebot_plugin_awmc_helper.core.types import SongType
+
+    song_8 = next(s for s in songs if s.id == 8)
+    entry = (8, song_8, SongType.STANDARD)
+    result = _preview_result(fake_out)
+
+    async def fake_build(entry_, index, range_token=None, hi_speed=7.0):
+        return result
+
+    monkeypatch.setattr(matchers, "build_preview", fake_build)
+    await song_service.inject(songs)
+    expected_text = (
+        matchers._song_info_text(entry, result)
+        + "\n\n"
+        + matchers._video_info_text(result, 7.0)
+    )
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message="谱面预览 紫+8")
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
+                        "同一谱面再次请求命中缓存秒回"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_api(
+            "send_group_forward_msg",
+            {"group_id": ANY, "message": ANY, "messages": ANY},
+            exception=ActionFailed(),
+        )
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.video(f"file://{fake_out}")]),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_send(
+            event,
+            Message([MessageSegment.text(expected_text)]),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_deliver_node_order(monkeypatch, tmp_path):
+    """合并转发节点顺序：视频 → 歌曲信息 → 视频信息（_deliver 单测）。"""
+    from types import SimpleNamespace
+
+    from nonebot.exception import FinishedException
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+
+    video = tmp_path / "order.mp4"
+    video.write_bytes(b"\x00" * 16)
+    result = _preview_result(video)
+    captured = {}
+
+    async def fake_forward(bot, entries, *, group_id=None, user_id=None):
+        captured["entries"] = entries
+        captured["group_id"] = group_id
+        captured["user_id"] = user_id
+        return True
+
+    monkeypatch.setattr(matchers, "is_ob11", lambda bot: True)
+    monkeypatch.setattr(matchers, "try_send_forward", fake_forward)
+    bot = SimpleNamespace(self_id="123456")
+    event = SimpleNamespace(group_id=87654321, user_id=12345678)
+
+    class Song:
+        title = "ラグトレイン"
+        id = 11355
+
+    with pytest.raises(FinishedException):
+        await matchers._deliver(bot, event, (11355, Song(), None), result, 7.0)
+
+    entries = captured["entries"]
+    assert len(entries) == 3
+    assert isinstance(entries[0], UniMessage)
+    assert "video" in [seg.type for seg in entries[0]]
+    assert "【歌曲信息】" in entries[1]
+    assert "【视频信息】" in entries[2]
+    assert captured["group_id"] == 87654321
+    assert captured["user_id"] is None

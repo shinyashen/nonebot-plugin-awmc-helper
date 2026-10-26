@@ -5,8 +5,10 @@
 命中直接发送。
 """
 
+import json
 import asyncio
 from pathlib import Path
+from dataclasses import dataclass
 
 from nonebot import logger
 from nonebot_plugin_localstore import get_cache_dir
@@ -28,6 +30,7 @@ from ...core.render.chart_range import (
     format_time,
     parse_range_token,
 )
+from ...core.render.chart_stats import ChartStats, compute_chart_stats
 from ...core.render.chart_video import render_chart_video
 
 _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
@@ -37,6 +40,19 @@ _INDEX_NAMES = ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 _CACHE_SUBDIR = "chart_preview"
 _CACHE_REVISION = 4
+
+
+@dataclass(frozen=True)
+class PreviewResult:
+    """渲染结果 + 合并转发所需的歌曲/视频信息。"""
+
+    path: Path
+    label: str
+    stats: ChartStats
+    range_text: str | None = None
+    preroll_measures: int = 0
+
+
 """渲染器版本：算法变更时递增，避免命中旧渲染器产物。"""
 
 
@@ -56,6 +72,7 @@ def _sweep_cache(cap_mb: int) -> None:
             break
         total -= p.stat().st_size
         p.unlink(missing_ok=True)
+        _stats_sidecar(p).unlink(missing_ok=True)
         logger.debug(f"chart_preview 缓存清理：{p.name}")
 
 
@@ -85,6 +102,48 @@ def _speed_suffix(hi_speed: float) -> str:
     return f"_v{hi_speed:g}"
 
 
+def _stats_sidecar(video: Path) -> Path:
+    return video.with_suffix(".stats.json")
+
+
+def _write_stats(result: PreviewResult) -> None:
+    payload = {
+        "label": result.label,
+        "range_text": result.range_text,
+        "preroll_measures": result.preroll_measures,
+        "chart_ms": result.stats.chart_ms,
+        "measures": result.stats.measures,
+        "counts": result.stats.counts,
+        "ex_counts": result.stats.ex_counts,
+    }
+    _stats_sidecar(result.path).write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def _read_stats(video: Path) -> PreviewResult | None:
+    sidecar = _stats_sidecar(video)
+    if not sidecar.exists():
+        return None
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        stats = ChartStats(
+            chart_ms=float(payload["chart_ms"]),
+            measures=int(payload["measures"]),
+            counts={k: int(v) for k, v in payload["counts"].items()},
+            ex_counts={k: int(v) for k, v in payload["ex_counts"].items()},
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return PreviewResult(
+        path=video,
+        label=str(payload.get("label", "")),
+        stats=stats,
+        range_text=payload.get("range_text"),
+        preroll_measures=int(payload.get("preroll_measures", 0)),
+    )
+
+
 def cached_path(
     entry: ChartEntry,
     index: int,
@@ -105,7 +164,7 @@ async def build_preview(
     index: int,
     range_token: str | None = None,
     hi_speed: float = 7.0,
-) -> tuple[Path, str]:
+) -> PreviewResult:
     """谱面类型条目 + 难度序 → 渲染好的 mp4 路径与难度标签。
 
     失败抛 ValueError/ExtError（message 面向用户）。``index`` 为 LevelIndex
@@ -128,7 +187,9 @@ async def build_preview(
     suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
     out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}{suffix}.mp4"
     if out.exists():
-        return out, level_label
+        cached = _read_stats(out)
+        if cached is not None:
+            return cached
 
     simai_text, _official_id = await fetch_chart_text(song.id, dx=dx)
     if is_utage:
@@ -145,10 +206,13 @@ async def build_preview(
     if site_chart is None:
         raise ValueError("素材站的谱面数据缺少该难度")
 
+    stats = compute_chart_stats(site_chart)
     clip = None
     clip_start = 0.0
     clip_end = None
     notes_start = None
+    range_text: str | None = None
+    preroll_measures = 0
     if range_token:
         parsed = parse_range_token(range_token)
         if parsed is None:
@@ -156,9 +220,23 @@ async def build_preview(
         clip = snap_range(site_chart, parsed[0], parsed[1])
         preroll = max(0, plugin_config.awmc_chart_preview_preroll_measures)
         clip_start, notes_start, clip_end = add_preroll(site_chart, clip, preroll)
+        preroll_measures = preroll
         start_label = "0:00" if parsed[0] is None else format_time(clip.start_ms)
         end_label = "结尾" if parsed[1] is None else format_time(clip.end_ms)
-        level_label = f"{level_label} · {start_label}-{end_label}"
+        range_text = f"{start_label}-{end_label}"
+        level_label = f"{level_label} · {range_text}"
+
+    if out.exists():
+        # 旧缓存（或无侧车）补建统计侧车后直接返回，不重复渲染
+        result = PreviewResult(
+            path=out,
+            label=level_label,
+            stats=stats,
+            range_text=range_text,
+            preroll_measures=preroll_measures,
+        )
+        _write_stats(result)
+        return result
 
     try:
         audio = await fetch_music(song.id)
@@ -186,5 +264,13 @@ async def build_preview(
         notes_start_ms=notes_start,
         hi_speed=hi_speed,
     )
+    result = PreviewResult(
+        path=out,
+        label=level_label,
+        stats=stats,
+        range_text=range_text,
+        preroll_measures=preroll_measures,
+    )
+    _write_stats(result)
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)
-    return out, level_label
+    return result
