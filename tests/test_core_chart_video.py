@@ -141,3 +141,11 @@ def test_render_with_audio(cv, site, tmp_path: Path):
     )
     assert out.exists()
     assert out.stat().st_size > 10_000
+
+
+def test_normalize_hi_speed(cv):
+    """谱面流速校验：0.25–10 步长 0.25，非法回退默认 7.0。"""
+    for value in (7, 7.25, 10.0, 0.25):
+        assert cv.normalize_hi_speed(value) == float(value)
+    for bad in (0, 9.3, 12, -3, "x", None):
+        assert cv.normalize_hi_speed(bad) == 7.0

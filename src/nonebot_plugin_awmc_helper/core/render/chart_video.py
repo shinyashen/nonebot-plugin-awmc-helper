@@ -48,6 +48,7 @@ showHitEffect 开；播放时钟在 chart beat 0 起、音频从 beat 4（1 小�
 
 import math
 import zlib
+import warnings
 import threading
 from pathlib import Path
 from dataclasses import field, dataclass
@@ -74,9 +75,38 @@ _SS = 2  # 超采样（站内 G=2 backing）
 _RADIUS = _LOGICAL * 0.45
 _CENTER = _LOGICAL / 2
 _BASE_APPROACH_MS = 2250.0
-_HI_SPEED = 6.0 * 0.6  # setHiSpeed 隐藏系数（L7894 默认 6*N）
+_HI_SPEED = 7.0 * 0.6  # 默认谱面流速 7.0 × setHiSpeed 隐藏系数 0.6
 _APPROACH_MS = _BASE_APPROACH_MS / _HI_SPEED
 _HALF_APPROACH = _APPROACH_MS / 2
+_HI_SPEED_MIN = 0.25
+_HI_SPEED_MAX = 10.0
+_HI_SPEED_STEP = 0.25
+_DEFAULT_HI_SPEED = 7.0
+DEFAULT_HI_SPEED = _DEFAULT_HI_SPEED
+
+
+def normalize_hi_speed(value: float | None) -> float:
+    """谱面流速参数校验：0.25–10、步长 0.25；非法回退默认 7.0。"""
+    try:
+        speed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return _DEFAULT_HI_SPEED
+    if not (_HI_SPEED_MIN <= speed <= _HI_SPEED_MAX):
+        return _DEFAULT_HI_SPEED
+    steps = speed / _HI_SPEED_STEP
+    if abs(steps - round(steps)) > 1e-6:
+        return _DEFAULT_HI_SPEED
+    return speed
+
+
+def _apply_hi_speed(speed: float) -> None:
+    """设置模块级 hiSpeed/approach 时间（站内 setHiSpeed：×0.6 隐藏系数）。"""
+    global _HI_SPEED, _APPROACH_MS, _HALF_APPROACH
+    _HI_SPEED = speed * 0.6
+    _APPROACH_MS = _BASE_APPROACH_MS / _HI_SPEED
+    _HALF_APPROACH = _APPROACH_MS / 2
+
+
 _R_NOTE = 1 / 12.5
 _R_INNER = 0.65
 _C_TRAVEL = 0.25
@@ -2284,12 +2314,27 @@ class _SlideRenderer:
         return 0.0 if now < start else per_ms * (now - start)
 
     # ---- renderSlideStar（L6115）：起点生长 → 沿路径移动（每条并行动径一颗）
-    def draw_slide_stars(self, c: _Canvas, note: _Note, now: float) -> None:
+    def draw_slide_stars(
+        self,
+        c: _Canvas,
+        note: _Note,
+        now: float,
+        *,
+        crossing: float | None = None,
+        only_in_progress: bool = False,
+    ) -> None:
         if not note.parts or now < note.timing:
             return
         is_simul_slide = note.simul_slide_count >= 2 or len(note.parts) > 1
         for part in self.ordered_parts(note):
             start = note.timing + part.delay_ms
+            if crossing is not None and not (
+                start < crossing < start + part.duration_ms
+            ):
+                # 片段前置空小节：只画延续进内容区的长条 note
+                continue
+            if only_in_progress and not (start <= now <= start + part.duration_ms):
+                continue
             if now > start + part.duration_ms:
                 continue
             segments = part.segments
@@ -4059,14 +4104,23 @@ def _map_notes(chart: SiteChart) -> list[_Note]:
 _WORKER_RENDERER: "_ChartRenderer | None" = None
 _WORKER_FPS: int = 30
 _WORKER_SIZE: int = int(_LOGICAL)
+_WORKER_START_MS: float = 0.0
 
 
-def _worker_init(chart: SiteChart, fps: int, supersample: float) -> None:
+def _worker_init(
+    chart: SiteChart,
+    fps: int,
+    supersample: float,
+    start_ms: float = 0.0,
+    hi_speed: float = _DEFAULT_HI_SPEED,
+) -> None:
     """子进程初始化：各自持有一个渲染器（fork 继承谱面对象，无需重解析）。"""
-    global _WORKER_RENDERER, _WORKER_FPS, _SS
+    global _WORKER_RENDERER, _WORKER_FPS, _SS, _WORKER_START_MS
     _SS = supersample
+    _apply_hi_speed(normalize_hi_speed(hi_speed))
     _WORKER_RENDERER = _ChartRenderer(chart)
     _WORKER_FPS = fps
+    _WORKER_START_MS = start_ms
 
 
 def _worker_render_chunk(args: tuple[int, int]) -> list[bytes]:
@@ -4080,7 +4134,8 @@ def _worker_render_chunk(args: tuple[int, int]) -> list[bytes]:
     assert _WORKER_RENDERER is not None
     frames: list[bytes] = []
     for index in range(start, start + count):
-        frame = _WORKER_RENDERER.render_frame(index / _WORKER_FPS * 1000.0, _WORKER_FPS)
+        now_ms = _WORKER_START_MS + index / _WORKER_FPS * 1000.0
+        frame = _WORKER_RENDERER.render_frame(now_ms, _WORKER_FPS)
         rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
         frames.append(
             zlib.compress(
@@ -4092,7 +4147,12 @@ def _worker_render_chunk(args: tuple[int, int]) -> list[bytes]:
 
 
 def _write_frames_parallel(
-    proc, chart: SiteChart, n_frames: int, fps: int, workers: int
+    proc,
+    chart: SiteChart,
+    n_frames: int,
+    fps: int,
+    workers: int,
+    start_ms: float = 0.0,
 ) -> bool:
     """多进程分帧渲染并保序写入 ffmpeg 管道。
 
@@ -4115,24 +4175,33 @@ def _write_frames_parallel(
     from concurrent.futures import ProcessPoolExecutor
 
     wrote = 0
-    try:
-        with ProcessPoolExecutor(
-            max_workers=workers,
-            mp_context=context,
-            initializer=_worker_init,
-            initargs=(chart, fps, _SS),
-        ) as pool:
-            for frames in pool.map(_worker_render_chunk, tasks):
-                for frame in frames:
-                    proc.stdin.write(zlib.decompress(frame))
-                    wrote += 1
-        return True
-    except (OSError, RuntimeError) as exc:
-        # 池创建/子进程启动失败且尚未写入任何帧 → 允许调用方退回串行；
-        # 已写入部分帧时不能重来（会重复帧），直接上抛由 finally 收尾报错。
-        if wrote:
-            raise RuntimeError(f"并行渲染中断（已写入 {wrote} 帧）") from exc
-        return False
+    # 我们刻意用 fork（继承谱面对象，避免子进程重复 import/解析）；Python 3.12
+    # 对「多线程进程 fork」的 DeprecationWarning 属预期，渲染是纯 CPU 子任务，
+    # 在进程池创建/提交阶段静默该条告警，避免污染调用方/测试日志。
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="This process .* is multi-threaded.*",
+            category=DeprecationWarning,
+        )
+        try:
+            with ProcessPoolExecutor(
+                max_workers=workers,
+                mp_context=context,
+                initializer=_worker_init,
+                initargs=(chart, fps, _SS, start_ms, _HI_SPEED / 0.6),
+            ) as pool:
+                for frames in pool.map(_worker_render_chunk, tasks):
+                    for frame in frames:
+                        proc.stdin.write(zlib.decompress(frame))
+                        wrote += 1
+            return True
+        except (OSError, RuntimeError) as exc:
+            # 池创建/子进程启动失败且尚未写入任何帧 → 允许调用方退回串行；
+            # 已写入部分帧时不能重来（会重复帧），直接上抛由 finally 收尾报错。
+            if wrote:
+                raise RuntimeError(f"并行渲染中断（已写入 {wrote} 帧）") from exc
+            return False
 
 
 _SS_LOCK = threading.Lock()
@@ -4150,13 +4219,21 @@ def render_chart_video(
     sound_effects: dict[str, bytes] | None = None,
     sound_offset_ms: float = -50.0,
     loudness_lufs: float = -16.0,
+    start_ms: float = 0.0,
+    end_ms: float | None = None,
+    notes_start_ms: float | None = None,
+    fade_in_ms: float | None = None,
+    hi_speed: float = _DEFAULT_HI_SPEED,
 ) -> Path:
-    """渲染入口：按质量档设置超采样倍率（1.0–2.0），串行化并发渲染。"""
-    global _SS
+    """渲染入口：设置超采样/谱面流速，串行化并发渲染。"""
+    global _SS, _HI_SPEED, _APPROACH_MS, _HALF_APPROACH
     clamped = max(1.0, min(2.0, float(supersample)))
+    speed = normalize_hi_speed(hi_speed)
     with _SS_LOCK:
-        previous = _SS
+        previous_ss = _SS
+        previous_speed = (_HI_SPEED, _APPROACH_MS, _HALF_APPROACH)
         _SS = clamped
+        _apply_hi_speed(speed)
         try:
             return _render_chart_video_impl(
                 chart,
@@ -4168,9 +4245,14 @@ def render_chart_video(
                 sound_effects=sound_effects,
                 sound_offset_ms=sound_offset_ms,
                 loudness_lufs=loudness_lufs,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                notes_start_ms=notes_start_ms,
+                fade_in_ms=fade_in_ms,
             )
         finally:
-            _SS = previous
+            _SS = previous_ss
+            _HI_SPEED, _APPROACH_MS, _HALF_APPROACH = previous_speed
 
 
 def _parse_loudnorm_json(text: str) -> dict[str, float] | None:
@@ -4251,11 +4333,22 @@ def _render_chart_video_impl(
     sound_effects: dict[str, bytes] | None = None,
     sound_offset_ms: float = -50.0,
     loudness_lufs: float = -16.0,
+    start_ms: float = 0.0,
+    end_ms: float | None = None,
+    notes_start_ms: float | None = None,
+    fade_in_ms: float | None = None,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
 
     时间轴与站内播放器一致：视频从 chart beat 0 起（前 4 拍空场 lead-in），
     音频从 beat 4 起播（chartpage.js syncFrame 的 240000/bpm 偏移）。
+    ``start_ms``/``end_ms`` 为 chart 显示时间轴（=成片播放时间）的片段范围：
+    帧按绝对时间渲染（跨范围的 hold/slide/touch-hold 自然呈进行中状态），
+    音频从对应音乐位置切入；渐入时长默认等于前置空小节时长（两小节），内容
+    起点处正好满音量（``fade_in_ms`` 可显式覆盖）。
+    ``notes_start_ms``（默认同 start_ms）：片段前置空小节的结束时刻（=内容
+    起点）。该时刻之前画面照常渲染（谱面连续、不出现“空场/半空冒音符”），
+    但**打击音效静音**，音乐在这段前置时长内渐入到满音量。
     ``limit_seconds`` 截断渲染时长；音频 None 时出无声视频。
     """
     import os
@@ -4267,10 +4360,20 @@ def _render_chart_video_impl(
     renderer = _ChartRenderer(chart)
     if workers <= 0:  # 0=自动：CPU-1（给 ffmpeg 留一核），上限 8
         workers = max(1, min(8, (os.cpu_count() or 1) - 1))
-    total = max(1.0, chart.timeline.ms_from_beat(chart.total_beats) / 1000.0)
+    full_total_ms = max(1.0, chart.timeline.ms_from_beat(chart.total_beats))
+    clip_start = max(0.0, min(start_ms, full_total_ms))
+    clip_end = full_total_ms if end_ms is None else min(end_ms, full_total_ms)
+    clip_duration_ms = clip_end - clip_start
+    if clip_duration_ms < 1000.0 / fps:
+        raise ValueError("片段时长不足一帧，请放宽范围")
     if limit_seconds is not None:
-        total = min(total, limit_seconds)
-    n_frames = int(total * fps)
+        clip_end = min(clip_end, clip_start + limit_seconds * 1000.0)
+    clip_duration_ms = clip_end - clip_start
+    n_frames = max(1, int(clip_duration_ms / 1000.0 * fps))
+    if notes_start_ms is None:
+        notes_start = clip_start
+    else:
+        notes_start = max(clip_start, min(notes_start_ms, clip_end))
     lead_ms = 240000.0 / chart.bpm
     audio_delay = max(0.0, lead_ms - (chart.first_ms or 0.0))
     out_path = Path(out_path)
@@ -4296,9 +4399,21 @@ def _render_chart_video_impl(
     if audio:
         audio_file = out_path.with_suffix(".audio.tmp")
         audio_file.write_bytes(audio)
-        delay_filter = (
-            f"adelay={int(audio_delay)}:all=1" if audio_delay > 0 else "anull"
-        )
+        # 片段起点对应的音乐位置 = clip_start - audio_delay（<0 表示音乐尚未开始）
+        music_pos_ms = clip_start - audio_delay
+        if music_pos_ms >= 0:
+            cut = f"atrim=start={music_pos_ms / 1000.0:.6f},asetpts=PTS-STARTPTS"
+        else:
+            cut = f"adelay={int(-music_pos_ms)}:all=1"
+        # 渐入时长默认 = 前置空小节时长（两小节），内容起点处正好到达满音量；
+        # 显式传 fade_in_ms 时按传入值（0=不渐入）。
+        if fade_in_ms is None:
+            fade_ms = max(0.0, notes_start - clip_start)
+        else:
+            fade_ms = max(0.0, fade_in_ms)
+        fade_s = min(fade_ms / 1000.0, clip_duration_ms / 1000.0)
+        fade = f",afade=t=in:st=0:d={fade_s:.3f}" if fade_s > 0 else ""
+        delay_filter = cut + fade
         effects = (
             build_effect_track(chart, sound_effects, offset_ms=sound_offset_ms)
             if sound_effects
@@ -4308,9 +4423,22 @@ def _render_chart_video_impl(
             fx_bytes, fx_scale = effects
             fx_file = out_path.with_suffix(".fx.tmp.wav")
             fx_file.write_bytes(fx_bytes)
+            # 音效轨以 chart 绝对时间为轴：前置段要静音，但内容要落在正确位置，
+            # 因此 trim 后需用 adelay 把内容平移回 (fx_from - clip_start)。
+            fx_from = max(0.0, notes_start + sound_offset_ms)
+            if fx_from > clip_start + 1e-6:
+                fx_delay = round(fx_from - clip_start)
+                fx_cut = (
+                    f"atrim=start={fx_from / 1000.0:.6f},asetpts=PTS-STARTPTS,"
+                    f"adelay={fx_delay}:all=1,"
+                )
+            elif clip_start > 0:
+                fx_cut = f"atrim=start={clip_start / 1000.0:.6f},asetpts=PTS-STARTPTS,"
+            else:
+                fx_cut = ""
             base_chain = (
                 f"[1:a]{delay_filter},aresample={MIX_RATE}[m];"
-                f"[2:a]volume={fx_scale:.6f},aresample={MIX_RATE}[f];"
+                f"[2:a]volume={fx_scale:.6f},{fx_cut}aresample={MIX_RATE}[f];"
                 "[m][f]amix=inputs=2:normalize=0:duration=longest[mixed]"
             )
         else:
@@ -4362,11 +4490,14 @@ def _render_chart_video_impl(
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     assert proc.stdin is not None
     try:
-        if workers > 1 and _write_frames_parallel(proc, chart, n_frames, fps, workers):
+        if workers > 1 and _write_frames_parallel(
+            proc, chart, n_frames, fps, workers, clip_start
+        ):
             pass
         else:
             for i in range(n_frames):
-                frame = renderer.render_frame(i / fps * 1000.0, fps)
+                now_ms = clip_start + i / fps * 1000.0
+                frame = renderer.render_frame(now_ms, fps)
                 rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
                 proc.stdin.write(
                     rgb.resize((int(_LOGICAL), int(_LOGICAL)), Image.BILINEAR).tobytes()

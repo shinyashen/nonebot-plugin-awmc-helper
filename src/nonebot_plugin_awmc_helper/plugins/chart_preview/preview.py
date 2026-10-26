@@ -22,6 +22,12 @@ from ...core.ext.lxns_assets import (
     fetch_hit_sounds,
 )
 from ...core.render.chart_notes import parse_site_chart
+from ...core.render.chart_range import (
+    snap_range,
+    add_preroll,
+    format_time,
+    parse_range_token,
+)
 from ...core.render.chart_video import render_chart_video
 
 _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
@@ -30,7 +36,7 @@ _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
 _INDEX_NAMES = ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 _CACHE_SUBDIR = "chart_preview"
-_CACHE_REVISION = 3
+_CACHE_REVISION = 4
 """渲染器版本：算法变更时递增，避免命中旧渲染器产物。"""
 
 
@@ -64,16 +70,42 @@ def _pick_utage_suffix(chart: dict[int, SimaiDifficulty], utage_diff) -> int | N
     return min(chart) if chart else None
 
 
-def cached_path(entry: ChartEntry, index: int) -> Path | None:
+def _range_suffix(range_token: str | None) -> str:
+    """片段缓存键后缀：用请求的原始范围（对齐前的输入）保证稳定。"""
+    if not range_token:
+        return ""
+    if parse_range_token(range_token) is None:
+        return ""
+    safe = range_token.replace(":", "m").replace(".", "p")
+    pre = max(0, plugin_config.awmc_chart_preview_preroll_measures)
+    return f"_t{safe}_p{pre}"
+
+
+def _speed_suffix(hi_speed: float) -> str:
+    return f"_v{hi_speed:g}"
+
+
+def cached_path(
+    entry: ChartEntry,
+    index: int,
+    range_token: str | None = None,
+    hi_speed: float = 7.0,
+) -> Path | None:
     """缓存命中查询（供 matcher 决定是否发「渲染中」提示）。"""
     _display_id, song, prefer = entry
     is_utage = prefer is None
     type_key = "ut" if is_utage else ("dx" if prefer is SongType.DX else "sd")
-    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}.mp4"
+    suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
+    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}{suffix}.mp4"
     return out if out.exists() else None
 
 
-async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
+async def build_preview(
+    entry: ChartEntry,
+    index: int,
+    range_token: str | None = None,
+    hi_speed: float = 7.0,
+) -> tuple[Path, str]:
     """谱面类型条目 + 难度序 → 渲染好的 mp4 路径与难度标签。
 
     失败抛 ValueError/ExtError（message 面向用户）。``index`` 为 LevelIndex
@@ -93,7 +125,8 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         level_label = diff.level
 
     type_key = "ut" if is_utage else ("dx" if dx else "sd")
-    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}.mp4"
+    suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
+    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{_CACHE_REVISION}{suffix}.mp4"
     if out.exists():
         return out, level_label
 
@@ -111,6 +144,21 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
     site_chart = site_charts.get(suffix)
     if site_chart is None:
         raise ValueError("素材站的谱面数据缺少该难度")
+
+    clip = None
+    clip_start = 0.0
+    clip_end = None
+    notes_start = None
+    if range_token:
+        parsed = parse_range_token(range_token)
+        if parsed is None:
+            raise ValueError("片段范围格式应形如 0:35-1:20 或 35-80（单位秒）")
+        clip = snap_range(site_chart, parsed[0], parsed[1])
+        preroll = max(0, plugin_config.awmc_chart_preview_preroll_measures)
+        clip_start, notes_start, clip_end = add_preroll(site_chart, clip, preroll)
+        start_label = "0:00" if parsed[0] is None else format_time(clip.start_ms)
+        end_label = "结尾" if parsed[1] is None else format_time(clip.end_ms)
+        level_label = f"{level_label} · {start_label}-{end_label}"
 
     try:
         audio = await fetch_music(song.id)
@@ -133,6 +181,10 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         sound_effects=hit_sounds,
         sound_offset_ms=plugin_config.awmc_chart_preview_sound_offset_ms,
         loudness_lufs=plugin_config.awmc_chart_preview_loudness_lufs,
+        start_ms=clip_start,
+        end_ms=clip_end,
+        notes_start_ms=notes_start,
+        hi_speed=hi_speed,
     )
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)
     return out, level_label

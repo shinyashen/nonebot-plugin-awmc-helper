@@ -65,9 +65,21 @@ def fake_render(monkeypatch, tmp_path):
         sound_effects=None,
         sound_offset_ms=-50.0,
         loudness_lufs=-16.0,
+        start_ms=0.0,
+        end_ms=None,
+        notes_start_ms=None,
+        fade_in_ms=None,
+        hi_speed=7.0,
     ):
         calls.append(
-            {"chart": chart, "has_audio": audio is not None, "workers": workers}
+            {
+                "chart": chart,
+                "has_audio": audio is not None,
+                "workers": workers,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "hi_speed": hi_speed,
+            }
         )
         out = Path(out_path)
         out.write_bytes(b"\x00" * 64)
@@ -88,7 +100,7 @@ async def test_command_not_found(app: App, db, cache_dir, songs):
     await song_service.inject(songs)
     async with app.test_matcher(chart_preview) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
-        event = fake_group_message_event_v11(message="谱面预览 不存在的曲名xyz")
+        event = fake_group_message_event_v11(message="谱面预览 紫+不存在的曲名xyz")
         ctx.receive_event(bot, event)
         ctx.should_call_send(
             event,
@@ -97,7 +109,7 @@ async def test_command_not_found(app: App, db, cache_dir, songs):
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(
                         " 未找到该歌曲，请确认曲名/别名，或先用「查歌」确认 id 后用"
-                        "「谱面预览 id xxxxx」指定"
+                        "「谱面预览 <难度色>+id」指定"
                     ),
                 ]
             ),
@@ -119,7 +131,7 @@ async def test_command_multi_hits_lists_ids(app: App, db, cache_dir, songs):
     await song_service.inject(songs)
     async with app.test_matcher(chart_preview) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
-        event = fake_group_message_event_v11(message="谱面预览 琪露诺")
+        event = fake_group_message_event_v11(message="谱面预览 紫+琪露诺")
         ctx.receive_event(bot, event)
         # 期望列表由同一数据源动态构造（199 宿主的多条目展开）
         entries = await song_service.entries_for_name("琪露诺")
@@ -152,15 +164,17 @@ async def test_command_single_hit_sends_video(
     fake_out = tmp_path / "fake_preview.mp4"
     fake_out.write_bytes(b"\x00" * 128)
 
-    async def fake_build(entry, index):
-        assert index == 3  # 默认 Master
+    async def fake_build(entry, index, range_token=None, hi_speed=7.0):
+        assert index == 3  # 紫 → Master
+        assert range_token is None
+        assert hi_speed == 7.0
         return fake_out, "13+"
 
     monkeypatch.setattr(matchers, "build_preview", fake_build)
     await song_service.inject(songs)
     async with app.test_matcher(chart_preview) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
-        event = fake_group_message_event_v11(message="谱面预览 8")
+        event = fake_group_message_event_v11(message="谱面预览 紫+8")
         ctx.receive_event(bot, event)
         ctx.should_call_send(
             event,
@@ -220,8 +234,249 @@ async def test_build_preview_orchestration(
     assert label == "10"  # TH SD EXPERT（样例库真实值）
     assert fake_render
     assert fake_render[0]["chart"].difficulty == 4  # 站内难度后缀 _4 = EXPERT
+    assert fake_render[0]["start_ms"] == 0.0
+    assert fake_render[0]["end_ms"] is None
+    assert fake_render[0]["hi_speed"] == 7.0
     # 二次调用命中缓存（渲染打桩不再被调）
     calls_before = len(fake_render)
     out2, _ = await build_preview(entry, 2)
     assert out2 == out
     assert len(fake_render) == calls_before
+
+
+@pytest.mark.asyncio
+async def test_command_range_hint_and_build(
+    app: App, db, cache_dir, songs, monkeypatch, tmp_path
+):
+    """带片段范围：提示文案走片段口径，范围 token 透传到 build_preview。"""
+    from fake import fake_group_message_event_v11
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    fake_out = tmp_path / "fake_range.mp4"
+    fake_out.write_bytes(b"\x00" * 128)
+    seen = {}
+
+    async def fake_build(entry, index, range_token=None, hi_speed=7.0):
+        seen["index"] = index
+        seen["range"] = range_token
+        seen["speed"] = hi_speed
+        return fake_out, "13+ · 0:35-1:20"
+
+    monkeypatch.setattr(matchers, "build_preview", fake_build)
+    await song_service.inject(songs)
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message="谱面预览 紫+8 0:35-1:20")
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 片段渲染中：约需 20–60 秒（视 CPU），完成后自动发送；"
+                        "同一片段再次请求命中缓存秒回"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.video(f"file://{fake_out}"),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    assert seen["range"] == "0:35-1:20"
+    assert seen["index"] == 3
+    assert seen["speed"] == 7.0
+
+
+@pytest.mark.asyncio
+async def test_build_preview_range(
+    app: App, db, cache_dir, songs, fake_render, monkeypatch
+):
+    """片段编排：范围解析→按小节对齐→start/end 透传渲染，缓存键带范围后缀。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.types import SongType
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import preview
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import build_preview
+
+    async def _no_hit_sounds():
+        return None
+
+    monkeypatch.setattr(preview, "fetch_hit_sounds", _no_hit_sounds)
+    await song_service.inject(songs)
+    song_8 = next(s for s in songs if s.id == 8)
+    entry = (8, song_8, SongType.STANDARD)
+
+    with respx.mock(assert_all_called=False) as m:
+        m.get(f"{BASE}/maimai/chart/8.txt").respond(
+            text=(SNAPSHOTS / "8.txt").read_text()
+        )
+        m.get(f"{BASE}/maimai/music/8.mp3").respond(content=b"fake-audio")
+        out, label = await build_preview(entry, 2, "0:05-0:10")
+
+    assert out.exists()
+    assert "_t0m05-0m10_p2_v7" in out.name
+    assert "0:06" in label
+    assert "0:10" in label
+    call = fake_render[-1]
+    assert call["start_ms"] > 0
+    assert call["end_ms"] is not None
+    assert call["end_ms"] > call["start_ms"]
+    assert call["end_ms"] - call["start_ms"] >= 1000  # 至少一个小节
+
+
+@pytest.mark.asyncio
+async def test_build_preview_range_bounds(
+    app: App, db, cache_dir, songs, fake_render, monkeypatch
+):
+    """越界/非法范围抛可读 ValueError，不进入渲染。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.types import SongType
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import preview
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import build_preview
+
+    async def _no_hit_sounds():
+        return None
+
+    monkeypatch.setattr(preview, "fetch_hit_sounds", _no_hit_sounds)
+    await song_service.inject(songs)
+    song_8 = next(s for s in songs if s.id == 8)
+    entry = (8, song_8, SongType.STANDARD)
+    fake_render.clear()
+
+    with respx.mock(assert_all_called=False) as m:
+        m.get(f"{BASE}/maimai/chart/8.txt").respond(
+            text=(SNAPSHOTS / "8.txt").read_text()
+        )
+        m.get(f"{BASE}/maimai/music/8.mp3").respond(content=b"fake-audio")
+        with pytest.raises(ValueError, match="开始 < 结束"):
+            await build_preview(entry, 2, "1:20-0:35")  # 起止颠倒
+        with pytest.raises(ValueError, match="超出歌曲长度"):
+            await build_preview(entry, 2, "999-1000")  # 超出曲长
+        with pytest.raises(ValueError, match="没有完整小节"):
+            await build_preview(entry, 2, "5.1-5.5")  # 不足一个小节
+    assert fake_render == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expect_speed", "expect_range"),
+    [
+        ("谱面预览 紫+8", 7.0, None),
+        ("谱面预览 紫+8 9.5", 9.5, None),
+        ("谱面预览 紫+8 9.3", 7.0, None),  # 非 0.25 步长 → 回退默认
+        ("谱面预览 紫+8 12", 7.0, None),  # 越界 → 回退默认
+        ("谱面预览 紫+8 9.5 0:35-1:20", 9.5, "0:35-1:20"),
+        ("谱面预览 紫+8 7.25 -1:20", 7.25, "-1:20"),
+    ],
+)
+async def test_command_speed_and_range_args(
+    app: App,
+    db,
+    cache_dir,
+    songs,
+    monkeypatch,
+    tmp_path,
+    message,
+    expect_speed,
+    expect_range,
+):
+    """新指令格式：难度色+查询、可选流速（校验/回退）、可选范围。"""
+    from fake import fake_group_message_event_v11
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    fake_out = tmp_path / "fake_args.mp4"
+    fake_out.write_bytes(b"\x00" * 64)
+    seen = {}
+
+    async def fake_build(entry, index, range_token=None, hi_speed=7.0):
+        seen["index"] = index
+        seen["range"] = range_token
+        seen["speed"] = hi_speed
+        return fake_out, "13+"
+
+    monkeypatch.setattr(matchers, "build_preview", fake_build)
+    await song_service.inject(songs)
+    hint = (
+        " 片段渲染中：约需 20–60 秒（视 CPU），完成后自动发送；"
+        "同一片段再次请求命中缓存秒回"
+        if expect_range
+        else " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
+        "同一谱面再次请求命中缓存秒回"
+    )
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message=message)
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(hint),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.video(f"file://{fake_out}"),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    assert seen["index"] == 3  # 紫 → Master
+    assert seen["speed"] == expect_speed
+    assert seen["range"] == expect_range
+
+
+@pytest.mark.asyncio
+async def test_command_requires_difficulty_color(app: App, db, cache_dir, songs):
+    """缺少「难度色+」前缀 → 可读格式错误提示。"""
+    from fake import fake_group_message_event_v11
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    await song_service.inject(songs)
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message="谱面预览 8")
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 需指定难度色：格式为 谱面预览 <难度色>+<歌名/别名/id>"
+                        "（宴谱用 宴+<id>）"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()

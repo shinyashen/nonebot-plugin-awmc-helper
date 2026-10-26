@@ -110,6 +110,8 @@ class Config(BaseModel):
     awmc_chart_preview_hit_sounds: bool = True
     # 谱面预览打击音效偏移（ms）：负值提前触发，站内默认 -50（音效偏移滑块 0）
     awmc_chart_preview_sound_offset_ms: float = -50.0
+    # 谱面预览片段的前置空小节数（音乐先放、画面不渲染音效，0=关闭）
+    awmc_chart_preview_preroll_measures: int = 2
     # 谱面预览音频响度目标（LUFS，两遍 loudnorm 线性增益，TP ≤ -1.5 dBTP）
     awmc_chart_preview_loudness_lufs: float = -16.0
 

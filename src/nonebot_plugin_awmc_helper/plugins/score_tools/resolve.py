@@ -13,7 +13,7 @@ import re
 
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from ...constants import UTAGE_ID_BASE, DIFF_DISPLAY_NAMES, COLOR_TO_LEVEL_INDEX
+from ...constants import UTAGE_ID_BASE, DIFF_DISPLAY_NAMES
 from ...core.songs import (
     ChartEntry,
     cn_song_map,
@@ -23,9 +23,9 @@ from ...core.songs import (
 )
 from ...core.types import Song, SongType, LevelIndex, SongDifficultyUtage
 from ...core.binding import UserBinding
+from ...core.chart_query import split_color_query
 
 _LINE_RE = re.compile(r"^-?[0-9]+(\.[0-9]+)?$")
-UTAGE_PREFIX = "宴"
 
 
 def split_args(
@@ -49,16 +49,12 @@ def split_args(
         line = float(tokens[-1])
         tokens = tokens[:-1]
     query = " ".join(tokens).strip()
-    if query and query[0] in COLOR_TO_LEVEL_INDEX:
-        level_index = COLOR_TO_LEVEL_INDEX[query[0]]
-        stripped = query[1:].strip()
-        candidates = [stripped, query] if stripped else [query]
-        return level_index, False, candidates, line
-    if query.startswith(UTAGE_PREFIX):
-        stripped = query[len(UTAGE_PREFIX) :].strip()
-        candidates = [stripped, query] if stripped else [query]
-        return None, True, candidates, line
-    return None, False, [query] if query else [], line
+    level_index, is_utage, stripped = split_color_query(query)
+    if stripped != query:
+        candidates = [stripped, query]
+    else:
+        candidates = [query] if query else []
+    return level_index, is_utage, candidates, line
 
 
 _COLOR_HINT = "※ 分数线需指定难度色：分数线 <绿/黄/红/紫/白><id/别名> <线>"
