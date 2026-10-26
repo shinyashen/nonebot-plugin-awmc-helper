@@ -62,6 +62,9 @@ def fake_render(monkeypatch, tmp_path):
         limit_seconds=None,
         workers=0,
         supersample=2.0,
+        sound_effects=None,
+        metronome=True,
+        loudness_lufs=-16.0,
     ):
         calls.append(
             {"chart": chart, "has_audio": audio is not None, "workers": workers}
@@ -165,7 +168,7 @@ async def test_command_single_hit_sends_video(
                 [
                     MessageSegment.at(event.user_id),
                     MessageSegment.text(
-                        " 谱面预览渲染中：整曲约需 3–8 分钟（视 CPU），完成后自动发送；"
+                        " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
                         "同一谱面再次请求命中缓存秒回"
                     ),
                 ]
@@ -188,12 +191,19 @@ async def test_command_single_hit_sends_video(
 
 
 @pytest.mark.asyncio
-async def test_build_preview_orchestration(app: App, db, cache_dir, songs, fake_render):
+async def test_build_preview_orchestration(
+    app: App, db, cache_dir, songs, fake_render, monkeypatch
+):
     """编排链路：respx 命中真实 8 快照谱面 + 音频 → 渲染打桩 → mp4 落缓存。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.types import SongType
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import preview
     from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import build_preview
 
+    async def _no_hit_sounds():
+        return None
+
+    monkeypatch.setattr(preview, "fetch_hit_sounds", _no_hit_sounds)
     await song_service.inject(songs)
     song_8 = next(s for s in songs if s.id == 8)
     entry = (8, song_8, SongType.STANDARD)

@@ -56,6 +56,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 from .fonts import font as _load_font
+from .chart_audio import MIX_RATE, build_effect_track
 from .chart_notes import (
     ChartNote,
     SiteChart,
@@ -4146,6 +4147,9 @@ def render_chart_video(
     limit_seconds: float | None = None,
     workers: int = 0,
     supersample: float = 2.0,
+    sound_effects: dict[str, bytes] | None = None,
+    metronome: bool = True,
+    loudness_lufs: float = -16.0,
 ) -> Path:
     """渲染入口：按质量档设置超采样倍率（1.0–2.0），串行化并发渲染。"""
     global _SS
@@ -4161,9 +4165,75 @@ def render_chart_video(
                 fps=fps,
                 limit_seconds=limit_seconds,
                 workers=workers,
+                sound_effects=sound_effects,
+                metronome=metronome,
+                loudness_lufs=loudness_lufs,
             )
         finally:
             _SS = previous
+
+
+def _parse_loudnorm_json(text: str) -> dict[str, float] | None:
+    """从 ffmpeg loudnorm 的 print_format=json 输出里取测量值。"""
+    import re
+    import json
+
+    match = None
+    for item in re.finditer(r"\{[^{}]*\}", text, re.S):
+        if '"input_i"' in item.group(0):
+            match = item.group(0)
+    if match is None:
+        return None
+    try:
+        data = json.loads(match)
+    except json.JSONDecodeError:
+        return None
+    keys = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+    try:
+        values = {key: float(data[key]) for key in keys}
+    except (KeyError, TypeError, ValueError):
+        return None
+    return values
+
+
+def _probe_loudness(
+    audio_file: Path,
+    fx_file: Path | None,
+    base_chain: str,
+    target_lufs: float,
+) -> dict[str, float] | None:
+    """测量「音乐+音效」混音的整体响度/真峰值（loudnorm 两遍法的第一遍）。"""
+    import subprocess
+
+    chain = (
+        base_chain
+        + f";[mixed]loudnorm=I={target_lufs}:TP=-1.5:LRA=11:print_format=json[out]"
+    )
+    # 与正式 mux 的输入序号保持一致（0=视频管道，1=音乐，2=音效）；探针这里用
+    # 一个不会被 map 的 lavfi 视频占位，避免 [1:a]/[2:a] 指错输入。
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostats",
+        "-v",
+        "info",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=black:s=2x2:r=1",
+        "-i",
+        str(audio_file),
+    ]
+    if fx_file is not None:
+        cmd += ["-i", str(fx_file)]
+    cmd += ["-filter_complex", chain, "-map", "[out]", "-f", "null", "-"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return _parse_loudnorm_json(proc.stderr)
 
 
 def _render_chart_video_impl(
@@ -4174,6 +4244,9 @@ def _render_chart_video_impl(
     fps: int = 30,
     limit_seconds: float | None = None,
     workers: int = 0,
+    sound_effects: dict[str, bytes] | None = None,
+    metronome: bool = True,
+    loudness_lufs: float = -16.0,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
 
@@ -4215,12 +4288,58 @@ def _render_chart_video_impl(
         "pipe:",
     ]
     audio_file: Path | None = None
+    fx_file: Path | None = None
     if audio:
         audio_file = out_path.with_suffix(".audio.tmp")
         audio_file.write_bytes(audio)
-        cmd += ["-i", str(audio_file), "-c:a", "aac", "-b:a", "160k"]
-        if audio_delay > 0:
-            cmd += ["-af", f"adelay={int(audio_delay)}:all=1"]
+        delay_filter = (
+            f"adelay={int(audio_delay)}:all=1" if audio_delay > 0 else "anull"
+        )
+        effects = (
+            build_effect_track(chart, sound_effects, metronome=metronome)
+            if (sound_effects or metronome)
+            else None
+        )
+        if effects is not None:
+            fx_bytes, fx_scale = effects
+            fx_file = out_path.with_suffix(".fx.tmp.wav")
+            fx_file.write_bytes(fx_bytes)
+            base_chain = (
+                f"[1:a]{delay_filter},aresample={MIX_RATE}[m];"
+                f"[2:a]volume={fx_scale:.6f},aresample={MIX_RATE}[f];"
+                "[m][f]amix=inputs=2:normalize=0:duration=longest[mixed]"
+            )
+        else:
+            base_chain = f"[1:a]{delay_filter}[mixed]"
+        # 两遍 loudnorm（linear 模式）：先测「音乐+音效」整体响度，再按测量值
+        # 一次性加增益，避免动态压缩破坏听感；响度不到位时退回不处理。
+        measured = _probe_loudness(audio_file, fx_file, base_chain, loudness_lufs)
+        if measured is not None:
+            base_chain += (
+                f";[mixed]loudnorm=I={loudness_lufs}:TP=-1.5:LRA=11:"
+                f"measured_I={measured['input_i']}:"
+                f"measured_TP={measured['input_tp']}:"
+                f"measured_LRA={measured['input_lra']}:"
+                f"measured_thresh={measured['input_thresh']}:"
+                f"offset={measured['target_offset']}:linear=true[aout]"
+            )
+        else:
+            base_chain += ";[mixed]anull[aout]"
+        cmd += ["-i", str(audio_file)]
+        if fx_file is not None:
+            cmd += ["-i", str(fx_file)]
+        cmd += [
+            "-filter_complex",
+            base_chain,
+            "-map",
+            "0:v",
+            "-map",
+            "[aout]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "160k",
+        ]
     cmd += [
         "-c:v",
         "libx264",
@@ -4256,6 +4375,8 @@ def _render_chart_video_impl(
         code = proc.wait()
         if audio_file is not None:
             audio_file.unlink(missing_ok=True)
+        if fx_file is not None:
+            fx_file.unlink(missing_ok=True)
     if code != 0:
         raise RuntimeError(f"ffmpeg 渲染失败（exit {code}），输出见 {out_path}")
     return out_path

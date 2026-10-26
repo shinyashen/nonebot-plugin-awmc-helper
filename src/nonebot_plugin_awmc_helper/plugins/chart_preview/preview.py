@@ -1,6 +1,6 @@
 """谱面预览编排：难度词解析 → 曲目定位 → 抓取/解析/渲染/缓存。
 
-渲染是 CPU 密集任务（整曲约 3–8 分钟，视 CPU），调用方必须在线程池执行
+渲染是 CPU 密集任务（整曲约半分钟，视 CPU），调用方必须在线程池执行
 （``asyncio.to_thread``）；产物按 (根 id, 谱面类型, 难度) 落盘缓存，
 命中直接发送。
 """
@@ -19,6 +19,7 @@ from ...core.ext.lxns_assets import (
     ChartNotAvailableError,
     fetch_music,
     fetch_chart_text,
+    fetch_hit_sounds,
 )
 from ...core.render.chart_notes import parse_site_chart
 from ...core.render.chart_video import render_chart_video
@@ -29,7 +30,7 @@ _SUFFIX_BY_INDEX = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
 _INDEX_NAMES = ("Basic", "Advanced", "Expert", "Master", "Re:Master")
 
 _CACHE_SUBDIR = "chart_preview"
-_CACHE_REVISION = 2
+_CACHE_REVISION = 3
 """渲染器版本：算法变更时递增，避免命中旧渲染器产物。"""
 
 
@@ -115,6 +116,9 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         audio = await fetch_music(song.id)
     except ChartNotAvailableError:
         audio = None  # 个别无音频场景：出无声视频
+    hit_sounds = None
+    if plugin_config.awmc_chart_preview_hit_sounds:
+        hit_sounds = await fetch_hit_sounds()
 
     limit = plugin_config.awmc_chart_preview_limit_seconds or None
     await asyncio.to_thread(
@@ -126,6 +130,9 @@ async def build_preview(entry: ChartEntry, index: int) -> tuple[Path, str]:
         workers=plugin_config.awmc_chart_preview_workers,
         supersample=plugin_config.awmc_chart_preview_supersample,
         fps=plugin_config.awmc_chart_preview_fps,
+        sound_effects=hit_sounds,
+        metronome=plugin_config.awmc_chart_preview_metronome,
+        loudness_lufs=plugin_config.awmc_chart_preview_loudness_lufs,
     )
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)
     return out, level_label

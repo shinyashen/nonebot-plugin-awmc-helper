@@ -4,12 +4,14 @@ import respx
 import pytest
 
 BASE = "https://assets2.lxns.net"
+SOUND_BASE = "https://maimai.lxns.net/assets/maimai/chart"
 
 
 @pytest.fixture
-def lxns_assets():
+def lxns_assets(monkeypatch):
     from nonebot_plugin_awmc_helper.core.ext import lxns_assets as mod
 
+    monkeypatch.setattr(mod, "_hit_sounds_cache", None)
     return mod
 
 
@@ -76,3 +78,28 @@ async def test_fetch_music_missing(lxns_assets):
         m.get(url__regex=r".*/music/\d+\.mp3").respond(status_code=404)
         with pytest.raises(lxns_assets.ChartNotAvailableError):
             await lxns_assets.fetch_music(12345)
+
+
+@pytest.mark.asyncio
+async def test_fetch_hit_sounds(lxns_assets):
+    """打击音效按站内静态资源名逐个抓取，成功后进程内缓存。"""
+    from nonebot_plugin_awmc_helper.core.render.chart_audio import SOUND_NAMES
+
+    with respx.mock(assert_all_called=False) as m:
+        for name in SOUND_NAMES:
+            m.get(f"{SOUND_BASE}/{name}.wav").respond(content=f"wav-{name}".encode())
+        sounds = await lxns_assets.fetch_hit_sounds()
+        assert sounds is not None
+        assert set(sounds) == set(SOUND_NAMES)
+        assert sounds["tap"] == b"wav-tap"
+        # 二次调用命中进程内缓存，不再发请求
+        again = await lxns_assets.fetch_hit_sounds()
+        assert again is sounds
+
+
+@pytest.mark.asyncio
+async def test_fetch_hit_sounds_failure(lxns_assets):
+    """任一采样失败 → None（渲染端退化为只有音乐，不阻塞出片）。"""
+    with respx.mock(assert_all_called=False) as m:
+        m.get(url__regex=rf"{SOUND_BASE}/.*\.wav").respond(status_code=500)
+        assert await lxns_assets.fetch_hit_sounds() is None

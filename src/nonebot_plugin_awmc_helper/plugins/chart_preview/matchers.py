@@ -80,7 +80,7 @@ async def _(args=CommandArg()):
 
     if cached_path(entry, index) is None:
         await UniMessage.text(
-            " 谱面预览渲染中：整曲约需 3–8 分钟（视 CPU），完成后自动发送；"
+            " 谱面预览渲染中：整曲约需 30–90 秒（视 CPU），完成后自动发送；"
             "同一谱面再次请求命中缓存秒回"
         ).send(at_sender=True)
     out, _label = await build_preview(entry, index)
@@ -98,12 +98,13 @@ help_registry.declare(
         CommandSpec(
             matcher=chart_preview,
             name="谱面预览",
-            brief="渲染谱面预览视频（simai+整曲音频，首次约数分钟，之后命中缓存）",
+            brief="渲染谱面预览视频（simai+整曲音频+打击音效，首次约半分钟，之后命中缓存）",
             detail=(
                 "格式：谱面预览 <曲名/别名/id> [难度]\n"
                 "难度默认 Master；支持 大师/宗师/专家/高级/基础、紫/白/红/黄/绿、"
                 "英文难度名。\n"
-                "数据与音频热链落雪素材站；国服先行曲等无谱面数据的曲目不支持。"
+                "数据/音频热链落雪素材站；带站内打击音效与开篇节拍器，响度"
+                "归一（-16 LUFS）。国服先行曲等无谱面数据的曲目不支持。"
                 "渲染结果有缓存，重复请求秒回。"
             ),
         ),

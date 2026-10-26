@@ -12,8 +12,10 @@ id 规则（2026-10-24 实测，见 ``local/reference/chart-preview-notes.md`` �
 """
 
 from . import ExtError, ext_request
+from ..render.chart_audio import SOUND_NAMES
 
 ASSETS_BASE = "https://assets2.lxns.net"
+HIT_SOUND_BASE = "https://maimai.lxns.net"
 _DX_ID_OFFSET = 10000
 
 
@@ -72,3 +74,34 @@ async def fetch_music(root_id: int) -> bytes:
     if resp.status_code != 200:
         raise ExtError(f"落雪曲目音频拉取失败（HTTP {resp.status_code}）")
     return resp.content
+
+
+_hit_sounds_cache: dict[str, bytes] | None = None
+
+
+async def fetch_hit_sounds() -> dict[str, bytes] | None:
+    """拉取站内打击音效 wav（11 个，进程内缓存）。
+
+    源为落雪站点静态资源 ``/assets/maimai/chart/{name}.wav``（与谱面预览播放器
+    同源采样）；任一文件失败返回 None，渲染端退化为「只有音乐」。
+    """
+    global _hit_sounds_cache
+    if _hit_sounds_cache is not None:
+        return _hit_sounds_cache
+    sounds: dict[str, bytes] = {}
+    for name in SOUND_NAMES:
+        try:
+            resp = await ext_request(
+                "GET",
+                f"{HIT_SOUND_BASE}/assets/maimai/chart/{name}.wav",
+                name=f"落雪打击音效（{name}）",
+                retries=1,
+                timeout=30,
+            )
+        except ExtError:
+            return None
+        if resp.status_code != 200:
+            return None
+        sounds[name] = resp.content
+    _hit_sounds_cache = sounds
+    return sounds
