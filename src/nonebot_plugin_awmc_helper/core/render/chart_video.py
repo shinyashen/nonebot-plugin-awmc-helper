@@ -4312,19 +4312,13 @@ def _thread_render_chunk(args: tuple[int, int]) -> list[bytes]:
     """渲染 [start, start+count) 帧（绝对时间）并返回 zlib 压缩帧。"""
     start, count = args
     renderer = _THREAD_STATE.renderer
+    renderer2 = _THREAD_STATE.renderer2
     fps = _THREAD_STATE.fps
     frames: list[bytes] = []
     for index in range(start, start + count):
         now_ms = _CLIP_START_MS + index / fps * 1000.0
-        frame = renderer.render_frame(now_ms, fps)
-        rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
         frames.append(
-            zlib.compress(
-                rgb.resize(
-                    (_WORKER_SIZE, _WORKER_SIZE), Image.Resampling.BILINEAR
-                ).tobytes(),
-                1,
-            )
+            zlib.compress(_compose_frame(renderer, renderer2, now_ms, fps).tobytes(), 1)
         )
     return frames
 
@@ -4699,14 +4693,11 @@ def _render_chart_video_impl(
         ):
             pass
         else:
+            renderer2 = _ChartRenderer(buddy_chart) if buddy_chart else None
             for i in range(n_frames):
                 now_ms = clip_start + i / fps * 1000.0
-                frame = renderer.render_frame(now_ms, fps)
-                rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
                 proc.stdin.write(
-                    rgb.resize(
-                        (int(_LOGICAL), int(_LOGICAL)), Image.Resampling.BILINEAR
-                    ).tobytes()
+                    _compose_frame(renderer, renderer2, now_ms, fps).tobytes()
                 )
     finally:
         try:

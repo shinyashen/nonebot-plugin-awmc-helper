@@ -283,3 +283,35 @@ def test_render_buddy_two_panels(cv, site, tmp_path: Path):
         check=True,
     )
     assert probe.stdout.strip() == "1200,600"
+    # 内容校验：两面板各为完整 600×600（曾因写入 600×600 原始帧导致上下压扁
+    # 成四宫格）；左半圆环的白色像素包围盒应近似正方形。
+    import numpy as np
+
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            "0.5",
+            "-i",
+            str(out),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    frame = np.frombuffer(raw.stdout, dtype=np.uint8).reshape(600, 1200, 3)
+    white = (frame[60:540, 60:540] > 180).all(axis=2)
+    ys, xs = np.nonzero(white)
+    assert len(xs) > 100
+    height = ys.max() - ys.min()
+    width = xs.max() - xs.min()
+    assert height > 400, f"圆环被压扁: bbox={width}x{height}"
+    assert abs(width - height) < 120, f"圆环非圆形: bbox={width}x{height}"
