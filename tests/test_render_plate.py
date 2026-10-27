@@ -488,3 +488,80 @@ async def test_plate_cross_type_charts(songs, tmp_path, monkeypatch):
     assert polluted is not None
     assert stamped != base  # SD 成绩产生盖章
     assert polluted == stamped  # DX 成绩（他牌条目）不串槽
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_plate_rem_score_outside_scope(songs, tmp_path, monkeypatch):
+    """回归（舞将完成表 IndexError）：牌内无 ReM 谱的曲收到 SD ReM 成绩。
+
+    旧曲的 Re:MASTER 谱多为 DX 时代追加（版本区间外；2026-10-11 类型门槛
+    移除后以条目版本归属牌），牌子完成表该曲只有 4 槽；成绩对位仅按类型
+    守卫时区间外 ReM 成绩过类型关 → slots[4] IndexError，舞/霸完成表全员
+    崩。修后按（类型, 槽位）组合守卫：区间外 ReM 成绩跳过不盖章，区间内
+    ReM（FiNALE 代追加）正常入第 5 槽。
+    """
+    from mocks import make_diff, make_song, make_score, seed_service
+    from maimai_py import SongType, LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.render.plate_table_draw import (
+        draw_plate_table,
+    )
+
+    out = tmp_path / "plate_table"
+    monkeypatch.setattr(table_template, "plate_table_dir", lambda: out)
+
+    no_rem = make_song(
+        8041,
+        "（构造）旧曲DX追加ReM不在牌",
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.MASTER,
+                version=16000,
+            ),
+        ],
+    )
+    with_rem = make_song(
+        8042,
+        "（构造）旧曲FiNALE代ReM在牌",
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.MASTER,
+                version=16000,
+            ),
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.ReMASTER,
+                level="13+",
+                level_value=13.8,
+                version=19900,
+            ),
+        ],
+    )
+    await seed_service(song_service, [no_rem, with_rem])
+    assert await table_template.generate_plate_template("舞", "将", song_service) == 3
+
+    entries = [(s, d) for s in (no_rem, with_rem) for d in s.get_difficulties()]
+    base = draw_plate_table("舞", "将", [], entries, page=1)
+    out_rem = draw_plate_table(
+        "舞",
+        "将",
+        [make_score(8041, li=LevelIndex.ReMASTER, song_type=SongType.STANDARD)],
+        entries,
+        page=1,
+    )
+    in_rem = draw_plate_table(
+        "舞",
+        "将",
+        [make_score(8042, li=LevelIndex.ReMASTER, song_type=SongType.STANDARD)],
+        entries,
+        page=1,
+    )
+    assert base is not None
+    assert out_rem == base  # 区间外 ReM 成绩被守卫跳过（旧代码在此 IndexError）
+    assert in_rem is not None
+    assert in_rem != base  # 区间内 ReM 正常入槽盖章

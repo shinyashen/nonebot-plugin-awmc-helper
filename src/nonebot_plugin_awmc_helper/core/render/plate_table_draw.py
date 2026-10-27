@@ -103,18 +103,22 @@ def draw_plate_table(
         played.setdefault(level, {}).setdefault(
             song_id, [None] * song_slot_size[song_id]
         )
-    # 成绩按曲内条目类型对位（2026-10-11 类型门槛移除后，同曲可能以 SD 或
-    # DX 条目进牌——DX 曲的 SD 追加谱在 DX 牌、SD 曲的 DX 追加谱在旧框之后
-    # 的 DX 牌；槽位只认 entries 里实际存在的类型，防他牌谱面串槽）
-    entry_types: dict[int, set] = {
-        sid: {d.type for d in diffs} for sid, diffs in all_slots.items()
+    # 成绩按曲内条目（类型, 槽位）对位（2026-10-11 类型门槛移除后，同曲可能
+    # 以 SD 或 DX 条目进牌——DX 曲的 SD 追加谱在 DX 牌、SD 曲的 DX 追加谱在
+    # 旧框之后的 DX 牌；槽位只认 entries 里实际存在的组合，防他牌谱面串槽）。
+    # 只按类型守卫不完备：旧曲 DX 时代追加的 Re:MASTER 谱在牌版本区间外
+    # （曲内只有 4 槽），玩家的 SD ReM 成绩却过类型关 → slots[4] IndexError，
+    # 舞/霸完成表全员崩（2026-10-27 修）
+    entry_slots: dict[int, set] = {
+        sid: {(d.type, d.level_index) for d in diffs}
+        for sid, diffs in all_slots.items()
     }
     for score in play_result:
         if score.level_index.value >= slot_num:
             continue
         if score.id not in song_level:
             continue
-        if score.type not in entry_types[score.id]:
+        if (score.type, score.level_index) not in entry_slots[score.id]:
             continue
         slots = played[song_level[score.id]].setdefault(
             score.id, [None] * song_slot_size[score.id]
