@@ -44,12 +44,8 @@ def test_chart_stats_counts_and_ex(chart_11355_master):
     assert "SLIDE 96（EX" not in text
 
 
-def test_break_ex_matches_hud_relation():
-    """文字 BREAK（EX n）与 HUD 自洽：总数 = 无保护 + EX（12025 类问题）。
-
-    EX break slide/hold 的完成事件也计入 EX（不只 break tap），
-    否则无保护 + 文本 EX ≠ BREAK 总数。
-    """
+def test_break_ex_completion_difference():
+    """BREAK EX 用完成事件差额：总数 = 无保护 + EX（含 slide 本体 break）。"""
     from types import SimpleNamespace
 
     from nonebot_plugin_awmc_helper.core.render.chart_notes import (
@@ -75,6 +71,6 @@ def test_break_ex_matches_hud_relation():
     )
     stats = compute_chart_stats(chart, diff)
     assert stats.counts["BREAK"] == total
-    assert stats.ex_counts["BREAK"] == total - noex
+    assert stats.ex_counts["BREAK"] == 2  # EX star head + EX break hold 头
     assert stats.counts["BREAK"] - stats.ex_counts["BREAK"] == noex
     assert stats.ex_counts["TAP"] == 0  # break slide 的 EX 不重复计入 TAP

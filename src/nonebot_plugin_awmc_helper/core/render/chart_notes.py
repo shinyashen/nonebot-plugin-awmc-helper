@@ -765,10 +765,14 @@ def break_completion_times(notes: list[ChartNote]) -> list[float]:
 
 
 def break_noex_completion_times(notes: list[ChartNote]) -> list[float]:
-    """「无保护」计数（breakNoExCompletionTimes）：非 EX 的 break 事件。
+    """「无保护」计数（breakNoExCompletionTimes）：非 EX 的 break 判定。
 
-    与站内 JS 一致（chart-canvas L8255：``t.isEx || d.push``）：右下角
-    「无保护 BREAK」显示的是**非 EX** break 的完成数；EX 是保护音符。
+    break 判定共四类：break tap / break star head（slide 前缀 b）/
+    break hold 头 / **break slide 本体**（slide 结尾巴 b，路径判定）。
+    本函数统计其中非 EX 的全部事件（含 slide 本体），因此
+    ``BREAK 总数 = 无保护 + EX``（12025：146 = 119 + 27）。
+    站内 JS 的 d 数组只 push 三类“头”，漏掉 break slide 本体，
+    会在含「路径 break」的谱面上少算（JS 12025 为 114）。
     """
     times: list[float] = []
     for note in notes:

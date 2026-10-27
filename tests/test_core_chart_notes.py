@@ -57,3 +57,22 @@ def test_hud_beat_roundtrip(notes):
         assert timeline.beat_from_ms(timeline.ms_from_beat(beat)) == pytest.approx(
             beat, abs=1e-6
         )
+
+
+def test_break_noex_counts_slide_body_judgements():
+    """无保护统计全部非 EX break 判定（含结尾巴 b 的 slide 本体）。
+
+    站内 JS 的 d 只算头、漏 slide 本体；本实现按完整语义计入
+    （12025：无保护 119、EX 27、总数 146 自洽）。
+    """
+    from nonebot_plugin_awmc_helper.core.render.chart_notes import (
+        parse_site_chart,
+        break_completion_times,
+        break_noex_completion_times,
+    )
+
+    text = "&bpm=120\n&inote_2=\n(120){1},1-3b[4:1],\n(120){2},1b-3[4:1],\n"
+    chart = parse_site_chart(text, difficulty=2)[2]
+    assert len(break_completion_times(chart.notes)) == 2
+    # 第一张 slide 本体是 break、第二张 star 头是 break → 两条都算无保护
+    assert len(break_noex_completion_times(chart.notes)) == 2
