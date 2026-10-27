@@ -23,7 +23,7 @@ from ._vendor.maiconverter_simai import parse_fragment
 
 _RE_BPM = re.compile(r"\((\d+(?:\.\d+)?)\)")
 _RE_SUB = re.compile(r"\{(\d+)\}")
-_RE_INOTE_SPLIT = re.compile(r"&inote_(\d)=\n?")
+_RE_INOTE_SPLIT = re.compile(r"&inote_(\d+)=\n?")
 _RE_HEADER = re.compile(r"&(\w+)=(.*)")
 
 # 形状对：形状 + 结束位（V 形额外带一位 reflect，单独处理）。

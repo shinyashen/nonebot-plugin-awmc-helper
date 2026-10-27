@@ -11,7 +11,6 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from .preview import PreviewResult, cached_path, build_preview
 from ...config import plugin_config
 from ...core.ext import ExtError
-from ...constants import display_song_id
 from ...core.help import CommandSpec, help_registry
 from ...core.songs import song_service
 from ...core.types import SongType, LevelIndex
@@ -81,11 +80,14 @@ def _dedupe_entries(entries: list) -> list:
     曲在别名链里可能同时命中两个视图对象，不去重就会在「请用 id 指定」列表里
     出现重复行。SD/DX 双谱曲 prefer 不同 → 两条都保留，由用户按 id 选择。
     """
-    seen: set[tuple[int, object]] = set()
+    seen: set[tuple[object, ...]] = set()
     result: list = []
     for entry in entries:
-        song, prefer = entry[1], entry[2]
-        key = (song.id % 10000, prefer)
+        entry_id, song, prefer = entry
+        # 根 id + 类型 + 条目 id：CN/日服同曲同谱面（展示 id 相同）去重；
+        # 宴谱不同 diff_id 是不同谱面，必须保留（只按根 id+类型去重会把
+        # 同宿主的多张宴谱吞掉）。
+        key = (song.id % 10000, prefer, entry_id)
         if key in seen:
             continue
         seen.add(key)
@@ -93,18 +95,39 @@ def _dedupe_entries(entries: list) -> list:
     return result
 
 
+def _type_label(prefer) -> str:
+    return "宴" if prefer is None else ("DX" if prefer is SongType.DX else "SD")
+
+
+def _entry_label(entry) -> str:
+    """列表行：条目 id + 曲名 + 类型（宴谱用 6 位 diff_id，避免与 SD/DX 撞）。"""
+    entry_id, song, prefer = entry
+    return f"「{entry_id}」{song.title}（{_type_label(prefer)}）"
+
+
 def _song_info_text(entry, result: PreviewResult) -> str:
     """合并转发第 2 条：歌曲信息（谱面真实时长 + 各类型音符/EX 分布）。"""
     _display_id, song, prefer = entry
-    type_name = "宴" if prefer is None else ("DX" if prefer is SongType.DX else "SD")
     stats = result.stats
-    return (
-        f"【歌曲信息】{song.title}（{type_name}）\n"
+    head = (
+        f"【歌曲信息】{song.title}（{_type_label(prefer)}）\n"
         f"难度：{result.label}\n"
         f"谱面时长：{format_chart_duration(stats.chart_ms)}"
         "（谱面时间轴，非音源时长）\n"
-        f"音符分布：{format_note_distribution(stats)}\n"
-        f"总音符：{stats.total}（EX {stats.ex_total}）"
+    )
+    if result.buddy_stats is not None:
+        buddy = result.buddy_stats
+        return (
+            head
+            + f"音符分布（1P）：{format_note_distribution(stats)}\n"
+            + f"音符分布（2P）：{format_note_distribution(buddy)}\n"
+            + f"总音符：1P {stats.total}（EX {stats.ex_total}） / "
+            + f"2P {buddy.total}（EX {buddy.ex_total}）"
+        )
+    return (
+        head
+        + f"音符分布：{format_note_distribution(stats)}\n"
+        + f"总音符：{stats.total}（EX {stats.ex_total}）"
     )
 
 
@@ -144,18 +167,8 @@ async def _deliver(
     raise FinishedException
 
 
-@chart_preview.handle()
-@handle_errors(except_with_message=(ValueError, ExtError))
-async def _(bot: Bot, event: Event, args=CommandArg()):
-    if not plugin_config.awmc_chart_preview_enabled:
-        await UniMessage.text(" 谱面预览功能未开启").finish(at_sender=True)
-    text = args.extract_plain_text().strip()
-    if not text:
-        await UniMessage.text(_USAGE).finish(at_sender=True)
-    level, _is_utage, name, speed, range_token = _parse_args(text)
-    index = 3 if level is None else int(level.value)
-
-    # 曲目定位：数字 id 直查（含宴谱 diff_id/DX 展示 id），否则别名/标题链
+async def _resolve_normal_entry(name: str):
+    """普通谱面定位：数字 id 直查，否则别名/标题链（多命中列 id）。"""
     entry = None
     if name.isdigit():
         hit = await song_service.resolve_raw_chart(int(name))
@@ -168,10 +181,83 @@ async def _(bot: Bot, event: Event, args=CommandArg()):
             await UniMessage.text(_NOT_FOUND).finish(at_sender=True)
         if len(entries) > 1:
             lines = "找到多首匹配曲目，请用 id 指定：\n" + "\n".join(
-                f"「{display_song_id(s)}」{s.title}" for _i, s, _p in entries[:10]
+                _entry_label(entry) for entry in entries[:10]
             )
             await UniMessage.text(lines).finish(at_sender=True)
         entry = entries[0]
+    return entry
+
+
+def _utage_diffs(song) -> list:
+    """曲目的宴谱难度列表（不 import maimai_py：按 duck typing 取字段）。"""
+    from ...core.types import SongType
+
+    try:
+        diffs = song.get_difficulties(SongType.UTAGE)
+    except (AttributeError, ValueError):
+        return []
+    return [d for d in diffs if getattr(d, "diff_id", None) is not None]
+
+
+async def _resolve_utage_entry(name: str):
+    """宴谱定位：6 位 diff_id 直查；否则找宿主曲再选宴谱（多张列 diff_id）。"""
+    if name.isdigit():
+        hit = await song_service.resolve_raw_chart(int(name))
+        if hit is not None:
+            song, _prefer, _jp, utage_diff = hit
+            if utage_diff is not None:
+                return (int(name), song, None)
+            uts = _utage_diffs(song)
+            if len(uts) == 1:
+                return (uts[0].diff_id, song, None)
+            if len(uts) > 1:
+                await _list_utage(uts, song)
+        await UniMessage.text(_NOT_FOUND).finish(at_sender=True)
+
+    entries = _dedupe_entries(await song_service.entries_for_name(name))
+    ut_entries = [entry for entry in entries if entry[2] is None]
+    if len(ut_entries) == 1:
+        return ut_entries[0]
+    if len(ut_entries) > 1:
+        lines = "找到多张宴谱，请用 6 位 diff_id 指定：\n" + "\n".join(
+            _entry_label(entry) for entry in ut_entries[:10]
+        )
+        await UniMessage.text(lines).finish(at_sender=True)
+    songs = {entry[1].id: entry[1] for entry in entries}
+    if len(songs) == 1:
+        song = next(iter(songs.values()))
+        uts = _utage_diffs(song)
+        if len(uts) == 1:
+            return (uts[0].diff_id, song, None)
+        if len(uts) > 1:
+            await _list_utage(uts, song)
+    await UniMessage.text(
+        " 该曲目没有宴谱；宴谱请用「谱面预览 宴+<6 位 diff_id>」指定"
+    ).finish(at_sender=True)
+
+
+async def _list_utage(uts, song) -> None:
+    lines = "找到多张宴谱，请用 6 位 diff_id 指定：\n" + "\n".join(
+        f"「{d.diff_id}」{song.title}（宴·{getattr(d, 'kanji', '')}）" for d in uts[:10]
+    )
+    await UniMessage.text(lines).finish(at_sender=True)
+
+
+@chart_preview.handle()
+@handle_errors(except_with_message=(ValueError, ExtError))
+async def _(bot: Bot, event: Event, args=CommandArg()):
+    if not plugin_config.awmc_chart_preview_enabled:
+        await UniMessage.text(" 谱面预览功能未开启").finish(at_sender=True)
+    text = args.extract_plain_text().strip()
+    if not text:
+        await UniMessage.text(_USAGE).finish(at_sender=True)
+    level, is_utage, name, speed, range_token = _parse_args(text)
+    index = 3 if level is None else int(level.value)
+
+    if is_utage:
+        entry = await _resolve_utage_entry(name)
+    else:
+        entry = await _resolve_normal_entry(name)
 
     if cached_path(entry, index, range_token, speed) is None:
         hint = (
@@ -203,6 +289,9 @@ help_registry.declare(
                 "时间范围：0:35-1:20 / -1:20 / 0:35-（- 前后可省略一侧），"
                 "自动按小节对齐；片段会带 2 小节前置（音乐渐入、打击音效从内容"
                 "起点开始）。\n"
+                "宴谱用 宴+<6 位 diff_id>（也可 宴+宿主曲名/id 自动定位）。"
+                "buddy 宴谱输出 1200×600：左侧 1P、右侧 2P，歌曲信息分别给 "
+                "1P/2P 物量。\n"
                 "国服先行曲等暂无谱面数据的曲目无法预览。\n"
                 "结果为合并转发（视频 + 歌曲信息（谱面真实时长/各类型音符与 EX "
                 "分布）+ 调参提示（改流速/指定时间范围））；协议端不支持"

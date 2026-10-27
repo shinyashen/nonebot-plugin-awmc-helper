@@ -16,7 +16,7 @@ from nonebot import logger
 from nonebot_plugin_localstore import get_cache_dir
 
 from ...config import plugin_config
-from ...core.simai import SimaiDifficulty, parse_simai
+from ...core.simai import parse_simai
 from ...core.songs import ChartEntry, utage_diff_of
 from ...core.types import SongType, LevelIndex
 from ...core.ext.lxns_assets import (
@@ -24,6 +24,7 @@ from ...core.ext.lxns_assets import (
     fetch_music,
     fetch_chart_text,
     fetch_hit_sounds,
+    fetch_chart_text_by_id,
 )
 from ...core.render.chart_notes import parse_site_chart
 from ...core.render.chart_range import (
@@ -107,6 +108,7 @@ class PreviewResult:
     stats: ChartStats
     range_text: str | None = None
     preroll_measures: int = 0
+    buddy_stats: ChartStats | None = None  # buddy 宴谱 2P 侧统计（1P 在 stats）
 
 
 """渲染器版本：算法变更时递增，避免命中旧渲染器产物。"""
@@ -132,15 +134,115 @@ def _sweep_cache(cap_mb: int) -> None:
         logger.debug(f"chart_preview 缓存清理：{p.name}")
 
 
-def _pick_utage_suffix(chart: dict[int, SimaiDifficulty], utage_diff) -> int | None:
-    """宴谱 simai 后缀定位：优先按规范表物量对拍，兜底取最小后缀。"""
-    if utage_diff is not None:
-        expect = (utage_diff.tap_num, utage_diff.hold_num, utage_diff.slide_num)
-        for suffix, diff in sorted(chart.items()):
-            c = diff.counts()
-            if (c["tap"], c["hold"], c["slide"]) == expect:
-                return suffix
-    return min(chart) if chart else None
+_BUDDY_LEFT_SUFFIX = 2  # 落雪 buddy 谱面拆分约定：&inote_2 = 1P
+_BUDDY_RIGHT_SUFFIX = 102  # &inote_102 = 2P（落雪独创：1p/2p 两张谱面）
+
+
+def _counts_tuple(counts: dict[str, int]) -> tuple[int, int, int, int, int]:
+    """统一取 5 类物量：兼容 simai 解析的小写键与 ChartStats 的大写键。"""
+    keys = ("TAP", "HOLD", "SLIDE", "TOUCH", "BREAK")
+    lower = {key.lower(): value for key, value in counts.items()}
+    return tuple(int(counts[k] if k in counts else lower[k.lower()]) for k in keys)
+
+
+def _official_counts_tuple(diff) -> tuple[int, int, int, int, int]:
+    return (
+        int(diff.tap_num),
+        int(diff.hold_num),
+        int(diff.slide_num),
+        int(diff.touch_num),
+        int(diff.break_num),
+    )
+
+
+def _counts_distance(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+    return sum(abs(a - b) for a, b in zip(left, right, strict=True))
+
+
+def _pick_utage_suffixes(simai_text: str, utage_diff) -> tuple[int, int | None]:
+    """宴谱后缀定位：返回 (1P 后缀, 2P 后缀或 None)。
+
+    普通宴谱只有一张（通常 &inote_2）；buddy 宴谱按落雪约定拆成两张：
+    &inote_2 = 1P、&inote_102 = 2P。物量与规范表可能差 1–2（官方计数与
+    解析口径差异），按距离最小分配左右；多个候选却对不上时抛错，绝不
+    回落成 BASIC（历史 bug：宿主曲的普通谱 &inote_1 被当成宴谱渲染）。
+    """
+    parsed = parse_simai(simai_text).difficulties
+    if not parsed:
+        raise ValueError("该宴谱没有可渲染的谱面数据")
+    is_buddy = bool(getattr(utage_diff, "is_buddy", False))
+    buddy_notes = getattr(utage_diff, "buddy_notes", None) if is_buddy else None
+    if is_buddy and buddy_notes is not None:
+        left = (
+            buddy_notes.left_tap_num,
+            buddy_notes.left_hold_num,
+            buddy_notes.left_slide_num,
+            buddy_notes.left_touch_num,
+            buddy_notes.left_break_num,
+        )
+        right = (
+            buddy_notes.right_tap_num,
+            buddy_notes.right_hold_num,
+            buddy_notes.right_slide_num,
+            buddy_notes.right_touch_num,
+            buddy_notes.right_break_num,
+        )
+        ordered = (
+            _BUDDY_LEFT_SUFFIX,
+            _BUDDY_RIGHT_SUFFIX,
+        )
+        pair = (
+            ordered if ordered[0] in parsed and ordered[1] in parsed else tuple(parsed)
+        )
+        if len(pair) != 2:
+            raise ValueError("该 buddy 宴谱缺少 1P/2P 两张谱面数据")
+        candidates = [
+            (
+                _counts_distance(_counts_tuple(parsed[pair[0]].counts()), left)
+                + _counts_distance(_counts_tuple(parsed[pair[1]].counts()), right),
+                pair[0],
+                pair[1],
+            ),
+            (
+                _counts_distance(_counts_tuple(parsed[pair[1]].counts()), left)
+                + _counts_distance(_counts_tuple(parsed[pair[0]].counts()), right),
+                pair[1],
+                pair[0],
+            ),
+        ]
+        _score, left_suffix, right_suffix = min(candidates)
+        return left_suffix, right_suffix
+
+    expect = _official_counts_tuple(utage_diff) if utage_diff is not None else None
+    if expect is not None:
+        exact = [
+            suffix
+            for suffix, diff in parsed.items()
+            if _counts_tuple(diff.counts()) == expect
+        ]
+        if len(exact) == 1:
+            return exact[0], None
+        distances = [
+            (_counts_distance(_counts_tuple(diff.counts()), expect), suffix)
+            for suffix, diff in parsed.items()
+        ]
+        best_distance, best_suffix = min(distances)
+        if best_distance <= 5:
+            return best_suffix, None
+    if len(parsed) == 1:
+        return next(iter(parsed)), None
+    raise ValueError("无法定位该宴谱的谱面（物量与规范表不一致），暂不支持渲染")
+
+
+def _stats_with_counts(site_chart, counts: dict[str, int]) -> ChartStats:
+    """用官方物量计数 + 解析出的 EX 计数组装统计（buddy 1P/2P 各一份）。"""
+    parsed = compute_chart_stats(site_chart)
+    return ChartStats(
+        chart_ms=parsed.chart_ms,
+        measures=parsed.measures,
+        counts=counts,
+        ex_counts=parsed.ex_counts,
+    )
 
 
 def _range_suffix(range_token: str | None) -> str:
@@ -171,6 +273,16 @@ def _write_stats(result: PreviewResult) -> None:
         "measures": result.stats.measures,
         "counts": result.stats.counts,
         "ex_counts": result.stats.ex_counts,
+        "buddy_stats": (
+            {
+                "chart_ms": result.buddy_stats.chart_ms,
+                "measures": result.buddy_stats.measures,
+                "counts": result.buddy_stats.counts,
+                "ex_counts": result.buddy_stats.ex_counts,
+            }
+            if result.buddy_stats is not None
+            else None
+        ),
     }
     _stats_sidecar(result.path).write_text(
         json.dumps(payload, ensure_ascii=False), encoding="utf-8"
@@ -250,22 +362,53 @@ async def build_preview(
         if cached is not None:
             return cached
 
-    simai_text, _official_id = await fetch_chart_text(song.id, dx=dx)
+    buddy_chart = None
+    buddy_stats: ChartStats | None = None
     if is_utage:
-        # 宴谱后缀与难度无固定对应：先用物量对拍（simai.py 的水鱼口径物量）
-        # 定位后缀，再用站内渲染口径的解析器重建 note
-        parsed = parse_simai(simai_text)
-        suffix = _pick_utage_suffix(parsed.difficulties, utage_diff)
-        if suffix is None:
-            raise ValueError("该宴谱没有可渲染的谱面数据")
+        # 宴谱文件以 diff_id 命名（宿主曲 id 对应的是普通谱，不能拿来渲染）
+        simai_text = await fetch_chart_text_by_id(display_id)
+        suffix, buddy_suffix = _pick_utage_suffixes(simai_text, utage_diff)
+        site_chart = parse_site_chart(simai_text, difficulty=suffix).get(suffix)
+        if site_chart is None:
+            raise ValueError("素材站的谱面数据缺少该难度")
+        if buddy_suffix is not None:
+            buddy_chart = parse_site_chart(simai_text, difficulty=buddy_suffix).get(
+                buddy_suffix
+            )
+            if buddy_chart is None:
+                raise ValueError("素材站缺少该 buddy 宴谱的 2P 谱面数据")
     else:
+        simai_text, _official_id = await fetch_chart_text(song.id, dx=dx)
         suffix = _SUFFIX_BY_INDEX[index]
-    site_charts = parse_site_chart(simai_text, difficulty=suffix)
-    site_chart = site_charts.get(suffix)
-    if site_chart is None:
-        raise ValueError("素材站的谱面数据缺少该难度")
+        site_chart = parse_site_chart(simai_text, difficulty=suffix).get(suffix)
+        if site_chart is None:
+            raise ValueError("素材站的谱面数据缺少该难度")
 
-    stats = compute_chart_stats(site_chart, utage_diff or diff)
+    buddy_notes = getattr(utage_diff, "buddy_notes", None) if is_utage else None
+    if buddy_chart is not None and buddy_notes is not None:
+        # buddy：1P/2P 分别用官方左右物量（解析口径与官方可能差 1–2）
+        stats = _stats_with_counts(
+            site_chart,
+            {
+                "TAP": buddy_notes.left_tap_num,
+                "HOLD": buddy_notes.left_hold_num,
+                "SLIDE": buddy_notes.left_slide_num,
+                "TOUCH": buddy_notes.left_touch_num,
+                "BREAK": buddy_notes.left_break_num,
+            },
+        )
+        buddy_stats = _stats_with_counts(
+            buddy_chart,
+            {
+                "TAP": buddy_notes.right_tap_num,
+                "HOLD": buddy_notes.right_hold_num,
+                "SLIDE": buddy_notes.right_slide_num,
+                "TOUCH": buddy_notes.right_touch_num,
+                "BREAK": buddy_notes.right_break_num,
+            },
+        )
+    else:
+        stats = compute_chart_stats(site_chart, utage_diff or diff)
     clip = None
     clip_start = 0.0
     clip_end = None
@@ -293,6 +436,7 @@ async def build_preview(
             stats=stats,
             range_text=range_text,
             preroll_measures=preroll_measures,
+            buddy_stats=buddy_stats,
         )
         _write_stats(result)
         return result
@@ -323,6 +467,7 @@ async def build_preview(
         notes_start_ms=notes_start,
         hi_speed=hi_speed,
         ffmpeg=plugin_config.awmc_chart_preview_ffmpeg,
+        buddy_chart=buddy_chart,
     )
     result = PreviewResult(
         path=out,
@@ -330,6 +475,7 @@ async def build_preview(
         stats=stats,
         range_text=range_text,
         preroll_measures=preroll_measures,
+        buddy_stats=buddy_stats,
     )
     _write_stats(result)
     _sweep_cache(plugin_config.awmc_chart_preview_cache_mb)

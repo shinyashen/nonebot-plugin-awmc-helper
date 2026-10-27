@@ -802,7 +802,7 @@ def parse_site_chart(text: str, difficulty: int | None = None) -> dict[int, Site
     current: int | None = None
     for line in lines:
         stripped = line.strip()
-        match = re.match(r"^&inote_(\d)=(.*)$", stripped, re.IGNORECASE)
+        match = re.match(r"^&inote_(\d+)=(.*)$", stripped, re.IGNORECASE)
         if match:
             current = int(match.group(1))
             inotes[current] = [match.group(2)] if match.group(2) else []

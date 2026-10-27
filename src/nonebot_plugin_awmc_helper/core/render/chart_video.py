@@ -4277,9 +4277,34 @@ _CLIP_START_MS = 0.0
 _WORKER_SIZE = int(_LOGICAL)
 
 
-def _thread_worker_init(chart: SiteChart, fps: int) -> None:
-    """线程池 worker 初始化：每线程各持一个渲染器（共享只读谱面对象）。"""
+def _compose_frame(
+    renderer: "_ChartRenderer",
+    renderer2: "_ChartRenderer | None",
+    now_ms: float,
+    fps: int,
+) -> Image.Image:
+    """合成单帧：普通谱面 600×600；buddy 谱面 1200×600（左 1P、右 2P）。"""
+
+    def panel(r: "_ChartRenderer") -> Image.Image:
+        frame = r.render_frame(now_ms, fps)
+        rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
+        return rgb.resize((_WORKER_SIZE, _WORKER_SIZE), Image.Resampling.BILINEAR)
+
+    left = panel(renderer)
+    if renderer2 is None:
+        return left
+    out = Image.new("RGB", (_WORKER_SIZE * 2, _WORKER_SIZE))
+    out.paste(left, (0, 0))
+    out.paste(panel(renderer2), (_WORKER_SIZE, 0))
+    return out
+
+
+def _thread_worker_init(
+    chart: SiteChart, fps: int, buddy_chart: SiteChart | None = None
+) -> None:
+    """线程池 worker 初始化：每线程各持渲染器（共享只读谱面对象）。"""
     _THREAD_STATE.renderer = _ChartRenderer(chart)
+    _THREAD_STATE.renderer2 = _ChartRenderer(buddy_chart) if buddy_chart else None
     _THREAD_STATE.fps = fps
 
 
@@ -4311,6 +4336,7 @@ def _write_frames_parallel(
     fps: int,
     workers: int,
     start_ms: float = 0.0,
+    buddy_chart: SiteChart | None = None,
 ) -> bool:
     """多线程分帧渲染并保序写入 ffmpeg 管道。
 
@@ -4336,7 +4362,7 @@ def _write_frames_parallel(
         with ThreadPoolExecutor(
             max_workers=workers,
             initializer=_thread_worker_init,
-            initargs=(chart, fps),
+            initargs=(chart, fps, buddy_chart),
         ) as pool:
             for frames in pool.map(_thread_render_chunk, tasks):
                 for frame in frames:
@@ -4374,6 +4400,7 @@ def render_chart_video(
     fade_in_ms: float | None = None,
     hi_speed: float = _DEFAULT_HI_SPEED,
     ffmpeg: str | None = None,
+    buddy_chart: SiteChart | None = None,
 ) -> Path:
     """渲染入口：设置超采样/谱面流速/ffmpeg 路径，串行化并发渲染。"""
     global _SS, _HI_SPEED, _APPROACH_MS, _HALF_APPROACH
@@ -4407,6 +4434,7 @@ def render_chart_video(
                 notes_start_ms=notes_start_ms,
                 fade_in_ms=fade_in_ms,
                 ffmpeg=ffmpeg,
+                buddy_chart=buddy_chart,
             )
         finally:
             _SS = previous_ss
@@ -4503,6 +4531,7 @@ def _render_chart_video_impl(
     notes_start_ms: float | None = None,
     fade_in_ms: float | None = None,
     ffmpeg: str | None = None,
+    buddy_chart: SiteChart | None = None,
 ) -> Path:
     """渲染谱面预览 mp4（CPU 密集，调用方放线程池）。
 
@@ -4552,7 +4581,11 @@ def _render_chart_video_impl(
         "-pix_fmt",
         "rgb24",
         "-s",
-        f"{int(_LOGICAL)}x{int(_LOGICAL)}",
+        (
+            f"{int(_LOGICAL) * 2}x{int(_LOGICAL)}"
+            if buddy_chart is not None
+            else f"{int(_LOGICAL)}x{int(_LOGICAL)}"
+        ),
         "-r",
         str(fps),
         "-i",
@@ -4579,7 +4612,12 @@ def _render_chart_video_impl(
         fade = f",afade=t=in:st=0:d={fade_s:.3f}" if fade_s > 0 else ""
         delay_filter = cut + fade
         effects = (
-            build_effect_track(chart, sound_effects, offset_ms=sound_offset_ms)
+            build_effect_track(
+                chart,
+                sound_effects,
+                offset_ms=sound_offset_ms,
+                buddy_chart=buddy_chart,
+            )
             if sound_effects
             else None
         )
@@ -4657,7 +4695,7 @@ def _render_chart_video_impl(
     assert proc.stdin is not None
     try:
         if workers > 1 and _write_frames_parallel(
-            proc, chart, n_frames, fps, workers, clip_start
+            proc, chart, n_frames, fps, workers, clip_start, buddy_chart
         ):
             pass
         else:

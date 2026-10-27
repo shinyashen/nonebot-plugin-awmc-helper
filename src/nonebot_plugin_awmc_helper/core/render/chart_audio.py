@@ -290,6 +290,7 @@ def build_effect_track(
     sounds: dict[str, bytes] | None,
     *,
     offset_ms: float = -50.0,
+    buddy_chart: SiteChart | None = None,
 ) -> tuple[bytes, float] | None:
     """合成打击音效音轨。
 
@@ -308,6 +309,10 @@ def build_effect_track(
                     continue
 
     events = _collect_events(chart) if buffers else []
+    if buddy_chart is not None:
+        # buddy 宴谱 = 两张谱面（1P/2P）叠在一起，音效事件取两侧并集
+        events = list(events) + _collect_events(buddy_chart)
+        events.sort(key=lambda event: event["time_ms"])
     if events:
         _fill_gaps(events)
     last = max((e["time_ms"] for e in events), default=0.0)

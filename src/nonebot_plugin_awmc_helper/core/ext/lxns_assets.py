@@ -45,6 +45,18 @@ async def fetch_chart_text(root_id: int, *, dx: bool) -> tuple[str, int]:
     )
 
 
+async def fetch_chart_text_by_id(official_id: int) -> str:
+    """按官方谱面 id 直接拉取（宴谱 diff_id / 已确认的官方 id）。
+
+    宴谱的谱面文件以 6 位 diff_id 命名（宿主曲 id 的文件是普通谱），
+    因此宴谱渲染必须走本函数而不是 ``fetch_chart_text(root_id)``。
+    """
+    text = await _fetch_chart_file(official_id)
+    if text is None:
+        raise ChartNotAvailableError(f"素材站没有该谱面数据（官方 id {official_id}）")
+    return text
+
+
 async def _fetch_chart_file(official_id: int) -> str | None:
     resp = await ext_request(
         "GET",

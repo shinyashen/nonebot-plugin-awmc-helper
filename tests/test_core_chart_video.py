@@ -228,3 +228,58 @@ def test_speed_mapping_majdata(cv):
         assert cv._TOUCH_APPROACH_MS == pytest.approx(579.85, abs=0.05)
     finally:
         cv._apply_hi_speed(cv._DEFAULT_HI_SPEED)
+
+
+def test_parse_site_chart_buddy_suffix(site):
+    """&inote_102（buddy 2P）也要能解析：历史上正则只认单个数字。"""
+    text = (
+        "&bpm=120\n"
+        "&inote_2=\n(120){1},1,2,\n(120){2},3,4,\n"
+        "&inote_102=\n(120){1},5,6,\n(120){2},7,8,\n"
+    )
+    charts = site(text)
+    assert set(charts) == {2, 102}
+    assert len(charts[2].notes) == 4
+    assert len(charts[102].notes) == 4
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
+def test_render_buddy_two_panels(cv, site, tmp_path: Path):
+    """buddy 宴谱：1200x600，左侧 1P、右侧 2P（两张谱面独立渲染）。"""
+    import subprocess
+
+    text = (
+        "&bpm=120\n"
+        "&inote_2=\n(120){1},1,2,\n(120){2},3,4,\n"
+        "&inote_102=\n(120){1},5,6,\n(120){2},7,8,\n"
+    )
+    chart_1p = site(text, difficulty=2)[2]
+    chart_2p = site(text, difficulty=102)[102]
+    out = cv.render_chart_video(
+        chart_1p,
+        audio=None,
+        out_path=tmp_path / "buddy.mp4",
+        limit_seconds=1.0,
+        supersample=1.0,
+        workers=1,
+        buddy_chart=chart_2p,
+    )
+    assert out.exists()
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert probe.stdout.strip() == "1200,600"

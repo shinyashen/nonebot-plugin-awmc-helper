@@ -85,6 +85,7 @@ def fake_render(monkeypatch, tmp_path):
         fade_in_ms=None,
         hi_speed=7.0,
         ffmpeg=None,
+        buddy_chart=None,
     ):
         calls.append(
             {
@@ -94,6 +95,7 @@ def fake_render(monkeypatch, tmp_path):
                 "start_ms": start_ms,
                 "end_ms": end_ms,
                 "hi_speed": hi_speed,
+                "buddy_chart": buddy_chart,
             }
         )
         out = Path(out_path)
@@ -139,7 +141,6 @@ async def test_command_multi_hits_lists_ids(app: App, db, cache_dir, songs):
     """别名命中多条目（199 宿主：SD/DX/宴）→ 列表并提示用 id 指定。"""
     from fake import fake_group_message_event_v11
 
-    from nonebot_plugin_awmc_helper.constants import display_song_id
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.plugins.chart_preview import chart_preview
 
@@ -150,12 +151,13 @@ async def test_command_multi_hits_lists_ids(app: App, db, cache_dir, songs):
         ctx.receive_event(bot, event)
         # 期望列表由同一数据源动态构造（199 宿主的多条目展开）
         from nonebot_plugin_awmc_helper.plugins.chart_preview.matchers import (
+            _entry_label,
             _dedupe_entries,
         )
 
         entries = _dedupe_entries(await song_service.entries_for_name("琪露诺"))
         lines = "找到多首匹配曲目，请用 id 指定：\n" + "\n".join(
-            f"「{display_song_id(s)}」{s.title}" for _i, s, _p in entries[:10]
+            _entry_label(entry) for entry in entries[:10]
         )
         ctx.should_call_send(
             event,
@@ -819,3 +821,137 @@ def test_render_fingerprint_stable_and_sensitive():
     assert all(ch in "0123456789abcdef" for ch in fp7)
     assert _render_fingerprint(7.0) == fp7
     assert _render_fingerprint(7.5) != fp7
+
+
+def test_utage_suffixes_normal_and_buddy():
+    """宴谱后缀：普通按物量对拍；buddy 按落雪约定 2=1P、102=2P。"""
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import (
+        _pick_utage_suffixes,
+    )
+
+    text = "&bpm=120\n&inote_2=\n(120){1},1,2,3,4,\n&inote_102=\n(120){1},5,6,\n"
+    normal = _pick_utage_suffixes(
+        text,
+        SimpleNamespace(
+            tap_num=4,
+            hold_num=0,
+            slide_num=0,
+            touch_num=0,
+            break_num=0,
+            is_buddy=False,
+            buddy_notes=None,
+        ),
+    )
+    assert normal == (2, None)
+    buddy = _pick_utage_suffixes(
+        text,
+        SimpleNamespace(
+            tap_num=6,
+            hold_num=0,
+            slide_num=0,
+            touch_num=0,
+            break_num=0,
+            is_buddy=True,
+            buddy_notes=SimpleNamespace(
+                left_tap_num=4,
+                left_hold_num=0,
+                left_slide_num=0,
+                left_touch_num=0,
+                left_break_num=0,
+                right_tap_num=2,
+                right_hold_num=0,
+                right_slide_num=0,
+                right_touch_num=0,
+                right_break_num=0,
+            ),
+        ),
+    )
+    assert buddy == (2, 102)
+
+
+def test_buddy_song_info_shows_1p_2p():
+    """buddy 歌曲信息节点分别给 1P/2P 的分布与总音符。"""
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.core.render.chart_stats import ChartStats
+
+    class Song:
+        title = "[協]テスト"
+        id = 111355
+
+    left = ChartStats(
+        chart_ms=100_000.0,
+        measures=25,
+        counts={"TAP": 100, "HOLD": 10, "SLIDE": 5, "TOUCH": 2, "BREAK": 3},
+        ex_counts={"TAP": 1, "HOLD": 0, "SLIDE": 0, "TOUCH": 0, "BREAK": 0},
+    )
+    right = ChartStats(
+        chart_ms=100_000.0,
+        measures=25,
+        counts={"TAP": 90, "HOLD": 8, "SLIDE": 5, "TOUCH": 1, "BREAK": 2},
+        ex_counts={"TAP": 0, "HOLD": 0, "SLIDE": 0, "TOUCH": 0, "BREAK": 0},
+    )
+    result = _preview_result(Path("/tmp/buddy.mp4"))
+    result = type(result)(
+        path=result.path,
+        label="13?",
+        stats=left,
+        range_text=None,
+        preroll_measures=0,
+        buddy_stats=right,
+    )
+    text = matchers._song_info_text((111355, Song(), None), result)
+    assert "音符分布（1P）" in text
+    assert "音符分布（2P）" in text
+    assert "总音符：1P 120" in text
+
+
+@pytest.mark.asyncio
+async def test_command_utage_resolves_diff_id_from_host(
+    app: App, db, cache_dir, songs, monkeypatch, tmp_path
+):
+    """宴+宿主 id：定位该曲的宴谱 diff_id（而不是渲染宿主普通谱）。"""
+    from fake import fake_group_message_event_v11
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.__init__ import chart_preview
+
+    await song_service.inject(songs)
+    fake_out = tmp_path / "utage.mp4"
+    fake_out.write_bytes(b"\x00" * 64)
+    seen = {}
+
+    async def fake_build(entry, index, range_token=None, hi_speed=7.0):
+        seen["entry"] = entry
+        return _preview_result(fake_out, label="蛸")
+
+    async def fake_deliver(bot, event, entry, result, hi_speed):
+        from nonebot.exception import FinishedException
+
+        raise FinishedException
+
+    monkeypatch.setattr(matchers, "build_preview", fake_build)
+    monkeypatch.setattr(matchers, "_deliver", fake_deliver)
+    async with app.test_matcher(chart_preview) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        event = fake_group_message_event_v11(message="谱面预览 宴+199")
+        ctx.receive_event(bot, event)
+        ctx.should_call_send(
+            event,
+            Message(
+                [
+                    MessageSegment.at(event.user_id),
+                    MessageSegment.text(
+                        " 谱面预览渲染中：约需 30–90 秒，完成后自动发送。"
+                    ),
+                ]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+    entry_id, _song, prefer = seen["entry"]
+    assert prefer is None
+    assert entry_id == 100199  # 宴谱 diff_id，不是宿主 199
