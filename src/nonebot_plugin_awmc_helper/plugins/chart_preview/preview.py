@@ -140,9 +140,12 @@ _BUDDY_RIGHT_SUFFIX = 102  # &inote_102 = 2P（落雪独创：1p/2p 两张谱面
 
 def _counts_tuple(counts: dict[str, int]) -> tuple[int, int, int, int, int]:
     """统一取 5 类物量：兼容 simai 解析的小写键与 ChartStats 的大写键。"""
-    keys = ("TAP", "HOLD", "SLIDE", "TOUCH", "BREAK")
     lower = {key.lower(): value for key, value in counts.items()}
-    return tuple(int(counts[k] if k in counts else lower[k.lower()]) for k in keys)
+
+    def get(name: str) -> int:
+        return int(counts[name] if name in counts else lower[name.lower()])
+
+    return (get("TAP"), get("HOLD"), get("SLIDE"), get("TOUCH"), get("BREAK"))
 
 
 def _official_counts_tuple(diff) -> tuple[int, int, int, int, int]:
