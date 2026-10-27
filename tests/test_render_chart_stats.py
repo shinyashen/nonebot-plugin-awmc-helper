@@ -42,3 +42,39 @@ def test_chart_stats_counts_and_ex(chart_11355_master):
     assert "TAP 551（EX 65）" in text
     assert "SLIDE 96" in text
     assert "SLIDE 96（EX" not in text
+
+
+def test_break_ex_matches_hud_relation():
+    """文字 BREAK（EX n）与 HUD 自洽：总数 = 无保护 + EX（12025 类问题）。
+
+    EX break slide/hold 的完成事件也计入 EX（不只 break tap），
+    否则无保护 + 文本 EX ≠ BREAK 总数。
+    """
+    from types import SimpleNamespace
+
+    from nonebot_plugin_awmc_helper.core.render.chart_notes import (
+        parse_site_chart,
+        break_completion_times,
+        break_noex_completion_times,
+    )
+    from nonebot_plugin_awmc_helper.core.render.chart_stats import (
+        compute_chart_stats,
+    )
+
+    text = (
+        "&bpm=120\n"
+        "&inote_2=\n(120){1},1xb-3[4:1],\n"
+        "(120){2},1b,2b,\n(120){3},4bxh[1:1],\n"
+    )
+    chart = parse_site_chart(text, difficulty=2)[2]
+    total = len(break_completion_times(chart.notes))
+    noex = len(break_noex_completion_times(chart.notes))
+    # 官方 break_num 取 HUD 的完成事件总数（12025 为 146）
+    diff = SimpleNamespace(
+        tap_num=0, hold_num=0, slide_num=0, touch_num=0, break_num=total
+    )
+    stats = compute_chart_stats(chart, diff)
+    assert stats.counts["BREAK"] == total
+    assert stats.ex_counts["BREAK"] == total - noex
+    assert stats.counts["BREAK"] - stats.ex_counts["BREAK"] == noex
+    assert stats.ex_counts["TAP"] == 0  # break slide 的 EX 不重复计入 TAP

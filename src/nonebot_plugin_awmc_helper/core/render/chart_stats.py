@@ -12,7 +12,11 @@ from dataclasses import dataclass
 
 from maimai_py import SongDifficulty
 
-from .chart_notes import SiteChart
+from .chart_notes import (
+    SiteChart,
+    break_completion_times,
+    break_noex_completion_times,
+)
 
 # 站内 note 类型 → 展示类型（hold-end/touch-hold-end 不计入音符总量）
 _TYPE_GROUP = {
@@ -54,7 +58,10 @@ def compute_chart_stats(
     ``difficulty`` 传入时优先用官方谱面信息（水鱼/落雪 ``tap_num`` 等）作为
     各类型数量：官方口径把 SLIDE 星星头计入 TAP（例：11355 MASTER
     tap 551 = 我方纯 tap 456 + 95 个非无头 slide），用户要求与谱面信息
-    对齐；EX 数量官方无此字段，仍按解析结果统计（SLIDE 的 EX 归 TAP）。
+    对齐。EX 数量官方无此字段：普通类型按解析 note 统计（非 break slide 的
+    EX 归 TAP），**BREAK 则以渲染 HUD 的完成事件差额统计**（总数=break 完成
+    事件、无保护=非 EX 完成事件、EX=差额），保证文字与右下角
+    「BREAK 总数 = 无保护 + EX」自洽（12025：146 = 119 + 27）。
     """
     ex_counts: dict[str, int] = dict.fromkeys(_GROUPS, 0)
     for note in chart.notes:
@@ -62,12 +69,28 @@ def compute_chart_stats(
         if group is None or not note.is_ex:
             continue
         if group == "SLIDE":
-            # 星星头是 TAP 判定：EX 记到 EX-TAP，SLIDE 本体不计 EX
-            ex_counts["TAP"] += 1
+            # 星星头是 TAP 判定；但 break slide 属于 EX-BREAK（下方按
+            # 完成事件差额统计），不能重复计到 EX-TAP。
+            is_break_slide = note.is_start_break or any(
+                part.is_break for part in note.parts
+            )
+            if not is_break_slide:
+                ex_counts["TAP"] += 1
         elif group == "TOUCH":
             continue  # TOUCH（含烟花）没有 EX 判定
+        elif group == "BREAK":
+            continue  # EX break 含 break slide 各段，按完成事件差额统计
+        elif group == "HOLD" and note.is_break_hold:
+            continue  # EX break hold 属于 BREAK 事件
         else:
             ex_counts[group] += 1
+    # 与渲染 HUD 同口径：BREAK 总数为完成事件数（break tap + break hold 头 +
+    # break slide 头/各 break 段末），无保护 = 非 EX 事件数；EX = 两者差额。
+    ex_counts["BREAK"] = max(
+        0,
+        len(break_completion_times(chart.notes))
+        - len(break_noex_completion_times(chart.notes)),
+    )
 
     counts: dict[str, int] = dict.fromkeys(_GROUPS, 0)
     official: dict[str, int] | None = None
