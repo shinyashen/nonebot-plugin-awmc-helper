@@ -1638,10 +1638,13 @@ async def combo_chart_entries(
     """条件 → 谱面集（§5 选谱启发式）：进度/完成表/定数表消费。
 
     - 谱面级精确条件（难度/等级/定数/谱师，``single_chart``）在场 → 命中
-      谱面全部保留（完成表不收缩难度，§9.0），不做图长收缩；
+      谱面全部保留（完成表不收缩难度，§9.0）；
     - 否则每曲只取代表谱面（:func:`_representative_of`）；
-    - 代表谱面集仍 >400 → 只留 MASTER；>200 → 只留定数 ≥14.0（KarenBot §5
-      图长启发式）；过滤后为空则放弃该级收缩（旧框等低定数全集场景）；
+    - **不做图长收缩**（2026-10-27 修）：b50 的 KarenBot §5 启发式（>400 收
+      MASTER、>200 收 ds≥14）曾残留于此——本函数的消费方只有表格输出，
+      b50 走 :func:`run_combo`/:func:`combo_filtered_scores`（键集全量过滤），
+      收缩对表格纯有害（术力口完成表 342 张被剪到 7 张：>200 触发后仅存
+      ds≥14.0 的高定数谱）；
     - 谱面集空 → :class:`ComboEmpty`（可证明矛盾附点破提示）。
     """
     songs = await _songs_of(binding)
@@ -1670,19 +1673,9 @@ async def combo_chart_entries(
         entries = _representative_of(per_song)
     if not entries:
         return ComboEmpty(_empty_message(conds, cur))
-    # 图长启发式只作用于宽条件的代表谱面集：谱面级精确条件承诺全量保留
-    # ——单等级完成表底图是按全量谱面预渲染的网格文件，收缩会让盖章错位，
-    # 且 13+ 全组定数 <14.0 曾被 ds≥14 过滤整组滤空（渲染 0/0 空表，
-    # ComboEmpty 守卫在收缩前拦不住）。宽条件路径过滤后为空同样放弃收缩。
-    if not any(c.single_chart for c in conds):
-        if len(entries) > 400:
-            masters = [e for e in entries if e[1].level_index == LevelIndex.MASTER]
-            if masters:
-                entries = masters
-        if len(entries) > 200:
-            shrunk = [e for e in entries if e[1].level_value >= 14.0]
-            if shrunk:
-                entries = shrunk
+    # 图长收缩已整体退役（docstring）：b50 启发式（>400 收 MASTER、>200 收
+    # ds≥14）只对 b50 长图有意义，表格输出必须全量——宽条件收 13+ 全组曾
+    # 渲染 0/0 空表（ComboEmpty 守卫在收缩前拦不住），术力口完成表被剪到 7 张
     return entries
 
 

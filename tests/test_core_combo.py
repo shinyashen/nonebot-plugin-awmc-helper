@@ -859,10 +859,9 @@ async def bulk_lib(db):
 async def test_combo_chart_entries_single_chart_never_shrunk(bulk_lib):
     """回归（13+ap完成表 0/0）：谱面级精确条件不做图长收缩。
 
-    >200 收缩（ds≥14）曾作用于等级条件——13+ 全组定数 13.6~13.9 被整组
-    滤空后返回**空列表**（ComboEmpty 守卫在收缩前，拦不住），完成表渲染
-    0/0 且无盖章。单等级底图是按全量谱面预渲染的网格，精确条件必须全量
-    保留（§9.0 完成表不收缩难度）。
+    单等级底图是按全量谱面预渲染的网格，精确条件必须全量保留（§9.0
+    完成表不收缩难度）。（b50 图长收缩已整体退役：13+ 全组定数 13.6~13.9
+    曾被 ds≥14 过滤整组滤空，完成表渲染 0/0 且无盖章。）
     """
 
     from mocks import make_bulk_level_songs
@@ -876,16 +875,16 @@ async def test_combo_chart_entries_single_chart_never_shrunk(bulk_lib):
     await bulk_lib.inject(make_bulk_level_songs(220))
     entries = await combo_chart_entries(parse_combo("13+级"))
     assert not isinstance(entries, ComboEmpty)
-    # 220 张全部保留（旧逻辑：>200 → ds≥14 → 13.7 全滤 → 空列表）
     assert len(entries) == 220
     assert all(e[1].level_value == 13.7 for e in entries)
 
 
 @pytest.mark.asyncio
-async def test_combo_chart_entries_shrink_never_empties(bulk_lib):
-    """宽条件代表谱面集：收缩过滤逐级兜底，滤空即放弃该级收缩。
+async def test_combo_chart_entries_wide_lowds_full(bulk_lib):
+    """宽条件低定数全集：不收缩，代表谱面集全量保留。
 
-    旧框/低定数全集类宽条件（代表集 >200 且定数全 <14.0）曾同样被滤空。
+    旧框/低定数全集类宽条件（代表集 >200 且定数全 <14.0）曾被 >200 收缩
+    整组滤空（滤空兜底放弃收缩前，渲染 0/0 空表）。
     """
     from mocks import make_bulk_level_songs
 
@@ -903,8 +902,14 @@ async def test_combo_chart_entries_shrink_never_empties(bulk_lib):
 
 
 @pytest.mark.asyncio
-async def test_combo_chart_entries_shrink_still_caps_wide_sets(bulk_lib):
-    """宽条件图长启发式仍生效：>400 收 MASTER、>200 收 ds≥14（可满足时）。"""
+async def test_combo_chart_entries_wide_mixedds_full(bulk_lib):
+    """回归（术力口完成表只有 7 首）：宽条件混合定数集不收缩。
+
+    b50 的 KarenBot §5 图长启发式（>400 收 MASTER、>200 收 ds≥14）曾残留
+    在 combo_chart_entries——本函数只服务表格输出，b50 走
+    run_combo/combo_filtered_scores；术力口 342 张代表集 >200 触发收缩后
+    仅存 ds≥14.0 的 7 张谱，完成表剩 7 首（2026-10-27 修）。
+    """
     from mocks import make_diff, make_bulk_level_songs
     from maimai_py import LevelIndex
 
@@ -914,24 +919,23 @@ async def test_combo_chart_entries_shrink_still_caps_wide_sets(bulk_lib):
         combo_chart_entries,
     )
 
-    # 450 张各带 MASTER(14.2)+Re:MASTER(14.5)：代表集 900 → >400 收 MASTER
-    # → 450 → >200 收 ds≥14（全满足）→ 450
+    # 220 张东方曲定数 13.7 + 3 张定数 14.2（>200 收缩若在，仅存 3 张）
     await bulk_lib.inject(
-        make_bulk_level_songs(
-            450,
+        make_bulk_level_songs(220)
+        + make_bulk_level_songs(
+            3,
+            song_id_base=31000,
             level="14",
+            level_value=14.2,
             make_diffs=lambda i: [
-                make_diff(level="14", level_value=14.2, level_index=LevelIndex.MASTER),
-                make_diff(
-                    level="14", level_value=14.5, level_index=LevelIndex.ReMASTER
-                ),
+                make_diff(level="14", level_value=14.2, level_index=LevelIndex.MASTER)
             ],
         )
     )
     entries = await combo_chart_entries(parse_combo("东方"))
     assert not isinstance(entries, ComboEmpty)
-    assert len(entries) == 450
-    assert all(e[1].level_index is LevelIndex.MASTER for e in entries)
+    assert len(entries) == 223
+    assert sum(e[1].level_value >= 14.0 for e in entries) == 3
 
 
 def test_plate_shape():
