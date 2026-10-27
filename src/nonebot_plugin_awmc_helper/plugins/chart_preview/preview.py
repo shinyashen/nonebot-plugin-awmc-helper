@@ -296,14 +296,20 @@ def _read_stats(video: Path) -> PreviewResult | None:
     sidecar = _stats_sidecar(video)
     if not sidecar.exists():
         return None
+
+    def parse_stats(raw: dict) -> ChartStats:
+        return ChartStats(
+            chart_ms=float(raw["chart_ms"]),
+            measures=int(raw["measures"]),
+            counts={k: int(v) for k, v in raw["counts"].items()},
+            ex_counts={k: int(v) for k, v in raw["ex_counts"].items()},
+        )
+
     try:
         payload = json.loads(sidecar.read_text(encoding="utf-8"))
-        stats = ChartStats(
-            chart_ms=float(payload["chart_ms"]),
-            measures=int(payload["measures"]),
-            counts={k: int(v) for k, v in payload["counts"].items()},
-            ex_counts={k: int(v) for k, v in payload["ex_counts"].items()},
-        )
+        stats = parse_stats(payload)
+        buddy_raw = payload.get("buddy_stats")
+        buddy_stats = parse_stats(buddy_raw) if buddy_raw else None
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return None
     return PreviewResult(
@@ -312,6 +318,7 @@ def _read_stats(video: Path) -> PreviewResult | None:
         stats=stats,
         range_text=payload.get("range_text"),
         preroll_measures=int(payload.get("preroll_measures", 0)),
+        buddy_stats=buddy_stats,
     )
 
 

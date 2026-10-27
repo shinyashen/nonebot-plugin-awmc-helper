@@ -955,3 +955,49 @@ async def test_command_utage_resolves_diff_id_from_host(
     entry_id, _song, prefer = seen["entry"]
     assert prefer is None
     assert entry_id == 100199  # 宴谱 diff_id，不是宿主 199
+
+
+def test_sidecar_roundtrip_keeps_buddy_stats(tmp_path):
+    """侧车读写保留 buddy_stats：缓存命中时文字节点仍能分列 1P/2P。"""
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import matchers
+    from nonebot_plugin_awmc_helper.core.render.chart_stats import ChartStats
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import (
+        PreviewResult,
+        _read_stats,
+        _write_stats,
+    )
+
+    left = ChartStats(
+        chart_ms=100_000.0,
+        measures=25,
+        counts={"TAP": 100, "HOLD": 10, "SLIDE": 5, "TOUCH": 2, "BREAK": 3},
+        ex_counts={"TAP": 1, "HOLD": 0, "SLIDE": 0, "TOUCH": 0, "BREAK": 0},
+    )
+    right = ChartStats(
+        chart_ms=100_000.0,
+        measures=25,
+        counts={"TAP": 90, "HOLD": 8, "SLIDE": 5, "TOUCH": 1, "BREAK": 2},
+        ex_counts={"TAP": 0, "HOLD": 0, "SLIDE": 0, "TOUCH": 0, "BREAK": 0},
+    )
+    video = tmp_path / "buddy.mp4"
+    video.write_bytes(b"\x00" * 16)
+    _write_stats(
+        PreviewResult(
+            path=video,
+            label="13?",
+            stats=left,
+            buddy_stats=right,
+        )
+    )
+    cached = _read_stats(video)
+    assert cached is not None
+    assert cached.buddy_stats is not None
+    assert cached.buddy_stats.counts["TAP"] == 90
+
+    class Song:
+        title = "[協]テスト"
+        id = 111355
+
+    text = matchers._song_info_text((111355, Song(), None), cached)
+    assert "音符分布（1P）" in text
+    assert "音符分布（2P）" in text
