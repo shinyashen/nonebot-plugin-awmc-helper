@@ -45,8 +45,20 @@ _CACHE_SUBDIR = "chart_preview"
 
 
 # 渲染引擎源码文件：内容变化即视为输出可能变化（缓存指纹的一部分）。
+# chart_video 拆为包后逐文件列出（新渲染引擎文件入包时需同步补进本清单）。
 _RENDER_ENGINE_FILES = (
-    "chart_video.py",
+    "chart_video/__init__.py",
+    "chart_video/constants.py",
+    "chart_video/notes.py",
+    "chart_video/motion.py",
+    "chart_video/canvas.py",
+    "chart_video/note_renderer.py",
+    "chart_video/slide_renderer.py",
+    "chart_video/touch_renderer.py",
+    "chart_video/effects.py",
+    "chart_video/hud.py",
+    "chart_video/composer.py",
+    "chart_video/encoder.py",
     "chart_notes.py",
     "chart_audio.py",
     "chart_range.py",
