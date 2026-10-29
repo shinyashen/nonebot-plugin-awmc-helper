@@ -79,7 +79,7 @@ def test_render_smoke(cv, site, tmp_path: Path):
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
 def test_render_parallel_workers(cv, site, tmp_path: Path):
-    """多进程分帧渲染路径（fork 不可用时内部自动退回串行，仍应产出视频）。"""
+    """多线程分帧渲染路径（ThreadPoolExecutor；异常时未写帧则退回串行，仍应产出视频）。"""
     chart = site((SNAPSHOTS / "8.txt").read_text(), difficulty=5)[5]
     out = cv.render_chart_video(
         chart,
