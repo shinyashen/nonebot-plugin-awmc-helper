@@ -137,28 +137,36 @@ class _Renderer(_RendererEffectsMixin):
                     if note.is_each
                     else C_EX_NORMAL
                 )
-                lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-                ImageDraw.Draw(lay).ellipse(
-                    (
-                        x - r1 * c.ss,
-                        y - r1 * c.ss,
-                        x + r1 * c.ss,
-                        y + r1 * c.ss,
-                    ),
-                    fill=color,
-                )
-                hole = Image.new("L", c.img.size, 0)
-                ImageDraw.Draw(hole).ellipse(
-                    (
-                        x - r0 * c.ss,
-                        y - r0 * c.ss,
-                        x + r0 * c.ss,
-                        y + r0 * c.ss,
-                    ),
-                    fill=255,
-                )
-                lay.putalpha(ImageChops_darker(lay.getchannel("A"), hole))
-                c.over(lay)
+                # 局部窗口层：bbox 外 alpha 本为 0、paste 为 no-op，逐像素等价
+                rr = math.ceil(r1 * c.ss) + 2
+                x0 = max(0, int(x - rr))
+                y0 = max(0, int(y - rr))
+                x1 = min(c.img.width, int(x + rr) + 1)
+                y1 = min(c.img.height, int(y + rr) + 1)
+                if x1 > x0 and y1 > y0:
+                    lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+                    lx, ly = x * c.ss - x0, y * c.ss - y0
+                    ImageDraw.Draw(lay).ellipse(
+                        (
+                            lx - r1 * c.ss,
+                            ly - r1 * c.ss,
+                            lx + r1 * c.ss,
+                            ly + r1 * c.ss,
+                        ),
+                        fill=color,
+                    )
+                    hole = Image.new("L", lay.size, 0)
+                    ImageDraw.Draw(hole).ellipse(
+                        (
+                            lx - r0 * c.ss,
+                            ly - r0 * c.ss,
+                            lx + r0 * c.ss,
+                            ly + r0 * c.ss,
+                        ),
+                        fill=255,
+                    )
+                    lay.putalpha(ImageChops_darker(lay.getchannel("A"), hole))
+                    c.over(lay, (x0, y0))
         sprite = self.sprites.tap(note.pos, note.is_break, note.is_each, note.is_ex)
         if abs(pos.alpha - 1) > 1e-3:
             new_size = max(2, round(sprite.width * pos.alpha))
@@ -235,8 +243,6 @@ class _Renderer(_RendererEffectsMixin):
         while delta < -4:
             delta += 8
         col = (*C_SIMUL_DOT, 178)  # α0.7
-        lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-        ld = ImageDraw.Draw(lay, "RGBA")
         if abs(delta) == 4:
             pts = c.arc_points(c.cx, c.cy, dist, 0, math.tau)
         else:
@@ -244,8 +250,23 @@ class _Renderer(_RendererEffectsMixin):
             if hi < lo:
                 hi += math.tau
             pts = c.arc_points(c.cx, c.cy, dist, lo, hi)
-        ld.line(c.pts(pts), fill=col, width=max(1, round(c.s(self.sw))), joint="curve")
-        c.over(lay)
+        width = max(1, round(c.s(self.sw)))
+        dev = c.pts(pts)
+        # 局部窗口层：joint="curve" 圆滑接头外凸至多一个线宽，留足余量
+        x0 = max(0, int(min(p[0] for p in dev)) - width - 2)
+        y0 = max(0, int(min(p[1] for p in dev)) - width - 2)
+        x1 = min(c.img.width, int(max(p[0] for p in dev)) + width + 2)
+        y1 = min(c.img.height, int(max(p[1] for p in dev)) + width + 2)
+        if x1 <= x0 or y1 <= y0:
+            return
+        lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+        ImageDraw.Draw(lay, "RGBA").line(
+            [(px - x0, py - y0) for px, py in dev],
+            fill=col,
+            width=width,
+            joint="curve",
+        )
+        c.over(lay, (x0, y0))
 
     # ------------------------------------------------------------ hold（Ce 类 L6429）
     def draw_hold(self, c: _Canvas, note: _Note, now: float) -> None:
