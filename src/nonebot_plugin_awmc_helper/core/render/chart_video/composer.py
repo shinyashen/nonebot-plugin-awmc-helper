@@ -12,7 +12,6 @@ from .hud import _HudMixin
 from .notes import _Note, _map_notes, _collect_hit_notes
 from .canvas import _Canvas, _clip_layer
 from .motion import _button_angle, _note_position
-from .effects import _Fireworks, _TouchHitEffects
 from .constants import (
     _DOT,
     _JLINE,
@@ -25,6 +24,8 @@ from .constants import (
     C_SIMUL_DOT,
     C_SLIDE_CYAN,
 )
+from .fireworks import _Fireworks
+from .touch_hit import _TouchHitEffects
 from ..chart_notes import SiteChart, SlidePart
 from .note_renderer import _Renderer
 from .slide_renderer import _SlideRenderer
