@@ -9,14 +9,13 @@ from PIL import Image, ImageDraw
 
 from .hud import _HudMixin
 from .notes import _Note, _map_notes, _collect_hit_notes
-from .canvas import _Canvas, _clip_layer
+from .canvas import _Canvas
 from .motion import _button_angle, _note_position
+from .press_fx import _HitEffectRenderer
 from .constants import (
     _DOT,
     _JLINE,
     _HIT_MS,
-    _R_NOTE,
-    _RADIUS,
     C_WHITE,
     C_TAP_DOT,
     C_BREAK_DOT,
@@ -46,6 +45,7 @@ class _ChartRenderer(_HudMixin):
         self.touches = _TouchRenderer(base_renderer)
         self.fireworks = _Fireworks(base_renderer)
         self.touch_hits = _TouchHitEffects(base_renderer)
+        self.hit_effects = _HitEffectRenderer(base_renderer)
         # BPM 变化点（HUD 闪色：change 时刻表 + 方向）
         self._bpm_changes: list[tuple[float, int]] = []
         previous_bpm: float | None = None
@@ -66,7 +66,6 @@ class _ChartRenderer(_HudMixin):
         yy, xx = np.mgrid[0:size, 0:size]
         circle = np.hypot(xx - size / 2, yy - size / 2) <= size / 2 - 1
         self._clip_mask = Image.fromarray((circle * 255).astype(np.uint8), "L")
-        self._hit_sprite_cache: dict[tuple, Image.Image] = {}
         # HUD 文本缓存：(文本, 字号, 颜色, 锚点) → (阴影+文字的合成图, 粘贴偏移)
         self._text_cache: dict[
             tuple, tuple[Image.Image, Image.Image, float, float]
@@ -243,7 +242,9 @@ class _ChartRenderer(_HudMixin):
                     ang = -math.pi / 6
                 else:
                     ang = math.atan2(fc.cy - y, fc.cx - x)
-                self._hit_effect_at(fc, x, y, ang, (now - end) / _HIT_MS, "hexagon")
+                self.hit_effects.render_at(
+                    fc, x, y, ang, (now - end) / _HIT_MS, "hexagon"
+                )
 
     def _draw_tracks(
         self, fc: _Canvas, note: _Note, part: SlidePart, now: float
@@ -300,7 +301,7 @@ class _ChartRenderer(_HudMixin):
             ang = _button_angle(pos)
             px = fc.cx + math.cos(ang) * fc.radius
             py = fc.cy + math.sin(ang) * fc.radius
-            self._hit_effect_at(
+            self.hit_effects.render_at(
                 fc,
                 px,
                 py,
@@ -308,105 +309,6 @@ class _ChartRenderer(_HudMixin):
                 (now - timing) / _HIT_MS,
                 "star" if is_star else "hexagon",
             )
-
-    def _hit_effect_at(
-        self, fc: _Canvas, x: float, y: float, rot: float, progress: float, shape: str
-    ) -> None:
-        """renderHitEffectAt（L7289）：5 sprite（1 主 4 环绕），整体随按钮角旋转。"""
-        s = 1 - 0.75 * (progress - 1) * (progress - 1)
-        c_alpha = 1 - 4 * (progress - 0.5) * (progress - 0.5)
-        if c_alpha <= 0 or s <= 0:
-            return
-        fade_l = 1 - (progress - 1) * (progress - 1)
-        u = max(0.0, min(1.0, 1 - 8 / 9 * progress * progress))
-        d_size = fc.radius * _R_NOTE * 1.36 * 1.5
-        f = d_size * s
-        p = f * 0.7
-        m2 = f * 0.8
-        h = d_size * u * 0.7
-        sprite = self.renderer.sprites.hit(shape)
-        # JS 先 translate/rotate 画布再画 5 个 sprite：等价于在局部层画好后整体旋转
-        # 一次（比逐 sprite rotate 快数倍，也避免重复重采样）
-        half = d_size * 1.1 + _RADIUS * (4 / 300 * 0.7) * 2.4 * 3 + 4
-        size = math.ceil(half * 2 * fc.ss)
-        lay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        center = size / 2
-
-        def blit(lx: float, ly: float, sz: float) -> None:
-            quantized = round(sz * 2) / 2
-            key = (shape, quantized)
-            img = self._hit_sprite_cache.get(key)
-            if img is None:
-                ratio = quantized / d_size
-                img = (
-                    sprite
-                    if abs(ratio - 1) < 1e-6
-                    else sprite.resize(
-                        (
-                            max(2, int(sprite.width * ratio)),
-                            max(2, int(sprite.height * ratio)),
-                        ),
-                        Image.Resampling.BILINEAR,
-                    )
-                )
-                if len(self._hit_sprite_cache) > 64:
-                    self._hit_sprite_cache.clear()
-                self._hit_sprite_cache[key] = img
-            if c_alpha < 1:
-                img = img.copy()
-                img.putalpha(img.getchannel("A").point(lambda v: int(v * c_alpha)))
-            lay.alpha_composite(
-                img,
-                (
-                    int(center + lx * fc.ss - img.width / 2),
-                    int(center + ly * fc.ss - img.height / 2),
-                ),
-            )
-
-        x6 = math.pi / 6
-        s6 = -math.pi / 6
-        c_ang = x6 + math.pi * fade_l
-        w_ang = x6 + math.pi * (1 + fade_l)
-        t_ang = s6 - math.pi * fade_l
-        e_ang = s6 + math.pi * (1 - fade_l)
-        blit(0, 0, f)
-        blit(math.cos(c_ang) * h, math.sin(c_ang) * h * 0.7, p)
-        blit(math.cos(w_ang) * h, math.sin(w_ang) * h, p)
-        blit(math.cos(t_ang) * h, math.sin(t_ang) * h, m2)
-        blit(math.cos(e_ang) * h, math.sin(e_ang) * h, m2)
-        x0 = int(fc.s(x) - center)
-        y0 = int(fc.s(y) - center)
-        if abs(rot) > 1e-9:
-            # 旋转只作用于内容区域：整层 210² BILINEAR 旋转约 1ms/次，裁剪到
-            # 「内容外接圆 + 3px 余量」的正方形后再转，采样中心不变、结果一致。
-            bbox = lay.getbbox()
-            if bbox is None:
-                return
-            rx = max(abs(bbox[0] - center), abs(bbox[2] - center))
-            ry = max(abs(bbox[1] - center), abs(bbox[3] - center))
-            radius = math.hypot(rx, ry) + 3
-            side = min(size, int(radius * 2) + 1)
-            if side < size:
-                ox = int(center - side / 2)
-                oy = int(center - side / 2)
-                sub = lay.crop((ox, oy, ox + side, oy + side))
-                sub = sub.rotate(
-                    -math.degrees(rot),
-                    resample=Image.Resampling.BILINEAR,
-                    center=(center - ox, center - oy),
-                )
-                lay = sub
-                x0 += ox
-                y0 += oy
-                size = side
-            else:
-                lay = lay.rotate(
-                    -math.degrees(rot),
-                    resample=Image.Resampling.BILINEAR,
-                    center=(center, center),
-                )
-        box = (x0, y0, x0 + size, y0 + size)
-        fc.over(_clip_layer(lay, box, fc.img.width), (x0, y0))
 
     def _judgment_line(self, c: _Canvas) -> None:
         """renderJudgmentLine（L8086）simple 设计：白圈 + 8 按钮点。"""
