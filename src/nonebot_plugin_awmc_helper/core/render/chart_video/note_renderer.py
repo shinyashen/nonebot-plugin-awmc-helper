@@ -17,13 +17,13 @@ from .canvas import (
     ImageChops_darker,
     _mix,
     _Canvas,
-    _Sprites,
     _grad_pair,
     _brightness,
     _linear_gradient,
 )
 from .motion import _button_angle, _hold_flicker, _note_position
 from .effects import _RendererEffectsMixin
+from .sprites import _Sprites
 from .constants import (
     _P_MIX,
     _B_HOLD,
