@@ -4,7 +4,7 @@
 x/y 为半径比例、r 为该点箭头朝向角）/ le（形状→关键帧索引，末位为
 路径长度哨兵）表；生成脚本见 local/scratch/extract_slide_tables.js
 （node 求值对象字面量，保留 JS 指数写法精度）。
-坐标换算与旋转规则见 chart_video.py 的 _SlideRenderer.bar_chain。
+坐标换算与旋转规则见 chart_video/slide_geometry.py 的 _SlideGeometryMixin.bar_chain。
 """
 
 SLIDE_POINTS: dict[str, list[tuple[float, float, float]]] = {
