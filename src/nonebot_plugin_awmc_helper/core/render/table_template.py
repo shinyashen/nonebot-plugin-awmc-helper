@@ -851,6 +851,29 @@ def cond_table_page_groups(
     return pack_level_groups(group_by_level(list(entries)), cols=RATING_COLS - 1)
 
 
+async def rating_table_cond_text_page_bytes(
+    page_groups: "dict[str, list[tuple[Song, SongDifficulty]]]",
+    header_text: str,
+    *,
+    idx: int,
+    total: int,
+) -> bytes:
+    """条件化定数表**单页**渲染（显式页码路径用）：``page_groups`` 为
+    :func:`cond_table_page_groups` 的一页，``idx``/``total`` 为页位（表头
+    「定数表 i/n」；total=1 时无 i/n）。"""
+    page_entries = [pair for charts in page_groups.values() for pair in charts]
+    im = await rating_table_base_image(page_entries, None, use_file=True)
+    dr = ImageDraw.Draw(im)
+    draw_level_header(
+        dr,
+        header_text,
+        220,
+        prefix=None,
+        suffix=("定数表" if total == 1 else f"定数表 {idx + 1}/{total}"),
+    )
+    return image_to_bytes(scale_output(im))
+
+
 async def rating_table_cond_text_bytes(
     entries: Sequence[tuple[Song, SongDifficulty]], header_text: str
 ) -> "list[bytes]":
@@ -862,17 +885,9 @@ async def rating_table_cond_text_bytes(
     plugins/tables 直调（对外名兼容），返回值 bytes → list[bytes]（2026-10-27）。
     """
     pages = cond_table_page_groups(entries)
-    out: "list[bytes]" = []
-    for idx, page_groups in enumerate(pages):
-        page_entries = [pair for charts in page_groups.values() for pair in charts]
-        im = await rating_table_base_image(page_entries, None, use_file=True)
-        dr = ImageDraw.Draw(im)
-        draw_level_header(
-            dr,
-            header_text,
-            220,
-            prefix=None,
-            suffix=("定数表" if len(pages) == 1 else f"定数表 {idx + 1}/{len(pages)}"),
+    return [
+        await rating_table_cond_text_page_bytes(
+            page_groups, header_text, idx=idx, total=len(pages)
         )
-        out.append(image_to_bytes(scale_output(im)))
-    return out
+        for idx, page_groups in enumerate(pages)
+    ]

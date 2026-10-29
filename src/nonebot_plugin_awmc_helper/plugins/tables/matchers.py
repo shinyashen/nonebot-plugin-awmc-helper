@@ -115,13 +115,22 @@ async def _(
                 await plate_progress_overview(binding, plates, version, kind, page)
             else:
                 await plate_completion_sheet(
-                    binding, version, kind, page, preview=preview
+                    bot,
+                    session,
+                    binding,
+                    version,
+                    kind,
+                    page,
+                    preview=preview,
+                    explicit=bool(page_raw),
                 )
             return
 
     # 中文尾缀（进度/完成表/定数表）排除纯数字闲聊，裸数字等级/定数一律
     # 放行（S-8 拍板「级/定数必带仅限数字尾缀 50/40」；曾把进度语境排除在
     # 外——14+sss+进度 的「14+」被丢弃，整表退化为纯 sss+ 过滤）
+    # explicit：用户显式带页码 → 分页表只渲对应页（默认发全）
+    explicit = bool(page_raw)
     parsed = parse_combo(cond_text, numeric_level=True)
     if parsed is None:
         return
@@ -149,13 +158,31 @@ async def _(
     use_file = score_service.view_of(binding.service) != "jp"
 
     if suffix == "定数表":
-        # 单等级条件走文件底图 + Level. 前缀（收编等价）；其余现算
+        # 单等级条件走文件底图 + Level. 前缀（收编等价；页码无页概念，忽略）
         if len(parsed) == 1 and parsed[0].ctype is CondType.LEVEL:
             png = await table_template.rating_table_text_bytes(
                 parsed[0].value, entries, use_file=use_file
             )
             await UniMessage.image(raw=png).finish(at_sender=True)
-        pngs = await table_template.rating_table_cond_text_bytes(entries, header)
+        # 跨等级条件分页（40 行/页）：显式页码只渲对应页（越界提示范围），
+        # 默认发全（合并转发，单页时单图）
+        pages = table_template.cond_table_page_groups(entries)
+        total = len(pages)
+        if page > total:
+            await UniMessage.text(
+                f" {header}定数表共 {total} 页，页码超出范围"
+            ).finish(at_sender=True)
+        if explicit:
+            png = await table_template.rating_table_cond_text_page_bytes(
+                pages[page - 1], header, idx=page - 1, total=total
+            )
+            await UniMessage.image(raw=png).finish(at_sender=True)
+        pngs = [
+            await table_template.rating_table_cond_text_page_bytes(
+                pg, header, idx=i, total=total
+            )
+            for i, pg in enumerate(pages)
+        ]
         if len(pngs) == 1:
             await UniMessage.image(raw=pngs[0]).finish(at_sender=True)
         await send_paged_cond_table(
@@ -194,9 +221,9 @@ async def _(
         await UniMessage.image(raw=png).finish(at_sender=True)
 
     # 跨等级条件：等级组整组分页渲染（40 行/页），单页输出与既往逐像素一致；
-    # 多页走合并转发（首节点纯文本计数），失败降级多图直发。
-    # 单等级条件（14+sss+完成表 等）不走此路：底图为定数节文件底图，仅
-    # 跨等级条件（single_level=None）为标级大类
+    # 默认发全（合并转发，首节点纯文本计数），失败降级多图直发；显式页码
+    # 只渲对应页（越界提示范围）。单等级条件（14+sss+完成表 等）不走此路：
+    # 底图为定数节文件底图，仅跨等级条件（single_level=None）为标级大类
     if single_level is not None:
         im = await table_template.rating_table_base_image(
             entries, single_level, use_file=use_file
@@ -222,8 +249,15 @@ async def _(
         await UniMessage.image(raw=png).finish(at_sender=True)
 
     pages = table_template.cond_table_page_groups(entries)
+    total = len(pages)
+    if page > total:
+        await UniMessage.text(
+            f" {header}完成表共 {total} 页，页码超出范围"
+        ).finish(at_sender=True)
+    render_idx = [page - 1] if explicit else range(total)
     pngs = []
-    for idx, page_groups in enumerate(pages):
+    for idx in render_idx:
+        page_groups = pages[idx]
         page_entries = [pair for charts in page_groups.values() for pair in charts]
         im = await table_template.rating_table_base_image(
             page_entries, None, use_file=use_file
@@ -240,7 +274,7 @@ async def _(
                 checker=checker,
                 by_level=True,
                 suffix=(
-                    "完成表" if len(pages) == 1 else f"完成表 {idx + 1}/{len(pages)}"
+                    "完成表" if total == 1 else f"完成表 {idx + 1}/{total}"
                 ),
             )
         )

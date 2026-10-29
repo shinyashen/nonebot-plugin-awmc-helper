@@ -399,7 +399,9 @@ async def test_plate_at_net_target_routes(app: App, db, songs, monkeypatch):
 
     captured = {}
 
-    async def fake_sheet(binding, version, kind, page, *, preview=False):
+    async def fake_sheet(
+        bot, session, binding, version, kind, page, *, preview=False, explicit=False
+    ):
         captured["user_id"] = binding.user_id
         captured["vk"] = (version, kind, page)
         await UniMessage.text("完成表 OK").finish(at_sender=True)
@@ -591,7 +593,7 @@ async def test_plate_completion_sheet_scope_split(app: App, db, songs, monkeypat
     jp_binding = await binding_service.ensure("OneBot V11", "12345678")
     await binding_service.bind_net(jp_binding, sega_id="sid", password="pw")
     with pytest.raises(_Sentinel):
-        await sheet.plate_completion_sheet(jp_binding, "丸", "将", 1)
+        await sheet.plate_completion_sheet(None, None, jp_binding, "丸", "将", 1)
     assert calls["view"] == "jp"
     version, kind, n_entries, jp = calls["draw"]
     assert (version, kind, jp) == ("丸", "将", True)
@@ -601,7 +603,7 @@ async def test_plate_completion_sheet_scope_split(app: App, db, songs, monkeypat
     cn_binding = await binding_service.ensure("OneBot V11", "12345679")
     await binding_service.bind_divingfish_username(cn_binding, "tester")
     with pytest.raises(_Sentinel):
-        await sheet.plate_completion_sheet(cn_binding, "超", "将", 1)
+        await sheet.plate_completion_sheet(None, None, cn_binding, "超", "将", 1)
     assert calls["view"] == "cn"
     assert calls["draw"] == ("超", "将", calls["draw"][2], False)
     assert calls["draw"][2] > 0  # 样例库 Splash 段（version=12000）谱面进入超范围
@@ -625,7 +627,9 @@ async def test_plate_cn_preview_routing(app: App, db, monkeypatch):
 
     captured = {}
 
-    async def fake_sheet(binding, version, kind, page, *, preview=False):
+    async def fake_sheet(
+        bot, session, binding, version, kind, page, *, preview=False, explicit=False
+    ):
         captured["args"] = (version, kind, preview)
         await UniMessage.text("完成表 OK").finish(at_sender=True)
 
@@ -677,6 +681,8 @@ async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatc
     发图前提示待实装；「未」提示须带具体版本名（非官方牌名）。"""
     from types import SimpleNamespace
 
+    from nonebot.exception import FinishedException
+
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render import table_template
     from nonebot_plugin_awmc_helper.core.binding import binding_service
@@ -692,7 +698,7 @@ async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatc
     async def fake_draw(
         version, kind, scores, entries, *, page, song_service, jp=False
     ):
-        calls["draw"] = (version, kind, len(scores), jp)
+        calls.setdefault("draw_pages", []).append(page)
         return b"png"
 
     async def fake_scores(b, notify_slow=None):
@@ -718,6 +724,7 @@ async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatc
 
         async def finish(self, **kw):
             FakeUniMessage.sent.append(("finish", self.parts))
+            raise FinishedException
 
     monkeypatch.setattr(song_service, "jp_all", fake_jp_all)
     monkeypatch.setattr(table_template, "draw_plate_table_with_fallback", fake_draw)
@@ -733,11 +740,15 @@ async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatc
     cn = await binding_service.ensure("OneBot V11", "12345678")
     await binding_service.bind_divingfish_username(cn, "tester")
 
+    async def _call(*args, **kw):
+        with pytest.raises(FinishedException):
+            await sheet.plate_completion_sheet(*args, **kw)
+
     # 丸将预览：JP 视图、成绩零拉取（无章可盖）、提示待实装
     FakeUniMessage.sent.clear()
-    await sheet.plate_completion_sheet(cn, "丸", "将", 1, preview=True)
+    await _call(None, None, cn, "丸", "将", 1, preview=True)
     assert calls["view"] == "jp"
-    assert calls["draw"] == ("丸", "将", 0, True)
+    assert calls["draw_pages"] == [1]  # 丸单页牌：只渲一页
     assert "scores" not in calls
     (mode, parts), (finish_mode, _img) = FakeUniMessage.sent
     assert mode == "send"
@@ -747,7 +758,8 @@ async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatc
     # 未将预览：提示须带具体版本名（未 非官方名）与待实装
     FakeUniMessage.sent.clear()
     calls.pop("view", None)
-    await sheet.plate_completion_sheet(cn, "未", "将", 1, preview=True)
+    calls.pop("draw_pages", None)
+    await _call(None, None, cn, "未", "将", 1, preview=True)
     assert calls["view"] == "jp"
     _mode, parts = FakeUniMessage.sent[0]
     assert "MAGiCAL" in parts[0]
@@ -757,12 +769,23 @@ async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatc
     jp = await binding_service.ensure("OneBot V11", "12345679")
     await binding_service.bind_net(jp, sega_id="sid", password="pw")
     FakeUniMessage.sent.clear()
-    await sheet.plate_completion_sheet(jp, "未", "将", 1)
+    calls.pop("draw_pages", None)
+    await _call(None, None, jp, "未", "将", 1)
     assert calls["scores"] is True
-    assert calls["draw"] == ("未", "将", 0, True)
+    assert calls["draw_pages"] == [1]  # 未单页牌：只渲一页
     _mode, parts = FakeUniMessage.sent[0]
     assert "MAGiCAL" in parts[0]
     assert "待实装" not in parts[0]
+
+    # 范围保护（2026-10-29）：单页牌带页码 2 → 提示共 1 页，不渲染
+    FakeUniMessage.sent.clear()
+    calls.pop("draw_pages", None)
+    await _call(None, None, jp, "未", "将", 2)
+    assert "draw_pages" not in calls
+    (mode, parts), (finish_mode, f_parts) = FakeUniMessage.sent
+    assert mode == "send"  # 未将占位 notice 照发
+    assert finish_mode == "finish"
+    assert "共 1 页" in f_parts[0]
 
 
 @pytest.mark.asyncio
@@ -1325,6 +1348,142 @@ async def test_combo_score_table_paged_forward_fallback(
         )
         ctx.should_call_send(event, expected, result=None, bot=bot)
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_wu_plate_completion_full_pages_forward(app: App, db, songs, monkeypatch):
+    """舞/霸双页完成表默认发全（2026-10-29）：合并转发首节点「舞将完成表
+    共n张：」（n=曲数，一格一曲）+ 两页图；显式页码只渲对应页单图直发；
+    页码越界提示范围（范围保护）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from mocks import make_diff, make_bulk_level_songs
+    from maimai_py import SongType, LevelIndex
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import sheet as sheet_mod
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    await binding_service.ensure("OneBot V11", "12345678")
+    # 舞牌范围 = 旧作全集（≤19900）：两组各 300 曲（14 级 → 页1 / 12 级 → 页2，
+    # 按等级 13 分界），SD 条目；曲数 600 与页界无关（首节点计数按曲）
+
+    def sd_diff(level: str, level_value: float):
+        return make_diff(
+            type=SongType.STANDARD,
+            level_index=LevelIndex.MASTER,
+            level=level,
+            level_value=level_value,
+            version=15000,
+        )
+
+    await song_service.inject(
+        make_bulk_level_songs(
+            300,
+            level="14",
+            level_value=14.2,
+            make_diffs=lambda i: [sd_diff("14", 14.2)],
+        )
+        + make_bulk_level_songs(
+            300,
+            level="12",
+            level_value=12.5,
+            song_id_base=31000,
+            make_diffs=lambda i: [sd_diff("12", 12.5)],
+        )
+    )
+
+    async def fake_scores_all(b, notify_slow=None):
+        return SimpleNamespace(scores=[])
+
+    draw_pages: list[int] = []
+
+    async def fake_draw(
+        version, kind, scores, entries, *, page, song_service, jp=False
+    ):
+        draw_pages.append(page)
+        return f"png{page}".encode()
+
+    forward_calls: list[tuple] = []
+
+    async def fake_forward(bot, entries, session):
+        forward_calls.append((bot, list(entries), session))
+        return True
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+    monkeypatch.setattr(table_template, "draw_plate_table_with_fallback", fake_draw)
+    monkeypatch.setattr(sheet_mod, "try_send_forward_session", fake_forward)
+
+    def _api_mocks(ctx):
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+
+    # 默认：两页都渲 → 合并转发（首节点文本 + 2 图）
+    event = fake_group_message_event_v11(message="舞将完成表", user_id=12345678)
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        _api_mocks(ctx)
+        ctx.should_finished()
+    assert draw_pages == [1, 2]
+    ((fbot, entries, _session),) = forward_calls
+    assert fbot is bot
+    assert len(entries) == 3
+    assert entries[0] == "舞将完成表 共600张："
+    assert all(isinstance(e, UniMessage) for e in entries[1:])
+
+    # 显式页码 2：只渲第 2 页，单图直发（不走转发）
+    draw_pages.clear()
+    forward_calls.clear()
+    event = fake_group_message_event_v11(message="舞将完成表 2", user_id=12345678)
+    expected = Message(
+        [MessageSegment.at(12345678), MessageSegment.image("base64://cG5nMg==")]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        _api_mocks(ctx)
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+    assert draw_pages == [2]
+    assert forward_calls == []
+
+    # 范围保护：页码 3 > 2 → 提示共 2 页，零渲染
+    draw_pages.clear()
+    event = fake_group_message_event_v11(message="舞将完成表 3", user_id=12345678)
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.text(" 舞将完成表共 2 页，页码超出范围"),
+        ]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        _api_mocks(ctx)
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+    assert draw_pages == []
 
 
 @pytest.mark.asyncio

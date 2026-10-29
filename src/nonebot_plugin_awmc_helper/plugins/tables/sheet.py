@@ -101,13 +101,24 @@ async def send_paged_cond_table(
 
 
 async def plate_completion_sheet(
-    binding, version: str, kind: str, page: int, *, preview: bool = False
+    bot,
+    session,
+    binding,
+    version: str,
+    kind: str,
+    page: int,
+    *,
+    preview: bool = False,
+    explicit: bool = False,
 ) -> None:
     """完成表（NB DrawPlateTable：底图 + 达成章 + 各槽位计数与进度条）。
 
     ``preview``（2026-10-05 定案）：国服数据源查日服领先版本（丸/回，含
     「未」= 日服现行代占位）——牌子国服待实装，仅作前瞻：强制日服视图出
     谱面网格，不取成绩、不盖任何达成标志，发图前提示待实装。
+    舞/霸双页牌默认**发全两页**（合并转发，首节点按曲计数；2026-10-29）；
+    ``explicit``（用户显式带页码）只渲染对应那一页，越界提示共几页
+    （范围保护）；其余牌单页单图不变。
     """
     from ...core.render import table_template
 
@@ -150,17 +161,6 @@ async def plate_completion_sheet(
         scores = (
             await score_service.get_scores_all(binding, notify_slow=slow_notice())
         ).scores
-    png = await table_template.draw_plate_table_with_fallback(
-        version,
-        kind,
-        scores,
-        entries,
-        page=page,
-        song_service=song_service,
-        jp=jp,
-    )
-    if png is None:
-        await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(at_sender=True)
     notice = ""
     if preview:
         if version == PLATE_LATEST_CHAR:
@@ -177,7 +177,38 @@ async def plate_completion_sheet(
         notice = _latest_plate_notice()
     if notice:
         await UniMessage.text(notice).send(at_sender=True)
-    await UniMessage.image(raw=png).finish(at_sender=True)
+    # 舞/霸双页（底图固定两页）：默认发全（合并转发）；显式页码只渲对应页。
+    # 范围保护：单页牌页码 >1、舞/霸页码 >2 一律提示范围（旧行为是读不到
+    # 底图报「生成失败」）
+    is_wu = version in PLATE_FULL_SET_VERSIONS
+    total_pages = 2 if is_wu else 1
+    if page > total_pages:
+        await UniMessage.text(
+            f" {version}{kind}完成表共 {total_pages} 页，页码超出范围"
+        ).finish(at_sender=True)
+    if explicit:
+        render_pages: "tuple[int, ...]" = (page,)
+    else:
+        render_pages = (1, 2) if is_wu else (1,)
+    pngs = []
+    for p in render_pages:
+        png = await table_template.draw_plate_table_with_fallback(
+            version, kind, scores, entries, page=p, song_service=song_service, jp=jp
+        )
+        if png is not None:
+            pngs.append(png)
+    if not pngs:
+        await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
+            at_sender=True
+        )
+    if len(pngs) == 1:
+        await UniMessage.image(raw=pngs[0]).finish(at_sender=True)
+    # 首节点计数按曲（底图一格一曲，同曲 Master/Re:MASTER 合并一槽），与
+    # 图内总数（len(song_level) 按曲）同口径
+    total = len({song.id for song, _ in entries})
+    await send_paged_cond_table(
+        bot, session, f"{version}{kind}完成表 共{total}张：", pngs
+    )
 
 
 async def plate_progress_overview(
