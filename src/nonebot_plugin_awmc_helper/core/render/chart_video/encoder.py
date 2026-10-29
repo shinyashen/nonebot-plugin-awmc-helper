@@ -76,8 +76,7 @@ def _thread_render_chunk(args: tuple[int, int]) -> list[bytes]:
     return frames
 
 
-def _write_frames_parallel(
-    proc,
+def _iter_parallel_frames(
     chart: SiteChart,
     n_frames: int,
     fps: int,
@@ -85,13 +84,14 @@ def _write_frames_parallel(
     config: RenderConfig,
     start_ms: float,
     buddy_chart: SiteChart | None = None,
-) -> bool:
-    """多线程分帧渲染并保序写入 ffmpeg 管道。
+):
+    """多线程分帧渲染，按序惰性产出压缩帧块（耗尽/关闭时收尾线程池）。
 
     用 :class:`ThreadPoolExecutor` 而不是 multiprocessing：渲染由 PIL/numpy
-    的 C 层主导、GIL 大部分时间释放（实测 8 线程 ≈ 2.4× 串行），且不需要在
-    多线程进程里 fork（Python 3.12 明确警告 multi-threaded fork 有死锁风险）。
-    每个线程各自持有一个渲染器（线程局部），共享只读谱面对象。
+    的 C 层主导，且不需要在多线程进程里 fork（Python 3.12 明确警告
+    multi-threaded fork 有死锁风险）。每个线程各自持有一个渲染器（线程局部），
+    共享只读谱面与配置对象。惰性产出让调用方能在渲染进行中完成其他准备
+    （如等待 loudnorm 探测）。
     """
     import os
     from concurrent.futures import ThreadPoolExecutor
@@ -101,24 +101,15 @@ def _write_frames_parallel(
     tasks = [
         (start, min(chunk, n_frames - start)) for start in range(0, n_frames, chunk)
     ]
-    wrote = 0
+    pool = ThreadPoolExecutor(
+        max_workers=workers,
+        initializer=_thread_worker_init,
+        initargs=(chart, fps, config, buddy_chart, start_ms),
+    )
     try:
-        with ThreadPoolExecutor(
-            max_workers=workers,
-            initializer=_thread_worker_init,
-            initargs=(chart, fps, config, buddy_chart, start_ms),
-        ) as pool:
-            for frames in pool.map(_thread_render_chunk, tasks):
-                for frame in frames:
-                    proc.stdin.write(zlib.decompress(frame))
-                    wrote += 1
-        return True
-    except (OSError, RuntimeError):
-        # 已写入部分帧时不能退回串行（会重复帧），交由 finally 收尾报错；
-        # 未写入任何帧则允许调用方退回串行。
-        if wrote:
-            raise
-        return False
+        yield from pool.map(_thread_render_chunk, tasks)
+    finally:
+        pool.shutdown(wait=True)
 
 
 def render_chart_video(
@@ -242,6 +233,8 @@ def _render_chart_video_impl(
     ]
     audio_file: Path | None = None
     fx_file: Path | None = None
+    probe_thread: threading.Thread | None = None
+    probe_box: list[dict[str, float] | None] = [None]
     if audio:
         audio_file = out_path.with_suffix(".audio.tmp")
         audio_file.write_bytes(audio)
@@ -294,72 +287,147 @@ def _render_chart_video_impl(
             )
         else:
             base_chain = f"[1:a]{delay_filter}[mixed]"
+
         # 两遍 loudnorm（linear 模式）：先测「音乐+音效」整体响度，再按测量值
         # 一次性加增益，避免动态压缩破坏听感；响度不到位时退回不处理。
-        measured = _probe_loudness(
-            audio_file, fx_file, base_chain, loudness_lufs, ffmpeg_bin
-        )
-        if measured is not None:
-            base_chain += (
-                f";[mixed]loudnorm=I={loudness_lufs}:TP=-1.5:LRA=11:"
-                f"measured_I={measured['input_i']}:"
-                f"measured_TP={measured['input_tp']}:"
-                f"measured_LRA={measured['input_lra']}:"
-                f"measured_thresh={measured['input_thresh']}:"
-                f"offset={measured['target_offset']}:linear=true[aout]"
+        # 探测是独立的 ffmpeg 子进程，放后台线程与帧渲染并行——渲染侧在编码
+        # 管道就绪前先缓冲压缩帧（~59KB/帧；探测解码音频远快于渲染帧，缓冲
+        # 量以探测时长为界）。
+        def _run_probe() -> None:
+            probe_box[0] = _probe_loudness(
+                audio_file, fx_file, base_chain, loudness_lufs, ffmpeg_bin
             )
-        else:
-            base_chain += ";[mixed]anull[aout]"
-        cmd += ["-i", str(audio_file)]
-        if fx_file is not None:
-            cmd += ["-i", str(fx_file)]
-        cmd += [
-            "-filter_complex",
-            base_chain,
-            "-map",
-            "0:v",
-            "-map",
-            "[aout]",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "160k",
-        ]
-    cmd += [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "21",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-    ]
-    if audio:
-        cmd += ["-shortest"]
-    cmd += [str(out_path)]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    assert proc.stdin is not None
-    try:
-        if workers > 1 and _write_frames_parallel(
-            proc, chart, n_frames, fps, workers, config, clip_start, buddy_chart
-        ):
-            pass
-        else:
-            renderer2 = _ChartRenderer(buddy_chart, config) if buddy_chart else None
-            for i in range(n_frames):
-                now_ms = clip_start + i / fps * 1000.0
-                proc.stdin.write(
-                    _compose_frame(renderer, renderer2, now_ms, fps).tobytes()
+
+        probe_thread = threading.Thread(
+            target=_run_probe, name="awmc-loudnorm-probe", daemon=True
+        )
+        probe_thread.start()
+
+    def _open_video() -> None:
+        """等探测收尾、拼装音频链与完整命令并打开编码管道（幂等）。"""
+        nonlocal proc, cmd, base_chain
+        if proc is not None:
+            return
+        measured = None
+        if probe_thread is not None:
+            probe_thread.join()
+            measured = probe_box[0]
+        if audio:
+            if measured is not None:
+                base_chain += (
+                    f";[mixed]loudnorm=I={loudness_lufs}:TP=-1.5:LRA=11:"
+                    f"measured_I={measured['input_i']}:"
+                    f"measured_TP={measured['input_tp']}:"
+                    f"measured_LRA={measured['input_lra']}:"
+                    f"measured_thresh={measured['input_thresh']}:"
+                    f"offset={measured['target_offset']}:linear=true[aout]"
                 )
+            else:
+                base_chain += ";[mixed]anull[aout]"
+            cmd += ["-i", str(audio_file)]
+            if fx_file is not None:
+                cmd += ["-i", str(fx_file)]
+            cmd += [
+                "-filter_complex",
+                base_chain,
+                "-map",
+                "0:v",
+                "-map",
+                "[aout]",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "160k",
+            ]
+        cmd += [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "21",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+        ]
+        if audio:
+            cmd += ["-shortest"]
+        cmd += [str(out_path)]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        assert proc.stdin is not None
+
+    def _iter_serial_frames():
+        # 与并行路径同构：按「帧块」产出（此处每块一帧），写入循环统一按块迭代
+        renderer2 = _ChartRenderer(buddy_chart, config) if buddy_chart else None
+        for i in range(n_frames):
+            now_ms = clip_start + i / fps * 1000.0
+            yield [_compose_frame(renderer, renderer2, now_ms, fps).tobytes()]
+
+    proc: subprocess.Popen | None = None
+    using_parallel = workers > 1
+    if using_parallel:
+        # 并行帧为压缩态（~59KB/帧），探测完成前先缓冲
+        frame_blocks = _iter_parallel_frames(
+            chart, n_frames, fps, workers, config, clip_start, buddy_chart
+        )
+    else:
+        # 串行帧是原始字节（~1MB/帧）不缓冲：就地等探测，与旧时序一致
+        _open_video()
+        frame_blocks = _iter_serial_frames()
+
+    buffer: list[bytes] = []
+    wrote = 0
+    try:
+        while True:
+            try:
+                frames = next(frame_blocks)
+            except StopIteration:
+                break
+            except (OSError, RuntimeError):
+                # 已写入部分帧时不能退回串行（会重复帧）；一帧未写（含仍在
+                # 缓冲阶段）则允许整段退回串行重渲。
+                if using_parallel and wrote == 0 and proc is None:
+                    frame_blocks.close()  # 触发生成器 finally → 线程池收尾
+                    using_parallel = False
+                    _open_video()
+                    frame_blocks = _iter_serial_frames()
+                    continue
+                raise
+            for raw in frames:
+                if proc is None:
+                    if probe_thread is not None and probe_thread.is_alive():
+                        buffer.append(raw)
+                        continue
+                    _open_video()
+                if using_parallel:
+                    if buffer:
+                        buffer.append(raw)
+                        for compressed in buffer:
+                            proc.stdin.write(zlib.decompress(compressed))
+                            wrote += 1
+                        buffer.clear()
+                    else:
+                        proc.stdin.write(zlib.decompress(raw))
+                        wrote += 1
+                else:
+                    proc.stdin.write(raw)
+                    wrote += 1
+        _open_video()
+        if buffer:
+            for compressed in buffer:
+                proc.stdin.write(zlib.decompress(compressed))
+                wrote += 1
+            buffer.clear()
     finally:
-        try:
-            proc.stdin.close()
-        except BrokenPipeError:
-            pass
-        code = proc.wait()
+        if proc is not None:
+            try:
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
+            code = proc.wait()
+        # 探测线程若仍在读临时文件：Linux 上 unlink 不影响已打开的 fd；
+        # 异常路径不等待探测（daemon）。
         if audio_file is not None:
             audio_file.unlink(missing_ok=True)
         if fx_file is not None:
