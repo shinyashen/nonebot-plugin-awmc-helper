@@ -40,46 +40,64 @@ from .constants import (
 if TYPE_CHECKING:
     from .note_renderer import _Renderer  # 渲染器主类注解
 
+# 光晕形状缓存：size → (亮度场 float64, fade float64, alpha uint8)。
+# 形状只依赖超采样（每配置至多一两种 size），内容不可变、进程级共享
+# （同 canvas._CLIP_MASK_CACHE 习语）。
+_GLOW_FIELD_CACHE: dict[int, tuple] = {}
+
 
 class _RendererEffectsMixin:
     """_Renderer 的特效方法（涟漪/光晕）：按渲染器混入。"""
 
     def _head_glow(self, c: _Canvas, x: float, y: float, color: tuple) -> None:
-        """drawActiveHeadGlow（L6584）：E 表径向渐变。"""
-        table = (
-            (0, 0.99, 1.11, 1.29),
-            (0.1, 0.99, 0.98, 1.04),
-            (0.2, 0.99, 0.79, 0.72),
-            (0.3, 0.98, 0.63, 0.62),
-            (0.4, 0.93, 0.49, 0.62),
-            (0.5, 0.76, 0.28, 0.43),
-            (0.6, 0.54, 0.08, 0.13),
-            (0.7, 0.41, 0.02, 0.05),
-            (0.8, 0.3, 0.01, 0.04),
-            (0.9, 0.24, 0.02, 0.05),
-        )
+        """drawActiveHeadGlow（L6584）：E 表径向渐变。
+
+        形状（亮度场/alpha）只依赖超采样（size），颜色逐帧变——几何缓存
+        一次构建，每次仅按颜色着色（float64 保留，数值与逐帧重算逐位一致）。
+        """
         r = c.s(_T_GLOW * c.radius)
         if r < 1:
             return
         size = int(r * 2) + 2
-        yy, xx = np.mgrid[0:size, 0:size]
-        dist = np.hypot(xx - size / 2, yy - size / 2) / r
+        cached = _GLOW_FIELD_CACHE.get(size)
+        if cached is None:
+            table = (
+                (0, 0.99, 1.11, 1.29),
+                (0.1, 0.99, 0.98, 1.04),
+                (0.2, 0.99, 0.79, 0.72),
+                (0.3, 0.98, 0.63, 0.62),
+                (0.4, 0.93, 0.49, 0.62),
+                (0.5, 0.76, 0.28, 0.43),
+                (0.6, 0.54, 0.08, 0.13),
+                (0.7, 0.41, 0.02, 0.05),
+                (0.8, 0.3, 0.01, 0.04),
+                (0.9, 0.24, 0.02, 0.05),
+            )
+            yy, xx = np.mgrid[0:size, 0:size]
+            dist = np.hypot(xx - size / 2, yy - size / 2) / r
+            bright = np.zeros((size, size, 3))
+            for i in range(len(table) - 1):
+                t0, r0, g0, b0 = table[i]
+                t1, r1, g1, b1 = table[i + 1]
+                msk = (dist >= t0) & (dist <= t1)
+                frac = (dist[msk] - t0) / (t1 - t0 + 1e-9)
+                bright[msk, 0] = r0 + (r1 - r0) * frac
+                bright[msk, 1] = g0 + (g1 - g0) * frac
+                bright[msk, 2] = b0 + (b1 - b0) * frac
+            # 表覆盖 0..0.9；0.9..1.0 rgb 与 α 同步向 0 插值（canvas rgba stop 语义）
+            fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
+            fade = np.where(dist <= 0.9, 1.0, fade)
+            alpha = np.round(255 * fade).astype(np.uint8)
+            cached = (bright, fade, alpha)
+            _GLOW_FIELD_CACHE[size] = cached
+        bright, fade, alpha = cached
         arr = np.zeros((size, size, 4), dtype=np.uint8)
-        for i in range(len(table) - 1):
-            t0, r0, g0, b0 = table[i]
-            t1, r1, g1, b1 = table[i + 1]
-            msk = (dist >= t0) & (dist <= t1)
-            frac = (dist[msk] - t0) / (t1 - t0 + 1e-9)
-            arr[msk, 0] = np.round(color[0] * (r0 + (r1 - r0) * frac)).clip(0, 255)
-            arr[msk, 1] = np.round(color[1] * (g0 + (g1 - g0) * frac)).clip(0, 255)
-            arr[msk, 2] = np.round(color[2] * (b0 + (b1 - b0) * frac)).clip(0, 255)
-        # 表覆盖 0..0.9；0.9..1.0 rgb 与 α 同步向 0 插值（canvas rgba stop 语义）
-        fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
-        fade = np.where(dist <= 0.9, 1.0, fade)
+        for ch in range(3):
+            arr[..., ch] = np.round(color[ch] * bright[..., ch]).clip(0, 255)
         arr[..., :3] = (arr[..., :3].astype(np.float32) * fade[..., None]).astype(
             np.uint8
         )
-        arr[..., 3] = np.round(255 * fade).astype(np.uint8)
+        arr[..., 3] = alpha
         glow = Image.fromarray(arr, "RGBA")
         c.over(glow, (int(x * c.ss - size / 2), int(y * c.ss - size / 2)))
 
