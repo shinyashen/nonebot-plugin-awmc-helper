@@ -52,12 +52,14 @@ showHitEffect 开；播放时钟在 chart beat 0 起、音频从 beat 4（1 小�
 - 谱面流速：``DEFAULT_HI_SPEED`` / ``normalize_hi_speed``
 
 子模块分层（依赖单向，无环）：
-``constants ← notes ← motion ← canvas ← note_renderer/slide_renderer/
-touch_renderer ← effects ← composer ← encoder``；
-HUD（hud._HudMixin）与特效方法（effects._RendererEffectsMixin）按混入
-接入 composer/_Renderer。可变运行时全局（超采样/流速）固定活在
-constants，由 encoder.render_chart_video 写入、各模块经 ``constants._X``
-属性读取；包层经 PEP 562 ``__getattr__`` 动态转发（不快照）。
+``constants ← notes ← motion ← canvas ← sprites ← note_renderer/
+slide_renderer(← slide_geometry 混入)/touch_renderer ← effects(涟漪/光晕)/
+fireworks/touch_hit ← composer ← encoder(+ffmpeg_check)``；
+HUD（hud._HudMixin）与特效方法（effects._RendererEffectsMixin）、slide
+路径几何（slide_geometry._SlideGeometryMixin）按混入接入宿主类。可变
+运行时全局（超采样/流速）固定活在 constants，由 encoder.render_chart_video
+写入、各模块经 ``constants._X`` 属性读取；包层经 PEP 562 ``__getattr__``
+动态转发（不快照）。
 
 私有名的再导出仅为既有测试与调研脚本（cv._Note 等）保兼容，不构成
 新公共 API。
@@ -68,26 +70,16 @@ from .notes import _Note as _Note
 from .motion import _button_angle as _button_angle
 from .motion import _hold_flicker as _hold_flicker
 from .motion import _note_position as _note_position
-from .encoder import (
-    FFmpegStatus as FFmpegStatus,
-)
-from .encoder import (
-    FFmpegUnavailableError as FFmpegUnavailableError,
-)
-from .encoder import (
-    check_ffmpeg as check_ffmpeg,
-)
-from .encoder import (
-    resolve_ffmpeg as resolve_ffmpeg,
-)
-from .encoder import (
-    render_chart_video as render_chart_video,
-)
+from .encoder import render_chart_video as render_chart_video
 from .composer import _ChartRenderer as _ChartRenderer
 from .constants import DEFAULT_HI_SPEED as DEFAULT_HI_SPEED
 from .constants import _DEFAULT_HI_SPEED as _DEFAULT_HI_SPEED
 from .constants import _apply_hi_speed as _apply_hi_speed
 from .constants import normalize_hi_speed as normalize_hi_speed
+from .ffmpeg_check import FFmpegStatus as FFmpegStatus
+from .ffmpeg_check import FFmpegUnavailableError as FFmpegUnavailableError
+from .ffmpeg_check import check_ffmpeg as check_ffmpeg
+from .ffmpeg_check import resolve_ffmpeg as resolve_ffmpeg
 from .slide_renderer import _SlideRenderer as _SlideRenderer
 
 # 可变运行时全局固定活在 constants（_apply_hi_speed/render_chart_video 写入）：
