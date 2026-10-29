@@ -55,7 +55,110 @@ from dataclasses import field, dataclass
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+from . import constants
 from ..fonts import font as _load_font
+from .constants import (
+    _QT,
+    _DOT,
+    _STAR,
+    _JLINE,
+    _P_MIX,
+    _B_HOLD,
+    _CENTER,
+    _HIT_MS,
+    _R_NOTE,
+    _RADIUS,
+    _STROKE,
+    _T_GLOW,
+    C_BLACK,
+    C_WHITE,
+    _ARROW_W,
+    _LOGICAL,
+    _R_INNER,
+    C_ORANGE,
+    C_RIPPLE,
+    _C_TRAVEL,
+    _EX_ALPHA,
+    _STAR_MIN,
+    _TOUCH_IN,
+    C_TAP_DOT,
+    _ARROW_LEN,
+    _ARROW_TIP,
+    _GAUGE_GEO,
+    _INNER_HEX,
+    _RIPPLE_ET,
+    _RIPPLE_GE,
+    _RIPPLE_JE,
+    _RIPPLE_KE,
+    _RIPPLE_QE,
+    _RIPPLE_XE,
+    _RIPPLE_YE,
+    _RIPPLE_ZE,
+    _TOUCH_OUT,
+    _WIFI_EASE,
+    C_EX_BREAK,
+    C_EX_SIMUL,
+    C_EX_SLIDE,
+    C_HIT_GOLD,
+    C_HUD_GRAY,
+    C_TAP_GRAD,
+    _ARROW_BACK,
+    _DELAY_FADE,
+    _FIREWORK_R,
+    _SHADOW_OFF,
+    _TRAIL_RAMP,
+    C_BREAK_DOT,
+    C_EX_NORMAL,
+    C_SIMUL_DOT,
+    _FIREWORK_MS,
+    _FLICK_FLOOR,
+    _SLIDE_DELAY,
+    _TOUCH_ZONES,
+    C_BREAK_GRAD,
+    C_SIMUL_GRAD,
+    C_SLIDE_CYAN,
+    C_TOUCH_BLUE,
+    C_TOUCH_CYAN,
+    _FLICK_PERIOD,
+    C_SLIDE_ARROW,
+    C_SLIDE_SIMUL,
+    _FIREWORK_LATE,
+    _RIPPLE_QE_OUT,
+    _TOUCHHIT_GLOW,
+    C_TOUCH_CENTER,
+    _FIREWORK_PHASE,
+    _FIREWORK_SMALL,
+    _TOUCH_FLICK_MS,
+    C_TOUCH_SIMUL_G,
+    C_TOUCH_SIMUL_Y,
+    _FIREWORK_COLORS,
+    _TOUCHHIT_BURSTS,
+    _WIFI_HALF_ANGLE,
+    _WIFI_WIDTH_BASE,
+    C_TOUCH_CENTER_S,
+    _DEFAULT_HI_SPEED,
+    _RIPPLE_MIN_ALPHA,
+    _RIPPLE_PROFILE_X,
+    _RIPPLE_PROFILE_Y,
+    C_TOUCHHOLD_GAUGE,
+    _TOUCHHIT_LIFETIME,
+    _TOUCHHIT_RING_MAX,
+    C_TOUCHHOLD_PETALS,
+    _TOUCHHIT_RING_BASE,
+    _TOUCHHIT_RING_ALPHA,
+    _TOUCHHIT_STAR_SCALE,
+    _FIREWORK_WEDGE_SCALE,
+    _TOUCH_SORT_SENTINELS,
+    _TOUCHHIT_RING_SPLINE,
+    _TOUCHHIT_SPRITE_SIZE,
+    _TOUCHHIT_STAR_SPLINE,
+    _TOUCHHIT_DRIFT_SPLINE,
+    _apply_hi_speed,
+    normalize_hi_speed,
+)
+from .constants import (
+    DEFAULT_HI_SPEED as DEFAULT_HI_SPEED,
+)
 from ..chart_audio import MIX_RATE, build_effect_track
 from ..chart_notes import (
     ChartNote,
@@ -68,55 +171,22 @@ from ..chart_notes import (
 )
 from .._lxns_slide_data import SLIDE_POINTS, SLIDE_KEYFRAMES
 
-# ------------------------------------------------- 常量（JS L15-60 / I 表 L66）
-_LOGICAL = 600.0
-_SS = 2  # 超采样（站内 G=2 backing）
-_RADIUS = _LOGICAL * 0.45
-_CENTER = _LOGICAL / 2
-_BASE_APPROACH_MS = 2250.0  # lxns 渲染器「approach = base/hiSpeed」的基准值
+# 可变运行时全局固定活在 constants（_apply_hi_speed/render_chart_video 写入）：
+# 包层不做 import 快照，读 cv._SS 等经 PEP 562 动态转发，保证与运行时一致。
+_MUTABLE_STATE_NAMES = (
+    "_SS",
+    "_HI_SPEED",
+    "_APPROACH_MS",
+    "_HALF_APPROACH",
+    "_TOUCH_APPROACH_MS",
+    "_SPEED_SETTING",
+)
 
 
-# ── 谱面流速标定来源（2026-10-27 调研定案）────────────────────────────────
-# 原先照搬 maimai.lxns.net：hiSpeed = 设定值 × 0.6，approach = 2250/hiSpeed。
-# 但该口径比 Majdata（simai 生态事实标准播放器）快约 17.7%，7.0 相当于
-# Majdata 的 8.4；群友反馈按官机手感 Majdata 的 7.0 已偏快，故改用 Majdata
-# 标定（源码核对自 MajdataView `HttpHandler.cs` / MajdataPlay
-# `GamePlayManager`，team-carol/carol `chartRenderer.ts` 亦独立移植同一公式）：
-#   内部速度 S(s) = 107.25 / (71.4184491 · (s + 0.9975)^-0.985558604)
-#   出现→判定时长 = 7.349 / S(s) 秒
-#   其中 7.349 = 4.8 − (−2.549)：4.8 为判定线距离，NoteAppearRate=0.265 时
-#   destScale=0 的起始距离为 −2.549。
-# lxns 的 hiSpeed 语义是 approach=2250/hiSpeed，因此换算：
-#   hiSpeed = 2250 / (7349 / S(s)) = 0.30616 · S(s)
-# TOUCH 在 Majdata 是独立速度公式（默认 TouchSpeed 7.5；此处沿用用户流速）：
-#   touch 出现→判定时长 = 3209.385682 · s^-0.9549621752 ms
-def _majdata_note_internal_speed(setting: float) -> float:
-    """谱面流速设定值 → lxns 渲染器内部 hiSpeed（Majdata 标定，见上方注释）。"""
-    s = 107.25 / (71.4184491 * (setting + 0.9975) ** -0.985558604)
-    return _BASE_APPROACH_MS / (7349.0 / s)
-
-
-def _majdata_note_approach_ms(setting: float) -> float:
-    """音符出现→判定总时长（ms），Majdata 标定。"""
-    s = 107.25 / (71.4184491 * (setting + 0.9975) ** -0.985558604)
-    return 7349.0 / s
-
-
-def _majdata_touch_approach_ms(setting: float) -> float:
-    """TOUCH 出现→判定时长（ms），Majdata `TouchDrop.wholeDuration` 公式。"""
-    return 3209.385682 * setting**-0.9549621752
-
-
-_DEFAULT_HI_SPEED = 7.0
-_HI_SPEED = _majdata_note_internal_speed(_DEFAULT_HI_SPEED)
-_APPROACH_MS = _majdata_note_approach_ms(_DEFAULT_HI_SPEED)
-_HALF_APPROACH = _APPROACH_MS / 2
-_TOUCH_APPROACH_MS = _majdata_touch_approach_ms(_DEFAULT_HI_SPEED)
-_SPEED_SETTING = _DEFAULT_HI_SPEED
-_HI_SPEED_MIN = 3.0
-_HI_SPEED_MAX = 9.75
-_HI_SPEED_STEP = 0.25
-DEFAULT_HI_SPEED = _DEFAULT_HI_SPEED
+def __getattr__(name: str):
+    if name in _MUTABLE_STATE_NAMES:
+        return getattr(constants, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class FFmpegUnavailableError(ValueError):
@@ -221,304 +291,6 @@ def check_ffmpeg(ffmpeg: str | None = None) -> FFmpegStatus:
         if name not in filter_text:
             missing.append(f"滤镜 {name}")
     return FFmpegStatus(path=path, version=first_line, missing=tuple(missing))
-
-
-def normalize_hi_speed(value: float | None) -> float:
-    """谱面流速参数校验：3–9.75、步长 0.25；非法回退默认 7.0。"""
-    try:
-        speed = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return _DEFAULT_HI_SPEED
-    if not (_HI_SPEED_MIN <= speed <= _HI_SPEED_MAX):
-        return _DEFAULT_HI_SPEED
-    steps = speed / _HI_SPEED_STEP
-    if abs(steps - round(steps)) > 1e-6:
-        return _DEFAULT_HI_SPEED
-    return speed
-
-
-def _apply_hi_speed(speed: float) -> None:
-    """设置模块级流速/approach 时间（Majdata 标定，来源见上方常量注释）。"""
-    global _HI_SPEED, _APPROACH_MS, _HALF_APPROACH, _TOUCH_APPROACH_MS
-    global _SPEED_SETTING
-    _SPEED_SETTING = speed
-    _APPROACH_MS = _majdata_note_approach_ms(speed)
-    _HI_SPEED = _BASE_APPROACH_MS / _APPROACH_MS
-    _HALF_APPROACH = _APPROACH_MS / 2
-    _TOUCH_APPROACH_MS = _majdata_touch_approach_ms(speed)
-
-
-_R_NOTE = 1 / 12.5
-_R_INNER = 0.65
-_C_TRAVEL = 0.25
-_DOT = 9 / 300
-_STROKE = 2 / 300
-_JLINE = 3 / 300
-_ARROW_BACK = 44.6 / 300
-_ARROW_LEN = 12.2 / 300
-_ARROW_W = 16.6 / 300
-_ARROW_TIP = 9.5 / 300
-_SHADOW_OFF = 5 / 300  # 箭头黑影偏移（源码 a = 5/300·radius）
-_STAR = 1.6 / 10.42
-_B_HOLD = 1.5
-_INNER_HEX = 0.62
-_T_GLOW = 0.06
-_FLICK_PERIOD = 16000 / 60
-_FLICK_FLOOR = 0.82
-_HIT_MS = 450.0
-_EX_ALPHA = 1.19
-_P_MIX = 0.18
-_TOUCH_OUT = 1 / 6.25
-_TOUCH_IN = 1 / 12.5
-_STAR_HEAD = 1.15 * 1.25
-_STAR_MIN = 0.5  # JS `_`：生长星最小尺寸比例（L6131 u = _+(1-_)*r）
-_SLIDE_DELAY = 0.0  # 站内 config.slideDelay 默认 0（me() L5519 入参）
-_WIFI_HALF_ANGLE = 67.4 * math.pi / 180
-_TOUCH_FLICK_MS = 150.0
-_DELAY_FADE = 50.0  # de（L5510）：临近判定跳满档的窗口
-_TRAIL_RAMP = 200.0  # fe（L5511）：轨道淡入爬坡时长
-
-C_BLACK = (0, 0, 0)
-C_WHITE = (255, 255, 255)
-C_TAP_DOT = (255, 105, 180)
-C_SIMUL_DOT = (255, 215, 0)
-C_BREAK_DOT = (255, 140, 0)
-C_TAP_GRAD = ((253, 25, 125), (255, 125, 213))
-C_SIMUL_GRAD = ((252, 182, 0), (255, 254, 0))
-C_BREAK_GRAD = ((255, 179, 71), (255, 102, 0))
-C_SLIDE_CYAN = (1, 251, 253)
-C_SLIDE_ARROW = (255, 144, 1)
-C_SLIDE_SIMUL = (255, 237, 36)
-C_SLIDE_PINK = (255, 105, 180)
-C_TOUCH_CYAN = (0, 255, 255)
-C_TOUCH_BLUE = (0, 128, 255)
-C_TOUCH_SIMUL_Y = (255, 255, 0)
-C_TOUCH_SIMUL_G = (255, 215, 0)
-C_TOUCH_CENTER = (0, 191, 255)
-C_TOUCH_CENTER_S = (255, 255, 0)
-C_HIT_GOLD = (245, 234, 114)
-C_RIPPLE = (255, 227, 54)  # $e = (1, .889, .213)
-C_EX_NORMAL = (255, 180, 210, 204)
-C_EX_BREAK = (255, 200, 120, 204)
-C_EX_SIMUL = (255, 245, 150, 204)
-C_EX_SLIDE = (100, 230, 230, 204)
-C_HUD_GRAY = (148, 163, 184)
-C_FPS_GREEN = (34, 197, 94)
-C_FPS_YELLOW = (234, 179, 8)
-C_FPS_RED = (239, 68, 68)
-C_ORANGE = (255, 165, 0)
-# touch hold 花瓣渐变四停点 Pe（L6737）与进度环四象限色 Fe（L6743）
-C_TOUCHHOLD_PETALS = (
-    ((255, 85, 17), (247, 70, 1), (231, 66, 1), (255, 246, 242)),
-    ((248, 222, 0), (246, 237, 0), (236, 244, 2), (255, 251, 239)),
-    ((30, 180, 118), (18, 168, 106), (10, 160, 98), (236, 255, 248)),
-    ((0, 170, 248), (0, 151, 246), (2, 137, 244), (239, 252, 255)),
-)
-C_TOUCHHOLD_GAUGE = ((233, 85, 19), (250, 237, 0), (13, 172, 103), (44, 166, 224))
-
-# ---- 按压涟漪（it 类 Ge/Ke/Ye/Xe/Je/qe/Ze/Qe/et/tt/nt，L7143-7176）----
-_RIPPLE_GE = 16000 / 60 / 1000
-_RIPPLE_KE = (0.0, 4 / 60, 8 / 60)
-_RIPPLE_QE = 11 / 60
-_RIPPLE_JE = 1.0
-_RIPPLE_YE = 0.1355
-_RIPPLE_XE = 0.735
-_RIPPLE_ZE = 0.8  # 环带内缘比例
-_RIPPLE_QE_OUT = 1.2  # 环带外缘比例
-_RIPPLE_ET = 0.58  # 色向白偏移系数
-_RIPPLE_MIN_ALPHA = 0.02  # nt
-_RIPPLE_PROFILE = (  # tt：16 停点轮廓（位置, 强度）
-    (0.0, 0.0),
-    (0.063, 0.01),
-    (0.125, 0.08),
-    (0.188, 0.17),
-    (0.25, 0.33),
-    (0.313, 0.52),
-    (0.375, 0.68),
-    (0.438, 0.85),
-    (0.5, 1.0),
-    (0.563, 0.88),
-    (0.625, 0.71),
-    (0.688, 0.56),
-    (0.75, 0.37),
-    (0.813, 0.2),
-    (0.875, 0.09),
-    (0.938, 0.03),
-    (1.0, 0.01),
-)
-_RIPPLE_PROFILE_X = tuple(p[0] for p in _RIPPLE_PROFILE)
-_RIPPLE_PROFILE_Y = tuple(p[1] for p in _RIPPLE_PROFILE)
-
-# ---- touch 命中特效（Ft 类，L7350-7454）----
-_TOUCHHIT_LIFETIME = 0.5  # mt
-_TOUCHHIT_RING_MAX = 540.0  # gt
-_TOUCHHIT_RING_BASE = 2.5 * 70.0  # ht = 175
-_TOUCHHIT_STAR_SCALE = 1.4  # Et
-_TOUCHHIT_SPRITE_SIZE = 32.0  # Tt
-_TOUCHHIT_BURSTS = (
-    # (数量, 起始半径, 峰值半径, 漂移时长, 漂移距离)
-    (8, 0.5 * 70.0, 0.3 * 70.0, 0.0, 0.0),
-    (8, 0.6 * 70.0, 0.6 * 70.0, 700.0, 140.0),
-)
-_TOUCHHIT_RING_SPLINE = (  # Dt
-    (0.0, 0.0, 10.02783, 10.02783),
-    (0.0734887, 0.482223, 2.93804, 2.93804),
-    (0.3209003, 0.834577, 0.592962, 0.592962),
-    (1.0, 1.0, 0.180534, 0.180534),
-)
-_TOUCHHIT_RING_ALPHA = (
-    (0.0, 1.0),
-    (5484 / 65535, 1.0),
-    (18591 / 65535, 0.141176),
-    (31029 / 65535, 0.031373),
-    (45607 / 65535, 0.0),
-    (1.0, 0.0),
-)
-_TOUCHHIT_STAR_SPLINE = (  # kt
-    (0.0, 0.755245, 2.38315, 2.38315),
-    (0.127286, 1.0, 0.061337, 0.061337),
-    (0.272332, 0.892134, -0.927502, -0.927502),
-    (0.540943, 0.811183, -0.114026, -0.114026),
-    (1.0, 0.0, 0.036313, 0.036313),
-)
-_TOUCHHIT_DRIFT_SPLINE = ((0.0, 1.0, -2.726415, -2.726415), (1.0, 0.0, 0.0, 0.0))  # At
-_TOUCHHIT_GLOW = (  # ft：62 停点径向轮廓
-    0.666,
-    0.667,
-    0.671,
-    0.679,
-    0.685,
-    0.693,
-    0.7,
-    0.709,
-    0.718,
-    0.727,
-    0.736,
-    0.744,
-    0.753,
-    0.763,
-    0.772,
-    0.781,
-    0.791,
-    0.8,
-    0.809,
-    0.818,
-    0.826,
-    0.835,
-    0.843,
-    0.851,
-    0.858,
-    0.866,
-    0.872,
-    0.879,
-    0.887,
-    0.896,
-    0.905,
-    0.913,
-    0.922,
-    0.93,
-    0.938,
-    0.946,
-    0.953,
-    0.959,
-    0.964,
-    0.969,
-    0.974,
-    0.977,
-    0.981,
-    0.984,
-    0.986,
-    0.987,
-    0.989,
-    0.993,
-    0.998,
-    1.0,
-    0.896,
-    0.584,
-    0.374,
-    0.248,
-    0.155,
-    0.087,
-    0.038,
-    0.008,
-    0.002,
-    0.0,
-    0.0,
-    0.0,
-)
-
-# ---- 花火（Wt 类，L7655-7660）----
-_FIREWORK_MS = 1333.0  # It
-_FIREWORK_WEDGE_SCALE = 5 / 4.5 * 1.05  # Lt
-_FIREWORK_R = 5.0  # Rt（楔形长度参数）
-_FIREWORK_SMALL = 2.5  # zt：矢量楔阈值
-_FIREWORK_PHASE = 0.6  # Bt：两阶段切换
-_FIREWORK_LATE = 1.1  # Vt
-_FIREWORK_COLORS = (  # Ut：15 色楔形
-    (255, 179, 186),
-    (255, 208, 168),
-    (255, 250, 184),
-    (216, 240, 168),
-    (184, 224, 176),
-    (168, 224, 204),
-    (168, 200, 232),
-    (184, 176, 232),
-    (208, 176, 232),
-    (240, 176, 216),
-    (255, 201, 168),
-    (255, 239, 168),
-    (200, 232, 168),
-    (168, 224, 188),
-    (168, 204, 232),
-)
-
-# ---- touch 部件排序（ke/Ae，L6672-6684）----
-_TOUCH_ZONES = "BEADC"
-_TOUCH_SORT_SENTINELS = (  # De：槽间哨兵键
-    2148237322,
-    2148237312,
-    2148237312,
-    2147844096,
-    2147844096,
-    2147844098,
-    2147844098,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147844098,
-    2147844098,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147844098,
-    2147844098,
-    2147844096,
-    2147844106,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147844096,
-    2147942399,
-    2147942399,
-    2147516416,
-    2147516416,
-)
-# touch hold 进度环几何（K 表，L6744；单位为 480 设计空间）
-_GAUGE_GEO = {
-    "canvas_half": 99.75,
-    "inner_axis": 64.0,
-    "inner_diagonal": 50.5,
-    "outer_axis": 97.75,
-    "outer_diagonal": 82.75,
-}
-# wifi chevron 间距缓动表（y，L32）
-_WIFI_EASE = (0, 0.094, 0.178, 0.266, 0.355, 0.462, 0.57, 0.674, 0.779, 0.884, 1)
-_WIFI_WIDTH_BASE = 19.2 / 300  # v
-_QT = 2 * math.pi / 1000  # 星星 tap 自旋角速度（L7824 qt）
 
 
 def _sort_key(layer: int, order: int) -> int:
@@ -742,13 +514,13 @@ def _note_position(
     dt = note.timing - now_ms
     is_hold = note.kind == "hold"
     end_guard = -note.duration if is_hold else 0.0
-    if dt > _APPROACH_MS or dt < end_guard:
+    if dt > constants._APPROACH_MS or dt < end_guard:
         return _Pos(0.0, 0.0, 0.0, False)
-    if dt > _HALF_APPROACH:
+    if dt > constants._HALF_APPROACH:
         d = radius * _C_TRAVEL
-        alpha = 1 - (dt - _HALF_APPROACH) / _HALF_APPROACH
+        alpha = 1 - (dt - constants._HALF_APPROACH) / constants._HALF_APPROACH
     elif dt >= 0:
-        e = 1 - dt / _HALF_APPROACH
+        e = 1 - dt / constants._HALF_APPROACH
         d = radius * (_C_TRAVEL + 0.75 * e)
         alpha = 1.0
     elif is_hold:
@@ -768,7 +540,11 @@ class _Canvas:
         base_image: Image.Image | None = None,
         rgb: bool = False,
     ):
-        self.size = base_image.width if base_image is not None else int(_LOGICAL * _SS)
+        self.size = (
+            base_image.width
+            if base_image is not None
+            else int(_LOGICAL * constants._SS)
+        )
         if base_image is not None:
             self.img = base_image.copy()
         elif rgb:
@@ -799,10 +575,10 @@ class _Canvas:
             self.img.alpha_composite(layer, pos)
 
     def s(self, v: float) -> float:
-        return v * _SS
+        return v * constants._SS
 
     def pts(self, points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        return [(x * _SS, y * _SS) for x, y in points]
+        return [(x * constants._SS, y * constants._SS) for x, y in points]
 
     def stroke_circle(self, x: float, y: float, r: float, color, width: float) -> None:
         rr = self.s(r)
@@ -989,18 +765,18 @@ class _Sprites:
         sw = _STROKE * _RADIUS
         # 显示半宽 = getTapSpriteCropHalf L451（EX 环 1.19f 与黑环 f+1.5sw 取大）
         half = (max(f * _EX_ALPHA, f + sw / 2) if is_ex else f + sw * 1.5) + 1.0
-        size = math.ceil(half * 2 * _SS)
+        size = math.ceil(half * 2 * constants._SS)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         d = ImageDraw.Draw(img, "RGBA")
         cx = cy = size / 2
         c0, c1 = _grad_pair(is_break, is_each)
 
         def ring_px(r: float, color, width: float) -> None:
-            rr = r * _SS
+            rr = r * constants._SS
             d.ellipse(
                 (cx - rr, cy - rr, cx + rr, cy + rr),
                 outline=color,
-                width=max(1, round(width * _SS)),
+                width=max(1, round(width * constants._SS)),
             )
 
         def sector(
@@ -1008,15 +784,15 @@ class _Sprites:
         ) -> list[tuple[float, float]]:
             out = [
                 (
-                    cx + math.cos(a0 + (a1 - a0) * k / 12) * r1 * _SS,
-                    cy + math.sin(a0 + (a1 - a0) * k / 12) * r1 * _SS,
+                    cx + math.cos(a0 + (a1 - a0) * k / 12) * r1 * constants._SS,
+                    cy + math.sin(a0 + (a1 - a0) * k / 12) * r1 * constants._SS,
                 )
                 for k in range(13)
             ]
             inn = [
                 (
-                    cx + math.cos(a1 - (a1 - a0) * k / 12) * r0 * _SS,
-                    cy + math.sin(a1 - (a1 - a0) * k / 12) * r0 * _SS,
+                    cx + math.cos(a1 - (a1 - a0) * k / 12) * r0 * constants._SS,
+                    cy + math.sin(a1 - (a1 - a0) * k / 12) * r0 * constants._SS,
                 )
                 for k in range(13)
             ]
@@ -1030,12 +806,12 @@ class _Sprites:
             a0 = rot + k * math.pi / 2
             a1 = a0 + math.pi / 2
             g0 = (
-                cx + math.cos(a0) * mid * _SS,
-                cy + math.sin(a0) * mid * _SS,
+                cx + math.cos(a0) * mid * constants._SS,
+                cy + math.sin(a0) * mid * constants._SS,
             )
             g1 = (
-                cx + math.cos(a1) * mid * _SS,
-                cy + math.sin(a1) * mid * _SS,
+                cx + math.cos(a1) * mid * constants._SS,
+                cy + math.sin(a1) * mid * constants._SS,
             )
             path = sector(p, f, a0, a1)
             bbox = (
@@ -1075,7 +851,12 @@ class _Sprites:
         ring_px(p, C_WHITE, sw)
         dot = f * 0.15
         d.ellipse(
-            (cx - dot * _SS, cy - dot * _SS, cx + dot * _SS, cy + dot * _SS),
+            (
+                cx - dot * constants._SS,
+                cy - dot * constants._SS,
+                cx + dot * constants._SS,
+                cy + dot * constants._SS,
+            ),
             fill=_dot_color(is_break, is_each),
         )
         self.taps[key] = img
@@ -1092,11 +873,11 @@ class _Sprites:
         # JS getHitEffectShapeSprite L7329-7332：
         # l = at·R·coef·X，pad = s + u + l/X·ct + 1
         half = d_size + _STROKE * _RADIUS + l_blur * 2.5 + 1
-        size = math.ceil(half * 2 * _SS)
+        size = math.ceil(half * 2 * constants._SS)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         cx = cy = size / 2
-        rr = d_size * _SS
-        lw = max(2, round(_STROKE * _RADIUS * 2 * _SS))
+        rr = d_size * constants._SS
+        lw = max(2, round(_STROKE * _RADIUS * 2 * constants._SS))
         if shape == "star":
             # starSubPath L7276：5 角星，首顶点角 3π/2+π ≡ π/2（朝下）
             pts = []
@@ -1128,11 +909,11 @@ class _Sprites:
             return lay
 
         # 辉光层：α.55 + blur(l)（L7338 系数），主层：α1 + blur(c)
-        glow = stroke_layer().filter(ImageFilter.GaussianBlur(l_blur * _SS))
+        glow = stroke_layer().filter(ImageFilter.GaussianBlur(l_blur * constants._SS))
         ga = glow.getchannel("A").point(lambda v: int(v * 0.55))
         glow.putalpha(ga)
         img.alpha_composite(glow)
-        main = stroke_layer().filter(ImageFilter.GaussianBlur(c_blur * _SS))
+        main = stroke_layer().filter(ImageFilter.GaussianBlur(c_blur * constants._SS))
         img.alpha_composite(main)
         self.hits[shape] = img
         return img
@@ -1155,7 +936,7 @@ class _Sprites:
             + _RADIUS * (8 / 300)
             + _RADIUS * (2 / 300)
         )  # getTouchSpriteHalf L6755
-        size = math.ceil(half * 2 * _SS)
+        size = math.ceil(half * 2 * constants._SS)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         d = ImageDraw.Draw(img, "RGBA")
         cx = cy = size / 2
@@ -1165,16 +946,19 @@ class _Sprites:
         )
         m = _RADIUS * _TOUCH_IN * 1.3
         h_ang = p + math.pi
-        tip = (cx + math.cos(h_ang) * m * _SS, cy + math.sin(h_ang) * m * _SS)
+        tip = (
+            cx + math.cos(h_ang) * m * constants._SS,
+            cy + math.sin(h_ang) * m * constants._SS,
+        )
         left = (
-            cx + math.cos(p + math.pi / 2) * m * _SS,
-            cy + math.sin(p + math.pi / 2) * m * _SS,
+            cx + math.cos(p + math.pi / 2) * m * constants._SS,
+            cy + math.sin(p + math.pi / 2) * m * constants._SS,
         )
         right = (
-            cx + math.cos(p - math.pi / 2) * m * _SS,
-            cy + math.sin(p - math.pi / 2) * m * _SS,
+            cx + math.cos(p - math.pi / 2) * m * constants._SS,
+            cy + math.sin(p - math.pi / 2) * m * constants._SS,
         )
-        corner = _RADIUS * (8 / 300) * _SS
+        corner = _RADIUS * (8 / 300) * constants._SS
         outer = _rounded_tri_points(tip, left, right, corner)
         # 内三角（非 hold）：顶点向质心收缩 40%，圆角 0.4×
         gx = (tip[0] + left[0] + right[0]) / 3
@@ -1189,8 +973,8 @@ class _Sprites:
         if layer_kind == "sb":
             # 投影（shadow 层 L6798）：canvas shadowBlur=8/300·R 是设备像素
             # （不受 CTM 影响、且 blur≈2σ），offset=2/300·R；换到 2× 超采样画布
-            blur_r = _RADIUS * (8 / 300) * _SS / 2
-            off = _RADIUS * (2 / 300) * _SS
+            blur_r = _RADIUS * (8 / 300) * constants._SS / 2
+            off = _RADIUS * (2 / 300) * constants._SS
             sil = Image.new("RGBA", img.size, (0, 0, 0, 0))
             ImageDraw.Draw(sil).polygon(outer, fill=(0, 0, 0, 255))
             shadow = sil.filter(ImageFilter.GaussianBlur(blur_r))
@@ -1199,14 +983,14 @@ class _Sprites:
             d.line(
                 [*outer, outer[0]],
                 fill=(*C_BLACK, 255),
-                width=round(sw * 3 * _SS),
+                width=round(sw * 3 * constants._SS),
                 joint="curve",
             )
             if not is_hold:
                 d.line(
                     [*inner, inner[0]],
                     fill=(*C_BLACK, 255),
-                    width=round(sw * 3 * _SS),
+                    width=round(sw * 3 * constants._SS),
                     joint="curve",
                 )
         elif layer_kind == "f":
@@ -1250,14 +1034,14 @@ class _Sprites:
             d.line(
                 [*outer, outer[0]],
                 fill=(*C_WHITE, 255),
-                width=max(1, round(sw * _SS)),
+                width=max(1, round(sw * constants._SS)),
                 joint="curve",
             )
             if not is_hold:
                 d.line(
                     [*inner, inner[0]],
                     fill=(*C_WHITE, 255),
-                    width=max(1, round(sw * _SS)),
+                    width=max(1, round(sw * constants._SS)),
                     joint="curve",
                 )
         self.petals[key] = img
@@ -1374,12 +1158,22 @@ class _Renderer:
                 )
                 lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
                 ImageDraw.Draw(lay).ellipse(
-                    (x - r1 * _SS, y - r1 * _SS, x + r1 * _SS, y + r1 * _SS),
+                    (
+                        x - r1 * constants._SS,
+                        y - r1 * constants._SS,
+                        x + r1 * constants._SS,
+                        y + r1 * constants._SS,
+                    ),
                     fill=color,
                 )
                 hole = Image.new("L", c.img.size, 0)
                 ImageDraw.Draw(hole).ellipse(
-                    (x - r0 * _SS, y - r0 * _SS, x + r0 * _SS, y + r0 * _SS),
+                    (
+                        x - r0 * constants._SS,
+                        y - r0 * constants._SS,
+                        x + r0 * constants._SS,
+                        y + r0 * constants._SS,
+                    ),
                     fill=255,
                 )
                 lay.putalpha(ImageChops_darker(lay.getchannel("A"), hole))
@@ -1483,8 +1277,11 @@ class _Renderer:
         # 尾宽 j：头未进入后半接近窗时渐长（renderHold L6464 j 逻辑，基于头 timing）
         start_dt = note.timing - now
         j = 1.0
-        if start_dt > _HALF_APPROACH:
-            j = max(0.0, 1 - (start_dt - _HALF_APPROACH) / _HALF_APPROACH)
+        if start_dt > constants._HALF_APPROACH:
+            j = max(
+                0.0,
+                1 - (start_dt - constants._HALF_APPROACH) / constants._HALF_APPROACH,
+            )
         m_tail = m * j
         if head.visible:
             hx, hy = head.x, head.y
@@ -1569,7 +1366,7 @@ class _Renderer:
         if (
             tail.visible
             and note.duration
-            and note.timing + note.duration - now <= _HALF_APPROACH
+            and note.timing + note.duration - now <= constants._HALF_APPROACH
         ):
             c.fill_circle(tx, ty, m_tail * 0.15, _brightness(c0, flick))
         # 进行中按压涟漪在特效阶段统一绘制（renderNotes L8138，见 render_frame）
@@ -1644,7 +1441,9 @@ class _Renderer:
         )
         arr[..., 3] = np.round(255 * fade).astype(np.uint8)
         glow = Image.fromarray(arr, "RGBA")
-        c.over(glow, (int(x * _SS - size / 2), int(y * _SS - size / 2)))
+        c.over(
+            glow, (int(x * constants._SS - size / 2), int(y * constants._SS - size / 2))
+        )
 
     # ------------------------------------------------ 按压涟漪（it 类 L7186）
     def draw_press_ripple(
@@ -1687,7 +1486,7 @@ class _Renderer:
             r_out = radius * _RIPPLE_QE_OUT
             if r_out - r_in < 0.5:
                 continue
-            region = int(r_out * _SS) + 4
+            region = int(r_out * constants._SS) + 4
             x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
             x1, y1 = (
                 int(min(c.img.width, cx + region)),
@@ -1697,7 +1496,7 @@ class _Renderer:
                 continue
             w, h = x1 - x0, y1 - y0
             yy, xx = np.mgrid[0:h, 0:w]
-            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / _SS  # logical
+            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / constants._SS  # logical
             t = (dist - r_in) / (r_out - r_in)
             msk = (t >= 0) & (t <= 1)
             if not msk.any():
@@ -2073,7 +1872,7 @@ class _SlideRenderer:
     def _star_delay(self, note: _Note) -> float:
         """me()（L5514）：轨道淡入起点。"""
         r = round((_SLIDE_DELAY + 1) * 10)
-        return note.timing - _APPROACH_MS + _APPROACH_MS * r / 21
+        return note.timing - constants._APPROACH_MS + constants._APPROACH_MS * r / 21
 
     def track_alpha(self, note: _Note, now: float, fading: bool) -> float:
         """ge()（L5527）：fading=wifi 段（视作 split 档）。"""
@@ -2209,17 +2008,21 @@ class _SlideRenderer:
                 continue
             xs = [p[0] for poly in polys for p in poly]
             ys = [p[1] for poly in polys for p in poly]
-            x0 = max(0, int(min(xs) * _SS) - 2)
-            y0 = max(0, int(min(ys) * _SS) - 2)
-            x1 = min(c.img.width, int(max(xs) * _SS) + 3)
-            y1 = min(c.img.height, int(max(ys) * _SS) + 3)
+            x0 = max(0, int(min(xs) * constants._SS) - 2)
+            y0 = max(0, int(min(ys) * constants._SS) - 2)
+            x1 = min(c.img.width, int(max(xs) * constants._SS) + 3)
+            y1 = min(c.img.height, int(max(ys) * constants._SS) + 3)
             if x1 <= x0 or y1 <= y0:
                 continue
             mask = Image.new("L", (x1 - x0, y1 - y0), 0)
             md = ImageDraw.Draw(mask)
             for poly in polys:
                 md.polygon(
-                    [(px * _SS - x0, py * _SS - y0) for px, py in poly], fill=255
+                    [
+                        (px * constants._SS - x0, py * constants._SS - y0)
+                        for px, py in poly
+                    ],
+                    fill=255,
                 )
             mask = mask.point(lambda v: int(v * alpha * shade))
             lay = Image.new("RGBA", (x1 - x0, y1 - y0), (*col, 255))
@@ -2454,7 +2257,7 @@ class _SlideRenderer:
         length = sum(self.segment_length(s) for s in part.segments)
         rate = length * (480.0 / _RADIUS) / math.pi / duration * 15 * 0.06
         per_ms = -min(rate, 1.08) * (math.pi / 180)
-        start = note.timing - _APPROACH_MS
+        start = note.timing - constants._APPROACH_MS
         return 0.0 if now < start else per_ms * (now - start)
 
     # ---- renderSlideStar（L6115）：起点生长 → 沿路径移动（每条并行动径一颗）
@@ -2733,7 +2536,7 @@ class _TouchRenderer:
     def motion(self, note: _Note, now: float):
         is_hold = note.kind == "touch-hold"
         dt = note.timing - now
-        approach = _TOUCH_APPROACH_MS  # Majdata TouchDrop.wholeDuration
+        approach = constants._TOUCH_APPROACH_MS  # Majdata TouchDrop.wholeDuration
         life = (note.duration + 50) if is_hold else 50.0
         if dt > approach or dt < -life:
             return None
@@ -2799,12 +2602,14 @@ class _TouchRenderer:
             pts.append((-n + i, -i))
             return pts
 
-        size = math.ceil(half * 2 * _SS)
+        size = math.ceil(half * 2 * constants._SS)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         off = size / 2
 
         def to_px(pts):
-            return [(px * _SS + off, py * _SS + off) for px, py in pts]
+            return [
+                (px * constants._SS + off, py * constants._SS + off) for px, py in pts
+            ]
 
         outer = to_px(ring_path(_GAUGE_GEO["outer_axis"], _GAUGE_GEO["outer_diagonal"]))
         inner = to_px(ring_path(_GAUGE_GEO["inner_axis"], _GAUGE_GEO["inner_diagonal"]))
@@ -2830,10 +2635,10 @@ class _TouchRenderer:
             )
             grad = _multi_stop_gradient(
                 (size, size),
-                g0[0] * _SS + off,
-                g0[1] * _SS + off,
-                g1[0] * _SS + off,
-                g1[1] * _SS + off,
+                g0[0] * constants._SS + off,
+                g0[1] * constants._SS + off,
+                g1[0] * constants._SS + off,
+                g1[1] * constants._SS + off,
                 stops,
             )
             # 象限矩形裁剪（fillRect i>0?0:-n 等）
@@ -2842,10 +2647,10 @@ class _TouchRenderer:
             quad_mask = Image.new("L", (size, size), 0)
             ImageDraw.Draw(quad_mask).rectangle(
                 [
-                    x0q * _SS + off,
-                    y0q * _SS + off,
-                    (x0q + n_max) * _SS + off,
-                    (y0q + n_max) * _SS + off,
+                    x0q * constants._SS + off,
+                    y0q * constants._SS + off,
+                    (x0q + n_max) * constants._SS + off,
+                    (y0q + n_max) * constants._SS + off,
                 ],
                 fill=255,
             )
@@ -2915,7 +2720,7 @@ class _TouchRenderer:
                 lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
                 ld = ImageDraw.Draw(lay, "RGBA")
                 cx, cy = c.s(pos[0]), c.s(pos[1])
-                rr = center_r * _SS
+                rr = center_r * constants._SS
                 lw3 = max(1, round(c.s(self.r.sw * 3)))
                 lw1 = max(1, round(c.s(self.r.sw)))
                 a255 = int(255 * fade)
@@ -3021,7 +2826,7 @@ class _TouchRenderer:
         if mv is None:
             return
         _, dt, _, _, _ = mv
-        if dt > _APPROACH_MS or dt < -50:
+        if dt > constants._APPROACH_MS or dt < -50:
             return
         x, y = self.position(note)
         r_base = _RADIUS * (1 / 4.46) * 1.1 * 1.2
@@ -3029,7 +2834,7 @@ class _TouchRenderer:
         color = C_SIMUL_DOT if note.is_each else C_TOUCH_CYAN
         lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         ld = ImageDraw.Draw(lay, "RGBA")
-        lw = max(1, round(3 * _RADIUS / 300 * _SS))
+        lw = max(1, round(3 * _RADIUS / 300 * constants._SS))
         for n in ((r_base * 1.2,) if count >= 3 else ()) + (r_base,):
             left, top = x - n / 2, y - n / 2
             right_, bottom = left + n, top + n
@@ -3076,7 +2881,7 @@ class _Fireworks:
         if self._wedge is not None:
             return self._wedge
         half = _RADIUS * _FIREWORK_WEDGE_SCALE
-        size = math.ceil(half * 2 * _SS)
+        size = math.ceil(half * 2 * constants._SS)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         cx = cy = size / 2
         wedge_len = _RADIUS / 4.5 * _FIREWORK_R
@@ -3087,12 +2892,12 @@ class _Fireworks:
             t = e / n * math.tau
             p0 = (cx, cy)
             p1 = (
-                cx + math.cos(t - half_ang) * wedge_len * _SS,
-                cy + math.sin(t - half_ang) * wedge_len * _SS,
+                cx + math.cos(t - half_ang) * wedge_len * constants._SS,
+                cy + math.sin(t - half_ang) * wedge_len * constants._SS,
             )
             p2 = (
-                cx + math.cos(t + half_ang) * wedge_len * _SS,
-                cy + math.sin(t + half_ang) * wedge_len * _SS,
+                cx + math.cos(t + half_ang) * wedge_len * constants._SS,
+                cy + math.sin(t + half_ang) * wedge_len * constants._SS,
             )
             # 径向渐变：0-0.9 实色 → 尖端透明
             pts = [p0, p1, p2]
@@ -3116,7 +2921,9 @@ class _Fireworks:
             )
             col = _FIREWORK_COLORS[e]
             yy, xx = np.mgrid[0 : bbox[3] - bbox[1], 0 : bbox[2] - bbox[0]]
-            dist = np.hypot(xx + bbox[0] - cx, yy + bbox[1] - cy) / (wedge_len * _SS)
+            dist = np.hypot(xx + bbox[0] - cx, yy + bbox[1] - cy) / (
+                wedge_len * constants._SS
+            )
             fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
             arr = np.dstack(
                 [
@@ -3158,15 +2965,15 @@ class _Fireworks:
         if not balls:
             return
         max_r = max(m for m, *_ in balls)
-        region = int(max_r * _SS) + 2
-        cx, cy = x * _SS, y * _SS
+        region = int(max_r * constants._SS) + 2
+        cx, cy = x * constants._SS, y * constants._SS
         x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
         x1, y1 = int(min(layer.width, cx + region)), int(min(layer.height, cy + region))
         if x1 <= x0 or y1 <= y0:
             return
         w, h = x1 - x0, y1 - y0
         yy, xx = np.mgrid[0:h, 0:w]
-        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / _SS
+        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / constants._SS
         out = np.asarray(layer.crop((x0, y0, x1, y1)), dtype=np.float32)
         for m, p, c_in in balls:
             r_px = m
@@ -3247,7 +3054,7 @@ class _Fireworks:
         cut_alpha = min(1.0, g / 0.2)  # JS L7813：切洞强度渐入
         if v > 0 and cut_alpha > 0:
             yy, xx = np.mgrid[0 : scratch.height, 0 : scratch.width]
-            dist = np.hypot(xx - c.s(pos[0]), yy - c.s(pos[1])) / _SS
+            dist = np.hypot(xx - c.s(pos[0]), yy - c.s(pos[1])) / constants._SS
             keep = np.ones_like(dist)
             m1 = dist <= hole_in
             keep[m1] = 0.0
@@ -3269,18 +3076,18 @@ class _Fireworks:
         lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         n = len(_FIREWORK_COLORS)
         half_ang = math.pi / n * 0.45
-        cx, cy = x * _SS, y * _SS
+        cx, cy = x * constants._SS, y * constants._SS
         for e in range(n):
             t = e / n * math.tau + rot
             pts = [
                 (cx, cy),
                 (
-                    cx + math.cos(t - half_ang) * a * _SS,
-                    cy + math.sin(t - half_ang) * a * _SS,
+                    cx + math.cos(t - half_ang) * a * constants._SS,
+                    cy + math.sin(t - half_ang) * a * constants._SS,
                 ),
                 (
-                    cx + math.cos(t + half_ang) * a * _SS,
-                    cy + math.sin(t + half_ang) * a * _SS,
+                    cx + math.cos(t + half_ang) * a * constants._SS,
+                    cy + math.sin(t + half_ang) * a * constants._SS,
                 ),
             ]
             x0 = int(max(0, min(px for px, _ in pts) - 1))
@@ -3294,7 +3101,7 @@ class _Fireworks:
                 [(px - x0, py - y0) for px, py in pts], fill=255
             )
             yy, xx = np.mgrid[0 : y1 - y0, 0 : x1 - x0]
-            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / (a * _SS)
+            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / (a * constants._SS)
             fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
             arr = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
             arr[..., 0], arr[..., 1], arr[..., 2] = _FIREWORK_COLORS[e]
@@ -3341,7 +3148,9 @@ class _TouchHitEffects:
         """getStarSprites（L7590）+ drawStarFrame（L7605）：4 帧 sparkle。"""
         if self._star_sprites is not None:
             return self._star_sprites
-        size = math.ceil(_TOUCHHIT_SPRITE_SIZE * _TOUCHHIT_STAR_SCALE * 2 * _SS)
+        size = math.ceil(
+            _TOUCHHIT_SPRITE_SIZE * _TOUCHHIT_STAR_SCALE * 2 * constants._SS
+        )
         base_r = _TOUCHHIT_SPRITE_SIZE
         col = self.color
         white = (255, 255, 241)  # Z({r:1,g:1,b:.94}) ≈ (255,255,241)
@@ -3384,27 +3193,29 @@ class _TouchHitEffects:
             img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
             if style == "stroke":
                 d = ImageDraw.Draw(img, "RGBA")
-                path_o = sparkle_path(outer * 1.08 * _SS, inner_r * 1.08 * _SS)
-                path_i = sparkle_path(outer * _SS, inner_r * _SS)
+                path_o = sparkle_path(
+                    outer * 1.08 * constants._SS, inner_r * 1.08 * constants._SS
+                )
+                path_i = sparkle_path(outer * constants._SS, inner_r * constants._SS)
                 d.line(
                     [*path_o, path_o[0]],
                     fill=(*col, int(255 * 0.22)),
-                    width=max(1, round(outer * 0.13 * _SS)),
+                    width=max(1, round(outer * 0.13 * constants._SS)),
                     joint="curve",
                 )
                 d.line(
                     [*path_i, path_i[0]],
                     fill=(*white, int(255 * 0.88)),
-                    width=max(1, round(outer * 0.055 * _SS)),
+                    width=max(1, round(outer * 0.055 * constants._SS)),
                     joint="curve",
                 )
             else:
                 # fillStarGradient（L7623）：径向多停点
                 cx = cy = size / 2
-                path = sparkle_path(outer * _SS, inner_r * _SS)
+                path = sparkle_path(outer * constants._SS, inner_r * constants._SS)
                 mask = _poly_mask((size, size), path)
                 yy, xx = np.mgrid[0:size, 0:size]
-                dist = np.hypot(xx - cx, yy - cy) / (outer * _SS)
+                dist = np.hypot(xx - cx, yy - cy) / (outer * constants._SS)
                 if style == "a":
                     seg_pos = (0.0, 0.34, 0.72, 1.0)
                     seg_alpha = (0.03, 0.14, 0.82, 0.0)
@@ -3518,14 +3329,14 @@ class _TouchHitEffects:
         if alpha <= 0.01:
             return
         cx, cy = c.s(x), c.s(y)
-        region = int(radius * _SS) + 2
+        region = int(radius * constants._SS) + 2
         x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
         x1, y1 = int(min(c.img.width, cx + region)), int(min(c.img.height, cy + region))
         if x1 <= x0 or y1 <= y0:
             return
         w, h = x1 - x0, y1 - y0
         yy, xx = np.mgrid[0:h, 0:w]
-        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / _SS
+        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / constants._SS
         t = dist / radius
         n_stops = len(_TOUCHHIT_GLOW)
         glow = np.zeros_like(t)
@@ -3582,7 +3393,7 @@ class _TouchHitEffects:
         # 合成（900² 下约 24ms/次，84s 段落一次 7-8 个星爆），改为按解析
         # 上界裁 bbox 层，结果一致但开销与面积成正比。
         max_r = (start_r + abs(drift)) * r480 + peak_r * r480 * 0.847 + 2
-        region = int(max_r * _SS) + 2
+        region = int(max_r * constants._SS) + 2
         cx, cy = c.s(x), c.s(y)
         x0 = max(0, int(cx - region))
         y0 = max(0, int(cy - region))
@@ -3809,7 +3620,7 @@ class _ChartRenderer:
             if n.kind == "touch-hold":
                 continue
             dt = n.timing - now
-            if -50 <= dt <= _APPROACH_MS:
+            if -50 <= dt <= constants._APPROACH_MS:
                 key = (n.sensor, n.touch_num)
                 count_by_pos[key] = count_by_pos.get(key, 0) + 1
         for n in reversed(touches):
@@ -3926,7 +3737,7 @@ class _ChartRenderer:
         # JS 先 translate/rotate 画布再画 5 个 sprite：等价于在局部层画好后整体旋转
         # 一次（比逐 sprite rotate 快数倍，也避免重复重采样）
         half = d_size * 1.1 + _RADIUS * (4 / 300 * 0.7) * 2.4 * 3 + 4
-        size = math.ceil(half * 2 * _SS)
+        size = math.ceil(half * 2 * constants._SS)
         lay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         center = size / 2
 
@@ -3956,8 +3767,8 @@ class _ChartRenderer:
             lay.alpha_composite(
                 img,
                 (
-                    int(center + lx * _SS - img.width / 2),
-                    int(center + ly * _SS - img.height / 2),
+                    int(center + lx * constants._SS - img.width / 2),
+                    int(center + ly * constants._SS - img.height / 2),
                 ),
             )
 
@@ -4016,7 +3827,7 @@ class _ChartRenderer:
     def _hud(self, c: _Canvas, now: float, fps: int) -> None:
         """renderBpmDisplay（L8583）+ renderNoteCounts（L8637）。"""
 
-        s = _SS
+        s = constants._SS
         r300 = c.radius / 300
         n22, n16 = round(22 * r300) * s, round(16 * r300) * s
         n20, n4 = round(20 * r300) * s, round(4 * r300) * s
@@ -4397,20 +4208,18 @@ def render_chart_video(
     buddy_chart: SiteChart | None = None,
 ) -> Path:
     """渲染入口：设置超采样/谱面流速/ffmpeg 路径，串行化并发渲染。"""
-    global _SS, _HI_SPEED, _APPROACH_MS, _HALF_APPROACH
-    global _TOUCH_APPROACH_MS, _SPEED_SETTING
     clamped = max(1.0, min(2.0, float(supersample)))
     speed = normalize_hi_speed(hi_speed)
     with _SS_LOCK:
-        previous_ss = _SS
+        previous_ss = constants._SS
         previous_speed = (
-            _HI_SPEED,
-            _APPROACH_MS,
-            _HALF_APPROACH,
-            _TOUCH_APPROACH_MS,
-            _SPEED_SETTING,
+            constants._HI_SPEED,
+            constants._APPROACH_MS,
+            constants._HALF_APPROACH,
+            constants._TOUCH_APPROACH_MS,
+            constants._SPEED_SETTING,
         )
-        _SS = clamped
+        constants._SS = clamped
         _apply_hi_speed(speed)
         try:
             return _render_chart_video_impl(
@@ -4431,13 +4240,13 @@ def render_chart_video(
                 buddy_chart=buddy_chart,
             )
         finally:
-            _SS = previous_ss
+            constants._SS = previous_ss
             (
-                _HI_SPEED,
-                _APPROACH_MS,
-                _HALF_APPROACH,
-                _TOUCH_APPROACH_MS,
-                _SPEED_SETTING,
+                constants._HI_SPEED,
+                constants._APPROACH_MS,
+                constants._HALF_APPROACH,
+                constants._TOUCH_APPROACH_MS,
+                constants._SPEED_SETTING,
             ) = previous_speed
 
 

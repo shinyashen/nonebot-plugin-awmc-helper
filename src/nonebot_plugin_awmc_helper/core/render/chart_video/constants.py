@@ -1,0 +1,358 @@
+"""谱面预览渲染的全部常量与颜色表（含源码 JS 行号注释）。
+
+站内对照：maimai.lxns.net 渲染器 bundle（beautify 存档
+``local/reference/lxns-renderer/chart-canvas.pretty.js``）。
+可变运行时全局（_SS 超采样 / _apply_hi_speed 写入的流速组）也固定在本
+模块：它们是唯一的写入点，其余模块一律经 ``constants._X`` 属性读取，
+保证运行时更新对所有使用者可见。
+"""
+
+import math
+
+# ------------------------------------------------- 常量（JS L15-60 / I 表 L66）
+_LOGICAL = 600.0
+_SS = 2  # 超采样（站内 G=2 backing）
+_RADIUS = _LOGICAL * 0.45
+_CENTER = _LOGICAL / 2
+_BASE_APPROACH_MS = 2250.0  # lxns 渲染器「approach = base/hiSpeed」的基准值
+
+
+# ── 谱面流速标定来源（2026-10-27 调研定案）────────────────────────────────
+# 原先照搬 maimai.lxns.net：hiSpeed = 设定值 × 0.6，approach = 2250/hiSpeed。
+# 但该口径比 Majdata（simai 生态事实标准播放器）快约 17.7%，7.0 相当于
+# Majdata 的 8.4；群友反馈按官机手感 Majdata 的 7.0 已偏快，故改用 Majdata
+# 标定（源码核对自 MajdataView `HttpHandler.cs` / MajdataPlay
+# `GamePlayManager`，team-carol/carol `chartRenderer.ts` 亦独立移植同一公式）：
+#   内部速度 S(s) = 107.25 / (71.4184491 · (s + 0.9975)^-0.985558604)
+#   出现→判定时长 = 7.349 / S(s) 秒
+#   其中 7.349 = 4.8 − (−2.549)：4.8 为判定线距离，NoteAppearRate=0.265 时
+#   destScale=0 的起始距离为 −2.549。
+# lxns 的 hiSpeed 语义是 approach=2250/hiSpeed，因此换算：
+#   hiSpeed = 2250 / (7349 / S(s)) = 0.30616 · S(s)
+# TOUCH 在 Majdata 是独立速度公式（默认 TouchSpeed 7.5；此处沿用用户流速）：
+#   touch 出现→判定时长 = 3209.385682 · s^-0.9549621752 ms
+def _majdata_note_internal_speed(setting: float) -> float:
+    """谱面流速设定值 → lxns 渲染器内部 hiSpeed（Majdata 标定，见上方注释）。"""
+    s = 107.25 / (71.4184491 * (setting + 0.9975) ** -0.985558604)
+    return _BASE_APPROACH_MS / (7349.0 / s)
+
+
+def _majdata_note_approach_ms(setting: float) -> float:
+    """音符出现→判定总时长（ms），Majdata 标定。"""
+    s = 107.25 / (71.4184491 * (setting + 0.9975) ** -0.985558604)
+    return 7349.0 / s
+
+
+def _majdata_touch_approach_ms(setting: float) -> float:
+    """TOUCH 出现→判定时长（ms），Majdata `TouchDrop.wholeDuration` 公式。"""
+    return 3209.385682 * setting**-0.9549621752
+
+
+_DEFAULT_HI_SPEED = 7.0
+_HI_SPEED = _majdata_note_internal_speed(_DEFAULT_HI_SPEED)
+_APPROACH_MS = _majdata_note_approach_ms(_DEFAULT_HI_SPEED)
+_HALF_APPROACH = _APPROACH_MS / 2
+_TOUCH_APPROACH_MS = _majdata_touch_approach_ms(_DEFAULT_HI_SPEED)
+_SPEED_SETTING = _DEFAULT_HI_SPEED
+_HI_SPEED_MIN = 3.0
+_HI_SPEED_MAX = 9.75
+_HI_SPEED_STEP = 0.25
+DEFAULT_HI_SPEED = _DEFAULT_HI_SPEED
+
+
+def normalize_hi_speed(value: float | None) -> float:
+    """谱面流速参数校验：3–9.75、步长 0.25；非法回退默认 7.0。"""
+    try:
+        speed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return _DEFAULT_HI_SPEED
+    if not (_HI_SPEED_MIN <= speed <= _HI_SPEED_MAX):
+        return _DEFAULT_HI_SPEED
+    steps = speed / _HI_SPEED_STEP
+    if abs(steps - round(steps)) > 1e-6:
+        return _DEFAULT_HI_SPEED
+    return speed
+
+
+def _apply_hi_speed(speed: float) -> None:
+    """设置模块级流速/approach 时间（Majdata 标定，来源见上方常量注释）。"""
+    global _HI_SPEED, _APPROACH_MS, _HALF_APPROACH, _TOUCH_APPROACH_MS
+    global _SPEED_SETTING
+    _SPEED_SETTING = speed
+    _APPROACH_MS = _majdata_note_approach_ms(speed)
+    _HI_SPEED = _BASE_APPROACH_MS / _APPROACH_MS
+    _HALF_APPROACH = _APPROACH_MS / 2
+    _TOUCH_APPROACH_MS = _majdata_touch_approach_ms(speed)
+
+
+_R_NOTE = 1 / 12.5
+_R_INNER = 0.65
+_C_TRAVEL = 0.25
+_DOT = 9 / 300
+_STROKE = 2 / 300
+_JLINE = 3 / 300
+_ARROW_BACK = 44.6 / 300
+_ARROW_LEN = 12.2 / 300
+_ARROW_W = 16.6 / 300
+_ARROW_TIP = 9.5 / 300
+_SHADOW_OFF = 5 / 300  # 箭头黑影偏移（源码 a = 5/300·radius）
+_STAR = 1.6 / 10.42
+_B_HOLD = 1.5
+_INNER_HEX = 0.62
+_T_GLOW = 0.06
+_FLICK_PERIOD = 16000 / 60
+_FLICK_FLOOR = 0.82
+_HIT_MS = 450.0
+_EX_ALPHA = 1.19
+_P_MIX = 0.18
+_TOUCH_OUT = 1 / 6.25
+_TOUCH_IN = 1 / 12.5
+_STAR_HEAD = 1.15 * 1.25
+_STAR_MIN = 0.5  # JS `_`：生长星最小尺寸比例（L6131 u = _+(1-_)*r）
+_SLIDE_DELAY = 0.0  # 站内 config.slideDelay 默认 0（me() L5519 入参）
+_WIFI_HALF_ANGLE = 67.4 * math.pi / 180
+_TOUCH_FLICK_MS = 150.0
+_DELAY_FADE = 50.0  # de（L5510）：临近判定跳满档的窗口
+_TRAIL_RAMP = 200.0  # fe（L5511）：轨道淡入爬坡时长
+
+C_BLACK = (0, 0, 0)
+C_WHITE = (255, 255, 255)
+C_TAP_DOT = (255, 105, 180)
+C_SIMUL_DOT = (255, 215, 0)
+C_BREAK_DOT = (255, 140, 0)
+C_TAP_GRAD = ((253, 25, 125), (255, 125, 213))
+C_SIMUL_GRAD = ((252, 182, 0), (255, 254, 0))
+C_BREAK_GRAD = ((255, 179, 71), (255, 102, 0))
+C_SLIDE_CYAN = (1, 251, 253)
+C_SLIDE_ARROW = (255, 144, 1)
+C_SLIDE_SIMUL = (255, 237, 36)
+C_SLIDE_PINK = (255, 105, 180)
+C_TOUCH_CYAN = (0, 255, 255)
+C_TOUCH_BLUE = (0, 128, 255)
+C_TOUCH_SIMUL_Y = (255, 255, 0)
+C_TOUCH_SIMUL_G = (255, 215, 0)
+C_TOUCH_CENTER = (0, 191, 255)
+C_TOUCH_CENTER_S = (255, 255, 0)
+C_HIT_GOLD = (245, 234, 114)
+C_RIPPLE = (255, 227, 54)  # $e = (1, .889, .213)
+C_EX_NORMAL = (255, 180, 210, 204)
+C_EX_BREAK = (255, 200, 120, 204)
+C_EX_SIMUL = (255, 245, 150, 204)
+C_EX_SLIDE = (100, 230, 230, 204)
+C_HUD_GRAY = (148, 163, 184)
+C_FPS_GREEN = (34, 197, 94)
+C_FPS_YELLOW = (234, 179, 8)
+C_FPS_RED = (239, 68, 68)
+C_ORANGE = (255, 165, 0)
+# touch hold 花瓣渐变四停点 Pe（L6737）与进度环四象限色 Fe（L6743）
+C_TOUCHHOLD_PETALS = (
+    ((255, 85, 17), (247, 70, 1), (231, 66, 1), (255, 246, 242)),
+    ((248, 222, 0), (246, 237, 0), (236, 244, 2), (255, 251, 239)),
+    ((30, 180, 118), (18, 168, 106), (10, 160, 98), (236, 255, 248)),
+    ((0, 170, 248), (0, 151, 246), (2, 137, 244), (239, 252, 255)),
+)
+C_TOUCHHOLD_GAUGE = ((233, 85, 19), (250, 237, 0), (13, 172, 103), (44, 166, 224))
+
+# ---- 按压涟漪（it 类 Ge/Ke/Ye/Xe/Je/qe/Ze/Qe/et/tt/nt，L7143-7176）----
+_RIPPLE_GE = 16000 / 60 / 1000
+_RIPPLE_KE = (0.0, 4 / 60, 8 / 60)
+_RIPPLE_QE = 11 / 60
+_RIPPLE_JE = 1.0
+_RIPPLE_YE = 0.1355
+_RIPPLE_XE = 0.735
+_RIPPLE_ZE = 0.8  # 环带内缘比例
+_RIPPLE_QE_OUT = 1.2  # 环带外缘比例
+_RIPPLE_ET = 0.58  # 色向白偏移系数
+_RIPPLE_MIN_ALPHA = 0.02  # nt
+_RIPPLE_PROFILE = (  # tt：16 停点轮廓（位置, 强度）
+    (0.0, 0.0),
+    (0.063, 0.01),
+    (0.125, 0.08),
+    (0.188, 0.17),
+    (0.25, 0.33),
+    (0.313, 0.52),
+    (0.375, 0.68),
+    (0.438, 0.85),
+    (0.5, 1.0),
+    (0.563, 0.88),
+    (0.625, 0.71),
+    (0.688, 0.56),
+    (0.75, 0.37),
+    (0.813, 0.2),
+    (0.875, 0.09),
+    (0.938, 0.03),
+    (1.0, 0.01),
+)
+_RIPPLE_PROFILE_X = tuple(p[0] for p in _RIPPLE_PROFILE)
+_RIPPLE_PROFILE_Y = tuple(p[1] for p in _RIPPLE_PROFILE)
+
+# ---- touch 命中特效（Ft 类，L7350-7454）----
+_TOUCHHIT_LIFETIME = 0.5  # mt
+_TOUCHHIT_RING_MAX = 540.0  # gt
+_TOUCHHIT_RING_BASE = 2.5 * 70.0  # ht = 175
+_TOUCHHIT_STAR_SCALE = 1.4  # Et
+_TOUCHHIT_SPRITE_SIZE = 32.0  # Tt
+_TOUCHHIT_BURSTS = (
+    # (数量, 起始半径, 峰值半径, 漂移时长, 漂移距离)
+    (8, 0.5 * 70.0, 0.3 * 70.0, 0.0, 0.0),
+    (8, 0.6 * 70.0, 0.6 * 70.0, 700.0, 140.0),
+)
+_TOUCHHIT_RING_SPLINE = (  # Dt
+    (0.0, 0.0, 10.02783, 10.02783),
+    (0.0734887, 0.482223, 2.93804, 2.93804),
+    (0.3209003, 0.834577, 0.592962, 0.592962),
+    (1.0, 1.0, 0.180534, 0.180534),
+)
+_TOUCHHIT_RING_ALPHA = (
+    (0.0, 1.0),
+    (5484 / 65535, 1.0),
+    (18591 / 65535, 0.141176),
+    (31029 / 65535, 0.031373),
+    (45607 / 65535, 0.0),
+    (1.0, 0.0),
+)
+_TOUCHHIT_STAR_SPLINE = (  # kt
+    (0.0, 0.755245, 2.38315, 2.38315),
+    (0.127286, 1.0, 0.061337, 0.061337),
+    (0.272332, 0.892134, -0.927502, -0.927502),
+    (0.540943, 0.811183, -0.114026, -0.114026),
+    (1.0, 0.0, 0.036313, 0.036313),
+)
+_TOUCHHIT_DRIFT_SPLINE = ((0.0, 1.0, -2.726415, -2.726415), (1.0, 0.0, 0.0, 0.0))  # At
+_TOUCHHIT_GLOW = (  # ft：62 停点径向轮廓
+    0.666,
+    0.667,
+    0.671,
+    0.679,
+    0.685,
+    0.693,
+    0.7,
+    0.709,
+    0.718,
+    0.727,
+    0.736,
+    0.744,
+    0.753,
+    0.763,
+    0.772,
+    0.781,
+    0.791,
+    0.8,
+    0.809,
+    0.818,
+    0.826,
+    0.835,
+    0.843,
+    0.851,
+    0.858,
+    0.866,
+    0.872,
+    0.879,
+    0.887,
+    0.896,
+    0.905,
+    0.913,
+    0.922,
+    0.93,
+    0.938,
+    0.946,
+    0.953,
+    0.959,
+    0.964,
+    0.969,
+    0.974,
+    0.977,
+    0.981,
+    0.984,
+    0.986,
+    0.987,
+    0.989,
+    0.993,
+    0.998,
+    1.0,
+    0.896,
+    0.584,
+    0.374,
+    0.248,
+    0.155,
+    0.087,
+    0.038,
+    0.008,
+    0.002,
+    0.0,
+    0.0,
+    0.0,
+)
+
+# ---- 花火（Wt 类，L7655-7660）----
+_FIREWORK_MS = 1333.0  # It
+_FIREWORK_WEDGE_SCALE = 5 / 4.5 * 1.05  # Lt
+_FIREWORK_R = 5.0  # Rt（楔形长度参数）
+_FIREWORK_SMALL = 2.5  # zt：矢量楔阈值
+_FIREWORK_PHASE = 0.6  # Bt：两阶段切换
+_FIREWORK_LATE = 1.1  # Vt
+_FIREWORK_COLORS = (  # Ut：15 色楔形
+    (255, 179, 186),
+    (255, 208, 168),
+    (255, 250, 184),
+    (216, 240, 168),
+    (184, 224, 176),
+    (168, 224, 204),
+    (168, 200, 232),
+    (184, 176, 232),
+    (208, 176, 232),
+    (240, 176, 216),
+    (255, 201, 168),
+    (255, 239, 168),
+    (200, 232, 168),
+    (168, 224, 188),
+    (168, 204, 232),
+)
+
+# ---- touch 部件排序（ke/Ae，L6672-6684）----
+_TOUCH_ZONES = "BEADC"
+_TOUCH_SORT_SENTINELS = (  # De：槽间哨兵键
+    2148237322,
+    2148237312,
+    2148237312,
+    2147844096,
+    2147844096,
+    2147844098,
+    2147844098,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147844098,
+    2147844098,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147844098,
+    2147844098,
+    2147844096,
+    2147844106,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147844096,
+    2147942399,
+    2147942399,
+    2147516416,
+    2147516416,
+)
+# touch hold 进度环几何（K 表，L6744；单位为 480 设计空间）
+_GAUGE_GEO = {
+    "canvas_half": 99.75,
+    "inner_axis": 64.0,
+    "inner_diagonal": 50.5,
+    "outer_axis": 97.75,
+    "outer_diagonal": 82.75,
+}
+# wifi chevron 间距缓动表（y，L32）
+_WIFI_EASE = (0, 0.094, 0.178, 0.266, 0.355, 0.462, 0.57, 0.674, 0.779, 0.884, 1)
+_WIFI_WIDTH_BASE = 19.2 / 300  # v
+_QT = 2 * math.pi / 1000  # 星星 tap 自旋角速度（L7824 qt）
