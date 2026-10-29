@@ -123,9 +123,6 @@ class PreviewResult:
     buddy_stats: ChartStats | None = None  # buddy 宴谱 2P 侧统计（1P 在 stats）
 
 
-"""渲染器版本：算法变更时递增，避免命中旧渲染器产物。"""
-
-
 def cache_dir() -> Path:
     d = get_cache_dir("nonebot_plugin_awmc_helper") / _CACHE_SUBDIR
     d.mkdir(parents=True, exist_ok=True)
