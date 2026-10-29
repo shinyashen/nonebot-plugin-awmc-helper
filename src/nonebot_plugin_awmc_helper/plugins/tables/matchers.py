@@ -4,13 +4,16 @@ from collections.abc import Callable, Awaitable
 
 from nonebot import on_regex, on_command, on_fullmatch
 from nonebot.params import RegexGroup
+from nonebot.adapters import Bot
 from nonebot.permission import SUPERUSER
+from nonebot_plugin_uninfo import Session, UniSession
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from .sheet import (
     plate_shape,
     combo_progress_card,
     combo_score_list_card,
+    send_paged_cond_table,
     plate_completion_sheet,
     plate_progress_overview,
 )
@@ -65,14 +68,17 @@ update_plate = on_command("更新完成表", permission=SUPERUSER, block=True, p
 @progress_cmd.handle()
 @handle_errors("生成表格失败", except_with_message=(UserScoreError,))
 async def _(
+    bot: Bot,
     binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
+    session: Session = UniSession(),
 ):
     """条件化表格（进度/完成表/定数表统一入口，P2-c 收编）：
 
     牌组合文本经形状回认走牌子专用渲染（非法牌保持旧拒绝文案）；完成表/
     定数表的单等级条件走文件底图与既有版式（收编等价 + 同速），其余条件
-    底图现算（不缓存，2026-09-30 拍板）。
+    底图现算（不缓存，2026-09-30 拍板）；超 40 行按等级组分页合并转发
+    （2026-10-27，首节点纯文本计数）。
     """
     from ...core.combo import CondType
     from ...core.render import table_template
@@ -148,9 +154,13 @@ async def _(
             png = await table_template.rating_table_text_bytes(
                 parsed[0].value, entries, use_file=use_file
             )
-        else:
-            png = await table_template.rating_table_cond_text_bytes(entries, header)
-        await UniMessage.image(raw=png).finish(at_sender=True)
+            await UniMessage.image(raw=png).finish(at_sender=True)
+        pngs = await table_template.rating_table_cond_text_bytes(entries, header)
+        if len(pngs) == 1:
+            await UniMessage.image(raw=pngs[0]).finish(at_sender=True)
+        await send_paged_cond_table(
+            bot, session, f"{header}定数表 共{len(entries)}张：", pngs
+        )
 
     # 完成表：单等级条件优先文件底图（同速同像素），lv15 单条件走既有三列
     # 大图管线；其余条件现算底图。checker 驱动盖章三态背景（QoL）
@@ -177,7 +187,17 @@ async def _(
             checker=checker,
             use_file=use_file,
         )
-    else:
+        if png is None:
+            await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
+                at_sender=True
+            )
+        await UniMessage.image(raw=png).finish(at_sender=True)
+
+    # 跨等级条件：等级组整组分页渲染（40 行/页），单页输出与既往逐像素一致；
+    # 多页走合并转发（首节点纯文本计数），失败降级多图直发。
+    # 单等级条件（14+sss+完成表 等）不走此路：底图为定数节文件底图，仅
+    # 跨等级条件（single_level=None）为标级大类
+    if single_level is not None:
         im = await table_template.rating_table_base_image(
             entries, single_level, use_file=use_file
         )
@@ -189,19 +209,46 @@ async def _(
             # 单等级表头 = Level. 前缀 + 等级（「Level. xx」整段日文字体口径，
             # 2026-10-01）；条件版 = 规范化条件串，无前缀。表型说明「完成表」
             # 由渲染层补并整体居中
-            header_text=single_level if single_level else header,
-            header_prefix="Level." if single_level else None,
+            header_text=single_level,
+            header_prefix="Level.",
             theme=theme,
             checker=checker,
-            # 盖章分组与底图一致：单等级+判型混合（14+sss+完成表）底图为
-            # 定数节文件底图，仅跨等级条件（single_level=None）为标级大类
-            by_level=single_level is None,
+            by_level=False,
         )
         if png is None:
             await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
                 at_sender=True
             )
-    await UniMessage.image(raw=png).finish(at_sender=True)
+        await UniMessage.image(raw=png).finish(at_sender=True)
+
+    pages = table_template.cond_table_page_groups(entries)
+    pngs = []
+    for idx, page_groups in enumerate(pages):
+        page_entries = [pair for charts in page_groups.values() for pair in charts]
+        im = await table_template.rating_table_base_image(
+            page_entries, None, use_file=use_file
+        )
+        pngs.append(
+            draw_rating_table_cond(
+                im,
+                plan,
+                scores.scores,
+                page_entries,
+                header_text=header,
+                header_prefix=None,
+                theme=theme,
+                checker=checker,
+                by_level=True,
+                suffix=(
+                    "完成表" if len(pages) == 1 else f"完成表 {idx + 1}/{len(pages)}"
+                ),
+            )
+        )
+    if len(pngs) == 1:
+        await UniMessage.image(raw=pngs[0]).finish(at_sender=True)
+    await send_paged_cond_table(
+        bot, session, f"{header}完成表 共{len(entries)}张：", pngs
+    )
 
 
 @score_list_cmd.handle()

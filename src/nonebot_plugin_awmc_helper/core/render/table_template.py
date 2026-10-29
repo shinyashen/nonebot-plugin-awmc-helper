@@ -50,6 +50,7 @@ from ...constants import LEVEL_INDEX_EN, chart_display_id
 from .table_layout import (
     LV15_COLS,
     PLATE_COLS,
+    RATING_COLS,
     LV15_START_X,
     LV15_START_Y,
     LV15_COL_STEP,
@@ -70,6 +71,7 @@ from .table_layout import (
     slot_level_of,
     group_by_level,
     level_page_key,
+    pack_level_groups,
 )
 from ..plate_source import cn_plate_ids, cn_remaster_ids, plate_fingerprint
 
@@ -838,12 +840,39 @@ async def rating_table_text_bytes(
     )
 
 
+def cond_table_page_groups(
+    entries: Sequence[tuple[Song, SongDifficulty]],
+) -> "list[dict[str, list[tuple[Song, SongDifficulty]]]]":
+    """条件版表格分页（完成表/定数表共用）：等级组整组打包（40 行/页）。
+
+    返回逐页的 ``{等级串: 条目列表}``（组序=标级降序）；单页时恰为
+    :func:`group_by_level` 的原分组，渲染输出与不分页逐像素一致。
+    """
+    return pack_level_groups(group_by_level(list(entries)), cols=RATING_COLS - 1)
+
+
 async def rating_table_cond_text_bytes(
     entries: Sequence[tuple[Song, SongDifficulty]], header_text: str
-) -> bytes:
+) -> "list[bytes]":
     """条件化定数表（P2-c）：底图按条件谱面集现算（不落盘）、条件串表头。
 
-    签名保持 ``(entries, header_text)``——plugins/tables 直调（对外名兼容），
-    实现统一走 :func:`_rating_table_text_bytes`。
+    超过 :data:`~core.render.table_layout.COND_TABLE_PAGE_ROWS` 行按等级组
+    整组分页，返回逐页 PNG（表头带「定数表 i/n」）；单页返回单元素列表
+    （既往单图语义，逐像素不变）。签名保持 ``(entries, header_text)``——
+    plugins/tables 直调（对外名兼容），返回值 bytes → list[bytes]（2026-10-27）。
     """
-    return await _rating_table_text_bytes(entries, header_text)
+    pages = cond_table_page_groups(entries)
+    out: "list[bytes]" = []
+    for idx, page_groups in enumerate(pages):
+        page_entries = [pair for charts in page_groups.values() for pair in charts]
+        im = await rating_table_base_image(page_entries, None, use_file=True)
+        dr = ImageDraw.Draw(im)
+        draw_level_header(
+            dr,
+            header_text,
+            220,
+            prefix=None,
+            suffix=("定数表" if len(pages) == 1 else f"定数表 {idx + 1}/{len(pages)}"),
+        )
+        out.append(image_to_bytes(scale_output(im)))
+    return out

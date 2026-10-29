@@ -327,6 +327,7 @@ async def test_score_table_at_target(app: App, db, songs, monkeypatch):
         theme=None,
         checker=None,
         by_level=None,
+        suffix=None,
     ):
         captured["header"] = header_text
         captured["header_prefix"] = header_prefix
@@ -1023,6 +1024,7 @@ async def test_combo_score_table_cond(app: App, db, songs, monkeypatch):
         theme=None,
         checker=None,
         by_level=None,
+        suffix=None,
     ):
         captured["header"] = header_text
         captured["header_prefix"] = header_prefix
@@ -1113,6 +1115,7 @@ async def test_combo_score_table_single_level_not_emptied(
         theme=None,
         checker=None,
         by_level=None,
+        suffix=None,
     ):
         captured["entries_len"] = len(entries)
         captured["plan"] = plan
@@ -1156,6 +1159,172 @@ async def test_combo_score_table_single_level_not_emptied(
     assert captured["plan"] == "ap"
     assert captured["level"] == "13+"
     assert captured["header"] == "13+"
+
+
+@pytest.mark.asyncio
+async def test_combo_score_table_paged_forward(app: App, db, songs, monkeypatch):
+    """条件完成表超 40 行按等级组分页（2026-10-27）：合并转发发送——首节点
+    纯文本「东方完成表 共800张：」+ 每页一图；页内 suffix「完成表 i/n」。
+
+    两组各 400 张（14 / 13+，13 列各 31 行）：打包 31+31 > 40 → 拆两页，
+    整组不拆（组内谱面零丢弃）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from mocks import make_bulk_level_songs
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import sheet as sheet_mod
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    await binding_service.ensure("OneBot V11", "12345678")
+    await song_service.inject(
+        make_bulk_level_songs(400, level="14", level_value=14.2)
+        + make_bulk_level_songs(400, level="13+", level_value=13.7, song_id_base=31000)
+    )
+
+    async def fake_scores_all(b, notify_slow=None):
+        return SimpleNamespace(scores=[])
+
+    base_calls: list[int] = []
+
+    async def fake_base_image(entries, level=None, *, use_file=True):
+        base_calls.append(len(entries))
+        return "im-sentinel"
+
+    draw_calls: list[tuple[int, str, str]] = []
+    counter = {"n": 0}
+
+    def fake_cond(im, plan, scores, entries, *, header_text, suffix, **kw):
+        counter["n"] += 1
+        draw_calls.append((len(entries), header_text, suffix))
+        return f"png{counter['n']}".encode()
+
+    forward_calls: list[tuple] = []
+
+    async def fake_forward(bot, entries, session):
+        forward_calls.append((bot, list(entries), session))
+        return True
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+    monkeypatch.setattr(table_template, "rating_table_base_image", fake_base_image)
+    monkeypatch.setattr(plugin, "draw_rating_table_cond", fake_cond)
+    monkeypatch.setattr(sheet_mod, "try_send_forward_session", fake_forward)
+
+    event = fake_group_message_event_v11(message="东方完成表", user_id=12345678)
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_finished()
+
+    # 两页各 400 张（整组不拆），页序随组序（14 → 13+），suffix 带 i/n
+    assert base_calls == [400, 400]
+    assert draw_calls == [
+        (400, "东方", "完成表 1/2"),
+        (400, "东方", "完成表 2/2"),
+    ]
+    ((fbot, entries, fsession),) = forward_calls
+    assert fbot is bot
+    assert fsession is not None
+    assert len(entries) == 3
+    assert entries[0] == "东方完成表 共800张："
+    assert all(isinstance(e, UniMessage) for e in entries[1:])
+
+
+@pytest.mark.asyncio
+async def test_combo_score_table_paged_forward_fallback(
+    app: App, db, songs, monkeypatch
+):
+    """分页转发送失败/非 OB11 → 降级为多图普通消息（at_sender 一并附）。"""
+    from types import SimpleNamespace
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from mocks import make_bulk_level_songs
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.render import table_template
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.plugins.tables import sheet as sheet_mod
+    from nonebot_plugin_awmc_helper.plugins.tables import matchers as plugin
+
+    await binding_service.ensure("OneBot V11", "12345678")
+    await song_service.inject(
+        make_bulk_level_songs(400, level="14", level_value=14.2)
+        + make_bulk_level_songs(400, level="13+", level_value=13.7, song_id_base=31000)
+    )
+
+    async def fake_scores_all(b, notify_slow=None):
+        return SimpleNamespace(scores=[])
+
+    async def fake_base_image(entries, level=None, *, use_file=True):
+        return "im-sentinel"
+
+    counter = {"n": 0}
+
+    def fake_cond(im, plan, scores, entries, *, header_text, suffix, **kw):
+        counter["n"] += 1
+        return f"png{counter['n']}".encode()
+
+    async def fake_forward(bot, entries, session):
+        return False
+
+    monkeypatch.setattr(plugin.score_service, "get_scores_all", fake_scores_all)
+    monkeypatch.setattr(table_template, "rating_table_base_image", fake_base_image)
+    monkeypatch.setattr(plugin, "draw_rating_table_cond", fake_cond)
+    monkeypatch.setattr(sheet_mod, "try_send_forward_session", fake_forward)
+
+    event = fake_group_message_event_v11(message="东方完成表", user_id=12345678)
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image("base64://cG5nMQ=="),
+            MessageSegment.image("base64://cG5nMg=="),
+        ]
+    )
+    async with app.test_matcher(plugin.progress_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={"user_id": 12345678, "role": "member", "card": "", "nickname": "t"},
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
 
 
 @pytest.mark.asyncio

@@ -209,3 +209,88 @@ async def test_level_header_suffix_centered(monkeypatch):
     assert [t for _, t, _ in drawn] == ["东方", " 定数表"]
     assert drawn[0][2] is font(100, FONT_HAN)
     assert drawn[1][2] is font(70, FONT_HAN)
+
+
+def test_pack_level_groups():
+    """条件版分页打包（2026-10-27 定案 40 行/页）：等级组整组不拆、凑满即
+    分页；单组超限独占一页；小条件单页。pack 只读组长度，条目用占位对象。"""
+    from nonebot_plugin_awmc_helper.core.render.table_layout import pack_level_groups
+
+    def group(n):
+        return [object()] * n  # 13 列：n 张 → ceil(n/13) 行
+
+    # 两组各 31 行（400 张）：打包超 40 → 拆两页，整组不拆
+    pages = pack_level_groups({"14": group(400), "13": group(400)}, cols=13)
+    assert [sum(len(v) for v in p.values()) for p in pages] == [400, 400]
+
+    # 小条件（术力口体量 30 行）：单页且分组原样透传
+    pages = pack_level_groups({"14": group(100), "13": group(290)}, cols=13)
+    assert len(pages) == 1
+    assert list(pages[0]) == ["14", "13"]
+
+    # 单组超限（如单等级大组 >520 张）：独占一页，谱面零丢弃
+    pages = pack_level_groups({"13": group(600), "12": group(50)}, cols=13)
+    assert [sum(len(v) for v in p.values()) for p in pages] == [600, 50]
+
+    # 空表：单页空 dict（渲染侧空守卫兜底）
+    assert pack_level_groups({}, cols=13) == [{}]
+
+    # 组序保持（标级降序入参 → 页内同序）
+    pages = pack_level_groups({"14+": group(1), "14": group(1)}, cols=13)
+    assert list(pages[0]) == ["14+", "14"]
+
+
+@pytest.mark.asyncio
+@requires_assets
+async def test_cond_ds_table_paged_bytes(monkeypatch):
+    """条件定数表分页（2026-10-27）：超 40 行返回逐页 PNG，表头带
+    「定数表 i/n」；单页（含小条件）保持既往「定数表」后缀逐像素不变。"""
+    from PIL import Image as PILImage
+    from PIL import ImageDraw
+    from mocks import make_bulk_level_songs
+
+    from nonebot_plugin_awmc_helper.core.render import table_template
+
+    async def fake_base_image(entries, level=None, *, use_file=True):
+        return PILImage.new("RGBA", (1400, 1000))
+
+    monkeypatch.setattr(table_template, "rating_table_base_image", fake_base_image)
+    drawn: list[str] = []
+    orig_text = ImageDraw.ImageDraw.text
+
+    def spy(self, xy, text, *a, **kw):
+        drawn.append(str(text))
+        return orig_text(self, xy, text, *a, **kw)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy)
+
+    def entries_of(*songs_bulk):
+        return [
+            (song, diff)
+            for bulk in songs_bulk
+            for song in bulk
+            for diff in song.get_difficulties()
+        ]
+
+    # 两组各 400 张（各 31 行）→ 2 页；表头 = 条件串 + 「定数表 i/n」
+    bulk = entries_of(
+        make_bulk_level_songs(400, level="14", level_value=14.2),
+        make_bulk_level_songs(400, level="13+", level_value=13.7, song_id_base=31000),
+    )
+    pngs = await table_template.rating_table_cond_text_bytes(bulk, "东方")
+    assert len(pngs) == 2
+    assert all(p.startswith(b"\x89PNG\r\n") for p in pngs)
+    assert drawn.count(" 定数表 1/2") == 1
+    assert drawn.count(" 定数表 2/2") == 1
+    assert "东方" in drawn
+
+    # 单页（术力口体量 30 行）：后缀保持「定数表」，无 i/n
+    drawn.clear()
+    small = entries_of(
+        make_bulk_level_songs(290, level="14", level_value=14.2),
+        make_bulk_level_songs(52, level="13+", level_value=13.7, song_id_base=31000),
+    )
+    pngs = await table_template.rating_table_cond_text_bytes(small, "东方")
+    assert len(pngs) == 1
+    assert " 定数表 1/1" not in drawn
+    assert " 定数表" in drawn

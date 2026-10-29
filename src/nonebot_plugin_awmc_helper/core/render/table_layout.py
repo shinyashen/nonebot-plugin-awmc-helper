@@ -46,6 +46,46 @@ PLATE_START_Y = 490
 PLATE_COLS = 12
 PLATE_GROUP_GAP = 30
 
+COND_TABLE_PAGE_ROWS = 40
+"""条件化表格（完成表/定数表）单页行数上限：跨等级条件按等级组整组打包
+分页（组不拆、凑满即分页，2026-10-27 定案）。40 行 = 现有单等级完成表最大
+体量（13 级 37 行 / 4005px）的上一档——分页恰好只发生在真超限的条件
+（dx谱/标准/旧框/全库等 49–116 行），常用分类条件保持单图逐像素不变。"""
+
+
+def condition_grid_rows(charts: int, cols: int) -> int:
+    """一组 ``charts`` 个条目在 ``cols`` 列网格下的行数（分页打包用）。"""
+    return (charts - 1) // cols + 1 if charts else 0
+
+
+def pack_level_groups(
+    groups: "dict[str, list[tuple[Song, SongDifficulty]]]",
+    *,
+    cols: int,
+    max_rows: int = COND_TABLE_PAGE_ROWS,
+) -> "list[dict[str, list[tuple[Song, SongDifficulty]]]]":
+    """条件版等级分组 → 分页组列表：按组序贪心打包，**整组不拆**（凑满即
+    分页；单组超限独占一页，谱面零丢弃）。
+
+    条件化完成表/定数表全量输出用：组序（标级降序）即页序；渲染侧对每页
+    子集重走 :func:`group_by_level`（重排序确定性）得到相同分组。空组表 →
+    单页（空 dict），由渲染侧的空守卫兜底。
+    """
+    pages: "list[dict[str, list[tuple[Song, SongDifficulty]]]]" = []
+    current: "dict[str, list[tuple[Song, SongDifficulty]]]" = {}
+    current_rows = 0
+    for label, charts in groups.items():
+        rows = condition_grid_rows(len(charts), cols)
+        if current and current_rows + rows > max_rows:
+            pages.append(current)
+            current = {}
+            current_rows = 0
+        current[label] = charts
+        current_rows += rows
+    if current or not pages:
+        pages.append(current)
+    return pages
+
 
 def group_by_ds(
     entries: Sequence[tuple[Song, SongDifficulty]],

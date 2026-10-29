@@ -3,6 +3,9 @@
 被 matchers 的各表格指令 handler 共用；不注册 matcher。
 """
 
+from nonebot.adapters import Bot
+from nonebot.exception import FinishedException
+from nonebot_plugin_uninfo import Session
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from ...constants import LEVEL_LIST, PLATE_CHARS, chart_display_id
@@ -31,6 +34,7 @@ from ...core.plates import (
     plate_version_range,
 )
 from ...core.binding import service_display
+from ...core.forward import try_send_forward_session
 from ...core.sources import Capability
 from ...core.plate_source import cn_plate_ids, cn_remaster_ids
 from ...core.render.score import (
@@ -75,6 +79,25 @@ def _latest_plate_notice() -> str:
         f" 「未」为占位字：指日服现行版本「{PLATE_LATEST_VERSION_NAME}」"
         "（官方尚未公布该代牌字），非官方牌名"
     )
+
+
+async def send_paged_cond_table(
+    bot: Bot, session: Session, title: str, pngs: "list[bytes]"
+) -> None:
+    """条件完成表/定数表多页发送：合并转发（首节点纯文本「…表 共n张：」+
+    每页一图节点），非 OB11/发送失败降级为多图普通消息。
+
+    ``title`` 调用方拼好（如「术力口·将完成表 共342张：」）；n 为**谱面
+    总数**而非页数。转发成功经 FinishedException 终止 handler。
+    """
+    if await try_send_forward_session(
+        bot, [title, *[UniMessage.image(raw=p) for p in pngs]], session
+    ):
+        raise FinishedException
+    msg = UniMessage()
+    for png in pngs:
+        msg = msg.image(raw=png)
+    await msg.finish(at_sender=True)
 
 
 async def plate_completion_sheet(

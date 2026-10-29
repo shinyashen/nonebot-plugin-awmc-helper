@@ -155,6 +155,7 @@ def draw_rating_table_cond(
     theme: str = DEFAULT_THEME,
     checker: "Callable[[Any, Any, Any], bool] | None" = None,
     by_level: bool = True,
+    suffix: str = "完成表",
 ) -> bytes:
     """条件化完成表（P2-c）：调用方提供现算/文件底图，成绩按谱面键集过滤。
 
@@ -165,6 +166,9 @@ def draw_rating_table_cond(
     实际分组**一致（调用方按 single_level 是否为 None 传入）：跨等级条件
     底图=标级大类（True）；「单等级+判型」混合条件（如 14+sss+完成表）
     底图=定数节文件底图（False），硬编码 True 会叠章错位。
+    ``suffix``：表型说明（多页时传「完成表 i/n」）。分页（调用方按
+    :func:`~core.render.table_layout.pack_level_groups` 拆页）下 entries
+    为页内子集——统计头与全曲达成徽章按页内口径，页间无交叉盖章。
     """
     keys = {(song.id, d.level_index.value) for song, d in entries}
     played = {
@@ -181,7 +185,7 @@ def draw_rating_table_cond(
         lv15=False,
         header_text=header_text,
         header_prefix=header_prefix,
-        suffix="完成表",
+        suffix=suffix,
         checker=checker,
         by_level=by_level,
     )
