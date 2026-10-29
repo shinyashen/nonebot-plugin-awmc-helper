@@ -169,9 +169,9 @@ async def _(
         pages = table_template.cond_table_page_groups(entries)
         total = len(pages)
         if page > total:
-            await UniMessage.text(
-                f" {header}定数表共 {total} 页，页码超出范围"
-            ).finish(at_sender=True)
+            await UniMessage.text(f" {header}定数表共 {total} 页，页码超出范围").finish(
+                at_sender=True
+            )
         if explicit:
             png = await table_template.rating_table_cond_text_page_bytes(
                 pages[page - 1], header, idx=page - 1, total=total
@@ -251,9 +251,9 @@ async def _(
     pages = table_template.cond_table_page_groups(entries)
     total = len(pages)
     if page > total:
-        await UniMessage.text(
-            f" {header}完成表共 {total} 页，页码超出范围"
-        ).finish(at_sender=True)
+        await UniMessage.text(f" {header}完成表共 {total} 页，页码超出范围").finish(
+            at_sender=True
+        )
     render_idx = [page - 1] if explicit else range(total)
     pngs = []
     for idx in render_idx:
@@ -273,9 +273,7 @@ async def _(
                 theme=theme,
                 checker=checker,
                 by_level=True,
-                suffix=(
-                    "完成表" if total == 1 else f"完成表 {idx + 1}/{total}"
-                ),
+                suffix=("完成表" if total == 1 else f"完成表 {idx + 1}/{total}"),
             )
         )
     if len(pngs) == 1:

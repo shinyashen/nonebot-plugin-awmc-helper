@@ -198,9 +198,7 @@ async def plate_completion_sheet(
         if png is not None:
             pngs.append(png)
     if not pngs:
-        await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(
-            at_sender=True
-        )
+        await UniMessage.text(" 完成表底图生成失败，请稍后再试").finish(at_sender=True)
     if len(pngs) == 1:
         await UniMessage.image(raw=pngs[0]).finish(at_sender=True)
     # 首节点计数按曲（底图一格一曲，同曲 Master/Re:MASTER 合并一槽），与
