@@ -10,9 +10,9 @@
 需改用逐像素容差断言并在清单 note 里说明。
 """
 
-import hashlib
 import io
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -53,6 +53,7 @@ def golden_times(chart) -> list[float]:
     touch 命中特效 / touch hold 进度环 / 花火两阶段 / break 打击特效 / 结尾。
     """
     taps = [n for n in chart.notes if n.type in ("tap", "break", "simultaneous")]
+    ex_taps = [n for n in taps if n.is_ex]
     holds = [n for n in chart.notes if n.type == "hold-start"]
     slides = [n for n in chart.notes if n.type == "slide"]
     touches = [n for n in chart.notes if n.type == "touch"]
@@ -85,11 +86,12 @@ def golden_times(chart) -> list[float]:
         middle([slide_mid(n) for n in wifi]),  # wifi 段
         _offset(middle([n.timing_ms for n in touches]), 100.0),  # touch 命中特效
         middle([n.timing_ms + n.duration_ms / 2 for n in tholds]),  # 进度环
+        _offset(middle([n.timing_ms for n in ex_taps]), -300.0),  # EX 环接近期
+        middle([n.timing_ms for n in ex_taps]),  # EX 环判定界
         _offset(middle([n.timing_ms for n in fires]), 300.0),  # 花火前段（矢量楔）
         _offset(middle([n.timing_ms for n in fires]), 900.0),  # 花火后段（切洞）
         _offset(middle([n.timing_ms for n in breaks]), 200.0),  # break 打击特效
         last + 500.0,  # 结尾状态
-        (first_tap + last) / 2,  # 补位
     ]
     times: list[float] = []
     for t in candidates:
