@@ -84,7 +84,7 @@ async def _resolve_song(key: str):
             await UniMessage.text(" 宴谱没有游玩统计").finish(at_sender=True)
         if jp:
             # JP-only 曲封面不在本地素材包：与查歌卡同口径在线兜底落盘
-            await jp_cover.ensure(song.id)
+            await jp_cover.get_cover_path(song.id)
         return song
     songs = await song_service.by_alias(key)
     if len(songs) == 1:
@@ -160,7 +160,7 @@ async def _minfo_net(key: str, binding) -> None:
     if len(entries) > 1:  # 双谱曲且玩过：列 id 让用户指定看哪张
         await _finish_entry_list(entries)
     song = entries[0][1]
-    await jp_cover.ensure(song.id)
+    await jp_cover.get_cover_path(song.id)
     png = info_render.song_play_data(
         song,
         info.scores,

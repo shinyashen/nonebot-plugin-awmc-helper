@@ -47,12 +47,12 @@ async def chart_card_bytes(
     ——谱面与定数可能不同，混算无意义）。
     """
     is_banquet = nb_chart.is_banquet(song)
-    if is_banquet or jp:
-        # 宴曲多为日服限定 / 日服限定曲本地无素材：封面按需在线拉取
-        # （代理优先，落盘缓存；已有本地封面时静默跳过）
-        from .render import jp_cover
+    # 封面解析唯一入口（2026-10-30）：static/缓存缺失时按需走在线链
+    # （官方站日本 IP 门后经落雪资产站/otoge 仓库逐级兜底），国服卡同样生效；
+    # 已有本地封面时零开销短路
+    from .render import jp_cover
 
-        await jp_cover.ensure(song.id)
+    await jp_cover.get_cover_path(song.id)
     if is_banquet:
         return nb_chart.song_chart_banquet_info(song, jp=jp)
     calc, is_full, best_list = False, False, []
@@ -121,7 +121,7 @@ async def song_lookup_reply(
             # （国服宿主曲无此 diff_id）——保留 JP 宿主对象画日服卡
             from .render import jp_cover
 
-            await jp_cover.ensure(song.id)
+            await jp_cover.get_cover_path(song.id)
             cn_song = cn_songs[song.id]
             cn_diff = utage_diff_of(cn_song, entry_id) if cn_song is not None else None
             if cn_song is not None and cn_diff is not None:

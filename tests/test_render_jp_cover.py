@@ -18,6 +18,8 @@ OTOGE_URL = (
     "https://raw.githubusercontent.com/zvuc/otoge-db/main/maimai/jacket/c4ec.png"
 )
 
+LXNS_URL = "https://assets.lxns.net/maimai/jacket/2019.png"
+
 DEFAULT_PLATE_URL = (
     "https://maimaidx.jp/maimai-mobile/img/NamePlate/b919c327669240b8.png"
 )
@@ -84,11 +86,28 @@ async def test_ensure_skips_when_static_exists(jp_env, mock):
 
 
 @pytest.mark.asyncio
-async def test_ensure_falls_back_to_otoge_jacket(jp_env, mock):
-    """官方站日本 IP 门（403）→ otoge-db 仓库同名缩图兜底，落同一缓存路径。"""
+async def test_ensure_falls_back_to_lxns_jacket(jp_env, mock):
+    """官方站日本 IP 门（403）→ 落雪资产站（400×400，按 id 寻址）兜底。"""
     store, _static, cache = jp_env
     await _seed_song(store)
     mock.get(url=URL).respond(403)
+    lxns = mock.get(url=LXNS_URL).respond(200, content=PNG)
+
+    from nonebot_plugin_awmc_helper.core.render import assets, jp_cover
+
+    assert await jp_cover.ensure(2019, cache_dir=cache) is True
+    assert (cache / "2019.png").read_bytes() == PNG
+    assert lxns.call_count == 1
+    assert (cache / "2019.png") in assets.cover_candidates(2019)
+
+
+@pytest.mark.asyncio
+async def test_ensure_falls_back_to_otoge_jacket(jp_env, mock):
+    """官方与落雪都失败 → otoge-db 仓库同名缩图（链上最后一级在线源）。"""
+    store, _static, cache = jp_env
+    await _seed_song(store)
+    mock.get(url=URL).respond(403)
+    mock.get(url=LXNS_URL).respond(404)
     otoge = mock.get(url=OTOGE_URL).respond(200, content=PNG)
 
     from nonebot_plugin_awmc_helper.core.render import assets, jp_cover
@@ -119,6 +138,7 @@ async def test_ensure_silent_on_fetch_failure(jp_env, mock):
     store, _static, cache = jp_env
     await _seed_song(store)
     mock.get(url=URL).respond(500)
+    mock.get(url=LXNS_URL).respond(500)
     mock.get(url=OTOGE_URL).respond(500)
 
     from nonebot_plugin_awmc_helper.core.render import assets, jp_cover

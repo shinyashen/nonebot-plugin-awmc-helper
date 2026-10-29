@@ -1,6 +1,7 @@
 """日服官方图片在线获取：曲绘/NET 玩家资料图 + localstore 缓存（不动 static 素材目录）。
 
-- 触发时机：日服谱面卡渲染前调用 :func:`ensure`；static 素材与缓存都没有时才拉取；
+- 触发时机：渲染经唯一入口 :func:`get_cover_path` 取封面（static → 缓存 →
+  在线链逐级尝试）；:func:`ensure`/:func:`ensure_many` 是其 bool/批量适配；
 - URL 契约（01 文档）：``https://maimaidx.jp/maimai-mobile/img/Music/{image_url}``，
   ``image_url`` 为规范表留档的 otoge-db 官方文件名（``song`` 表）；
 - maimaidx.jp 在日本官方侧，走智能代理层自动代理优先（内置国外站清单）；
@@ -48,13 +49,17 @@ def _has_local(song_id: int, cache: Path) -> bool:
 
 _MUSIC_IMG_URL = "https://maimaidx.jp/maimai-mobile/img/Music/{image_url}"
 
+_LXNS_JACKET_URL = "https://assets.lxns.net/maimai/jacket/{song_id}.png"
+"""落雪资产站曲绘（400×400，按曲目 id 寻址）：国内直连、无官方站 IP 门，
+覆盖 otoge 未收录曲；pending 曲无 id 不适用。"""
+
 _OTOGE_JACKET_URL = (
     "https://raw.githubusercontent.com/zvuc/otoge-db/main/maimai/jacket/{image_url}"
 )
-"""otoge-db 仓库曲绘兜底：官方站日本 IP 门（2026-10-30）后的最低限度替代源。
+"""otoge-db 仓库曲绘兜底：190×190 缩图（官方 680×680），哈希名与
+song.image_url 一致；GitHub raw 经智能代理可达、标准证书链。"""
 
-190×190 缩图（官方 680×680），哈希名与 song.image_url 一致；GitHub raw 经
-智能代理可达、标准证书链（无需 maimaidx 专用上下文）。"""
+_LXNS_TAG, _NET_TAG, _OTOGE_TAG = "lxns", "官方NET", "otoge 兜底"
 
 
 async def _download_cover(url: str, path: Path, *, subject: str, verify) -> bool:
@@ -64,38 +69,59 @@ async def _download_cover(url: str, path: Path, *, subject: str, verify) -> bool
     )
 
 
-async def _fetch_with_otoge_fallback(
-    song_id: int | str, image_url: str, path: Path
+async def _fetch_cover_chain(
+    song_id: int | str, image_url: str, path: Path, *, with_lxns: bool
 ) -> bool:
-    """官方曲绘 → otoge-db 仓库缩图，两级尝试落同一缓存路径。"""
-    if await _download_cover(
-        _MUSIC_IMG_URL.format(image_url=image_url),
-        path,
-        subject=f"jp_cover：{song_id} 曲绘",
-        verify=maimaidx_ssl_context(),
-    ):
-        return True
-    return await _download_cover(
-        _OTOGE_JACKET_URL.format(image_url=image_url),
-        path,
-        subject=f"jp_cover：{song_id} 曲绘（otoge 兜底）",
-        verify=True,
+    """落雪资产站 →（官方 NET）→ otoge-db 仓库缩图，逐级落同一缓存路径。
+
+    落雪置首：国内直连无 IP 门、400×400 优于 otoge 缩图；官方 680×680
+    保持在链上（SEGA 解封即自动回到最优画质）。
+    ``with_lxns``：按 id 寻址的落雪源仅主表曲可用（pending 曲无 id）。
+    """
+    attempts = []
+    if with_lxns:
+        attempts.append((_LXNS_JACKET_URL.format(song_id=song_id), True, _LXNS_TAG))
+    attempts.append(
+        (_MUSIC_IMG_URL.format(image_url=image_url), maimaidx_ssl_context(), _NET_TAG)
     )
+    attempts.append(
+        (_OTOGE_JACKET_URL.format(image_url=image_url), True, _OTOGE_TAG)
+    )
+    for url, verify, tag in attempts:
+        subject = f"jp_cover：{song_id} 曲绘" + (f"（{tag}）" if tag else "")
+        if await _download_cover(url, path, subject=subject, verify=verify):
+            return True
+    return False
+
+
+async def get_cover_path(song_id: int, cache_dir: Path | None = None) -> Path:
+    """曲绘解析**唯一入口**（2026-10-30 定案）：所有需要封面的渲染统一经此。
+
+    static 素材 → 缓存 → 官方站 → 落雪资产站 → otoge-db 仓库 → 占位 0.png，
+    逐级尝试；在线命中即落缓存（后续走缓存环）。
+    ``cache_dir`` 供测试注入缓存目录，默认取 localstore 的 ``jp_covers``。
+    """
+    static, cached, placeholder = assets.cover_candidates(song_id)
+    if static.exists():
+        return static
+    if cached.exists():
+        return cached
+    image_url = await store.song_image_url(song_id)
+    if image_url and await _fetch_cover_chain(
+        song_id, image_url, cached, with_lxns=True
+    ):
+        return cached
+    return placeholder
 
 
 async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
-    """确保曲绘本地可得（static 或缓存）；本就有图或拉取成功返回 True。
+    """确保曲绘本地可得（bool 适配：底图缺失集等批量语义用）。
 
-    ``cache_dir`` 供测试注入缓存目录，默认取 localstore 的 ``jp_covers``。
+    本就有图或拉取成功返回 True；无 image_url 的曲恒 False。
     """
-    cache = cache_dir or jp_cache_dir()
-    if _has_local(song_id, cache):
-        return True
-    image_url = await store.song_image_url(song_id)
-    if not image_url:
-        return False
-    path = cache / f"{song_id}.png"
-    return await _fetch_with_otoge_fallback(song_id, image_url, path)
+    got = await get_cover_path(song_id, cache_dir)
+    placeholder = assets.cover_candidates(song_id)[-1]
+    return got != placeholder and got.exists()
 
 
 def has_local(song_id: int, cache: Path | None = None) -> bool:
@@ -169,7 +195,7 @@ async def ensure_image(
     path = cache / f"{key}.png"
     if path.exists():
         return path
-    ok = await _fetch_with_otoge_fallback(key, image_url, path)
+    ok = await _fetch_cover_chain(key, image_url, path, with_lxns=False)
     return path if ok else None
 
 

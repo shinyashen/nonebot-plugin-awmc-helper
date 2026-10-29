@@ -102,7 +102,7 @@ async def _(
         # 宴谱：diff_id 即完整规格，无难度色；日服限定宿主封面在线兜底
         from ...core.render import jp_cover
 
-        await jp_cover.ensure(song.id)
+        await jp_cover.get_cover_path(song.id)
         result = score_line(utage_diff, line)
         if result is None:
             await UniMessage.text(

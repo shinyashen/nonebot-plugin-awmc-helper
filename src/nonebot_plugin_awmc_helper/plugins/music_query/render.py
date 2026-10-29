@@ -30,7 +30,7 @@ async def _banquet_card(song, utage_diff=None, jp: bool = False) -> bytes:
     对应一张谱面），缺省取宿主曲第一张。``jp=True``：日服限定宿主曲
     （JP 视图对象），宴会卡不渲染国服口径的新曲标。
     """
-    await jp_cover.ensure(song.id)
+    await jp_cover.get_cover_path(song.id)  # 封面解析唯一入口（含在线兜底链）
     diffs = [utage_diff] if utage_diff is not None else None
     return nb_chart.song_chart_banquet_info(song, diffs, jp=jp)
 
