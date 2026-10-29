@@ -93,13 +93,10 @@ class _Fireworks:
         self._wedge = img
         return img
 
-    def draw_balls(
-        self, layer: Image.Image, x: float, y: float, t: float, additive: bool
-    ) -> None:
-        """drawFireworkBalls（L7741）：两层径向光球（lighter）。"""
+    def _plan_balls(self, x: float, y: float, t: float) -> list[tuple] | None:
+        """drawFireworkBalls 的光球清单（空 = 无可见光球）。"""
         if t < 0:
-            return
-        ss = self.r.config.supersample
+            return None
         i = _RADIUS / 4.5
         # (起亮时刻, 起始半径, 峰值透明度, ramp 时长, 衰减寿命, 衰减窗口, 色)
         specs = (
@@ -119,8 +116,16 @@ class _Fireworks:
                 continue
             if p > 0 and m > 0:
                 balls.append((m, p, color))
+        return balls or None
+
+    def draw_balls(
+        self, layer: Image.Image, x: float, y: float, t: float, additive: bool
+    ) -> None:
+        """drawFireworkBalls（L7741）：两层径向光球（lighter）。"""
+        balls = self._plan_balls(x, y, t)
         if not balls:
             return
+        ss = self.r.config.supersample
         max_r = max(m for m, *_ in balls)
         region = int(max_r * ss) + 2
         cx, cy = x * ss, y * ss
@@ -188,9 +193,18 @@ class _Fireworks:
                 self._blit_wedge(c, pos[0], pos[1], e, rot)
             self._balls_on_canvas(c, pos[0], pos[1], o - 0.1)
             return
-        # 后半程：scratch 合成 + destination-out 切洞
+        # 后半程：scratch 合成 + destination-out 切洞——全部内容（楔形 sprite、
+        # 光球、切洞环 v≤1.5h≤1.667R）都在命中点邻域，建局部窗口层即可；
+        # 窗口外 dist>v → keep=1，逐像素等价。
         wedge = self.wedge_sprite()
-        scratch = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
+        half_win = math.ceil(_RADIUS * 1.667 * c.ss) + 2
+        wx0 = max(0, int(c.s(pos[0]) - half_win))
+        wy0 = max(0, int(c.s(pos[1]) - half_win))
+        wx1 = min(c.img.width, int(c.s(pos[0]) + half_win) + 1)
+        wy1 = min(c.img.height, int(c.s(pos[1]) + half_win) + 1)
+        if wx1 <= wx0 or wy1 <= wy0:
+            return
+        scratch = Image.new("RGBA", (wx1 - wx0, wy1 - wy0), (0, 0, 0, 0))
         rotated = wedge.rotate(
             -math.degrees(rot),
             resample=Image.Resampling.BILINEAR,
@@ -199,11 +213,17 @@ class _Fireworks:
         scratch.alpha_composite(
             rotated,
             (
-                int(c.s(pos[0]) - c.s(d)),
-                int(c.s(pos[1]) - c.s(d)),
+                int(c.s(pos[0]) - c.s(d)) - wx0,
+                int(c.s(pos[1]) - c.s(d)) - wy0,
             ),
         )
-        self.draw_balls(scratch, pos[0], pos[1], o - 0.1, additive=True)
+        self.draw_balls(
+            scratch,
+            pos[0] - wx0 / c.ss,
+            pos[1] - wy0 / c.ss,
+            o - 0.1,
+            additive=True,
+        )
         h = _RADIUS / 4.5 * s
         g = min(1.0, (o - _FIREWORK_PHASE) / 0.5)
         hole_in = h * (0.05 + g * g * (3 - 2 * g) * 0.95)
@@ -211,7 +231,7 @@ class _Fireworks:
         cut_alpha = min(1.0, g / 0.2)  # JS L7813：切洞强度渐入
         if v > 0 and cut_alpha > 0:
             yy, xx = np.mgrid[0 : scratch.height, 0 : scratch.width]
-            dist = np.hypot(xx - c.s(pos[0]), yy - c.s(pos[1])) / c.ss
+            dist = np.hypot(xx - (c.s(pos[0]) - wx0), yy - (c.s(pos[1]) - wy0)) / c.ss
             keep = np.ones_like(dist)
             m1 = dist <= hole_in
             keep[m1] = 0.0
@@ -222,7 +242,8 @@ class _Fireworks:
             scratch.putalpha(
                 Image.fromarray((alpha * keep * 255).astype(np.uint8), "L")
             )
-        c.over(_clip_layer(scratch))
+        # 裁剪圆必须仍是全帧播放场圆（以窗口自身尺寸生成会移圆心）
+        c.over(_clip_layer(scratch, (wx0, wy0, wx1, wy1), c.img.width), (wx0, wy0))
 
     def _draw_wedges_vector(
         self, c: _Canvas, x: float, y: float, s: float, rot: float
@@ -230,41 +251,50 @@ class _Fireworks:
         a = _RADIUS / 4.5 * s
         if a <= 0:
             return
-        lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         n = len(_FIREWORK_COLORS)
         half_ang = math.pi / n * 0.45
         cx, cy = x * c.ss, y * c.ss
+        # 全部楔形共心共径 → 单一外接窗口层（bbox 外 paste 为 no-op，逐像素等价）
+        rr = a * c.ss + 2
+        x0 = max(0, int(cx - rr) - 1)
+        y0 = max(0, int(cy - rr) - 1)
+        x1 = min(c.img.width, int(cx + rr) + 2)
+        y1 = min(c.img.height, int(cy + rr) + 2)
+        if x1 <= x0 or y1 <= y0:
+            return
+        lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+        lx, ly = cx - x0, cy - y0
         for e in range(n):
             t = e / n * math.tau + rot
             pts = [
-                (cx, cy),
+                (lx, ly),
                 (
-                    cx + math.cos(t - half_ang) * a * c.ss,
-                    cy + math.sin(t - half_ang) * a * c.ss,
+                    lx + math.cos(t - half_ang) * a * c.ss,
+                    ly + math.sin(t - half_ang) * a * c.ss,
                 ),
                 (
-                    cx + math.cos(t + half_ang) * a * c.ss,
-                    cy + math.sin(t + half_ang) * a * c.ss,
+                    lx + math.cos(t + half_ang) * a * c.ss,
+                    ly + math.sin(t + half_ang) * a * c.ss,
                 ),
             ]
-            x0 = int(max(0, min(px for px, _ in pts) - 1))
-            y0 = int(max(0, min(py for _, py in pts) - 1))
-            x1 = int(min(lay.width, max(px for px, _ in pts) + 2))
-            y1 = int(min(lay.height, max(py for _, py in pts) + 2))
-            if x1 <= x0 or y1 <= y0:
+            wx0 = int(max(0, min(px for px, _ in pts) - 1))
+            wy0 = int(max(0, min(py for _, py in pts) - 1))
+            wx1 = int(min(lay.width, max(px for px, _ in pts) + 2))
+            wy1 = int(min(lay.height, max(py for _, py in pts) + 2))
+            if wx1 <= wx0 or wy1 <= wy0:
                 continue
-            mask = Image.new("L", (x1 - x0, y1 - y0), 0)
+            mask = Image.new("L", (wx1 - wx0, wy1 - wy0), 0)
             ImageDraw.Draw(mask).polygon(
-                [(px - x0, py - y0) for px, py in pts], fill=255
+                [(px - wx0, py - wy0) for px, py in pts], fill=255
             )
-            yy, xx = np.mgrid[0 : y1 - y0, 0 : x1 - x0]
-            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / (a * c.ss)
+            yy, xx = np.mgrid[0 : wy1 - wy0, 0 : wx1 - wx0]
+            dist = np.hypot(xx - (lx - wx0), yy - (ly - wy0)) / (a * c.ss)
             fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
-            arr = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
+            arr = np.zeros((wy1 - wy0, wx1 - wx0, 4), dtype=np.uint8)
             arr[..., 0], arr[..., 1], arr[..., 2] = _FIREWORK_COLORS[e]
             arr[..., 3] = (fade * 0.589 * 255).astype(np.uint8)
-            lay.paste(Image.fromarray(arr, "RGBA"), (x0, y0), mask)
-        c.over(lay)
+            lay.paste(Image.fromarray(arr, "RGBA"), (wx0, wy0), mask)
+        c.over(lay, (x0, y0))
 
     def _blit_wedge(self, c: _Canvas, x: float, y: float, e: float, rot: float) -> None:
         wedge = self.wedge_sprite()
@@ -287,7 +317,18 @@ class _Fireworks:
         )
 
     def _balls_on_canvas(self, c: _Canvas, x: float, y: float, t: float) -> None:
-        lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-        self.draw_balls(lay, x, y, t, additive=True)
-        box = (0, 0, c.img.width, c.img.height)
-        _additive_composite(c.img, lay, box)
+        # 光球范围有限：先按球清单求区域，建区域大小的层再 lighter 合成
+        balls = self._plan_balls(x, y, t)
+        if not balls:
+            return
+        ss = c.ss
+        max_r = max(m for m, *_ in balls)
+        region = int(max_r * ss) + 2
+        cx, cy = x * ss, y * ss
+        x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
+        x1, y1 = int(min(c.img.width, cx + region)), int(min(c.img.height, cy + region))
+        if x1 <= x0 or y1 <= y0:
+            return
+        lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+        self.draw_balls(lay, x - x0 / ss, y - y0 / ss, t, additive=True)
+        _additive_composite(c.img, lay, (x0, y0, x1, y1))

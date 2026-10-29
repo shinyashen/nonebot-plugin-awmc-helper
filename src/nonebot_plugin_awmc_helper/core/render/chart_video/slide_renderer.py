@@ -611,35 +611,45 @@ class _SlideRenderer(_SlideGeometryMixin):
                     outline=C_BLACK,
                     width=self.r.sw * 3,
                 )
-        # 填充：两个朝向的环（外正向 + 内 0.55 反向）
-        for rot in (-math.pi / 2, math.pi / 2):
-            outer_ring = [
-                (
-                    x
-                    + math.cos(k * math.pi / 5 + rot + rotation)
-                    * (size if k % 2 == 0 else size * 0.5),
-                    y
-                    + math.sin(k * math.pi / 5 + rot + rotation)
-                    * (size if k % 2 == 0 else size * 0.5),
-                )
-                for k in range(10)
-            ]
-            inner_ring = [
-                (
-                    x
-                    + math.cos(k * math.pi / 5 + rot + rotation)
-                    * (size * 0.55 if k % 2 == 0 else size * 0.275),
-                    y
-                    + math.sin(k * math.pi / 5 + rot + rotation)
-                    * (size * 0.55 if k % 2 == 0 else size * 0.275),
-                )
-                for k in range(10)
-            ][::-1]
-            path = [*c.pts(outer_ring), *c.pts(inner_ring)]
-            mask = Image.new("L", (c.img.width, c.img.height), 0)
-            ImageDraw.Draw(mask).polygon(path, fill=255)
-            fill_img = Image.new("RGBA", c.img.size, (*color[:3], int(255 * 1.0)))
-            c.img.paste(fill_img, (0, 0), mask)
+        # 填充：两个朝向的环（外正向 + 内 0.55 反向）——外环外接窗口内建
+        # 局部 mask（环外像素 mask=0、paste 为 no-op，逐像素等价）
+        star_extent = math.ceil(size * c.ss) + 2
+        sx0 = max(0, int(x * c.ss - star_extent))
+        sy0 = max(0, int(y * c.ss - star_extent))
+        sx1 = min(c.img.width, int(x * c.ss + star_extent) + 1)
+        sy1 = min(c.img.height, int(y * c.ss + star_extent) + 1)
+        if sx1 > sx0 and sy1 > sy0:
+            for rot in (-math.pi / 2, math.pi / 2):
+                outer_ring = [
+                    (
+                        x
+                        + math.cos(k * math.pi / 5 + rot + rotation)
+                        * (size if k % 2 == 0 else size * 0.5),
+                        y
+                        + math.sin(k * math.pi / 5 + rot + rotation)
+                        * (size if k % 2 == 0 else size * 0.5),
+                    )
+                    for k in range(10)
+                ]
+                inner_ring = [
+                    (
+                        x
+                        + math.cos(k * math.pi / 5 + rot + rotation)
+                        * (size * 0.55 if k % 2 == 0 else size * 0.275),
+                        y
+                        + math.sin(k * math.pi / 5 + rot + rotation)
+                        * (size * 0.55 if k % 2 == 0 else size * 0.275),
+                    )
+                    for k in range(10)
+                ][::-1]
+                path = [
+                    (px * c.ss - sx0, py * c.ss - sy0)
+                    for px, py in [*outer_ring, *inner_ring]
+                ]
+                mask = Image.new("L", (sx1 - sx0, sy1 - sy0), 0)
+                ImageDraw.Draw(mask).polygon(path, fill=255)
+                fill_img = Image.new("RGBA", mask.size, (*color[:3], int(255 * 1.0)))
+                c.img.paste(fill_img, (sx0, sy0), mask)
         for rot in (-math.pi / 2, math.pi / 2):
             c.polygon(
                 star_pts(size, size * 0.5, rot + rotation),
