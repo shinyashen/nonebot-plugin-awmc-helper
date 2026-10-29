@@ -55,9 +55,9 @@ from dataclasses import field, dataclass
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from .fonts import font as _load_font
-from .chart_audio import MIX_RATE, build_effect_track
-from .chart_notes import (
+from ..fonts import font as _load_font
+from ..chart_audio import MIX_RATE, build_effect_track
+from ..chart_notes import (
     ChartNote,
     SiteChart,
     SlidePart,
@@ -66,7 +66,7 @@ from .chart_notes import (
     break_completion_times,
     break_noex_completion_times,
 )
-from ._lxns_slide_data import SLIDE_POINTS, SLIDE_KEYFRAMES
+from .._lxns_slide_data import SLIDE_POINTS, SLIDE_KEYFRAMES
 
 # ------------------------------------------------- 常量（JS L15-60 / I 表 L66）
 _LOGICAL = 600.0
