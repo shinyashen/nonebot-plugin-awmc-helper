@@ -250,31 +250,40 @@ class _TouchRenderer:
             if part == "center":
                 if fade <= 0:
                     return
-                lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-                ld = ImageDraw.Draw(lay, "RGBA")
                 cx, cy = c.s(pos[0]), c.s(pos[1])
                 rr = center_r * c.ss
                 lw3 = max(1, round(c.s(self.r.sw * 3)))
                 lw1 = max(1, round(c.s(self.r.sw)))
                 a255 = int(255 * fade)
+                # 局部窗口层（外扩一个最宽描边）：bbox 外 paste 为 no-op，逐像素等价
+                half = math.ceil(rr) + lw3 + 2
+                x0 = max(0, int(cx - half))
+                y0 = max(0, int(cy - half))
+                x1 = min(c.img.width, int(cx + half) + 1)
+                y1 = min(c.img.height, int(cy + half) + 1)
+                if x1 <= x0 or y1 <= y0:
+                    return
+                lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+                ld = ImageDraw.Draw(lay, "RGBA")
+                lx, ly = cx - x0, cy - y0
                 ld.ellipse(
-                    (cx - rr, cy - rr, cx + rr, cy + rr),
+                    (lx - rr, ly - rr, lx + rr, ly + rr),
                     outline=(*C_BLACK, a255),
                     width=lw3,
                 )
                 ld.ellipse(
-                    (cx - rr, cy - rr, cx + rr, cy + rr),
+                    (lx - rr, ly - rr, lx + rr, ly + rr),
                     fill=(
                         *(C_TOUCH_CENTER_S if note.is_each else C_TOUCH_CENTER),
                         a255,
                     ),
                 )
                 ld.ellipse(
-                    (cx - rr, cy - rr, cx + rr, cy + rr),
+                    (lx - rr, ly - rr, lx + rr, ly + rr),
                     outline=(*C_WHITE, a255),
                     width=lw1,
                 )
-                c.over(lay)
+                c.over(lay, (x0, y0))
             elif part.startswith("petal-"):
                 k = int(part[-1])
                 if petal_alpha <= 0:
@@ -365,9 +374,9 @@ class _TouchRenderer:
         r_base = _RADIUS * (1 / 4.46) * 1.1 * 1.2
         corner_r = _RADIUS * _R_NOTE
         color = C_SIMUL_DOT if note.is_each else C_TOUCH_CYAN
-        lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-        ld = ImageDraw.Draw(lay, "RGBA")
         lw = max(1, round(3 * _RADIUS / 300 * c.ss))
+        # 先收集两圈方框的全部路径点，取并集外接窗口建局部层
+        squares: list[list[tuple[float, float]]] = []
         for n in ((r_base * 1.2,) if count >= 3 else ()) + (r_base,):
             left, top = x - n / 2, y - n / 2
             right_, bottom = left + n, top + n
@@ -398,5 +407,21 @@ class _TouchRenderer:
             seg((left, bottom - corner_r), (left, mid_b))
             seg((left, mid_t), (left, top + corner_r))
             arc(left + corner_r, top + corner_r, math.pi, math.pi * 1.5)
-            ld.line(c.pts(pts), fill=(*color, 255), width=lw, joint="curve")
-        c.over(lay)
+            squares.append(pts)
+        dev = [c.pts(pts) for pts in squares]
+        x0 = max(0, int(min(p[0] for pts in dev for p in pts)) - lw - 2)
+        y0 = max(0, int(min(p[1] for pts in dev for p in pts)) - lw - 2)
+        x1 = min(c.img.width, int(max(p[0] for pts in dev for p in pts)) + lw + 2)
+        y1 = min(c.img.height, int(max(p[1] for pts in dev for p in pts)) + lw + 2)
+        if x1 <= x0 or y1 <= y0:
+            return
+        lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+        ld = ImageDraw.Draw(lay, "RGBA")
+        for pts in dev:
+            ld.line(
+                [(px - x0, py - y0) for px, py in pts],
+                fill=(*color, 255),
+                width=lw,
+                joint="curve",
+            )
+        c.over(lay, (x0, y0))
