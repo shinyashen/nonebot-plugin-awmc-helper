@@ -1,7 +1,8 @@
-"""打击特效：按压涟漪/头部光晕（渲染器 mixin）、花火、touch 命中星爆。
+"""判定/按压即时反馈：按压涟漪与 hold 头部光晕（渲染器 mixin）。
 
-站内对照：it 类（L7186 涟漪）/ drawActiveHeadGlow（L6584）/ Wt 类
-（L7665 花火）/ Ft 类（L7509 touch 命中），插值工具 Mt/jt/Nt/Pt。
+站内对照：it 类（L7143-7241 涟漪，screen 混合）/ drawActiveHeadGlow
+（L6584 光晕）。花火在 fireworks、touch 命中在 touch_hit、按钮打击特效
+放置逻辑在 composer（待并入本模块）。
 """
 
 from __future__ import annotations

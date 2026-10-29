@@ -56,7 +56,7 @@ _RENDER_ENGINE_FILES = (
     "chart_video/note_renderer.py",
     "chart_video/slide_renderer.py",
     "chart_video/touch_renderer.py",
-    "chart_video/effects.py",
+    "chart_video/press_fx.py",
     "chart_video/hud.py",
     "chart_video/composer.py",
     "chart_video/encoder.py",

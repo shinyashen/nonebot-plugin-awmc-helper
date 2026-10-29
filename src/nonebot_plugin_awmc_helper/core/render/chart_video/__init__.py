@@ -55,8 +55,8 @@ showHitEffect 开；播放时钟在 chart beat 0 起、音频从 beat 4（1 小�
 子模块分层（依赖单向，无环）：
 ``constants ← render_config ← notes ← motion ← canvas ← sprites ←
 note_renderer/slide_renderer(← slide_geometry 混入)/touch_renderer ←
-effects(涟漪/光晕)/fireworks/touch_hit ← composer ← encoder(+ffmpeg_check)``；
-HUD（hud._HudMixin）与特效方法（effects._RendererEffectsMixin）、slide
+press_fx(涟漪/光晕)/fireworks/touch_hit ← composer ← encoder(+ffmpeg_check)``；
+HUD（hud._HudMixin）与特效方法（press_fx._RendererEffectsMixin）、slide
 路径几何（slide_geometry._SlideGeometryMixin）按混入接入宿主类。超采样/
 流速活在 render_config.RenderConfig（frozen），由 render_chart_video 构造
 并贯穿全部渲染器——并发渲染互不可见、无需加锁。
