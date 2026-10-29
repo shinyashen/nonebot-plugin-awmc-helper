@@ -102,9 +102,16 @@ class _ChartRenderer(_HudMixin):
         # 5) touch：边框盒（L8133）→ 部件（ke/Ae 排序，L8135）
         self._draw_touches(fc, now)
         # clip 圆合成（静态 mask）：field 的 alpha 圈外清零后 alpha_composite
-        # 叠加——底图的判定圈/按钮点保留（paste 会整块替换，把圈内底图抹掉）
-        field.putalpha(ImageChops.darker(field.getchannel("A"), self._clip_mask))
-        c.over(field)
+        # 叠加——底图的判定圈/按钮点保留（paste 会整块替换，把圈内底图抹掉）。
+        # 只处理 alpha 非零窗口：圈外 darker 是逐帧固定开销，空场帧近乎免费
+        # （bbox 外 alpha 本就为 0，darker 后仍为 0，paste 为 no-op——逐像素等价）。
+        alpha_bbox = field.getchannel("A").getbbox()
+        if alpha_bbox is not None:
+            sub = field.crop(alpha_bbox)
+            sub.putalpha(
+                ImageChops.darker(sub.getchannel("A"), self._clip_mask.crop(alpha_bbox))
+            )
+            c.over(sub, alpha_bbox)
         # 6) 特效阶段（L8136-8139）：screen/lighter 混合必须对最终画面进行
         # （JS 直接画在主画布上；画在透明 field 层会把底图盖黑）——按 clip 掩码
         # 裁剪后逐一绘制：hold 涟漪 → touch hold 按压/松手 → 命中 → 打击
