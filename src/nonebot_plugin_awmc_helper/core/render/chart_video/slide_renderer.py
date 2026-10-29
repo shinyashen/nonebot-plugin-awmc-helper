@@ -984,11 +984,6 @@ class _SlideRenderer:
                 for k in range(10)
             ]
 
-        def ring_path(outer: float, inner_big: float, inner_small: float) -> list:
-            path = star_pts(outer, inner_big, 0.0)
-            path += star_pts(inner_big * 0.55, inner_small, 0.0)[::-1]
-            return path
-
         if not is_ex:
             for rot in (-math.pi / 2, math.pi / 2):
                 c.polygon(
@@ -1025,7 +1020,6 @@ class _SlideRenderer:
             ImageDraw.Draw(mask).polygon(path, fill=255)
             fill_img = Image.new("RGBA", c.img.size, (*color[:3], int(255 * 1.0)))
             c.img.paste(fill_img, (0, 0), mask)
-        _ = ring_path
         for rot in (-math.pi / 2, math.pi / 2):
             c.polygon(
                 star_pts(size, size * 0.5, rot + rotation),
