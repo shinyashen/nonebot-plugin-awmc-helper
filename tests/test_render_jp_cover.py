@@ -14,6 +14,10 @@ PNG = b"\x89PNG-fake-bytes"
 
 URL = "https://maimaidx.jp/maimai-mobile/img/Music/c4ec.png"
 
+OTOGE_URL = (
+    "https://raw.githubusercontent.com/zvuc/otoge-db/main/maimai/jacket/c4ec.png"
+)
+
 DEFAULT_PLATE_URL = (
     "https://maimaidx.jp/maimai-mobile/img/NamePlate/b919c327669240b8.png"
 )
@@ -80,11 +84,42 @@ async def test_ensure_skips_when_static_exists(jp_env, mock):
 
 
 @pytest.mark.asyncio
+async def test_ensure_falls_back_to_otoge_jacket(jp_env, mock):
+    """官方站日本 IP 门（403）→ otoge-db 仓库同名缩图兜底，落同一缓存路径。"""
+    store, _static, cache = jp_env
+    await _seed_song(store)
+    mock.get(url=URL).respond(403)
+    otoge = mock.get(url=OTOGE_URL).respond(200, content=PNG)
+
+    from nonebot_plugin_awmc_helper.core.render import assets, jp_cover
+
+    assert await jp_cover.ensure(2019, cache_dir=cache) is True
+    assert (cache / "2019.png").read_bytes() == PNG
+    assert otoge.call_count == 1
+    assert (cache / "2019.png") in assets.cover_candidates(2019)
+
+
+@pytest.mark.asyncio
+async def test_ensure_image_falls_back_to_otoge(jp_env, mock):
+    """pending 路径（显式文件名 + 标题摘要 key）同样走 otoge 兜底。"""
+    _store, _static, cache = jp_env
+    mock.get(url=URL).respond(403)
+    mock.get(url=OTOGE_URL).respond(200, content=PNG)
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    path = await jp_cover.ensure_image("c4ec.png", "abcd1234", cache_dir=cache)
+    assert path == cache / "abcd1234.png"
+    assert path.read_bytes() == PNG
+
+
+@pytest.mark.asyncio
 async def test_ensure_silent_on_fetch_failure(jp_env, mock):
-    """拉取失败静默回退（返回 False、无落盘），渲染维持占位图。"""
+    """官方与 otoge 兜底均失败：静默回退（False、无落盘），渲染维持占位图。"""
     store, _static, cache = jp_env
     await _seed_song(store)
     mock.get(url=URL).respond(500)
+    mock.get(url=OTOGE_URL).respond(500)
 
     from nonebot_plugin_awmc_helper.core.render import assets, jp_cover
 

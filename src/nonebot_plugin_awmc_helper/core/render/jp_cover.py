@@ -6,7 +6,10 @@
 - maimaidx.jp 在日本官方侧，走智能代理层自动代理优先（内置国外站清单）；
 - 官方站点 TLS 只下发叶子证书（缺 GlobalSign 中间件），httpx 严格校验会失败：
   :func:`_ssl_context` 把中间证书并入信任上下文（CA 名含年份，官方轮换后需更新）；
-- 拉取失败静默返回 False，渲染维持 0.png 占位行为；并发请求同曲合并为单次下载。
+- 拉取失败静默返回 False，渲染维持 0.png 占位行为；并发请求同曲合并为单次下载；
+- **otoge-db 仓库兜底（2026-10-30）**：官方站上了日本 IP 门（维护后仅日本 IP 可
+  访问）且订阅机房节点被拒——官方拉取失败时回退 otoge-db 仓库同名缩图
+  （190×190，raw.githubusercontent 走智能代理可达），落同一缓存路径。
 """
 
 import asyncio
@@ -45,6 +48,40 @@ def _has_local(song_id: int, cache: Path) -> bool:
 
 _MUSIC_IMG_URL = "https://maimaidx.jp/maimai-mobile/img/Music/{image_url}"
 
+_OTOGE_JACKET_URL = (
+    "https://raw.githubusercontent.com/zvuc/otoge-db/main/maimai/jacket/{image_url}"
+)
+"""otoge-db 仓库曲绘兜底：官方站日本 IP 门（2026-10-30）后的最低限度替代源。
+
+190×190 缩图（官方 680×680），哈希名与 song.image_url 一致；GitHub raw 经
+智能代理可达、标准证书链（无需 maimaidx 专用上下文）。"""
+
+
+async def _download_cover(url: str, path: Path, *, subject: str, verify) -> bool:
+    return await _COVER_GATE.run(
+        (subject, url),
+        lambda: download_to_file(url, path, subject=subject, verify=verify),
+    )
+
+
+async def _fetch_with_otoge_fallback(
+    song_id: int | str, image_url: str, path: Path
+) -> bool:
+    """官方曲绘 → otoge-db 仓库缩图，两级尝试落同一缓存路径。"""
+    if await _download_cover(
+        _MUSIC_IMG_URL.format(image_url=image_url),
+        path,
+        subject=f"jp_cover：{song_id} 曲绘",
+        verify=maimaidx_ssl_context(),
+    ):
+        return True
+    return await _download_cover(
+        _OTOGE_JACKET_URL.format(image_url=image_url),
+        path,
+        subject=f"jp_cover：{song_id} 曲绘（otoge 兜底）",
+        verify=True,
+    )
+
 
 async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
     """确保曲绘本地可得（static 或缓存）；本就有图或拉取成功返回 True。
@@ -58,16 +95,7 @@ async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
     if not image_url:
         return False
     path = cache / f"{song_id}.png"
-    url = _MUSIC_IMG_URL.format(image_url=image_url)
-    return await _COVER_GATE.run(
-        song_id,
-        lambda: download_to_file(
-            url,
-            path,
-            subject=f"jp_cover：{song_id} 曲绘",
-            verify=maimaidx_ssl_context(),
-        ),
-    )
+    return await _fetch_with_otoge_fallback(song_id, image_url, path)
 
 
 def has_local(song_id: int, cache: Path | None = None) -> bool:
@@ -141,13 +169,7 @@ async def ensure_image(
     path = cache / f"{key}.png"
     if path.exists():
         return path
-    url = _MUSIC_IMG_URL.format(image_url=image_url)
-    ok = await _COVER_GATE.run(
-        key,
-        lambda: download_to_file(
-            url, path, subject=f"jp_cover：{key} 曲绘", verify=maimaidx_ssl_context()
-        ),
-    )
+    ok = await _fetch_with_otoge_fallback(key, image_url, path)
     return path if ok else None
 
 
