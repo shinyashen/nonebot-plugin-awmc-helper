@@ -145,7 +145,7 @@ class _Renderer(_RendererEffectsMixin):
                 y1 = min(c.img.height, int(y + rr) + 1)
                 if x1 > x0 and y1 > y0:
                     lay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
-                    lx, ly = x * c.ss - x0, y * c.ss - y0
+                    lx, ly = x - x0, y - y0
                     ImageDraw.Draw(lay).ellipse(
                         (
                             lx - r1 * c.ss,
