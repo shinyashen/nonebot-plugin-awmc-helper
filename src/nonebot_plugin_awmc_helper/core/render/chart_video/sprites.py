@@ -6,7 +6,6 @@ import math
 
 from PIL import Image, ImageDraw, ImageFilter
 
-from . import constants
 from .canvas import (
     _mix,
     _dot_color,
@@ -33,6 +32,7 @@ from .constants import (
     C_TOUCH_SIMUL_Y,
     C_TOUCHHOLD_PETALS,
 )
+from .render_config import RenderConfig
 
 
 def _rounded_tri_points(
@@ -75,7 +75,8 @@ def _rounded_tri_points(
 class _Sprites:
     """缓存 sprite（tap 环 / touch 花瓣 / 打击特效 / gauge），等价 JS sprite cache。"""
 
-    def __init__(self):
+    def __init__(self, config: RenderConfig):
+        self._ss = config.supersample
         self.taps: dict[tuple, Image.Image] = {}
         self.petals: dict[tuple, Image.Image] = {}
         self.hits: dict[str, Image.Image] = {}
@@ -96,18 +97,18 @@ class _Sprites:
         sw = _STROKE * _RADIUS
         # 显示半宽 = getTapSpriteCropHalf L451（EX 环 1.19f 与黑环 f+1.5sw 取大）
         half = (max(f * _EX_ALPHA, f + sw / 2) if is_ex else f + sw * 1.5) + 1.0
-        size = math.ceil(half * 2 * constants._SS)
+        size = math.ceil(half * 2 * self._ss)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         d = ImageDraw.Draw(img, "RGBA")
         cx = cy = size / 2
         c0, c1 = _grad_pair(is_break, is_each)
 
         def ring_px(r: float, color, width: float) -> None:
-            rr = r * constants._SS
+            rr = r * self._ss
             d.ellipse(
                 (cx - rr, cy - rr, cx + rr, cy + rr),
                 outline=color,
-                width=max(1, round(width * constants._SS)),
+                width=max(1, round(width * self._ss)),
             )
 
         def sector(
@@ -115,15 +116,15 @@ class _Sprites:
         ) -> list[tuple[float, float]]:
             out = [
                 (
-                    cx + math.cos(a0 + (a1 - a0) * k / 12) * r1 * constants._SS,
-                    cy + math.sin(a0 + (a1 - a0) * k / 12) * r1 * constants._SS,
+                    cx + math.cos(a0 + (a1 - a0) * k / 12) * r1 * self._ss,
+                    cy + math.sin(a0 + (a1 - a0) * k / 12) * r1 * self._ss,
                 )
                 for k in range(13)
             ]
             inn = [
                 (
-                    cx + math.cos(a1 - (a1 - a0) * k / 12) * r0 * constants._SS,
-                    cy + math.sin(a1 - (a1 - a0) * k / 12) * r0 * constants._SS,
+                    cx + math.cos(a1 - (a1 - a0) * k / 12) * r0 * self._ss,
+                    cy + math.sin(a1 - (a1 - a0) * k / 12) * r0 * self._ss,
                 )
                 for k in range(13)
             ]
@@ -137,12 +138,12 @@ class _Sprites:
             a0 = rot + k * math.pi / 2
             a1 = a0 + math.pi / 2
             g0 = (
-                cx + math.cos(a0) * mid * constants._SS,
-                cy + math.sin(a0) * mid * constants._SS,
+                cx + math.cos(a0) * mid * self._ss,
+                cy + math.sin(a0) * mid * self._ss,
             )
             g1 = (
-                cx + math.cos(a1) * mid * constants._SS,
-                cy + math.sin(a1) * mid * constants._SS,
+                cx + math.cos(a1) * mid * self._ss,
+                cy + math.sin(a1) * mid * self._ss,
             )
             path = sector(p, f, a0, a1)
             bbox = (
@@ -183,10 +184,10 @@ class _Sprites:
         dot = f * 0.15
         d.ellipse(
             (
-                cx - dot * constants._SS,
-                cy - dot * constants._SS,
-                cx + dot * constants._SS,
-                cy + dot * constants._SS,
+                cx - dot * self._ss,
+                cy - dot * self._ss,
+                cx + dot * self._ss,
+                cy + dot * self._ss,
             ),
             fill=_dot_color(is_break, is_each),
         )
@@ -204,11 +205,11 @@ class _Sprites:
         # JS getHitEffectShapeSprite L7329-7332：
         # l = at·R·coef·X，pad = s + u + l/X·ct + 1
         half = d_size + _STROKE * _RADIUS + l_blur * 2.5 + 1
-        size = math.ceil(half * 2 * constants._SS)
+        size = math.ceil(half * 2 * self._ss)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         cx = cy = size / 2
-        rr = d_size * constants._SS
-        lw = max(2, round(_STROKE * _RADIUS * 2 * constants._SS))
+        rr = d_size * self._ss
+        lw = max(2, round(_STROKE * _RADIUS * 2 * self._ss))
         if shape == "star":
             # starSubPath L7276：5 角星，首顶点角 3π/2+π ≡ π/2（朝下）
             pts = []
@@ -240,11 +241,11 @@ class _Sprites:
             return lay
 
         # 辉光层：α.55 + blur(l)（L7338 系数），主层：α1 + blur(c)
-        glow = stroke_layer().filter(ImageFilter.GaussianBlur(l_blur * constants._SS))
+        glow = stroke_layer().filter(ImageFilter.GaussianBlur(l_blur * self._ss))
         ga = glow.getchannel("A").point(lambda v: int(v * 0.55))
         glow.putalpha(ga)
         img.alpha_composite(glow)
-        main = stroke_layer().filter(ImageFilter.GaussianBlur(c_blur * constants._SS))
+        main = stroke_layer().filter(ImageFilter.GaussianBlur(c_blur * self._ss))
         img.alpha_composite(main)
         self.hits[shape] = img
         return img
@@ -267,7 +268,7 @@ class _Sprites:
             + _RADIUS * (8 / 300)
             + _RADIUS * (2 / 300)
         )  # getTouchSpriteHalf L6755
-        size = math.ceil(half * 2 * constants._SS)
+        size = math.ceil(half * 2 * self._ss)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         d = ImageDraw.Draw(img, "RGBA")
         cx = cy = size / 2
@@ -278,18 +279,18 @@ class _Sprites:
         m = _RADIUS * _TOUCH_IN * 1.3
         h_ang = p + math.pi
         tip = (
-            cx + math.cos(h_ang) * m * constants._SS,
-            cy + math.sin(h_ang) * m * constants._SS,
+            cx + math.cos(h_ang) * m * self._ss,
+            cy + math.sin(h_ang) * m * self._ss,
         )
         left = (
-            cx + math.cos(p + math.pi / 2) * m * constants._SS,
-            cy + math.sin(p + math.pi / 2) * m * constants._SS,
+            cx + math.cos(p + math.pi / 2) * m * self._ss,
+            cy + math.sin(p + math.pi / 2) * m * self._ss,
         )
         right = (
-            cx + math.cos(p - math.pi / 2) * m * constants._SS,
-            cy + math.sin(p - math.pi / 2) * m * constants._SS,
+            cx + math.cos(p - math.pi / 2) * m * self._ss,
+            cy + math.sin(p - math.pi / 2) * m * self._ss,
         )
-        corner = _RADIUS * (8 / 300) * constants._SS
+        corner = _RADIUS * (8 / 300) * self._ss
         outer = _rounded_tri_points(tip, left, right, corner)
         # 内三角（非 hold）：顶点向质心收缩 40%，圆角 0.4×
         gx = (tip[0] + left[0] + right[0]) / 3
@@ -304,8 +305,8 @@ class _Sprites:
         if layer_kind == "sb":
             # 投影（shadow 层 L6798）：canvas shadowBlur=8/300·R 是设备像素
             # （不受 CTM 影响、且 blur≈2σ），offset=2/300·R；换到 2× 超采样画布
-            blur_r = _RADIUS * (8 / 300) * constants._SS / 2
-            off = _RADIUS * (2 / 300) * constants._SS
+            blur_r = _RADIUS * (8 / 300) * self._ss / 2
+            off = _RADIUS * (2 / 300) * self._ss
             sil = Image.new("RGBA", img.size, (0, 0, 0, 0))
             ImageDraw.Draw(sil).polygon(outer, fill=(0, 0, 0, 255))
             shadow = sil.filter(ImageFilter.GaussianBlur(blur_r))
@@ -314,14 +315,14 @@ class _Sprites:
             d.line(
                 [*outer, outer[0]],
                 fill=(*C_BLACK, 255),
-                width=round(sw * 3 * constants._SS),
+                width=round(sw * 3 * self._ss),
                 joint="curve",
             )
             if not is_hold:
                 d.line(
                     [*inner, inner[0]],
                     fill=(*C_BLACK, 255),
-                    width=round(sw * 3 * constants._SS),
+                    width=round(sw * 3 * self._ss),
                     joint="curve",
                 )
         elif layer_kind == "f":
@@ -365,14 +366,14 @@ class _Sprites:
             d.line(
                 [*outer, outer[0]],
                 fill=(*C_WHITE, 255),
-                width=max(1, round(sw * constants._SS)),
+                width=max(1, round(sw * self._ss)),
                 joint="curve",
             )
             if not is_hold:
                 d.line(
                     [*inner, inner[0]],
                     fill=(*C_WHITE, 255),
-                    width=max(1, round(sw * constants._SS)),
+                    width=max(1, round(sw * self._ss)),
                     joint="curve",
                 )
         self.petals[key] = img

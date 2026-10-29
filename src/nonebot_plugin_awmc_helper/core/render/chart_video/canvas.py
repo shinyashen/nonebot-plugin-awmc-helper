@@ -9,7 +9,6 @@ import math
 import numpy as np
 from PIL import Image, ImageDraw
 
-from . import constants
 from .constants import (
     _CENTER,
     _RADIUS,
@@ -23,6 +22,7 @@ from .constants import (
     C_BREAK_GRAD,
     C_SIMUL_GRAD,
 )
+from .render_config import RenderConfig
 
 
 def _mix(c1: tuple, c2: tuple, t: float) -> tuple:
@@ -55,14 +55,14 @@ class _Canvas:
 
     def __init__(
         self,
+        config: RenderConfig,
         transparent: bool = False,
         base_image: Image.Image | None = None,
         rgb: bool = False,
     ):
+        self.ss = config.supersample
         self.size = (
-            base_image.width
-            if base_image is not None
-            else int(_LOGICAL * constants._SS)
+            base_image.width if base_image is not None else int(_LOGICAL * self.ss)
         )
         if base_image is not None:
             self.img = base_image.copy()
@@ -94,10 +94,10 @@ class _Canvas:
             self.img.alpha_composite(layer, pos)
 
     def s(self, v: float) -> float:
-        return v * constants._SS
+        return v * self.ss
 
     def pts(self, points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        return [(x * constants._SS, y * constants._SS) for x, y in points]
+        return [(x * self.ss, y * self.ss) for x, y in points]
 
     def stroke_circle(self, x: float, y: float, r: float, color, width: float) -> None:
         rr = self.s(r)

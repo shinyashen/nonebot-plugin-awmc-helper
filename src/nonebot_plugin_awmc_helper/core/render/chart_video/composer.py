@@ -7,7 +7,6 @@ import math
 import numpy as np
 from PIL import Image, ImageDraw
 
-from . import constants
 from .hud import _HudMixin
 from .notes import _Note, _map_notes, _collect_hit_notes
 from .canvas import _Canvas, _clip_layer
@@ -28,6 +27,7 @@ from .fireworks import _Fireworks
 from .touch_hit import _TouchHitEffects
 from ..chart_notes import SiteChart, SlidePart
 from .note_renderer import _Renderer
+from .render_config import DEFAULT_CONFIG, RenderConfig
 from .slide_renderer import _SlideRenderer
 from .touch_renderer import _TouchRenderer
 
@@ -35,11 +35,12 @@ from .touch_renderer import _TouchRenderer
 class _ChartRenderer(_HudMixin):
     """整帧组合（renderFrame L7997 层序 + prepareRenderNotes L8232）。"""
 
-    def __init__(self, chart: SiteChart):
+    def __init__(self, chart: SiteChart, config: RenderConfig | None = None):
         self.chart = chart
+        self.config = config or DEFAULT_CONFIG
         self.notes = _map_notes(chart)
         hit_notes = _collect_hit_notes(chart)
-        base_renderer = _Renderer(self.notes, chart, hit_notes)
+        base_renderer = _Renderer(self.notes, chart, hit_notes, self.config)
         self.slide_renderer = _SlideRenderer(base_renderer)
         self.renderer = base_renderer
         self.touches = _TouchRenderer(base_renderer)
@@ -58,7 +59,7 @@ class _ChartRenderer(_HudMixin):
                 )
             previous_bpm = bpm
         # 静态底图（黑底 + 判定圈 + 按钮点）与 clip 圆 alpha mask：预生成每帧 copy
-        base = _Canvas(rgb=True)
+        base = _Canvas(self.config, rgb=True)
         self._judgment_line(base)
         self._base_img = base.img
         size = base.img.width
@@ -75,7 +76,7 @@ class _ChartRenderer(_HudMixin):
     def render_frame(self, now_ms: float, fps: int) -> Image.Image:
         from PIL import ImageChops
 
-        c = _Canvas(base_image=self._base_img)
+        c = _Canvas(self.config, base_image=self._base_img)
         # 花火（clip 圆内、HUD 之下，L8101）——直接画在最终画布（此刻只有底图，
         # 与 JS 在 clear/判定线之后立即绘制的背景一致；lighter 混合语义成立）
         fire_notes = [n for n in self.renderer.touches if n.fire]
@@ -84,7 +85,7 @@ class _ChartRenderer(_HudMixin):
         self._hud(c, now_ms, fps)
         # clip 圆内播放场（ctx.clip 等价：先画到独立层再按圆裁切合成）
         field = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
-        fc = _Canvas()
+        fc = _Canvas(self.config)
         fc.img = field
         fc.d = ImageDraw.Draw(field, "RGBA")
         now = now_ms
@@ -108,7 +109,7 @@ class _ChartRenderer(_HudMixin):
         # 6) 特效阶段（L8136-8139）：screen/lighter 混合必须对最终画面进行
         # （JS 直接画在主画布上；画在透明 field 层会把底图盖黑）——按 clip 掩码
         # 裁剪后逐一绘制：hold 涟漪 → touch hold 按压/松手 → 命中 → 打击
-        fx = _Canvas()
+        fx = _Canvas(self.config)
         fx.img = c.img
         fx.d = ImageDraw.Draw(c.img, "RGBA")
         for n in self.renderer.holds:
@@ -143,14 +144,14 @@ class _ChartRenderer(_HudMixin):
         items.sort(key=lambda item: (-item[0], item[1]))
         for _timing, kind_order, n in items:
             if kind_order == 0:
-                pos = _note_position(n, now, fc.cx, fc.cy, fc.radius)
+                pos = _note_position(n, now, fc.cx, fc.cy, fc.radius, self.config)
                 if pos.visible:
                     if n.is_star:
                         self.slide_renderer.draw_star_tap(fc, n, pos, now)
                     else:
                         self.renderer.draw_tap(fc, n, pos)
             elif kind_order == 1:
-                head = _note_position(n, now, fc.cx, fc.cy, fc.radius)
+                head = _note_position(n, now, fc.cx, fc.cy, fc.radius, self.config)
                 if head.visible:
                     self.renderer.draw_hold(fc, n, now)
             else:
@@ -169,7 +170,7 @@ class _ChartRenderer(_HudMixin):
             for n in group:
                 if n.timing <= now:
                     continue
-                pos = _note_position(n, now, fc.cx, fc.cy, fc.radius)
+                pos = _note_position(n, now, fc.cx, fc.cy, fc.radius, self.config)
                 if not pos.visible:
                     continue
                 if n.kind == "hold":
@@ -210,7 +211,7 @@ class _ChartRenderer(_HudMixin):
             if n.kind == "touch-hold":
                 continue
             dt = n.timing - now
-            if -50 <= dt <= constants._APPROACH_MS:
+            if -50 <= dt <= self.config.approach_ms:
                 key = (n.sensor, n.touch_num)
                 count_by_pos[key] = count_by_pos.get(key, 0) + 1
         for n in reversed(touches):
@@ -327,7 +328,7 @@ class _ChartRenderer(_HudMixin):
         # JS 先 translate/rotate 画布再画 5 个 sprite：等价于在局部层画好后整体旋转
         # 一次（比逐 sprite rotate 快数倍，也避免重复重采样）
         half = d_size * 1.1 + _RADIUS * (4 / 300 * 0.7) * 2.4 * 3 + 4
-        size = math.ceil(half * 2 * constants._SS)
+        size = math.ceil(half * 2 * fc.ss)
         lay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         center = size / 2
 
@@ -357,8 +358,8 @@ class _ChartRenderer(_HudMixin):
             lay.alpha_composite(
                 img,
                 (
-                    int(center + lx * constants._SS - img.width / 2),
-                    int(center + ly * constants._SS - img.height / 2),
+                    int(center + lx * fc.ss - img.width / 2),
+                    int(center + ly * fc.ss - img.height / 2),
                 ),
             )
 

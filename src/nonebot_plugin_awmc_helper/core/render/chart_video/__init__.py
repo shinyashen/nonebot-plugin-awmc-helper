@@ -49,52 +49,34 @@ showHitEffect 开；播放时钟在 chart beat 0 起、音频从 beat 4（1 小�
 - :func:`render_chart_video` —— 渲染入口（encoder）
 - ffmpeg 探测：``FFmpegUnavailableError`` / ``resolve_ffmpeg`` /
   ``FFmpegStatus`` / ``check_ffmpeg``
-- 谱面流速：``DEFAULT_HI_SPEED`` / ``normalize_hi_speed``
+- 渲染配置：``RenderConfig``（超采样/流速单值对象，一次渲染一份、可并发）
+  与 ``DEFAULT_HI_SPEED`` / ``normalize_hi_speed``
 
 子模块分层（依赖单向，无环）：
-``constants ← notes ← motion ← canvas ← sprites ← note_renderer/
-slide_renderer(← slide_geometry 混入)/touch_renderer ← effects(涟漪/光晕)/
-fireworks/touch_hit ← composer ← encoder(+ffmpeg_check)``；
+``constants ← render_config ← notes ← motion ← canvas ← sprites ←
+note_renderer/slide_renderer(← slide_geometry 混入)/touch_renderer ←
+effects(涟漪/光晕)/fireworks/touch_hit ← composer ← encoder(+ffmpeg_check)``；
 HUD（hud._HudMixin）与特效方法（effects._RendererEffectsMixin）、slide
-路径几何（slide_geometry._SlideGeometryMixin）按混入接入宿主类。可变
-运行时全局（超采样/流速）固定活在 constants，由 encoder.render_chart_video
-写入、各模块经 ``constants._X`` 属性读取；包层经 PEP 562 ``__getattr__``
-动态转发（不快照）。
+路径几何（slide_geometry._SlideGeometryMixin）按混入接入宿主类。超采样/
+流速活在 render_config.RenderConfig（frozen），由 render_chart_video 构造
+并贯穿全部渲染器——并发渲染互不可见、无需加锁。
 
 私有名的再导出仅为既有测试与调研脚本（cv._Note 等）保兼容，不构成
 新公共 API。
 """
 
-from . import constants
 from .notes import _Note as _Note
 from .motion import _button_angle as _button_angle
 from .motion import _hold_flicker as _hold_flicker
 from .motion import _note_position as _note_position
 from .encoder import render_chart_video as render_chart_video
 from .composer import _ChartRenderer as _ChartRenderer
-from .constants import DEFAULT_HI_SPEED as DEFAULT_HI_SPEED
-from .constants import _DEFAULT_HI_SPEED as _DEFAULT_HI_SPEED
-from .constants import _apply_hi_speed as _apply_hi_speed
-from .constants import normalize_hi_speed as normalize_hi_speed
 from .ffmpeg_check import FFmpegStatus as FFmpegStatus
 from .ffmpeg_check import FFmpegUnavailableError as FFmpegUnavailableError
 from .ffmpeg_check import check_ffmpeg as check_ffmpeg
 from .ffmpeg_check import resolve_ffmpeg as resolve_ffmpeg
+from .render_config import DEFAULT_HI_SPEED as DEFAULT_HI_SPEED
+from .render_config import _DEFAULT_HI_SPEED as _DEFAULT_HI_SPEED
+from .render_config import RenderConfig as RenderConfig
+from .render_config import normalize_hi_speed as normalize_hi_speed
 from .slide_renderer import _SlideRenderer as _SlideRenderer
-
-# 可变运行时全局固定活在 constants（_apply_hi_speed/render_chart_video 写入）：
-# 包层不做 import 快照，读 cv._SS 等经 PEP 562 动态转发，保证与运行时一致。
-_MUTABLE_STATE_NAMES = (
-    "_SS",
-    "_HI_SPEED",
-    "_APPROACH_MS",
-    "_HALF_APPROACH",
-    "_TOUCH_APPROACH_MS",
-    "_SPEED_SETTING",
-)
-
-
-def __getattr__(name: str):
-    if name in _MUTABLE_STATE_NAMES:
-        return getattr(constants, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -49,6 +49,7 @@ _CACHE_SUBDIR = "chart_preview"
 _RENDER_ENGINE_FILES = (
     "chart_video/__init__.py",
     "chart_video/constants.py",
+    "chart_video/render_config.py",
     "chart_video/notes.py",
     "chart_video/motion.py",
     "chart_video/canvas.py",

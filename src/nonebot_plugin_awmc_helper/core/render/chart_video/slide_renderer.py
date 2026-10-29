@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
-from . import constants
 from .notes import _Pos, _Note
 from .canvas import _Canvas, _poly_mask
 from .motion import _note_position
@@ -59,7 +58,9 @@ class _SlideRenderer(_SlideGeometryMixin):
     def _star_delay(self, note: _Note) -> float:
         """me()（L5514）：轨道淡入起点。"""
         r = round((_SLIDE_DELAY + 1) * 10)
-        return note.timing - constants._APPROACH_MS + constants._APPROACH_MS * r / 21
+        return (
+            note.timing - self.r.config.approach_ms + self.r.config.approach_ms * r / 21
+        )
 
     def track_alpha(self, note: _Note, now: float, fading: bool) -> float:
         """ge()（L5527）：fading=wifi 段（视作 split 档）。"""
@@ -195,20 +196,17 @@ class _SlideRenderer(_SlideGeometryMixin):
                 continue
             xs = [p[0] for poly in polys for p in poly]
             ys = [p[1] for poly in polys for p in poly]
-            x0 = max(0, int(min(xs) * constants._SS) - 2)
-            y0 = max(0, int(min(ys) * constants._SS) - 2)
-            x1 = min(c.img.width, int(max(xs) * constants._SS) + 3)
-            y1 = min(c.img.height, int(max(ys) * constants._SS) + 3)
+            x0 = max(0, int(min(xs) * c.ss) - 2)
+            y0 = max(0, int(min(ys) * c.ss) - 2)
+            x1 = min(c.img.width, int(max(xs) * c.ss) + 3)
+            y1 = min(c.img.height, int(max(ys) * c.ss) + 3)
             if x1 <= x0 or y1 <= y0:
                 continue
             mask = Image.new("L", (x1 - x0, y1 - y0), 0)
             md = ImageDraw.Draw(mask)
             for poly in polys:
                 md.polygon(
-                    [
-                        (px * constants._SS - x0, py * constants._SS - y0)
-                        for px, py in poly
-                    ],
+                    [(px * c.ss - x0, py * c.ss - y0) for px, py in poly],
                     fill=255,
                 )
             mask = mask.point(lambda v: int(v * alpha * shade))
@@ -276,7 +274,7 @@ class _SlideRenderer(_SlideGeometryMixin):
         if alpha < 0.999:
             # JS ctx.globalAlpha 作用于整颗星（黑/白边、填充、中心点），
             # 不是只淡出填充——生长期的星整体半透明
-            layer = _Canvas(transparent=True)
+            layer = _Canvas(self.r.config, transparent=True)
             self.draw_star(layer, x, y, size, color, rotation, is_ex, 1.0)
             layer.img.putalpha(
                 layer.img.getchannel("A").point(lambda v: int(v * alpha))
@@ -405,7 +403,7 @@ class _SlideRenderer(_SlideGeometryMixin):
         length = sum(self.segment_length(s) for s in part.segments)
         rate = length * (480.0 / _RADIUS) / math.pi / duration * 15 * 0.06
         per_ms = -min(rate, 1.08) * (math.pi / 180)
-        start = note.timing - constants._APPROACH_MS
+        start = note.timing - self.r.config.approach_ms
         return 0.0 if now < start else per_ms * (now - start)
 
     # ---- renderSlideStar（L6115）：起点生长 → 沿路径移动（每条并行动径一颗）
@@ -537,7 +535,7 @@ class _SlideRenderer(_SlideGeometryMixin):
 
     # ---- slide 起点星形头（renderSingleSlideStart L8411）
     def draw_slide_head(self, c: _Canvas, note: _Note, now: float) -> None:
-        pos = _note_position(note, now, c.cx, c.cy, c.radius)
+        pos = _note_position(note, now, c.cx, c.cy, c.radius, self.r.config)
         if not pos.visible:
             return
         is_simul = note.is_each

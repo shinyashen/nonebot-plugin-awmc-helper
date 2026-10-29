@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PIL import Image, ImageDraw
 
-from . import constants
 from .notes import _Note
 from .canvas import _Canvas, _clip_layer, _additive_composite
 from .constants import (
@@ -38,8 +37,9 @@ class _Fireworks:
     def wedge_sprite(self) -> Image.Image:
         if self._wedge is not None:
             return self._wedge
+        ss = self.r.config.supersample
         half = _RADIUS * _FIREWORK_WEDGE_SCALE
-        size = math.ceil(half * 2 * constants._SS)
+        size = math.ceil(half * 2 * ss)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         cx = cy = size / 2
         wedge_len = _RADIUS / 4.5 * _FIREWORK_R
@@ -50,12 +50,12 @@ class _Fireworks:
             t = e / n * math.tau
             p0 = (cx, cy)
             p1 = (
-                cx + math.cos(t - half_ang) * wedge_len * constants._SS,
-                cy + math.sin(t - half_ang) * wedge_len * constants._SS,
+                cx + math.cos(t - half_ang) * wedge_len * ss,
+                cy + math.sin(t - half_ang) * wedge_len * ss,
             )
             p2 = (
-                cx + math.cos(t + half_ang) * wedge_len * constants._SS,
-                cy + math.sin(t + half_ang) * wedge_len * constants._SS,
+                cx + math.cos(t + half_ang) * wedge_len * ss,
+                cy + math.sin(t + half_ang) * wedge_len * ss,
             )
             # 径向渐变：0-0.9 实色 → 尖端透明
             pts = [p0, p1, p2]
@@ -79,9 +79,7 @@ class _Fireworks:
             )
             col = _FIREWORK_COLORS[e]
             yy, xx = np.mgrid[0 : bbox[3] - bbox[1], 0 : bbox[2] - bbox[0]]
-            dist = np.hypot(xx + bbox[0] - cx, yy + bbox[1] - cy) / (
-                wedge_len * constants._SS
-            )
+            dist = np.hypot(xx + bbox[0] - cx, yy + bbox[1] - cy) / (wedge_len * ss)
             fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
             arr = np.dstack(
                 [
@@ -101,6 +99,7 @@ class _Fireworks:
         """drawFireworkBalls（L7741）：两层径向光球（lighter）。"""
         if t < 0:
             return
+        ss = self.r.config.supersample
         i = _RADIUS / 4.5
         # (起亮时刻, 起始半径, 峰值透明度, ramp 时长, 衰减寿命, 衰减窗口, 色)
         specs = (
@@ -123,15 +122,15 @@ class _Fireworks:
         if not balls:
             return
         max_r = max(m for m, *_ in balls)
-        region = int(max_r * constants._SS) + 2
-        cx, cy = x * constants._SS, y * constants._SS
+        region = int(max_r * ss) + 2
+        cx, cy = x * ss, y * ss
         x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
         x1, y1 = int(min(layer.width, cx + region)), int(min(layer.height, cy + region))
         if x1 <= x0 or y1 <= y0:
             return
         w, h = x1 - x0, y1 - y0
         yy, xx = np.mgrid[0:h, 0:w]
-        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / constants._SS
+        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / ss
         out = np.asarray(layer.crop((x0, y0, x1, y1)), dtype=np.float32)
         for m, p, c_in in balls:
             r_px = m
@@ -212,7 +211,7 @@ class _Fireworks:
         cut_alpha = min(1.0, g / 0.2)  # JS L7813：切洞强度渐入
         if v > 0 and cut_alpha > 0:
             yy, xx = np.mgrid[0 : scratch.height, 0 : scratch.width]
-            dist = np.hypot(xx - c.s(pos[0]), yy - c.s(pos[1])) / constants._SS
+            dist = np.hypot(xx - c.s(pos[0]), yy - c.s(pos[1])) / c.ss
             keep = np.ones_like(dist)
             m1 = dist <= hole_in
             keep[m1] = 0.0
@@ -234,18 +233,18 @@ class _Fireworks:
         lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         n = len(_FIREWORK_COLORS)
         half_ang = math.pi / n * 0.45
-        cx, cy = x * constants._SS, y * constants._SS
+        cx, cy = x * c.ss, y * c.ss
         for e in range(n):
             t = e / n * math.tau + rot
             pts = [
                 (cx, cy),
                 (
-                    cx + math.cos(t - half_ang) * a * constants._SS,
-                    cy + math.sin(t - half_ang) * a * constants._SS,
+                    cx + math.cos(t - half_ang) * a * c.ss,
+                    cy + math.sin(t - half_ang) * a * c.ss,
                 ),
                 (
-                    cx + math.cos(t + half_ang) * a * constants._SS,
-                    cy + math.sin(t + half_ang) * a * constants._SS,
+                    cx + math.cos(t + half_ang) * a * c.ss,
+                    cy + math.sin(t + half_ang) * a * c.ss,
                 ),
             ]
             x0 = int(max(0, min(px for px, _ in pts) - 1))
@@ -259,7 +258,7 @@ class _Fireworks:
                 [(px - x0, py - y0) for px, py in pts], fill=255
             )
             yy, xx = np.mgrid[0 : y1 - y0, 0 : x1 - x0]
-            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / (a * constants._SS)
+            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / (a * c.ss)
             fade = np.clip((1.0 - dist) / 0.1, 0.0, 1.0)
             arr = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
             arr[..., 0], arr[..., 1], arr[..., 2] = _FIREWORK_COLORS[e]

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
-from . import constants
 from .notes import _Note
 from .canvas import (
     ImageChops_darker,
@@ -71,7 +70,7 @@ class _TouchRenderer:
     def motion(self, note: _Note, now: float):
         is_hold = note.kind == "touch-hold"
         dt = note.timing - now
-        approach = constants._TOUCH_APPROACH_MS  # Majdata TouchDrop.wholeDuration
+        approach = self.r.config.touch_approach_ms  # Majdata TouchDrop.wholeDuration
         life = (note.duration + 50) if is_hold else 50.0
         if dt > approach or dt < -life:
             return None
@@ -95,6 +94,7 @@ class _TouchRenderer:
     def gauge_sprite(self) -> Image.Image:
         if self._gauge_sprite is not None:
             return self._gauge_sprite
+        ss = self.r.config.supersample
         r = _RADIUS / 480
         half = _GAUGE_GEO["canvas_half"] * r
 
@@ -137,14 +137,12 @@ class _TouchRenderer:
             pts.append((-n + i, -i))
             return pts
 
-        size = math.ceil(half * 2 * constants._SS)
+        size = math.ceil(half * 2 * ss)
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         off = size / 2
 
         def to_px(pts):
-            return [
-                (px * constants._SS + off, py * constants._SS + off) for px, py in pts
-            ]
+            return [(px * ss + off, py * ss + off) for px, py in pts]
 
         outer = to_px(ring_path(_GAUGE_GEO["outer_axis"], _GAUGE_GEO["outer_diagonal"]))
         inner = to_px(ring_path(_GAUGE_GEO["inner_axis"], _GAUGE_GEO["inner_diagonal"]))
@@ -170,10 +168,10 @@ class _TouchRenderer:
             )
             grad = _multi_stop_gradient(
                 (size, size),
-                g0[0] * constants._SS + off,
-                g0[1] * constants._SS + off,
-                g1[0] * constants._SS + off,
-                g1[1] * constants._SS + off,
+                g0[0] * ss + off,
+                g0[1] * ss + off,
+                g1[0] * ss + off,
+                g1[1] * ss + off,
                 stops,
             )
             # 象限矩形裁剪（fillRect i>0?0:-n 等）
@@ -182,10 +180,10 @@ class _TouchRenderer:
             quad_mask = Image.new("L", (size, size), 0)
             ImageDraw.Draw(quad_mask).rectangle(
                 [
-                    x0q * constants._SS + off,
-                    y0q * constants._SS + off,
-                    (x0q + n_max) * constants._SS + off,
-                    (y0q + n_max) * constants._SS + off,
+                    x0q * ss + off,
+                    y0q * ss + off,
+                    (x0q + n_max) * ss + off,
+                    (y0q + n_max) * ss + off,
                 ],
                 fill=255,
             )
@@ -255,7 +253,7 @@ class _TouchRenderer:
                 lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
                 ld = ImageDraw.Draw(lay, "RGBA")
                 cx, cy = c.s(pos[0]), c.s(pos[1])
-                rr = center_r * constants._SS
+                rr = center_r * c.ss
                 lw3 = max(1, round(c.s(self.r.sw * 3)))
                 lw1 = max(1, round(c.s(self.r.sw)))
                 a255 = int(255 * fade)
@@ -361,7 +359,7 @@ class _TouchRenderer:
         if mv is None:
             return
         _, dt, _, _, _ = mv
-        if dt > constants._APPROACH_MS or dt < -50:
+        if dt > self.r.config.approach_ms or dt < -50:
             return
         x, y = self.position(note)
         r_base = _RADIUS * (1 / 4.46) * 1.1 * 1.2
@@ -369,7 +367,7 @@ class _TouchRenderer:
         color = C_SIMUL_DOT if note.is_each else C_TOUCH_CYAN
         lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         ld = ImageDraw.Draw(lay, "RGBA")
-        lw = max(1, round(3 * _RADIUS / 300 * constants._SS))
+        lw = max(1, round(3 * _RADIUS / 300 * c.ss))
         for n in ((r_base * 1.2,) if count >= 3 else ()) + (r_base,):
             left, top = x - n / 2, y - n / 2
             right_, bottom = left + n, top + n

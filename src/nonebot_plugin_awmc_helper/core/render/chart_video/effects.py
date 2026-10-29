@@ -11,7 +11,6 @@ import math
 import numpy as np
 from PIL import Image
 
-from . import constants
 from .canvas import (
     _Canvas,
     _screen_composite,
@@ -74,9 +73,7 @@ class _RendererEffectsMixin:
         )
         arr[..., 3] = np.round(255 * fade).astype(np.uint8)
         glow = Image.fromarray(arr, "RGBA")
-        c.over(
-            glow, (int(x * constants._SS - size / 2), int(y * constants._SS - size / 2))
-        )
+        c.over(glow, (int(x * c.ss - size / 2), int(y * c.ss - size / 2)))
 
     # ------------------------------------------------ 按压涟漪（it 类 L7186）
     def draw_press_ripple(
@@ -119,7 +116,7 @@ class _RendererEffectsMixin:
             r_out = radius * _RIPPLE_QE_OUT
             if r_out - r_in < 0.5:
                 continue
-            region = int(r_out * constants._SS) + 4
+            region = int(r_out * c.ss) + 4
             x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
             x1, y1 = (
                 int(min(c.img.width, cx + region)),
@@ -129,7 +126,7 @@ class _RendererEffectsMixin:
                 continue
             w, h = x1 - x0, y1 - y0
             yy, xx = np.mgrid[0:h, 0:w]
-            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / constants._SS  # logical
+            dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / c.ss  # logical
             t = (dist - r_in) / (r_out - r_in)
             msk = (t >= 0) & (t <= 1)
             if not msk.any():

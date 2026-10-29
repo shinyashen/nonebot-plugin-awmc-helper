@@ -6,7 +6,6 @@ import math
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import constants
 from ..fonts import font as _load_font
 from .canvas import _Canvas
 from .constants import (
@@ -24,7 +23,7 @@ class _HudMixin:
     def _hud(self, c: _Canvas, now: float, fps: int) -> None:
         """renderBpmDisplay（L8583）+ renderNoteCounts（L8637）。"""
 
-        s = constants._SS
+        s = c.ss
         r300 = c.radius / 300
         n22, n16 = round(22 * r300) * s, round(16 * r300) * s
         n20, n4 = round(20 * r300) * s, round(4 * r300) * s

@@ -2,9 +2,9 @@
 
 import math
 
-from . import constants
 from .notes import _Pos, _Note
 from .constants import _C_TRAVEL, _FLICK_FLOOR, _FLICK_PERIOD
+from .render_config import RenderConfig
 
 
 def _button_angle(pos: int) -> float:
@@ -44,23 +44,29 @@ def _hold_flicker(elapsed_ms: float) -> float:
 
 
 def _note_position(
-    note: _Note, now_ms: float, cx: float, cy: float, radius: float
+    note: _Note,
+    now_ms: float,
+    cx: float,
+    cy: float,
+    radius: float,
+    config: RenderConfig,
 ) -> _Pos:
     """calculateNotePosition（L307）。tap 判定后立即消失；hold 头驻留 R。
 
     alpha 字段对应 JS 的 scale：前半程由 0→1，用于 note 尺寸缩放。
+    approach 组取自本次渲染的 RenderConfig。
     """
     ang = _button_angle(note.pos)
     dt = note.timing - now_ms
     is_hold = note.kind == "hold"
     end_guard = -note.duration if is_hold else 0.0
-    if dt > constants._APPROACH_MS or dt < end_guard:
+    if dt > config.approach_ms or dt < end_guard:
         return _Pos(0.0, 0.0, 0.0, False)
-    if dt > constants._HALF_APPROACH:
+    if dt > config.half_approach_ms:
         d = radius * _C_TRAVEL
-        alpha = 1 - (dt - constants._HALF_APPROACH) / constants._HALF_APPROACH
+        alpha = 1 - (dt - config.half_approach_ms) / config.half_approach_ms
     elif dt >= 0:
-        e = 1 - dt / constants._HALF_APPROACH
+        e = 1 - dt / config.half_approach_ms
         d = radius * (_C_TRAVEL + 0.75 * e)
         alpha = 1.0
     elif is_hold:

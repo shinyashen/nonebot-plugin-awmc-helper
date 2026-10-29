@@ -12,15 +12,14 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import constants
 from .composer import _ChartRenderer
-from .constants import _LOGICAL, _DEFAULT_HI_SPEED, _apply_hi_speed, normalize_hi_speed
+from .constants import _LOGICAL
 from ..chart_audio import MIX_RATE, build_effect_track
 from ..chart_notes import SiteChart
 from .ffmpeg_check import resolve_ffmpeg, _probe_loudness
+from .render_config import _DEFAULT_HI_SPEED, RenderConfig
 
 _THREAD_STATE = threading.local()
-_CLIP_START_MS = 0.0
 _WORKER_SIZE = int(_LOGICAL)
 
 
@@ -47,12 +46,19 @@ def _compose_frame(
 
 
 def _thread_worker_init(
-    chart: SiteChart, fps: int, buddy_chart: SiteChart | None = None
+    chart: SiteChart,
+    fps: int,
+    config: RenderConfig,
+    buddy_chart: SiteChart | None,
+    start_ms: float,
 ) -> None:
-    """线程池 worker 初始化：每线程各持渲染器（共享只读谱面对象）。"""
-    _THREAD_STATE.renderer = _ChartRenderer(chart)
-    _THREAD_STATE.renderer2 = _ChartRenderer(buddy_chart) if buddy_chart else None
+    """线程池 worker 初始化：每线程各持渲染器（共享只读谱面与配置对象）。"""
+    _THREAD_STATE.renderer = _ChartRenderer(chart, config)
+    _THREAD_STATE.renderer2 = (
+        _ChartRenderer(buddy_chart, config) if buddy_chart else None
+    )
     _THREAD_STATE.fps = fps
+    _THREAD_STATE.start_ms = start_ms
 
 
 def _thread_render_chunk(args: tuple[int, int]) -> list[bytes]:
@@ -63,7 +69,7 @@ def _thread_render_chunk(args: tuple[int, int]) -> list[bytes]:
     fps = _THREAD_STATE.fps
     frames: list[bytes] = []
     for index in range(start, start + count):
-        now_ms = _CLIP_START_MS + index / fps * 1000.0
+        now_ms = _THREAD_STATE.start_ms + index / fps * 1000.0
         frames.append(
             zlib.compress(_compose_frame(renderer, renderer2, now_ms, fps).tobytes(), 1)
         )
@@ -76,7 +82,8 @@ def _write_frames_parallel(
     n_frames: int,
     fps: int,
     workers: int,
-    start_ms: float = 0.0,
+    config: RenderConfig,
+    start_ms: float,
     buddy_chart: SiteChart | None = None,
 ) -> bool:
     """多线程分帧渲染并保序写入 ffmpeg 管道。
@@ -89,21 +96,17 @@ def _write_frames_parallel(
     import os
     from concurrent.futures import ThreadPoolExecutor
 
-    global _CLIP_START_MS
-
     workers = max(1, min(workers, (os.cpu_count() or 1)))
     chunk = max(1, min(30, n_frames // (workers * 4) or 1))
     tasks = [
         (start, min(chunk, n_frames - start)) for start in range(0, n_frames, chunk)
     ]
     wrote = 0
-    previous_start = _CLIP_START_MS
-    _CLIP_START_MS = start_ms
     try:
         with ThreadPoolExecutor(
             max_workers=workers,
             initializer=_thread_worker_init,
-            initargs=(chart, fps, buddy_chart),
+            initargs=(chart, fps, config, buddy_chart, start_ms),
         ) as pool:
             for frames in pool.map(_thread_render_chunk, tasks):
                 for frame in frames:
@@ -116,11 +119,6 @@ def _write_frames_parallel(
         if wrote:
             raise
         return False
-    finally:
-        _CLIP_START_MS = previous_start
-
-
-_SS_LOCK = threading.Lock()
 
 
 def render_chart_video(
@@ -143,52 +141,32 @@ def render_chart_video(
     ffmpeg: str | None = None,
     buddy_chart: SiteChart | None = None,
 ) -> Path:
-    """渲染入口：设置超采样/谱面流速/ffmpeg 路径，串行化并发渲染。"""
-    clamped = max(1.0, min(2.0, float(supersample)))
-    speed = normalize_hi_speed(hi_speed)
-    with _SS_LOCK:
-        previous_ss = constants._SS
-        previous_speed = (
-            constants._HI_SPEED,
-            constants._APPROACH_MS,
-            constants._HALF_APPROACH,
-            constants._TOUCH_APPROACH_MS,
-            constants._SPEED_SETTING,
-        )
-        constants._SS = clamped
-        _apply_hi_speed(speed)
-        try:
-            return _render_chart_video_impl(
-                chart,
-                audio=audio,
-                out_path=out_path,
-                fps=fps,
-                limit_seconds=limit_seconds,
-                workers=workers,
-                sound_effects=sound_effects,
-                sound_offset_ms=sound_offset_ms,
-                loudness_lufs=loudness_lufs,
-                start_ms=start_ms,
-                end_ms=end_ms,
-                notes_start_ms=notes_start_ms,
-                fade_in_ms=fade_in_ms,
-                ffmpeg=ffmpeg,
-                buddy_chart=buddy_chart,
-            )
-        finally:
-            constants._SS = previous_ss
-            (
-                constants._HI_SPEED,
-                constants._APPROACH_MS,
-                constants._HALF_APPROACH,
-                constants._TOUCH_APPROACH_MS,
-                constants._SPEED_SETTING,
-            ) = previous_speed
+    """渲染入口：构造本次渲染的 RenderConfig 并贯穿全程（可安全并发）。"""
+    config = RenderConfig.create(supersample=supersample, hi_speed=hi_speed)
+    return _render_chart_video_impl(
+        chart,
+        config=config,
+        audio=audio,
+        out_path=out_path,
+        fps=fps,
+        limit_seconds=limit_seconds,
+        workers=workers,
+        sound_effects=sound_effects,
+        sound_offset_ms=sound_offset_ms,
+        loudness_lufs=loudness_lufs,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        notes_start_ms=notes_start_ms,
+        fade_in_ms=fade_in_ms,
+        ffmpeg=ffmpeg,
+        buddy_chart=buddy_chart,
+    )
 
 
 def _render_chart_video_impl(
     chart: SiteChart,
     *,
+    config: RenderConfig,
     audio: bytes | None,
     out_path: Path,
     fps: int = 30,
@@ -221,7 +199,7 @@ def _render_chart_video_impl(
     import subprocess
 
     ffmpeg_bin = resolve_ffmpeg(ffmpeg)
-    renderer = _ChartRenderer(chart)
+    renderer = _ChartRenderer(chart, config)
     if workers <= 0:  # 0=自动：线程池受益有限，实测 2–4 线程最佳（上限 4）
         workers = max(1, min(4, os.cpu_count() or 1))
     full_total_ms = max(1.0, chart.timeline.ms_from_beat(chart.total_beats))
@@ -366,11 +344,11 @@ def _render_chart_video_impl(
     assert proc.stdin is not None
     try:
         if workers > 1 and _write_frames_parallel(
-            proc, chart, n_frames, fps, workers, clip_start, buddy_chart
+            proc, chart, n_frames, fps, workers, config, clip_start, buddy_chart
         ):
             pass
         else:
-            renderer2 = _ChartRenderer(buddy_chart) if buddy_chart else None
+            renderer2 = _ChartRenderer(buddy_chart, config) if buddy_chart else None
             for i in range(n_frames):
                 now_ms = clip_start + i / fps * 1000.0
                 proc.stdin.write(

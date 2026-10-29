@@ -11,7 +11,6 @@ import bisect
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import constants
 from .notes import _Pos, _Note
 from .canvas import (
     ImageChops_darker,
@@ -50,6 +49,7 @@ from ..chart_notes import (
     break_completion_times,
     break_noex_completion_times,
 )
+from .render_config import RenderConfig
 
 
 class _Renderer(_RendererEffectsMixin):
@@ -63,9 +63,11 @@ class _Renderer(_RendererEffectsMixin):
         notes: list[_Note],
         site: SiteChart,
         hit_notes: list[tuple[int, float, bool]],
+        config: RenderConfig,
     ):
         self.notes = notes
         self.site = site
+        self.config = config
         self.sw = _STROKE * _RADIUS  # note 描边宽（logical px）
         self.slides = [n for n in notes if n.kind == "slide"]
         self.holds = [n for n in notes if n.kind == "hold"]
@@ -105,7 +107,7 @@ class _Renderer(_RendererEffectsMixin):
         self.completions = note_completion_times(site.notes)
         self.break_completions = break_completion_times(site.notes)
         self.noex_break_completions = break_noex_completion_times(site.notes)
-        self.sprites = _Sprites()
+        self.sprites = _Sprites(config)
         self._fonts: dict[int, ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
     # ------------------------------------------------------------ 通用
@@ -138,20 +140,20 @@ class _Renderer(_RendererEffectsMixin):
                 lay = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
                 ImageDraw.Draw(lay).ellipse(
                     (
-                        x - r1 * constants._SS,
-                        y - r1 * constants._SS,
-                        x + r1 * constants._SS,
-                        y + r1 * constants._SS,
+                        x - r1 * c.ss,
+                        y - r1 * c.ss,
+                        x + r1 * c.ss,
+                        y + r1 * c.ss,
                     ),
                     fill=color,
                 )
                 hole = Image.new("L", c.img.size, 0)
                 ImageDraw.Draw(hole).ellipse(
                     (
-                        x - r0 * constants._SS,
-                        y - r0 * constants._SS,
-                        x + r0 * constants._SS,
-                        y + r0 * constants._SS,
+                        x - r0 * c.ss,
+                        y - r0 * c.ss,
+                        x + r0 * c.ss,
+                        y + r0 * c.ss,
                     ),
                     fill=255,
                 )
@@ -207,7 +209,7 @@ class _Renderer(_RendererEffectsMixin):
         for n in taps:
             if n.timing <= now:
                 continue
-            pos = _note_position(n, now, c.cx, c.cy, c.radius)
+            pos = _note_position(n, now, c.cx, c.cy, c.radius, self.config)
             if not pos.visible:
                 continue
             color = (
@@ -247,19 +249,21 @@ class _Renderer(_RendererEffectsMixin):
 
     # ------------------------------------------------------------ hold（Ce 类 L6429）
     def draw_hold(self, c: _Canvas, note: _Note, now: float) -> None:
-        head = _note_position(note, now, c.cx, c.cy, c.radius)
+        head = _note_position(note, now, c.cx, c.cy, c.radius, self.config)
         tail_note = _Note("tap", note.pos, note.timing + note.duration)
-        tail = _note_position(tail_note, now, c.cx, c.cy, c.radius)
+        tail = _note_position(tail_note, now, c.cx, c.cy, c.radius, self.config)
         angle = _button_angle(note.pos)
         m = c.radius * _R_NOTE * _B_HOLD
         h = m * head.alpha if head.visible else 0.0
         # 尾宽 j：头未进入后半接近窗时渐长（renderHold L6464 j 逻辑，基于头 timing）
         start_dt = note.timing - now
         j = 1.0
-        if start_dt > constants._HALF_APPROACH:
+        if start_dt > self.config.half_approach_ms:
             j = max(
                 0.0,
-                1 - (start_dt - constants._HALF_APPROACH) / constants._HALF_APPROACH,
+                1
+                - (start_dt - self.config.half_approach_ms)
+                / self.config.half_approach_ms,
             )
         m_tail = m * j
         if head.visible:
@@ -345,7 +349,7 @@ class _Renderer(_RendererEffectsMixin):
         if (
             tail.visible
             and note.duration
-            and note.timing + note.duration - now <= constants._HALF_APPROACH
+            and note.timing + note.duration - now <= self.config.half_approach_ms
         ):
             c.fill_circle(tx, ty, m_tail * 0.15, _brightness(c0, flick))
         # 进行中按压涟漪在特效阶段统一绘制（renderNotes L8138，见 render_frame）

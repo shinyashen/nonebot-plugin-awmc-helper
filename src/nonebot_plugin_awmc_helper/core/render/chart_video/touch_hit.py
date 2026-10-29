@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PIL import Image, ImageDraw
 
-from . import constants
 from .notes import _Note, _touch_position_name
 from .canvas import _Canvas, _poly_mask, _additive_composite
 from .constants import (
@@ -105,9 +104,8 @@ class _TouchHitEffects:
         """getStarSprites（L7590）+ drawStarFrame（L7605）：4 帧 sparkle。"""
         if self._star_sprites is not None:
             return self._star_sprites
-        size = math.ceil(
-            _TOUCHHIT_SPRITE_SIZE * _TOUCHHIT_STAR_SCALE * 2 * constants._SS
-        )
+        ss = self.r.config.supersample
+        size = math.ceil(_TOUCHHIT_SPRITE_SIZE * _TOUCHHIT_STAR_SCALE * 2 * ss)
         base_r = _TOUCHHIT_SPRITE_SIZE
         col = self.color
         white = (255, 255, 241)  # Z({r:1,g:1,b:.94}) ≈ (255,255,241)
@@ -150,29 +148,27 @@ class _TouchHitEffects:
             img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
             if style == "stroke":
                 d = ImageDraw.Draw(img, "RGBA")
-                path_o = sparkle_path(
-                    outer * 1.08 * constants._SS, inner_r * 1.08 * constants._SS
-                )
-                path_i = sparkle_path(outer * constants._SS, inner_r * constants._SS)
+                path_o = sparkle_path(outer * 1.08 * ss, inner_r * 1.08 * ss)
+                path_i = sparkle_path(outer * ss, inner_r * ss)
                 d.line(
                     [*path_o, path_o[0]],
                     fill=(*col, int(255 * 0.22)),
-                    width=max(1, round(outer * 0.13 * constants._SS)),
+                    width=max(1, round(outer * 0.13 * ss)),
                     joint="curve",
                 )
                 d.line(
                     [*path_i, path_i[0]],
                     fill=(*white, int(255 * 0.88)),
-                    width=max(1, round(outer * 0.055 * constants._SS)),
+                    width=max(1, round(outer * 0.055 * ss)),
                     joint="curve",
                 )
             else:
                 # fillStarGradient（L7623）：径向多停点
                 cx = cy = size / 2
-                path = sparkle_path(outer * constants._SS, inner_r * constants._SS)
+                path = sparkle_path(outer * ss, inner_r * ss)
                 mask = _poly_mask((size, size), path)
                 yy, xx = np.mgrid[0:size, 0:size]
-                dist = np.hypot(xx - cx, yy - cy) / (outer * constants._SS)
+                dist = np.hypot(xx - cx, yy - cy) / (outer * ss)
                 if style == "a":
                     seg_pos = (0.0, 0.34, 0.72, 1.0)
                     seg_alpha = (0.03, 0.14, 0.82, 0.0)
@@ -286,14 +282,14 @@ class _TouchHitEffects:
         if alpha <= 0.01:
             return
         cx, cy = c.s(x), c.s(y)
-        region = int(radius * constants._SS) + 2
+        region = int(radius * c.ss) + 2
         x0, y0 = int(max(0, cx - region)), int(max(0, cy - region))
         x1, y1 = int(min(c.img.width, cx + region)), int(min(c.img.height, cy + region))
         if x1 <= x0 or y1 <= y0:
             return
         w, h = x1 - x0, y1 - y0
         yy, xx = np.mgrid[0:h, 0:w]
-        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / constants._SS
+        dist = np.hypot(xx - (cx - x0), yy - (cy - y0)) / c.ss
         t = dist / radius
         n_stops = len(_TOUCHHIT_GLOW)
         glow = np.zeros_like(t)
@@ -350,7 +346,7 @@ class _TouchHitEffects:
         # 合成（900² 下约 24ms/次，84s 段落一次 7-8 个星爆），改为按解析
         # 上界裁 bbox 层，结果一致但开销与面积成正比。
         max_r = (start_r + abs(drift)) * r480 + peak_r * r480 * 0.847 + 2
-        region = int(max_r * constants._SS) + 2
+        region = int(max_r * c.ss) + 2
         cx, cy = c.s(x), c.s(y)
         x0 = max(0, int(cx - region))
         y0 = max(0, int(cy - region))

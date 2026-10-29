@@ -38,15 +38,16 @@ def test_button_angles(cv):
 def test_note_position_travel(cv):
     """运动：前半窗 0.25R 驻留淡入 → 后半窗到 R → tap 判定后消失。"""
     note = cv._Note("tap", 6, 6734.7)
+    config = cv.RenderConfig.create()
     # 前半窗起点（接近窗开端）：驻留 0.25R、alpha=0
-    p = cv._note_position(note, 6734.7 - cv._APPROACH_MS + 1, 300, 300, 270)
+    p = cv._note_position(note, 6734.7 - config.approach_ms + 1, 300, 300, 270, config)
     assert math.hypot(p.x - 300, p.y - 300) == pytest.approx(270 * 0.25, abs=2)
     assert p.alpha == pytest.approx(0.0, abs=0.01)
     # 判定时刻：正好在 R
-    p = cv._note_position(note, 6734.7, 300, 300, 270)
+    p = cv._note_position(note, 6734.7, 300, 300, 270, config)
     assert math.hypot(p.x - 300, p.y - 300) == pytest.approx(270, abs=1)
     # 判定后：tap 不可见
-    p = cv._note_position(note, 6734.7 + 50, 300, 300, 270)
+    p = cv._note_position(note, 6734.7 + 50, 300, 300, 270, config)
     assert not p.visible
 
 
@@ -214,20 +215,35 @@ def test_check_ffmpeg_reports_usable_and_missing(cv, monkeypatch):
 
 
 def test_speed_mapping_majdata(cv):
-    """流速按 Majdata 标定：7.0 → 音符 630.6ms / touch 500.5ms（见常量注释）。"""
+    """流速按 Majdata 标定：7.0 → 音符 630.6ms / touch 500.5ms（见标定注释）。"""
     import pytest
 
-    try:
-        cv._apply_hi_speed(7.0)
-        assert cv._APPROACH_MS == pytest.approx(630.56, abs=0.05)
-        assert cv._HALF_APPROACH == pytest.approx(315.28, abs=0.05)
-        assert cv._TOUCH_APPROACH_MS == pytest.approx(500.48, abs=0.05)
-        assert cv._SPEED_SETTING == 7.0
-        cv._apply_hi_speed(6.0)
-        assert cv._APPROACH_MS == pytest.approx(719.28, abs=0.05)
-        assert cv._TOUCH_APPROACH_MS == pytest.approx(579.85, abs=0.05)
-    finally:
-        cv._apply_hi_speed(cv._DEFAULT_HI_SPEED)
+    config = cv.RenderConfig.create(hi_speed=7.0)
+    assert config.speed_setting == 7.0
+    assert config.approach_ms == pytest.approx(630.56, abs=0.05)
+    assert config.half_approach_ms == pytest.approx(315.28, abs=0.05)
+    assert config.touch_approach_ms == pytest.approx(500.48, abs=0.05)
+    config6 = cv.RenderConfig.create(hi_speed=6.0)
+    assert config6.approach_ms == pytest.approx(719.28, abs=0.05)
+    assert config6.touch_approach_ms == pytest.approx(579.85, abs=0.05)
+
+
+def test_render_config_concurrent():
+    """RenderConfig 不可变且各渲染独立：并发渲染不再有进程级流速/超采样串行。"""
+    import dataclasses
+
+    from nonebot_plugin_awmc_helper.core.render.chart_video.render_config import (
+        DEFAULT_CONFIG,
+        RenderConfig,
+    )
+
+    assert dataclasses.is_dataclass(RenderConfig)
+    fast = RenderConfig.create(supersample=1.0, hi_speed=9.0)
+    slow = RenderConfig.create(supersample=2.0, hi_speed=3.0)
+    # 互不干扰：fast 的构造不影响 slow 与默认值（旧全局态会互相覆盖）
+    assert fast.approach_ms < slow.approach_ms
+    assert DEFAULT_CONFIG.supersample == 2.0
+    assert DEFAULT_CONFIG.approach_ms == RenderConfig.create().approach_ms
 
 
 def test_parse_site_chart_buddy_suffix(site):
