@@ -246,6 +246,52 @@ def test_render_config_concurrent():
     assert DEFAULT_CONFIG.approach_ms == RenderConfig.create().approach_ms
 
 
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 ffmpeg")
+def test_render_concurrent_no_cross_contamination(cv, site, tmp_path: Path):
+    """同进程两线程并发渲染不同 (超采样, 流速)，产物须与单独渲染逐字节一致。
+
+    端到端守卫 RenderConfig 对象化：旧的模块级全局（_SS/_APPROACH_MS/
+    _CLIP_START_MS）在并发渲染下会互相污染（流速/帧起点被后启动者改写）。
+    """
+    import hashlib
+    import threading
+
+    chart = site((SNAPSHOTS / "8.txt").read_text(), difficulty=5)[5]
+
+    def run(tag: str, supersample: float, hi_speed: float) -> str:
+        out = cv.render_chart_video(
+            chart,
+            audio=None,
+            out_path=tmp_path / f"{tag}.mp4",
+            limit_seconds=1.0,
+            fps=30,
+            workers=2,
+            supersample=supersample,
+            hi_speed=hi_speed,
+        )
+        return hashlib.sha256(out.read_bytes()).hexdigest()
+
+    solo = {
+        "fast": run("fast_solo", 1.0, 9.0),
+        "slow": run("slow_solo", 2.0, 3.0),
+    }
+    results: dict[str, str] = {}
+
+    def worker(tag: str, ss: float, speed: float) -> None:
+        results[tag] = run(tag, ss, speed)
+
+    threads = [
+        threading.Thread(target=worker, args=("fast_conc", 1.0, 9.0)),
+        threading.Thread(target=worker, args=("slow_conc", 2.0, 3.0)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results["fast_conc"] == solo["fast"], "并发污染了 fast 渲染"
+    assert results["slow_conc"] == solo["slow"], "并发污染了 slow 渲染"
+
+
 def test_parse_site_chart_buddy_suffix(site):
     """&inote_102（buddy 2P）也要能解析：历史上正则只认单个数字。"""
     text = (
