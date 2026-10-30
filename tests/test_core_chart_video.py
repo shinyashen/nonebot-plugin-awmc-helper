@@ -178,7 +178,13 @@ def test_check_ffmpeg_reports_usable_and_missing(cv, monkeypatch):
     """探测：完整构建 usable；缺 libx264/loudnorm 时报 missing 条目。"""
     from types import SimpleNamespace
 
-    monkeypatch.setattr(cv, "resolve_ffmpeg", lambda _ffmpeg=None: "/usr/bin/ffmpeg")
+    # check_ffmpeg 拆到 ffmpeg_check 模块后读的是该模块全局的
+    # resolve_ffmpeg，patch 必须落在定义处（包 __init__ 只是再导出）
+    from nonebot_plugin_awmc_helper.core.render.chart_video import ffmpeg_check
+
+    monkeypatch.setattr(
+        ffmpeg_check, "resolve_ffmpeg", lambda _ffmpeg=None: "/usr/bin/ffmpeg"
+    )
 
     def fake_run(cmd, **kwargs):
         if "-version" in cmd:

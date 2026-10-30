@@ -120,7 +120,19 @@ def render_golden_frames(chart, times: list[float]) -> list[bytes]:
 
 
 def test_chart_video_golden_frames():
-    """逐帧 SHA256 比对黄金帧清单；任何变化都是渲染行为变了。"""
+    """逐帧 SHA256 比对黄金帧清单；任何变化都是渲染行为变了。
+
+    基线在「有 static 素材包字体」的开发机生成；CI 没有 static/（不入库），
+    字体回落 load_default 会整体改变帧内容——素材缺失时跳过（不是基线
+    失效，是环境不可比）。
+    """
+    from nonebot_plugin_awmc_helper.config import plugin_config
+
+    font_path = (
+        Path(plugin_config.awmc_static_path) / "font" / "ResourceHanRoundedCN-Bold.ttf"
+    )
+    if not font_path.exists():
+        pytest.skip(f"static 素材包缺失（{font_path}），黄金帧仅在素材齐备的环境比对")
     if not GOLDEN_JSON.exists():
         pytest.fail(
             "黄金帧清单缺失：先在仓库根目录运行 "
