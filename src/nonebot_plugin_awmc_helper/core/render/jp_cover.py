@@ -70,7 +70,7 @@ async def _download_cover(url: str, path: Path, *, subject: str, verify) -> bool
 
 
 async def _fetch_cover_chain(
-    song_id: int | str, image_url: str, path: Path, *, with_lxns: bool
+    song_id: int | str, image_url: str | None, path: Path, *, with_lxns: bool
 ) -> bool:
     """落雪资产站 →（官方 NET）→ otoge-db 仓库缩图，逐级落同一缓存路径。
 
