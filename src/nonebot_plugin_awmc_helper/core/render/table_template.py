@@ -372,7 +372,7 @@ async def generate_rating_template(level: str, song_service) -> int:
         return 0
     out = rating_table_file(level)
     out.parent.mkdir(parents=True, exist_ok=True)
-    # 绘制段 CPU 密集（数百张封面加载/缩放），整体让出事件循环（L-6）；
+    # 绘制段 CPU 密集（数百张封面加载/缩放），整体让出事件循环；
     # 闭包只引用本协程局部变量，无跨线程共享可变状态
     img = await asyncio.to_thread(
         lambda: _rating_grid_15(entries) if level == "15" else _rating_grid(entries)
@@ -541,7 +541,7 @@ async def generate_plate_template(
             if not any(group.values()):
                 continue
             flat = [pair for charts in group.values() for pair in charts]
-            # 绘制段让出事件循环（L-6）：lambda 在本次迭代内即被 await，
+            # 绘制段让出事件循环：lambda 在本次迭代内即被 await，
             # 捕获的 flat/pages 不会跨迭代失效
             img = await asyncio.to_thread(
                 lambda flat=flat, pages=pages: _plate_grid(
@@ -720,12 +720,13 @@ def draw_level_header(
     """完成表/定数表大字表头（rating_table/table_template 共用）。
 
     两版式 y 有意错位（普通分支统计头不同），由调用方传入。
-    ``prefix=None`` 为条件化表头（P2-c）：无 Level. 前缀、直接画条件串，
+    ``prefix=None`` 为条件化表头（条件化收编，karenbot-combo-notes.md
+    §12.2）：无 Level. 前缀、直接画条件串，
     超 4 显示字降字号防溢出。``suffix``：表型说明（「完成表」/「定数表」，
     2026-10-01 QoL——标题位原本只承载 Level./条件串，表型无处说明）。
 
     字体口径（2026-10-01 用户拍板）：「Level. xx」整段日文字体（RODIN，
-    数字原为 RODIN，P2-c 曾误改 HAN）；条件串与表型说明统一中文字体
+    数字原为 RODIN，条件化收编时曾误改 HAN）；条件串与表型说明统一中文字体
     （HAN——Rodin 无简中字形）。整块标题按实测宽度水平居中于画布中轴
     700（原左起 495 固定位，长条件串头重脚轻）。
     """
@@ -755,10 +756,10 @@ def draw_level_header(
 def _width(text: str) -> int:
     """显示宽度粗算（全角 2 / 半角 1；标题字号选择用）。
 
-    ⚠️ 与 :func:`tools.column_width` 是**两套独立宽度口径**（第六轮审查定案：
-    不合并）——本函数按码点粗分（>0x2E7F 记全角 2），column_width 走 NB
-    _CHAR_WIDTHS 逐字宽表；换实现会改变「Level.」大字的 100pt/60pt 字号
-    切换点，属视觉变更。粗算口径仅此处表头字号选择用，截断类一律走
+    ⚠️ 与 :func:`tools.column_width` 是**两套独立宽度口径**（定案：不合并）
+    ——本函数按码点粗分（>0x2E7F 记全角 2）仅驱动表头「Level.」大字的
+    100pt/60pt 字号切换，column_width 走 NB _CHAR_WIDTHS 逐字宽表；换实现
+    会改变切换点，属视觉变更。粗算口径仅此处表头字号选择用，截断类一律走
     column_width 族。
     """
     return sum(2 if ord(ch) > 0x2E7F else 1 for ch in text)
@@ -777,7 +778,7 @@ async def rating_table_base_image(
     不一致，按 entries 现算且不落盘（条件版现算同口径，2026-09-30 拍板）。
 
     条件版现算不落盘、不做进程缓存（2026-09-30 拍板：条件组合长尾命中率
-    低，现算 1-3s 可接受）。CPU 密集，整体在工作线程执行（L-6）。
+    低，现算 1-3s 可接受）。CPU 密集，整体在工作线程执行。
     """
     if level:
         if use_file:
@@ -798,13 +799,13 @@ async def _rating_table_text_bytes(
     level: "str | None" = None,
     use_file: bool = True,
 ) -> bytes:
-    """定数表文字版渲染孪生体合并实现（第六轮审查）。
+    """定数表文字版渲染（等级/条件两版式合并实现）。
 
     ``level`` 非 None → 底图走该等级文件底图（缺失现算）且表头带
     「Level.」前缀；None → 条件版（底图按 entries 现算、条件串直接作表头）。
     ``use_file=False``（日服视图）按 entries 现算（口径同
     :func:`rating_table_base_image`）。
-    现算分支 CPU 密集，整体在工作线程执行（L-6），故本函数为协程。
+    现算分支 CPU 密集，整体在工作线程执行，故本函数为协程。
     """
     im = await rating_table_base_image(entries, level, use_file=use_file)
     dr = ImageDraw.Draw(im)
@@ -870,7 +871,8 @@ async def rating_table_cond_text_page_bytes(
 async def rating_table_cond_text_bytes(
     entries: Sequence[tuple[Song, SongDifficulty]], header_text: str
 ) -> "list[bytes]":
-    """条件化定数表（P2-c）：底图按条件谱面集现算（不落盘）、条件串表头。
+    """条件化定数表（条件化收编，karenbot-combo-notes.md §12.2）：底图按
+    条件谱面集现算（不落盘）、条件串表头。
 
     超过 :data:`~core.render.table_layout.COND_TABLE_PAGE_ROWS` 行按等级组
     整组分页，返回逐页 PNG（表头带「定数表 i/n」）；单页返回单元素列表

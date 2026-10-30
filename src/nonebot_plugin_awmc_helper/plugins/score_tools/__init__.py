@@ -174,7 +174,7 @@ async def _(
         await UniMessage.text(" 没有找到可以提升 RA 的曲目，换一个目标试试吧").finish(
             at_sender=True
         )
-    # R3：NB DrawScore 行卡版式——双栏按版本划分（用户口径）：旧版本 =
+    # NB DrawScore 行卡版式——双栏按版本划分（用户口径）：旧版本 =
     # 当前版本以前全部谱面（b35 侧），新版本 = 当前版本谱面（b15 侧）
     old_rec = [r for r in rec if r["side"] == "old"]
     new_rec = [r for r in rec if r["side"] == "new"]

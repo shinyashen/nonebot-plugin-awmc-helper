@@ -77,7 +77,7 @@ async def ext_request(
     network_message: str | None = None,
     **kwargs,
 ) -> httpx.Response:
-    """ext 层请求底座（D1）：网络异常重试 ``retries`` 次后统一包装
+    """ext 层请求底座：网络异常重试 ``retries`` 次后统一包装
     ExtNetworkError。
 
     状态码检查与 JSON 解析留在各源模块——协议形态不同（柚子 4xx 带

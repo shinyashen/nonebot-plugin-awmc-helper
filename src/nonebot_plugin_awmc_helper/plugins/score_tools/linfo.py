@@ -109,8 +109,9 @@ async def _(
         await chart_history(song.id, kind, diff.level_index.value)
     )
     if not jp_view:
-        # 国服视图基线校准：国服先行曲首节点提前到国服上线版本（§5.3 同款
-        # 「区间无值取首值」fallback），否则起始版本错归因到日服追加版本
+        # 国服视图基线校准：国服先行曲首节点提前到国服上线版本
+        # （song-db-design.md §5.3 同款「区间无值取首值」fallback），
+        # 否则起始版本错归因到日服追加版本
         points = with_cn_baseline(points, await group_cn_version(song.id, kind))
     if len(points) <= 1:
         # DX 世代全程未调整：不出卡，纯文本告知（值取不到时回落当前定数）

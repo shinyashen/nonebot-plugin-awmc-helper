@@ -157,7 +157,8 @@ def draw_rating_table_cond(
     by_level: bool = True,
     suffix: str = "完成表",
 ) -> bytes:
-    """条件化完成表（P2-c）：调用方提供现算/文件底图，成绩按谱面键集过滤。
+    """条件化完成表（条件化收编，karenbot-combo-notes.md §12.2）：调用方
+    提供现算/文件底图，成绩按谱面键集过滤。
 
     ``header_text``：标题大字（单等级条件传等级串配 ``header_prefix="Level."``
     ——「Level. xx」整段日文字体口径，2026-10-01；其余传条件 label 串——

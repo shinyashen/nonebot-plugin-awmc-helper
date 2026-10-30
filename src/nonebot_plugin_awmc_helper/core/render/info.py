@@ -125,7 +125,7 @@ def song_play_data(
         score = by_slot.get(level_index)
         diff = next(d for d in diffs if d.level_index == level_index)
         # 定数小字为白色（NB DrawText 默认色），两分支逐字相同 → 分支前单次
-        # 绘制。z 序核验（2026-10-04 第六轮）：已玩分支其后的绘制（ra_dx 底、
+        # 绘制。z 序核验（2026-10-04）：已玩分支其后的绘制（ra_dx 底、
         # DX 星、DX 分、fcfs、连击/Sync 章、评级章、达成率文本）bbox 均不与
         # (685, 251+y) 白字区域相交，提前绘制不被覆盖，逐像素等价
         dr.text(

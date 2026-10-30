@@ -53,7 +53,7 @@ def _ids_text(song) -> str:
 async def _send_song_aliases(song_id: int, hint: str = "") -> None:
     """发送某曲目的全部别名（柚子 + 落雪 + MuNET + 本地合并视图），ID 展示全部可用 id。
 
-    国服视图未命中（仅日服曲目）时回退日服视图取曲、合并库取别名（Q32 同口径），
+    国服视图未命中（仅日服曲目）时回退日服视图取曲、合并库取别名，
     ID 行追加「（日服限定）」标注。
     """
     song = await song_service.by_id(song_id)
@@ -131,12 +131,12 @@ async def _(bot: Bot, session: Session = UniSession(), groups: tuple = RegexGrou
     songs, strip_info = await song_service.by_alias_detail(keyword)
     jp_only = False
     if not songs:
-        # 国服视图未命中 → 日服视图别名兜底（仅日服曲目，Q32 同口径）
+        # 国服视图未命中 → 日服视图别名兜底（仅日服曲目，既定回退口径）
         songs, strip_info = await song_service.jp_by_alias_detail(keyword)
         jp_only = True
     hint = ""
     if strip_info:
-        # 前缀/后缀剥离命中：提醒别名库已合并，无需再加谱面前后缀（Q31）
+        # 前缀/后缀剥离命中：提醒别名库已合并，无需再加谱面前后缀
         stripped, matched, kind = strip_info
         pos = "后缀" if kind == "suffix" else "前缀"
         hint = (

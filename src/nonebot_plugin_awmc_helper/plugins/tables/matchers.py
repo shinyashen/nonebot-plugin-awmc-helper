@@ -47,8 +47,8 @@ from ...core.sources import Capability
 from ...core.render.tools import text_image_bytes
 from ...core.render.rating_table import draw_rating_table_cond
 
-# 表格条件化统一入口（P2-c 收编：定数表/完成表尾缀并入，触发文本逐字不变；
-# 类别词/页码为尾缀附带参数）
+# 表格条件化统一入口（条件化收编，karenbot-combo-notes.md §12.2：定数表/
+# 完成表尾缀并入，触发文本逐字不变；类别词/页码为尾缀附带参数）
 progress_cmd = on_regex(
     at_tolerant(
         r"^(.+?)(已完成|未完成|未游玩|未开始)?(进度|完成表|定数表)\s?([0-9]+)?$"
@@ -73,7 +73,8 @@ async def _(
     groups: tuple = RegexGroup(),
     session: Session = UniSession(),
 ):
-    """条件化表格（进度/完成表/定数表统一入口，P2-c 收编）：
+    """条件化表格（进度/完成表/定数表统一入口，条件化收编
+    karenbot-combo-notes.md §12.2）：
 
     牌组合文本经形状回认走牌子专用渲染（非法牌保持旧拒绝文案）；完成表/
     定数表的单等级条件走文件底图与既有版式（收编等价 + 同速），其余条件
@@ -127,7 +128,7 @@ async def _(
             return
 
     # 中文尾缀（进度/完成表/定数表）排除纯数字闲聊，裸数字等级/定数一律
-    # 放行（S-8 拍板「级/定数必带仅限数字尾缀 50/40」；曾把进度语境排除在
+    # 放行（定案口径：级/定数必带仅限数字尾缀 50/40；曾把进度语境排除在
     # 外——14+sss+进度 的「14+」被丢弃，整表退化为纯 sss+ 过滤）
     # explicit：用户显式带页码 → 分页表只渲对应页（默认发全）
     explicit = bool(page_raw)
@@ -289,7 +290,7 @@ async def _(
     binding: UserBinding = SessionQueryBinding(),
     groups: tuple = RegexGroup(),
 ):
-    """条件化分数列表（R5 行卡版式泛化，80/页）：条件 → 成绩集，达成率降序。"""
+    """条件化分数列表（行卡版式泛化，80/页）：条件 → 成绩集，达成率降序。"""
     cond_text, page_raw = groups
     page = parse_page(page_raw)
     await ensure_designer_rules()

@@ -124,7 +124,7 @@ def _major_type_diffs(song: Song, prefer_sd: bool) -> list:
 def major_type_of(song: Song, prefer_type: SongType | None = None) -> SongType:
     """卡片主类型判定单源（SD/DX 缩写、类型徽章、prefer_sd 派生共用）。
 
-    语义与历史各消费点逐字重复的判定一致（2026-10-04 第六轮单源化）：
+    语义与历史各消费点逐字重复的判定一致（2026-10-04 单源化）：
 
     - ``prefer_type`` 为 STANDARD 且存在 standard 谱面 → STANDARD
       （前缀「标准/标」搜索显示 SD 谱面）；

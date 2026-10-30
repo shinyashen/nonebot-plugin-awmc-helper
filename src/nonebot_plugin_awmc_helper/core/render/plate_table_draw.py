@@ -191,7 +191,7 @@ def draw_plate_table(
     finished_marks = [assets.pic(f"t_{i}.png") for i in range(slot_num)]
 
     # 网格几何走 table_layout 单源（grid_rows/iter_grid/grid_height，与模板
-    # 侧/盖章侧/进度总览同一套；第六轮审查：删 COL_STEP 等本地别名）
+    # 侧/盖章侧/进度总览同一套，勿再引本地别名副本）
     current_y = PLATE_START_Y
     for level, songs_slots in played.items():
         slots_list = list(songs_slots.items())

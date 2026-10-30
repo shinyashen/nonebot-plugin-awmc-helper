@@ -1,6 +1,7 @@
 """awmc.songdb：歌曲库 SUPERUSER 指令（规范表手动运维入口）。
 
-- `重载补充数据`：立即重读全部外部补充源并按模式合并（§7.5-C）；
+- `重载补充数据`：立即重读全部外部补充源并按模式合并
+  （song-db-design.md §7.5-C）；
   MuNET 别名全量走查在此后台启动（force 跳过间隔检查，互斥锁防并发）。
 - `刷新歌曲库`：手动执行全量管线（四源重建 → MuNET 批次补充 → 底图 →
   运行时刷新）。
@@ -68,7 +69,8 @@ async def _():
     if summary.get("changed") or g_changed:
         from ...core.songs import prerender_templates
 
-        await prerender_templates()  # 与自动管线共用：变化即重建底图（§7.5-C）
+        # 与自动管线共用：变化即重建底图（song-db-design.md §7.5-C）
+        await prerender_templates()
         wiki_msg = f"，wiki 补充 {g_applied} 处" if g_applied else ""
         await UniMessage.text(
             f"补充数据已重载并重建底图（源 {summary['sources']} 个"

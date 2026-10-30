@@ -84,8 +84,9 @@ async def _render_jp_result(songs, page: int, binding=None) -> None:
 async def _render_query_result(
     songs, jp_fetch, page: int, binding=None, pending_fetch=None
 ) -> None:
-    """查询结果渲染：国服命中走普通结果，未命中走日服 fallback（Q32），
-    日服也未命中走 pending 兜底（id 未收录新曲，Q33）。
+    """查询结果渲染：国服命中走普通结果，未命中走日服 fallback（国服视图
+    未命中回退日服视图的既定口径），日服也未命中走 pending 兜底
+    （id 未收录新曲）。
 
     返回值驱动：fallback 未命中明确落到「未找到」，不再依赖
     ``_render_jp_result`` 内部必 finish 的控制流（避免未来加 return 路径双发）。

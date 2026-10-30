@@ -20,8 +20,8 @@ from ..constants import DEFAULT_THEME, UTAGE_ID_BASE
 
 
 async def resolve_card_view(song: Song, binding=None) -> "tuple[Song, bool]":
-    """出卡路由（L-5 拍板，查歌/随机曲共用单源）：NET 等日服视图数据源的
-    用户，曲对象换 JP 视图（缺失回退原对象）并以日服口径出卡（jp=True，
+    """出卡路由（查歌/随机曲共用单源）：NET 等日服视图数据源的用户，
+    曲对象换 JP 视图（缺失回退原对象）并以日服口径出卡（jp=True，
     不嵌国服 B50——NET 成绩 id 形状与 CN 视图 B50 消费侧失配）；其余绑定
     原样返回 ``(song, False)``。视图判定走 score_service.view_of（数据源
     注册表单源）。

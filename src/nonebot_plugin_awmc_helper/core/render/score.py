@@ -474,7 +474,7 @@ class DrawScore:
         # ⚠️ 本页脚与 _footer 结构相同（design.png 底 + 文案 + 署名行）但纵坐标
         # 全不同（本处 153/110/35 vs _footer 133/90/30——分数列表段高预算不同），
         # 且字号 25pt 同 _footer、文案分两行绘制；NB 原版即两套坐标，勿合并，
-        # 合并须先逐坐标核对 NB 基准（第六轮审查记录）
+        # 合并须先逐坐标核对 NB 基准
         self._im.alpha_composite(
             assets.pic("design.png", self._theme), (200, height - 153)
         )

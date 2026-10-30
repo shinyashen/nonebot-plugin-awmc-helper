@@ -49,7 +49,7 @@ mai_what_rise = on_command(
 
 
 async def _card_bytes(song: Song, binding: UserBinding) -> tuple[bytes, str]:
-    """出卡：路由经 core ``resolve_card_view`` 单源（L-5 拍板）；日服限定
+    """出卡：路由经 core ``resolve_card_view`` 单源；日服限定
     标注只按「该曲是否国服缺席」拼接（与路由解耦，NET 用户随到国服在架曲
     不弹提示）。返回 ``(图, 日服限定提示)``。
     """

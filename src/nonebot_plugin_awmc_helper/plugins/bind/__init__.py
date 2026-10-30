@@ -1,6 +1,7 @@
 """awmc.bind：绑定与设置子插件。
 
-指令（对齐原版语义，绑定方案按规划 §5.3 与 maimai-py 对齐）：
+指令（对齐原版语义；绑定方案复用 maimai-py 的凭据存取与会话，maimai-py
+不含的水鱼 OAuth 设备授权由 core/ext/divingfish 直连补齐）：
 - `绑定水鱼`：水鱼 OAuth 设备码授权（QQ 平台，确认码回填完成绑定）
 - `绑定水鱼用户名 <用户名>`：用户名公开查询档
 - `绑定水鱼token <Import-Token>`：全量成绩档

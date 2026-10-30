@@ -4,9 +4,9 @@
 （``(?i)`` 兼容大小写；``\\s*`` 兼容历史无空格写法 ``帮助maimaiDX排卡``——旧
 复合触发词统一收敛，核心词由注册表按 指令 > 类别 > 指南 消歧）。
 
-发送链（拍板③）：多节点页合并转发 → 失败降级 ``text_image_bytes`` 整图；
+发送链（定案）：多节点页合并转发 → 失败降级 ``text_image_bytes`` 整图；
 单节点纯文本页（指令详情/管理页）直接普通消息不发转发卡。「管理」节点仅
-SUPERUSER **私聊**查询时附带（拍板④追加：群聊不留管理指令痕迹）。旧
+SUPERUSER **私聊**查询时附带（追加定案：群聊不留管理指令痕迹）。旧
 HELP_TEXT 静态总览已删除，内容迁入 ``core.help`` 注册表。
 """
 
@@ -82,7 +82,7 @@ async def _(
     text = event.get_plaintext().strip()
     matched = re.match(ROOT_PATTERN, text)
     query = (matched.group(1) or "").strip() if matched else ""
-    # 拍板④：管理面仅 SUPERUSER 且私聊时可见（群聊不留管理指令痕迹）
+    # 定案：管理面仅 SUPERUSER 且私聊时可见（群聊不留管理指令痕迹）
     include_hidden = await _superuser(bot, event) and is_private_session(session)
     page = help_registry.resolve(query, include_hidden=include_hidden)
     if isinstance(page, NotFoundPage):

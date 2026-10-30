@@ -30,7 +30,7 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
         "如果不需要接收推送消息，请使用「关闭别名推送」指令关闭推送"
     ]
     # 标题回取并发化（读运行时缓存，无远端请求）；日服限定曲 CN 视图查不到
-    # 时回退 JP 视图（与查询侧 Q32 口径一致，不再显示裸 ID）
+    # 时回退 JP 视图（与查询侧日服回退口径一致，不再显示裸 ID）
     hits = await asyncio.gather(
         *(song_service.by_id(item.song_id) for item in push.status)
     )

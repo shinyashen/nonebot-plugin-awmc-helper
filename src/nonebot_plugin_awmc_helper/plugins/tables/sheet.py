@@ -195,7 +195,7 @@ async def plate_completion_sheet(
 async def plate_progress_overview(
     binding, plates, version: str, kind: str, page: int
 ) -> None:
-    """进度总览（R7：NB DrawPlateProgress 版式总览图）。"""
+    """进度总览（NB DrawPlateProgress 版式总览图）。"""
     cleared_plates = await plates.get_cleared()
     remained = await plates.get_remained()
 
@@ -320,11 +320,11 @@ def plate_shape(text: str) -> "tuple[str, str] | None":
 async def combo_progress_card(
     binding, conds, cond_text: str, category: str | None, page: int
 ) -> None:
-    """条件化进度（R4 版式泛化，NB draw_plan/draw_category 同布局）。
+    """条件化进度（版式泛化，NB draw_plan/draw_category 同布局）。
 
-    条件 → 谱面集（core.combo §5 选谱启发式）→ 逐谱面按玩家成绩盖章分三段
-    （已完成/未完成/未游玩）；判型由条件集推导（:func:`plan_of`，无达标型
-    条件 → 达成率 ≥80% 评级章）。
+    条件 → 谱面集（core.combo 选谱启发式，karenbot-combo-notes.md §5）→
+    逐谱面按玩家成绩盖章分三段（已完成/未完成/未游玩）；判型由条件集推导
+    （:func:`plan_of`，无达标型条件 → 达成率 ≥80% 评级章）。
     """
     entries = await combo_chart_entries(conds, binding)
     if isinstance(entries, ComboEmpty):
@@ -431,7 +431,7 @@ async def combo_progress_card(
 
 
 async def combo_score_list_card(binding, conds, cond_text: str, page: int) -> None:
-    """条件化分数列表（R5 行卡版式泛化，80/页）：条件 → 成绩集（键集全量
+    """条件化分数列表（行卡版式泛化，80/页）：条件 → 成绩集（键集全量
     过滤、无选谱收缩），按达成率降序分页。"""
     filtered = await combo_filtered_scores(conds, binding, notify_slow=slow_notice())
     if isinstance(filtered, ComboEmpty):

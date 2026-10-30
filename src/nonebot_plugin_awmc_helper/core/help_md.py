@@ -13,7 +13,7 @@ scripts/gen_commands.py 生成本模块的输出，tests/test_gen_commands.py �
 - 静态部分（文档头图例、每类尾注、条件组合查询专章）为下方模块常量，内容自
   手工版 commands.md 原样搬运（含换行），不重写；改文案时注意单源位置：
   条件词表权威在 core/combo.py，NET 说明对应 core/ext/net + core/sources。
-- 范围（拍板 A）：仅主插件块（``plugin`` 以 ``awmc.`` 开头）；第三方块与
+- 范围（手册范围定案）：仅主插件块（``plugin`` 以 ``awmc.`` 开头）；第三方块与
   第三方指南（``source`` 不以 ``awmc.`` 开头）不进主插件手册。
 """
 
@@ -173,7 +173,7 @@ def _guides_section(reg: HelpRegistry) -> str:
     parts = ["## 指南", _GUIDES_NOTE]
     for guide in reg.guides.values():
         if not guide.source.startswith("awmc."):
-            continue  # 第三方指南不进主插件手册（拍板 A 同口径）
+            continue  # 第三方指南不进主插件手册（同上手册范围定案）
         lines = [guide.intro]
         if guide.prerequisites:
             lines.append(f"前置条件：{guide.prerequisites}")

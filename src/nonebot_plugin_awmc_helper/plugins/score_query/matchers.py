@@ -74,7 +74,7 @@ async def _resolve_song(key: str):
     if key.isdigit():
         # 数字 id 单源解析（与查歌同口径）：6 位宴谱 diff_id 命中即文本终止
         # ——宴谱没有游玩统计，且 by_id 对 6 位 id 取模会错配同号普通曲
-        # （L-7：提示语引导输入 6 位 id，却渲染宿主曲统计卡的矛盾收口）；
+        # （提示语引导输入 6 位 id，却渲染宿主曲统计卡的矛盾收口）；
         # 其余获得日服兜底（JP-only 曲不再直接「未找到」）
         hit = await song_service.resolve_raw_chart(int(key))
         if hit is None:
@@ -263,7 +263,8 @@ async def _(
 ):
     """无条件全量 b40（旧系数口径）：全部成绩 FiNALE 系数重算 + 恒拆分 25/15。
 
-    松匹配下裸「b40」条件串只剩残片「b」、零条件静默（笔记 §13.2），无条件
+    松匹配下裸「b40」条件串只剩残片「b」、零条件静默
+    （karenbot-combo-notes.md §13.2 松匹配残片已知边界），无条件
     全量卡由此独立指令承担（priority 1 先于 combo50；nb40/dx2024b40 等带
     条件的仍走松匹配，不以 b40 开头不冲突）。
     """
@@ -331,7 +332,7 @@ async def _combo_query(
     """条件查询共享收尾（combo50 与 ap50 共用）：适用矩阵 → 抓取提示 →
     执行 → 四态出图。"""
     if bad := inapplicable(parsed, output):
-        # §9.7 适用矩阵（era_year/ideal/fit 等 D/C 类仅 b50/40）
+        # karenbot-combo-notes.md §9.7 适用矩阵（era_year/ideal/fit 等 D/C 类仅 b50/40）
         await UniMessage.text(
             f" {'、'.join(c.label for c in bad)} 不适用于条件{suffix}"
         ).finish(at_sender=True)
@@ -397,7 +398,7 @@ async def _(
         await _finish_entry_list(entries)
     song = entries[0][1]
 
-    # R1：按基准 info.py 版式渲染真实成绩卡（主类型在定位时定好：数字 id 按形状、
+    # 按基准 info.py 版式渲染真实成绩卡（主类型在定位时定好：数字 id 按形状、
     # 唯一命中条目按其类型；双条目/多曲已在上方列出 id 终止）
     png = info_render.song_play_data(
         song,
@@ -425,11 +426,11 @@ async def _(groups: tuple = RegexGroup()):
         await UniMessage.text(
             "该谱面暂无游玩统计（新谱样本不足或曲线数据未加载）"
         ).finish(at_sender=True)
-    # R2：与查歌同源富谱面卡（渲染器在 core/render，无跨插件问题）；
+    # 与查歌同源富谱面卡（渲染器在 core/render，无跨插件问题）；
     # 卡片主类型跟随所选谱面（选 SD 色谱显示 SD 卡）
     prefer = SongType.STANDARD if diff.type == SongType.STANDARD else None
     card = nb_chart.song_chart_info(song, False, False, [], DEFAULT_THEME, prefer)
-    # R9：统计信息画入双环统计卡（样本/拟合/均值/σ/DX + 全连与评级分布）
+    # 统计信息画入双环统计卡（样本/拟合/均值/σ/DX + 全连与评级分布）
     stats_png = stats_render.song_global_data(song, diff)
     png = _ginfo_image(card, stats_png)
     await UniMessage.image(raw=png).finish(at_sender=True)

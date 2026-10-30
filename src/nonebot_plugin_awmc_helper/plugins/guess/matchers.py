@@ -21,7 +21,7 @@ async def _is_guess_answer(bot: Bot, event: Event) -> bool:
     """priority=0 答案拦截规则：群内存在对局且消息为非空文本。"""
     from nonebot_plugin_uninfo import get_session
 
-    # 空对局先短路：免每条消息白构造 uninfo Session（L-29）
+    # 空对局先短路：免每条消息白构造 uninfo Session
     if not _games:
         return False
     session = await get_session(bot, event)

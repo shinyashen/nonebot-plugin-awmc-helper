@@ -105,7 +105,7 @@ async def _code_fill_state(
 
 async def _is_code_fill(bot: Bot, event: Event) -> bool:
     """回填 matcher 的 rule（checker 须返回 bool；具体状态 handler 再判定）。"""
-    # 空会话表先短路：免每条消息白构造 uninfo Session（L-29）
+    # 空会话表先短路：免每条消息白构造 uninfo Session
     if not pending_bindings.any_active():
         return False
     return await _code_fill_state(bot, event) is not None
@@ -171,7 +171,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
                 at_sender=True
             )
         if df_ext.looks_like_import_token(arg):
-            # 误投 token 会把凭据存成用户名、b50 按用户名查必败（Q51）；
+            # 误投 token 会把凭据存成用户名、b50 按用户名查必败；
             # 软引导到 token 指令，且不 ensure（拒绝输入不落行）
             await UniMessage.text(" " + DIVINGFISH_TOKEN_LOOKALIKE_MSG).finish(
                 at_sender=True
@@ -181,10 +181,10 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
             f"绑定用户名公开查询请发送「绑定水鱼用户名 {arg}」"
         ).finish(at_sender=True)
     if platform in QQ_PLATFORMS and df_ext.oauth_ready():
-        # 设备码授权（sunset 文档 §3.2 完整版）：handoff=code 确认码回填，
-        # scope 一次带齐 read+write（水鱼已要求所有写入走 OAuth）。
+        # 设备码授权（divingfish-oauth-sunset.md §3.2 完整版）：handoff=code
+        # 确认码回填，scope 一次带齐 read+write（水鱼已要求所有写入走 OAuth）。
         # 仅 QQ 平台提供：非 QQ 平台用户没有 QQ 身份标识可派生 subject
-        # （导分写目标缺口，已知边界，见审查报告 §七）。
+        # （导分写目标缺口，已知边界：此类绑定无法作为导分的写入目标）。
         binding = await binding_service.ensure(platform, user_id)
         ref = binding_service.divingfish_subject(binding)
         if ref is None:  # pragma: no cover —— QQ 平台必可派生
@@ -247,7 +247,7 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
             " 用法：绑定水鱼用户名 <水鱼用户名>（水鱼个人页显示的用户名）"
         ).finish(at_sender=True)
     if df_ext.looks_like_import_token(arg):
-        # 误投 token 会把凭据存成用户名、b50 按用户名查必败（Q51）；
+        # 误投 token 会把凭据存成用户名、b50 按用户名查必败；
         # 软引导到 token 指令，且不 ensure（拒绝输入不落行）
         await UniMessage.text(" " + DIVINGFISH_TOKEN_LOOKALIKE_MSG).finish(
             at_sender=True

@@ -79,7 +79,8 @@ class Guide:
 
 @dataclass
 class PluginHelp:
-    """子插件声明块：一个子插件一次 ``declare`` 集中声明（拍板项⑤）。"""
+    """子插件声明块：一个子插件一次 ``declare`` 集中声明（写在子插件
+    matchers.py 末尾、直接引用 matcher 对象作键，声明与定义零漂移）。"""
 
     plugin: str  # PluginMetadata.name（awmc.xxx / 第三方自取名）
     title: str  # 展示名
@@ -169,8 +170,8 @@ class HelpRegistry:
 
     def __init__(self) -> None:
         self.categories: dict[str, Category] = {c.key: c for c in BUILTIN_CATEGORIES}
-        # 声明块按 (plugin, category) 存：同一插件可就近入多个类别
-        # （拍板⑦ 规则化双支持），每块独立整替
+        # 声明块按 (plugin, category) 存：同一插件可就近入多个类别，
+        # 每块独立整替
         self.blocks: list[PluginHelp] = []
         self._block_index: dict[tuple[str, str], PluginHelp] = {}
         self.guides: dict[str, Guide] = {}

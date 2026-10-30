@@ -149,8 +149,8 @@ def _base_kind(dan_id: str) -> str:
 # 全部为定稿实测值；调整任何一项前先跑 local/scratch/render_dan_preview.py
 # 出三样式样张比对，并同步 static/mai/pic/jp/dan/README.md。
 
-# 画布即底图原生尺寸（曾记 CANVAS_SIZE=(980, 928) 常量，全仓零引用已删——
-# 第六轮审查；底图尺寸以素材实际为准，render_dan_card 直接用底图 copy）
+# 画布即底图原生尺寸（曾记 CANVAS_SIZE=(980, 928) 常量，全仓零引用已删；
+# 底图尺寸以素材实际为准，render_dan_card 直接用底图 copy）
 
 # 歌曲条：640×140 卡框等比缩放后顶格堆叠（无空隙），左缘对齐蝴蝶结留位
 CARD_X, CARD_W, CARD_H = 272, 581, 127

@@ -44,7 +44,7 @@ _disabled = plugin_config.awmc_disabled_plugins
 # 官方《嵌套插件》结构：plugins/ 下每个子目录为独立子插件（awmc. 前缀命名、可停用）。
 # 加载用官方 load_plugin(完整模块名)（同文档"停用扩展"API）逐个加载：
 # 不用 load_plugins(目录)：其内部以 CWD 推导模块名，装到 site-packages 后会
-# ValueError 崩溃（上游缺陷，实测 2.4.3/master 均如此，见 local/QUESTIONS.md Q1）。
+# ValueError 崩溃（上游缺陷，实测 2.4.3/master 均如此，见 nonebot-api-notes.md）。
 if _plugins_dir.is_dir():
     sub_plugins = [
         p

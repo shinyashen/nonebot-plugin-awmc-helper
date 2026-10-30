@@ -309,7 +309,7 @@ async def _net_call(coro):
     """NET 抓取层调用 → 统一映射 NetError/NetScoreError 为用户文案。
 
     NetError 是凭据错误/维护等抓取层语义（映射表转专项文案）；只捕
-    NetScoreError 会让 handler 的通用兜底吃掉专项提示（L-1）。
+    NetScoreError 会让 handler 的通用兜底吃掉专项提示。
     """
     try:
         return await coro

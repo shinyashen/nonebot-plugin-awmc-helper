@@ -904,8 +904,8 @@ class SongService:
         """随机谱面：按类型/分类/等级过滤后随机选择（maimai-py 无随机接口）。
 
         ``jp=True``：从日服视图（:meth:`jp_all`）抽取，其余过滤语义与 CN 侧
-        一致——NET 绑定用户的随机走 JP 池（L-5 拍板：NET 成绩口径与 CN 视图
-        B50 消费侧失配，出卡走日服视图）。``rng``：可注入的随机源（fortune
+        一致——NET 绑定用户的随机走 JP 池（NET 成绩口径与 CN 视图 B50
+        消费侧失配，出卡统一走日服视图）。``rng``：可注入的随机源（fortune
         「同人同日结果稳定」的种子随机），缺省用进程全局随机。
         """
         candidates: list[tuple[Song, SongDifficulty]] = []

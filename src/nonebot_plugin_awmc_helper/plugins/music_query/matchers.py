@@ -166,7 +166,7 @@ async def _(
         msg = _reply(JP_ONLY_NOTE) if jp_only else UniMessage()
         await msg.image(raw=png).text("您要找的是不是这首？").finish(at_sender=True)
 
-    # pending 兜底（Q33）：输入本身是新曲歌名（id 未收录，CN/JP 视图与
+    # pending 兜底：输入本身是新曲歌名（id 未收录，CN/JP 视图与
     # 别名索引均不可见）——别名投票提示之后、相似标题兜底之前出临时卡
     await _render_pending_result(await song_service.pending_by_title_fuzzy(name))
 
