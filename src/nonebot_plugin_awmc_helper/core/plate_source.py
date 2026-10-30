@@ -32,8 +32,10 @@ from .plates import (
     PLATE_FULL_SET_VERSIONS,
     PlatesView,
     norm_plate,
+    in_plate_scope,
     is_newcomer_diff,
     plate_entry_allowed,
+    plate_version_range,
 )
 from .ext.yuzu import get_plate_list
 from ..constants import DX_ID_OFFSET
@@ -330,6 +332,56 @@ async def filter_cn_plates(plate: str, plates: PlatesView) -> PlatesView:
         full_set=full_set,
         disabled=disabled,
     )
+
+
+async def collect_plate_entries(
+    songs,
+    *,
+    version: str,
+    jp: bool,
+):
+    """牌子曲目收集**单一事实源**（2026-10-30）：完成表底图网格、成绩叠章
+    entries、入表状态指纹三处共用——任一消费方各写各的过滤必然漂移（11876
+    错位事故：底图含放行曲、叠章不含，行数不一致全网错位）。
+
+    区间（in_plate_scope）→ 白名单（Q60）→ 当期新曲受控放行（删除检查
+    fail-closed，惰性拉 disabled）。返回 ``(entries, bypass)``：entries 为
+    ``(song, diff)`` 列表；bypass 为经受控放行的根 id 元组（底图指纹用）。
+    """
+    rng = plate_version_range(version, jp=jp)
+    if rng is None:
+        return [], ()
+    lo, hi = rng
+    plate_ids = None if jp else await cn_plate_ids(version)
+    remaster_ids = (
+        None
+        if jp or version not in PLATE_FULL_SET_VERSIONS
+        else await cn_remaster_ids()
+    )
+    disabled: frozenset[int] | None = None
+    bypass: set[int] = set()
+    entries: list[tuple] = []
+    for song in songs:
+        for diff in song.get_difficulties():
+            if not in_plate_scope(song, diff, lo, hi):
+                continue
+            whitelisted = plate_entry_allowed(
+                plate_ids, song, diff, remaster_ids=remaster_ids
+            )
+            if not whitelisted and plate_ids is not None:
+                if disabled is None and is_newcomer_diff(diff):
+                    disabled = await cn_disabled_ids()
+                if not await plate_admission(
+                    song,
+                    diff,
+                    plate_ids=plate_ids,
+                    remaster_ids=remaster_ids,
+                    disabled=disabled,
+                ):
+                    continue
+                bypass.add(song.id)
+            entries.append((song, diff))
+    return entries, tuple(sorted(bypass))
 
 
 def _cache_clear() -> None:

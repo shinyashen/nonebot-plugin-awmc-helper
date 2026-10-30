@@ -217,6 +217,44 @@ def test_parse_lxns_disabled_flag():
     assert not cn[30].disabled
 
 
+def test_parse_lxns_drops_future_dated():
+    """落雪预注册（release_date 未来）不入国侧——Retribution 1876 形态
+    （11/11 上线、先行收录带 25506 批次码）：CN 在列以「现在可玩」为准。"""
+    from datetime import date
+
+    from nonebot_plugin_awmc_helper.core.songdb import parse_lxns
+
+    today = date(2026, 10, 30)
+    doc = {
+        "songs": [
+            {
+                "id": 2025,
+                "title": "魔法仕掛けのファンタジア",
+                "release_date": "2026-10-29",
+                "difficulties": {"dx": [{"difficulty": 0, "version": 25505}]},
+            },
+            {
+                "id": 11876,
+                "title": "Retribution ～ Cycle of Redemption ～",
+                "release_date": "2026-11-11",
+                "difficulties": {"dx": [{"difficulty": 0, "version": 25506}]},
+            },
+            {
+                "id": 999,
+                "title": "（构造）非法日期",
+                "release_date": "not-a-date",
+                "difficulties": {"standard": [{"difficulty": 0, "version": 25505}]},
+            },
+        ]
+    }
+    parsed = parse_lxns(doc, today=today)
+    assert 2025 in parsed  # 已上线
+    assert 11876 not in parsed  # 预注册未上线：不入国侧
+    assert 999 in parsed  # 非法日期不拦（宁滥勿删）
+    # 缺省 today = 当天：未来日期相对真实今天同样被拦
+    assert 11876 not in parse_lxns(doc)
+
+
 def test_detect_cn_update():
     from nonebot_plugin_awmc_helper.core.songdb import DetectKey, detect_cn_update
 

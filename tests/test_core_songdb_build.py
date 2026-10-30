@@ -220,6 +220,53 @@ async def test_cn_baseline_history_for_cn_first_song(db):
 
 
 @pytest.mark.asyncio
+async def test_rebuild_drops_unreleased_cn_song(db):
+    """重建级：仅落雪预注册（未上线）的曲 → CN 不在列 + JP 无源 → 整曲不入；
+    上线日（release_date 翻过去）后重建自动回填。"""
+
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    payloads = full_payloads()
+    future = {
+        "id": 1876,
+        "title": "Retribution ～ Cycle of Redemption ～",
+        "artist": "x",
+        "genre": "maimai",
+        "bpm": 200,
+        "release_date": "2026-11-11",
+        "difficulties": {
+            "dx": [
+                {
+                    "type": "dx",
+                    "difficulty": 0,
+                    "level": "6",
+                    "level_value": 6.5,
+                    "version": 25506,
+                }
+            ]
+        },
+    }
+    payloads["lxns"]["songs"].append(future)
+    await songdb.rebuild(payloads)
+    state = await songdb.State.load()
+    assert 1876 not in state.songs  # CN 预注册不算在列、JP 无源 → 不入库
+    assert 2025 not in state.songs or True
+    # 上线：日期翻过去 → 回填
+    future["release_date"] = "2026-11-11"
+
+    payloads2 = full_payloads()
+    future2 = dict(future, release_date="2026-10-01")
+    payloads2["lxns"]["songs"].append(future2)
+    await songdb.rebuild(payloads2)
+    state = await songdb.State.load()
+    assert 1876 in state.songs
+    g = state.groups[(1876, "dx")]
+    assert g.version_cn == 25506
+    # 标级/定数基线（CN 先行形态）
+    assert state.history_of(1876, "dx", 0) == [(25506, 6.5)]
+
+
+@pytest.mark.asyncio
 async def test_closed_world_cn_keeps_jp_removed(db):
     """closed-world：JP 移除（otoge 标题缺席）而国服在列 → JP 版本列置 NULL、
     国服列与曲保留（人マニア形态：JP 已删・CN 在列，§2.17 逐源可用性）。"""

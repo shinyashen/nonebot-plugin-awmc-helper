@@ -39,12 +39,6 @@ from .tools import (
     generate_frosted_card,
 )
 from .assets import assets
-from ..plates import (
-    PLATE_FULL_SET_VERSIONS,
-    in_plate_scope,
-    plate_entry_allowed,
-    plate_version_range,
-)
 from .nb_chart import version_image
 from ...constants import LEVEL_INDEX_EN, chart_display_id
 from .table_layout import (
@@ -75,11 +69,8 @@ from .table_layout import (
 )
 from ..plate_source import (
     cn_plate_ids,
-    cn_disabled_ids,
-    cn_remaster_ids,
-    plate_admission,
     admission_fingerprint,
-    is_current_batch_newcomer,
+    collect_plate_entries,
 )
 
 FONT_BLUE = TITLE_BLUE
@@ -502,40 +493,6 @@ async def _plate_fp_stale(
     return saved != fp
 
 
-async def _current_bypass_ids(
-    version: str,
-    *,
-    songs: list,
-    plate_ids: frozenset[int] | None,
-    remaster_ids: frozenset[int] | None,
-) -> tuple[int, ...]:
-    """当前入表状态下的放行实绩（查询侧指纹重算用，与渲染口径一致）：
-    当期新曲、在牌区间内、白名单缺席、落雪删除检查通过（fail-closed）。"""
-    if plate_ids is None:
-        return ()
-    rng = plate_version_range(version)
-    if rng is None:
-        return ()
-    lo, hi = rng
-    disabled: frozenset[int] | None = None
-    bypass: set[int] = set()
-    for song in songs:
-        if not is_current_batch_newcomer(song):
-            continue
-        if not any(in_plate_scope(song, d, lo, hi) for d in song.get_difficulties()):
-            continue
-        if any(
-            plate_entry_allowed(plate_ids, song, d, remaster_ids=remaster_ids)
-            for d in song.get_difficulties()
-        ):
-            continue  # 白名单已含（柚子跟进），放行实绩消失
-        if disabled is None:
-            disabled = await cn_disabled_ids()
-        if disabled is not None and song.id not in disabled:
-            bypass.add(song.id)
-    return tuple(sorted(bypass))
-
-
 async def generate_plate_template(
     version: str, kind: str, song_service, *, jp: bool = False
 ) -> int:
@@ -549,45 +506,10 @@ async def generate_plate_template(
     牌单指纹落 kv（查询侧比对失效即重渲）。
     """
     songs = await (song_service.jp_all() if jp else song_service.get_all())
-    rng = plate_version_range(version, jp=jp)
-    if rng is None:
-        return 0
-    lo, hi = rng
-    # 柚子牌单过筛（Q60，仅国服）：逐牌白名单 + 舞/霸 ReM 槽按舞ReMASTER
-    # 名单收口；双双 None = 牌单不可用不过筛（既有口径）。当期新曲（版本码
-    # > 库 current_version）白名单缺席时经落雪 disabled 删除检查放行
-    # （fail-closed，惰性拉取——出现当期新曲候选才请求），2026-10-30。
-    plate_ids = None if jp else await cn_plate_ids(version)
-    remaster_ids = (
-        None
-        if jp or version not in PLATE_FULL_SET_VERSIONS
-        else await cn_remaster_ids()
+    entries, bypass = await collect_plate_entries(songs, version=version, jp=jp)
+    fp = admission_fingerprint(
+        None if jp else await cn_plate_ids(version), bypass=bypass
     )
-    disabled = None
-    bypass: set[int] = set()
-    entries: list[tuple[Song, SongDifficulty]] = []
-    for song in songs:
-        for diff in song.get_difficulties():
-            if not in_plate_scope(song, diff, lo, hi):
-                continue
-            whitelisted = plate_entry_allowed(
-                plate_ids, song, diff, remaster_ids=remaster_ids
-            )
-            if not whitelisted and plate_ids is not None:
-                # 白名单缺席：仅当期新曲可能经删除检查放行（惰性拉 disabled）
-                if disabled is None and is_current_batch_newcomer(song):
-                    disabled = await cn_disabled_ids()
-                if not await plate_admission(
-                    song,
-                    diff,
-                    plate_ids=plate_ids,
-                    remaster_ids=remaster_ids,
-                    disabled=disabled,
-                ):
-                    continue
-                bypass.add(song.id)
-            entries.append((song, diff))
-    fp = admission_fingerprint(plate_ids, bypass=tuple(sorted(bypass)))
     if not entries:
         return 0
     # ReM 槽（紫框 + 分组代表谱）直接取自过筛后 entries 的 ReM 谱面——
@@ -761,14 +683,11 @@ async def draw_plate_table_with_fallback(
         if jp
         else admission_fingerprint(
             await cn_plate_ids(version),
-            bypass=await _current_bypass_ids(
-                version,
-                songs=await song_service.get_all(),
-                plate_ids=await cn_plate_ids(version),
-                remaster_ids=await cn_remaster_ids()
-                if version in PLATE_FULL_SET_VERSIONS
-                else None,
-            ),
+            bypass=(
+                await collect_plate_entries(
+                    await song_service.get_all(), version=version, jp=False
+                )
+            )[1],
         )
     )
     png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)

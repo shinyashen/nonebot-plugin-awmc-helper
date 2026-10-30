@@ -28,15 +28,13 @@ from ...core.plates import (
     PLATE_FULL_SET_VERSIONS,
     PLATE_LATEST_VERSION_NAME,
     PLATE_VERSION_ALIAS_CHARS,
-    in_plate_scope,
     version_code_of,
-    plate_entry_allowed,
     plate_version_range,
 )
 from ...core.binding import service_display
 from ...core.forward import try_send_forward_session
 from ...core.sources import Capability
-from ...core.plate_source import cn_plate_ids, cn_remaster_ids
+from ...core.plate_source import collect_plate_entries
 from ...core.render.score import (
     SCORE_LIST_PER_PAGE,
     SCORE_LIST_HEAD_HEIGHT,
@@ -132,25 +130,10 @@ async def plate_completion_sheet(
     # JP 限定曲在牌范围内，缺了永远差曲（CN 口径维持国服网格不变）；
     # 预览查询同走日服视图（领先牌的曲目只在日服视图里）
     jp = preview or score_service.view_of(binding.service) == "jp"
-    rng = plate_version_range(version, jp=jp)
-    entries = []
-    if rng is not None:
-        lo, hi = rng
-        # 柚子牌单过筛（Q60，仅国服口径）：逐牌白名单 + 舞/霸 ReM 槽按
-        # 舞ReMASTER 名单收口；牌单不可用（None）= 不过筛（既有口径）
-        plate_ids = None if jp else await cn_plate_ids(version)
-        remaster_ids = (
-            None
-            if jp or version not in PLATE_FULL_SET_VERSIONS
-            else await cn_remaster_ids()
-        )
-        songs = await (song_service.jp_all() if jp else song_service.get_all())
-        for song in songs:
-            for d in song.get_difficulties():
-                if in_plate_scope(song, d, lo, hi) and plate_entry_allowed(
-                    plate_ids, song, d, remaster_ids=remaster_ids
-                ):
-                    entries.append((song, d))
+    songs = await (song_service.jp_all() if jp else song_service.get_all())
+    # 底图网格与叠章同一收集（单一事实源 plate_source.collect_plate_entries）：
+    # 区间 + 白名单 + 当期新曲受控放行——两口径漂移即全网错位（11876 事故）
+    entries, _bypass = await collect_plate_entries(songs, version=version, jp=jp)
     if not entries:
         await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
     if preview:

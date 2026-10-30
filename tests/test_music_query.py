@@ -896,8 +896,8 @@ async def test_ds_search_pending_fallback_card(app: App, songs):
 @pytest.mark.asyncio
 async def test_alias_song_pending_fallback_card(app: App, songs, monkeypatch):
     """是什么歌：输入为新曲歌名（无别名）→ 投票提示落空后 pending 兜底。"""
-    from nonebot_plugin_awmc_helper.core.ext.yuzu import yuzu_client
     from nonebot_plugin_awmc_helper.core.render import jp_cover
+    from nonebot_plugin_awmc_helper.core.ext.yuzu import yuzu_client
 
     async def _boom(*a, **k):
         raise RuntimeError("测试跳过网络")

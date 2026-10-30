@@ -20,6 +20,7 @@ import asyncio
 import hashlib
 import unicodedata
 from typing import Any, Literal
+from datetime import date
 from dataclasses import field, dataclass
 
 from nonebot import logger
@@ -443,10 +444,24 @@ def _otoge_utage_hosts(music_ex: list[dict]) -> set[str]:
     return hosts
 
 
-def parse_lxns(song_list: dict) -> dict[int, Entry]:
-    """落雪列表 → 国侧中间结构（version_cn / 国服谱面 / 宴 buddy，§3）。"""
+def parse_lxns(song_list: dict, *, today: date | None = None) -> dict[int, Entry]:
+    """落雪列表 → 国侧中间结构（version_cn / 国服谱面 / 宴 buddy，§3）。
+
+    ``release_date`` 晚于 ``today`` 的条目 = 落雪**预注册**、尚未上线
+    （Retribution 1876 实测：11/11 上线、先行收录带 25506 批次码）——不入
+    国侧：CN 在列/牌子/查歌都以「现在可玩」为准，否则未上线曲混入当期
+    完成表；上线日过后续跑重建自动回填（双侧皆无→删除→复见的既有闭环）。
+    """
+    today = today or date.today()
     songs: dict[int, Entry] = {}
     for item in song_list.get("songs", []):
+        release_date = item.get("release_date")
+        if release_date:
+            try:
+                if date.fromisoformat(release_date) > today:
+                    continue
+            except ValueError:
+                pass  # 非法日期不拦（按在列处理，宁滥勿删）
         raw_id = int(item["id"])
         # 落雪 raw_id 三命名空间（SD/DX/宴）统一取根：DX_OFFSET 与宴步进同为 10000
         song_id = raw_id % DX_ID_OFFSET
