@@ -469,8 +469,6 @@ async def test_batch_intl_first_song_uses_otoge_fact(
     assert group.date == 261002
 
 
-
-
 def _deleted_song_entry() -> dict:
     """（构造）12055 上线前删除曲原型：复用真实 DX 条目（10199）改键改名。
 

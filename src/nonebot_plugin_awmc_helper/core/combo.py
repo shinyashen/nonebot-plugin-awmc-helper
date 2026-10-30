@@ -193,7 +193,7 @@ class ComboResult:
 # §9.7 适用矩阵（2026-09-30 拍板：不适用=拒绝并提示，非上游静默失效）：
 # A 谱面类全输出适用；B1 达标型（combo/sync/rate）进分数列表与表格盖章判型、
 # 不进定数表；B2 区间型（badge/star/cun/kill）只进 b50 与分数列表；C 修改类
-# （ideal/fit）只进 b50/40（拟合定数表随 P3 再议）；D 回到过去（era_year）只进
+# （ideal/fit）只进 b50/40（拟合定数表暂缓，需要时再评估）；D 回到过去（era_year）只进
 # b50/40（分数列表按达成率排、历史完成表/定数表未定义，§9.7 D 行）。
 _B1_KINDS = frozenset(
     {OutputKind.B50, OutputKind.B40, OutputKind.SCORE_LIST, OutputKind.TABLE}

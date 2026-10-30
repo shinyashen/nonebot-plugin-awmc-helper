@@ -167,7 +167,7 @@ def utage_diff_of(song: Song, diff_id: int) -> "SongDifficultyUtage | None":
 def _alias_lookup(
     index: dict[str, set[int]], alias: str, extra_prefixes: set[str]
 ) -> "tuple[set[int], tuple[str, str, str] | None]":
-    """别名索引「精确查 → 未命中剥一层谱面前后缀重查」的共用骨架（Q31）。
+    """别名索引「精确查 → 未命中剥一层谱面前后缀重查」的共用骨架。
 
     ``index`` 由调用方喂各自视图（CN 运行时索引 / JP 合并库索引）；返回
     ``(命中 id 集, 剥离结果)``——重查未命中时 id 集为空、剥离结果原样返回，
@@ -308,7 +308,7 @@ class SongService:
         self._utage_kanji: set[str] = set()
         # 宴谱 diff_id → 宿主根 id（CN 运行时视图；by_utage_id 定位用）
         self._utage_index: dict[int, int] = {}
-        # 日服视图缓存（国服查不到时的 fallback，Q32）：根 id → 日服 Song
+        # 日服视图缓存（国服查不到时的 fallback）：根 id → 日服 Song
         self._alias_provider = _ALIAS_PROVIDER
         self._jp_view: dict[int, Song] = {}
         self._jp_fingerprint: str | None = None
@@ -582,7 +582,7 @@ class SongService:
     async def jp_by_alias_detail(
         self, alias: str
     ) -> tuple[list[Song], tuple[str, str, str] | None]:
-        """日服视图按别名查曲（国服查不到时的 fallback，Q32）。
+        """日服视图按别名查曲（国服查不到时的 fallback）。
 
         别名库用 provider 的完整合并视图（含仅日服条目），匹配语义与国服侧
         一致（归一化 + 单层谱面前后缀剥离，宴谱汉字取日服视图自身）。
@@ -621,7 +621,7 @@ class SongService:
         jp = await self._jp_songs_map()
         return jp.get(song_id % DX_ID_OFFSET)
 
-    # -- pending 兜底（id 未收录新曲，Q33）---------------------------------
+    # -- pending 兜底（id 未收录新曲）---------------------------------
 
     async def pending_by_title_fuzzy(self, title: str) -> "list[songdb.PendingSong]":
         """pending 曲标题子串匹配（CN/JP 视图与别名全 miss 后的最终兜底）。"""
@@ -755,7 +755,7 @@ class SongService:
         剥离**一层**谱面类型前缀/后缀（前缀 dx/标准/标/宴/该曲宴谱汉字含
         [汉字] 括号形式，后缀 dx/标准，简繁归一）重查——别名库已去前缀按根 id
         合并，带前后缀的社区惯用写法（dx圣诞 / 标39 / 协love you / 牛奶猫dx）
-        由此兜底命中（Q31）。
+        由此兜底命中。
         """
         await self.ensure_loaded()
         # 与 JP 侧共用的「精确查 → 剥一层重查」骨架（_alias_lookup）；
@@ -804,12 +804,12 @@ class SongService:
         """非数字查询键（别名/曲名）→ 谱面类型条目（查歌/查分共用的定位链）。
 
         链：``scope="cn"`` 国服别名 → 日服别名 →（``cn_title`` 时）国服标题 →
-        日服标题兜底（Q32）；``scope="jp"`` 只走日服视图——NET 数据源以日服
+        日服标题兜底；``scope="jp"`` 只走日服视图——NET 数据源以日服
         口径出卡，混入国服曲对象会带错定数与版本。
 
         末尾按谱面前缀（dx/标准/标/宴）把条目收敛到对应类型：双谱曲不带前缀时
         保留 SD/DX 双条目交调用方列出 id 让用户指定，带前缀时直接定位该类型
-        （Q31 的社区惯用写法）。``cn_title`` 供以曲名为主要输入的指令（minfo）
+        （社区惯用写法）。``cn_title`` 供以曲名为主要输入的指令（minfo）
         使用；「是什么歌」按设计不查国服标题（输入是别名，曲名走其后的兜底措辞）。
         """
         songs: list[Song] = []

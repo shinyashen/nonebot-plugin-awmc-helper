@@ -60,7 +60,8 @@ async def rating_ranking() -> list[RankUser]:
 
 DF_AUTH_BASE = "https://auth.diving-fish.com"
 REVOKE_URL = DF_AUTH_BASE + "/apps"
-# scope 一次带齐 read+write（sunset 文档 §定案④：写为导分统一凭据，2026-09-28 已获批）
+# scope 一次带齐 read+write（divingfish-oauth-sunset.md 定案④：写为
+# 导分统一凭据，2026-09-28 已获批）
 OAUTH_SCOPE = "prober.records.read prober.records.write"
 
 # 确认码字母表：去掉元音（避免随机拼出脏词）与形近字符（0/1/L），用户要在

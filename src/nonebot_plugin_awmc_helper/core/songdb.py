@@ -1710,7 +1710,8 @@ def _level_flat(history: list[tuple[int, float]]) -> list[float]:
 def _points_from_flat(
     values: list[float], debut: int | None
 ) -> list[tuple[int, float]]:
-    """01 文档的扁平 ``level`` 列表 → 变化点序列（外部源导入用，§7.5-C）。
+    """01 文档的扁平 ``level`` 列表 → 变化点序列
+    （外部源导入用，song-db-design.md §7.5-C）。
 
     对位规则：登场版本（组 version，旧框取 DX 初代）在轴上有位则从该位起；
     长度与登场版本不一致或未知时，按「列表末位 = 轴末位（DX 14 版）」端对齐。
@@ -1930,7 +1931,7 @@ async def refresh_all(
                 pr_titles.add(norm_title(entry["title"]))
     except Exception as e:
         logger.warning(f"songdb: otoge PR 预读失败（现役集不含 PR 标题）：{e}")
-    # 外部补充源：读取一次，重建后强制重放合并（§7.5-C）
+    # 外部补充源：读取一次，重建后强制重放合并（song-db-design.md §7.5-C）
     try:
         extra_docs = await _load_extra_docs()
     except Exception:
@@ -2052,7 +2053,7 @@ async def upsert_pending(source: str, key: str, reason: str, payload: dict) -> N
 
 
 # ---------------------------------------------------------------------------
-# 待归并曲目可查（§7.4-7 / Q33）：id 未到位的 pending 曲以「仅展示」形式参与
+# 待归并曲目可查（song-db-design.md §7.4-7）：id 未到位的 pending 曲以「仅展示」形式参与
 # 查歌兜底——不进运行时视图/别名索引/id 键路径。搜索侧用轻量结构（PendingSong，
 # 携带封面 URL 等模型没有的字段），渲染时经 :func:`pending_to_song` 物化为
 # maimai_py Song 走既有查歌卡（用户拍板「0 即 -」约定：bpm/物量的 0 在卡面
@@ -2265,7 +2266,7 @@ async def pending_search(
 
 
 async def _load_extra_docs() -> list[tuple[str, str, dict]]:
-    """读取外部补充源配置（§7.5-C），返回 (来源名, mode, 文档) 列表。
+    """读取外部补充源配置（song-db-design.md §7.5-C），返回 (来源名, mode, 文档) 列表。
 
     配置 ``awmc_extra_song_sources`` 每项为路径/URL，可带 ``::fill``/``::override``
     后缀指定该源合并模式（默认 override，人工即权威）。读取失败记 error 跳过。
