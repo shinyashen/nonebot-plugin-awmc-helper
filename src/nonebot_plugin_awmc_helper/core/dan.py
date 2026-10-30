@@ -98,6 +98,8 @@ DIFF_TO_LEVEL_INDEX = {
     "remaster": 4,
 }
 
+_LEVEL_ID_TO_KIND = {v: k for k, v in DIFF_TO_LEVEL_INDEX.items()}
+
 
 # ---------------------------------------------------------------- 解析模型
 
@@ -781,9 +783,7 @@ async def _sample_random_sheets(
         (
             song_id,
             "std" if kind == "sd" else "dx",
-            {0: "basic", 1: "advanced", 2: "expert", 3: "master", 4: "remaster"}[
-                level_id
-            ],
+            _LEVEL_ID_TO_KIND[level_id],
         )
         for (song_id, kind, level_id), (_ver, ds) in latest.items()
         if random_row.ds_lo <= ds <= random_row.ds_hi

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 
 from .hud import _HudMixin
 from .notes import _Note, _map_notes, _collect_hit_notes
@@ -73,8 +73,6 @@ class _ChartRenderer(_HudMixin):
 
     # ---- 帧渲染
     def render_frame(self, now_ms: float) -> Image.Image:
-        from PIL import ImageChops
-
         c = _Canvas(self.config, base_image=self._base_img)
         # 花火（clip 圆内、HUD 之下，L8101）——直接画在最终画布（此刻只有底图，
         # 与 JS 在 clear/判定线之后立即绘制的背景一致；lighter 混合语义成立）

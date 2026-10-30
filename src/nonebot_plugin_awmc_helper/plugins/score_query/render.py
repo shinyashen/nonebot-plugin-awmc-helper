@@ -5,13 +5,13 @@
 
 import io
 
+from PIL import Image
+
 from ...core.render.tools import image_to_bytes
 
 
 def _ginfo_image(card: bytes, stats_png: bytes) -> bytes:
     """富谱面卡 + 统计卡纵向拼接。"""
-    from PIL import Image
-
     extras: list[Image.Image] = [
         Image.open(io.BytesIO(card)).convert("RGBA"),
         Image.open(io.BytesIO(stats_png)).convert("RGBA"),

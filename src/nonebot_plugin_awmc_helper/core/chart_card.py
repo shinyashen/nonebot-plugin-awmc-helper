@@ -15,7 +15,7 @@ from .score import UserScoreError, score_service
 # 同名常量），plugins 层消费方经本模块 import 不动
 from .songs import SINGLE_JP_NOTE as JP_ONLY_NOTE
 from .songs import cn_song_map, song_service, utage_diff_of, entries_list_text
-from .render import nb_chart
+from .render import jp_cover, nb_chart
 from ..constants import DEFAULT_THEME, UTAGE_ID_BASE
 
 
@@ -119,8 +119,6 @@ async def song_lookup_reply(
         if entry_id >= UTAGE_ID_BASE:
             # 宴谱条目：宿主曲即便有普通谱也渲染宴会场卡；该张可能日服限定
             # （国服宿主曲无此 diff_id）——保留 JP 宿主对象画日服卡
-            from .render import jp_cover
-
             await jp_cover.get_cover_path(song.id)
             cn_song = cn_songs[song.id]
             cn_diff = utage_diff_of(cn_song, entry_id) if cn_song is not None else None

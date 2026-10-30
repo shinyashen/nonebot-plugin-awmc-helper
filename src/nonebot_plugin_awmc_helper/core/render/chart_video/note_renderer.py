@@ -9,11 +9,10 @@ from __future__ import annotations
 import math
 import bisect
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageChops
 
 from .notes import _Pos, _Note
 from .canvas import (
-    ImageChops_darker,
     _mix,
     _Canvas,
     _grad_pair,
@@ -165,7 +164,7 @@ class _Renderer(_RendererEffectsMixin):
                         ),
                         fill=255,
                     )
-                    lay.putalpha(ImageChops_darker(lay.getchannel("A"), hole))
+                    lay.putalpha(ImageChops.darker(lay.getchannel("A"), hole))
                     c.over(lay, (x0, y0))
         sprite = self.sprites.tap(note.pos, note.is_break, note.is_each, note.is_ex)
         if abs(pos.alpha - 1) > 1e-3:

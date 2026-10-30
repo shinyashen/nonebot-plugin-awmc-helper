@@ -7,7 +7,7 @@ parity-notes.md）。
 import math
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 
 from .constants import (
     _CENTER,
@@ -193,10 +193,8 @@ def _clip_layer(
     掩码圆心在整帧画布中心；区域层需传 box 与 frame_size，取整帧掩码的
     对应窗口（不能以区域自身中心重新生成圆）。
     """
-    from PIL import ImageChops
-
-    out = Image.new("RGBA", layer.size, (0, 0, 0, 0))
     if box is None:
+        out = Image.new("RGBA", layer.size, (0, 0, 0, 0))
         # 只处理非空区域：整帧 darker() 是每帧特效的主要开销之一
         bbox = layer.getbbox()
         if bbox is None:
@@ -287,7 +285,3 @@ def _multi_stop_gradient(
     return Image.fromarray(arr, "RGBA")
 
 
-def ImageChops_darker(a: Image.Image, b: Image.Image) -> Image.Image:
-    from PIL import ImageChops
-
-    return ImageChops.darker(a, b)

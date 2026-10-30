@@ -12,11 +12,11 @@ id 规则（2026-10-24 实测，见 ``local/reference/chart-preview-notes.md`` �
 """
 
 from . import ExtError, ext_request
+from ...constants import DX_ID_OFFSET
 from ..render.chart_audio import SOUND_NAMES
 
 ASSETS_BASE = "https://assets2.lxns.net"
 HIT_SOUND_BASE = "https://maimai.lxns.net"
-_DX_ID_OFFSET = 10000
 
 
 class ChartNotAvailableError(ExtError):
@@ -31,11 +31,11 @@ async def fetch_chart_text(root_id: int, *, dx: bool) -> tuple[str, int]:
     时回退 +10000 兜底（同曲 SD/DX 文件分立）。官方 id 同时供预览页
     ``chart_id`` 参数使用。
     """
-    primary = root_id + (_DX_ID_OFFSET if dx else 0)
+    primary = root_id + (DX_ID_OFFSET if dx else 0)
     text = await _fetch_chart_file(primary)
     if text is not None:
         return text, primary
-    fallback = primary + _DX_ID_OFFSET if not dx else root_id
+    fallback = primary + DX_ID_OFFSET if not dx else root_id
     if fallback != primary:
         text = await _fetch_chart_file(fallback)
         if text is not None:
@@ -76,7 +76,7 @@ async def fetch_music(root_id: int) -> bytes:
     """拉取整曲 mp3（64kbps 整曲；404 抛 :class:`ChartNotAvailableError`）。"""
     resp = await ext_request(
         "GET",
-        f"{ASSETS_BASE}/maimai/music/{root_id % _DX_ID_OFFSET}.mp3",
+        f"{ASSETS_BASE}/maimai/music/{root_id % DX_ID_OFFSET}.mp3",
         name="落雪曲目音频",
         retries=0,
         timeout=120,

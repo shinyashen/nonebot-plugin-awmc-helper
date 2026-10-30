@@ -8,6 +8,7 @@ NapCat 等实现读 ``messages``、LLOneBot 部分版本只读 ``message``，两
 返回 False 由调用方降级为普通消息。
 """
 
+import time
 import asyncio
 from pathlib import Path
 from collections.abc import Sequence
@@ -175,8 +176,6 @@ async def try_send_forward(
             api, params = "send_private_forward_msg", {"user_id": int(user_id)}
         else:
             return False
-        import time
-
         started = time.time()
         try:
             await asyncio.wait_for(

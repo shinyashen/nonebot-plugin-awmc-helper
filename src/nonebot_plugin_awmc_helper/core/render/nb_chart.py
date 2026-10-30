@@ -10,7 +10,8 @@
 from pathlib import Path
 
 from PIL import Image, ImageDraw
-from maimai_py import Song, Version, SongType, ScoreExtend
+from maimai_py import Song, Version, SongType, ScoreExtend, current_version
+from maimai_py.utils import ScoreCoefficient
 
 from .fonts import FONT_HAN, FONT_RODIN, font
 from .tools import (
@@ -39,8 +40,6 @@ from ...constants import (
 
 def _get_best_rating(level_value: float) -> list[int]:
     """高达成率段的 7 档 RA（NB get_best_rating：最后 6 档 + SSS+ 再 +1，降序）。"""
-    from maimai_py.utils import ScoreCoefficient
-
     ra = [int(ScoreCoefficient(r).ra(level_value)) for r in ACHIEVEMENT_LIST[-6:]]
     ra.append(int(ScoreCoefficient(ACHIEVEMENT_LIST[-1]).ra(level_value)) + 1)
     return sorted(ra, reverse=True)
@@ -105,8 +104,6 @@ def major_diffs(song: Song, prefer_type: SongType | None = None) -> list:
 
 def is_new_chart(version: int) -> bool:
     """当前版本曲目标「新曲」（NB isnew 语义，以 maimai-py 当前版本为准）。"""
-    from maimai_py import current_version
-
     return version >= current_version.value
 
 

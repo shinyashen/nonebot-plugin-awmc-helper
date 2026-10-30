@@ -28,7 +28,8 @@ import httpx
 from bs4 import BeautifulSoup
 
 from . import get_client
-from .. import store
+from .. import store, songdb
+from ..songdb import State
 from ..songdb import norm_title as _norm_title
 
 logger = logging.getLogger("nonebot_plugin_awmc_helper.songdb")
@@ -389,9 +390,7 @@ def _build_song_entry(state, song_id: int, page: ParsedPage) -> dict | None:
 
 async def _build_fill_doc() -> tuple[dict, int]:
     """缺口曲（sd/dx 物量全零）→ fill 文档。返回 (文档, 抓取了页面的曲数)。"""
-    from .. import songdb
-
-    state = await songdb.State.load()
+    state = await State.load()
     cfg = _config()
     http = get_client()
     max_age = cfg.awmc_gamerch_max_age
@@ -441,8 +440,6 @@ async def apply_fill() -> tuple[int, bool]:
 
     返回 (applied, changed)。
     """
-    from .. import songdb
-
     doc, fetched = await _build_fill_doc()
     if not doc:
         logger.info("songdb: gamerch 补充无缺口谱面，跳过")

@@ -19,7 +19,8 @@ from nonebot import logger
 from sqlmodel import select
 
 from . import ExtError, ExtNetworkError, get_client
-from .. import store
+from .. import store, songdb
+from ...config import plugin_config
 from ...constants import DX_ID_OFFSET, normalize_text
 
 _PORTAL_ORIGIN = "https://portal.mumur.net"
@@ -374,7 +375,6 @@ async def refresh_aliases_full(
       在跑标志互斥（进行中直接返回 running）。
     """
     global _walk_running
-    from ...config import plugin_config
 
     if _walk_running:
         return {"status": "running"}
@@ -480,7 +480,6 @@ def _group_title_key(title: str) -> str:
     """标题 join 键（组追加差分与既有组校正共用）：normalize_text（NFKC+简体）
     后再 norm_title（去空白）对齐——任一侧只做 norm_title 会在简繁/全半角
     差异上错配（normalize_text 相等保证 NFKC 相等，反向不然）。"""
-    from .. import songdb
 
     return songdb.norm_title(normalize_text(title))
 
@@ -505,7 +504,6 @@ async def _correct_unconfirmed_versions(facts: dict[str, dict]) -> list[int]:
     时重新锚定为现值并转 confirmed，同样不覆写。只动 sd/dx 组：宴为日服
     独占，MuNET addVersion 无国际服先行问题。
     """
-    from .. import songdb
 
     records = await store.kv_get(_BATCH_GROUPS_KV)
     if not isinstance(records, dict) or not records:
@@ -596,8 +594,6 @@ async def run_batch_supplement() -> dict:
     """
     from . import otoge_db as ext_otoge
     from . import otoge_pr
-    from .. import songdb
-    from ...config import plugin_config
 
     if not plugin_config.awmc_munet_batch:
         return {"status": "disabled"}

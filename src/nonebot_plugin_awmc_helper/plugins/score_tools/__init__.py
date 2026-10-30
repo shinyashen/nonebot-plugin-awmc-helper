@@ -36,10 +36,13 @@ from ...core.songs import song_service, chart_of_color
 from ...core.store import UserBinding
 from ...core.types import SongType
 from ...core.utils import paginate, parse_page, slow_notice, handle_errors
+from ...core.render import jp_cover
 from ...core.binding import SessionBinding, service_display
 from ...core.sources import Capability
 from ...core.chart_card import resolve_card_view
+from ...core.render.score import DrawScore
 from ...core.render.tools import text_image_bytes
+from ...core.render.score_line import score_line_card
 
 _RANKING_PAGE_SIZE = 50
 """水鱼 RA 排行榜页大小（帮助文案「50/页」口径同源）。"""
@@ -101,12 +104,8 @@ async def _(
 
     song, prefer, jp, utage_diff = resolved
     theme = binding.theme or DEFAULT_THEME
-    from ...core.render.score_line import score_line_card
-
     if utage_diff is not None:
         # 宴谱：diff_id 即完整规格，无难度色；日服限定宿主封面在线兜底
-        from ...core.render import jp_cover
-
         await jp_cover.get_cover_path(song.id)
         result = score_line(utage_diff, line)
         if result is None:
@@ -145,8 +144,6 @@ async def _(
     binding: UserBinding = SessionBinding(),
     groups: tuple = RegexGroup(),
 ):
-    from ...core.render.score import DrawScore
-
     level, target_raw = groups
     target = int(target_raw) if target_raw else 1
     bests = await score_service.get_b50(binding, notify_slow=slow_notice())

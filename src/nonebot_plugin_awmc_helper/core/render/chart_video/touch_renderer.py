@@ -5,11 +5,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 
 from .notes import _Note
 from .canvas import (
-    ImageChops_darker,
     _mix,
     _Canvas,
     _poly_mask,
@@ -219,7 +218,7 @@ class _TouchRenderer:
             pts.append((cx + math.cos(ang) * size, cy + math.sin(ang) * size))
         pd.polygon(pts, fill=255)
         layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        layer.paste(sprite, (0, 0), ImageChops_darker(sprite.getchannel("A"), pie))
+        layer.paste(sprite, (0, 0), ImageChops.darker(sprite.getchannel("A"), pie))
         if alpha < 1:
             layer.putalpha(layer.getchannel("A").point(lambda v: int(v * alpha)))
         c.over(layer, (int(c.s(x) - size / 2), int(c.s(y) - size / 2)))
