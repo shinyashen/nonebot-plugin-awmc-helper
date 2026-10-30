@@ -872,8 +872,14 @@ async def _seed_pending():
 
 @requires_assets
 @pytest.mark.asyncio
-async def test_search_pending_fallback_card(app: App, songs):
-    """查歌：CN/JP 视图均 miss → pending 兜底出临时卡。"""
+async def test_search_pending_fallback_card(app: App, songs, monkeypatch):
+    """查歌：CN/JP 视图均 miss → pending 兜底出临时卡（封面链 stub 占位）。"""
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(jp_cover, "ensure_image", _none)
     await _seed_pending()
     await _assert_pending_card(app, "search", "查歌 物語")
 
@@ -891,11 +897,17 @@ async def test_ds_search_pending_fallback_card(app: App, songs):
 async def test_alias_song_pending_fallback_card(app: App, songs, monkeypatch):
     """是什么歌：输入为新曲歌名（无别名）→ 投票提示落空后 pending 兜底。"""
     from nonebot_plugin_awmc_helper.core.ext.yuzu import yuzu_client
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
 
     async def _boom(*a, **k):
         raise RuntimeError("测试跳过网络")
 
     monkeypatch.setattr(yuzu_client, "get_apply_songs", _boom)
+
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(jp_cover, "ensure_image", _none)
     await _seed_pending()
     await _assert_pending_card(app, "search_alias_song", "物語はここから是什么歌")
 

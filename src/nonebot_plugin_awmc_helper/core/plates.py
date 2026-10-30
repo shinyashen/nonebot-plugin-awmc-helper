@@ -18,6 +18,7 @@ from maimai_py import (
     SongType,
     LevelIndex,
     SongDifficulty,
+    current_version,
     plate_to_version,
     current_version_jp,
     plate_to_version_jp,
@@ -265,6 +266,16 @@ def version_code_of(diff: SongDifficulty) -> int | None:
     末期 lv15 ReM 谱被 19900 上界排除，舞将完成表缺 15）。
     """
     return align_version_code(diff.version) if diff.version is not None else None
+
+
+def is_newcomer_diff(diff: SongDifficulty) -> bool:
+    """当期批次新曲谱面：谱面**原始版本码**大于库 ``current_version``（国服
+    后缀批次码如 25505，maimai_py 未跟进期间）。
+
+    必须用 diff 原始码（不经 align）：align(25505)=25500 会把当期判据抹平；
+    也不能用 song.version（组级口径，与谱面归属在混组形态下不一致）。
+    """
+    return diff.version is not None and diff.version > current_version.value
 
 
 def in_plate_scope(song: Song, diff: SongDifficulty, lo: int, hi: int) -> bool:

@@ -32,6 +32,7 @@ from .plates import (
     PLATE_FULL_SET_VERSIONS,
     PlatesView,
     norm_plate,
+    is_newcomer_diff,
     plate_entry_allowed,
 )
 from .ext.yuzu import get_plate_list
@@ -199,7 +200,8 @@ async def _disabled_fetch() -> "frozenset[int]":
     global _disabled_cache
     from .ext.lxns import fetch_song_list
 
-    songs = await fetch_song_list(notes=False)
+    # fetch_song_list 返回带 ``songs`` 键的 doc（与轮询层同款取法）
+    songs = (await fetch_song_list(notes=False)).get("songs", [])
     _disabled_cache = {
         "ids": frozenset(
             int(s["id"]) % DX_ID_OFFSET for s in songs if s.get("disabled")
@@ -225,9 +227,9 @@ async def plate_admission(
     """
     if plate_entry_allowed(plate_ids, song, diff, remaster_ids=remaster_ids):
         return True
-    if disabled is None or not is_current_batch_newcomer(song):
+    if disabled is None or not is_newcomer_diff(diff):
         return False
-    return song.id not in disabled
+    return song.id % DX_ID_OFFSET not in disabled
 
 
 def admission_fingerprint(
@@ -283,7 +285,7 @@ class _FilteredPlates:
                     and is_current_batch_newcomer(obj.song)
                     and obj.song.id % DX_ID_OFFSET not in self._disabled
                 ):
-                    continue
+                    continue  # （song 级判定：库对象不带谱面版本，CN 视图组级口径）
             levels = obj.levels
             if (
                 self._full_set

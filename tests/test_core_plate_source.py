@@ -274,6 +274,30 @@ async def test_filter_cn_plates_dx_full_id(snapshot):
 
 
 @pytest.mark.asyncio
+async def test_cn_disabled_ids_parses_song_doc(db, monkeypatch):
+    """disabled 集解析落雪曲库 doc：``fetch_song_list`` 返回带 ``songs`` 键的
+    dict（非 list）——迭代 dict 键会让 `.get` 炸掉、fail-closed 恒不放行
+    （2026-10-30 生产实测回归）。"""
+    from nonebot_plugin_awmc_helper.core import plate_source
+    from nonebot_plugin_awmc_helper.core.ext import lxns
+
+    async def fake_list(notes=True):
+        return {
+            "songs": [
+                {"id": 12025, "disabled": False},
+                {"id": 11001, "disabled": True},  # DX 曲 raw id → 根 1001
+                {"id": 8, "disabled": True},  # SD 根 id
+            ]
+        }
+
+    monkeypatch.setattr(lxns, "fetch_song_list", fake_list)
+    # autouse 夹具替换了 cn_disabled_ids 本身（fail-closed 默认态），此处直测
+    # 解析内层
+    assert await plate_source._disabled_fetch() == frozenset({1001, 8})
+    assert plate_source._disabled_cache["ids"] == frozenset({1001, 8})
+
+
+@pytest.mark.asyncio
 async def test_filter_cn_plates_newcomer_bypass(db, monkeypatch):
     """当期新曲受控放行（2026-10-30）：白名单缺席 × 落雪删除检查三态。
 
