@@ -528,6 +528,33 @@ async def test_chart_card_b50_side_by_version(monkeypatch):
     )
 
 
+def test_parse_range_args_dash_syntax():
+    """定数/bpm 参数解析（2026-10-31 定案语法）：首参数值或短横线范围、次参页码。
+
+    取代基准 Hoshino 的「两数=范围、大值在前=单值+页」歧义约定：旧习惯
+    「180 2」在新语法下自然解读为「bpm 180 第 2 页」；空格两数不再作范围
+    （第二参数恒为页码），范围一律走短横线。
+    """
+    from nonebot_plugin_awmc_helper.plugins.music_query.resolve import parse_range_args
+
+    # 单值 / 单值+页码
+    assert parse_range_args(["13.5"], "定数") == (13.5, 13.5, 1)
+    assert parse_range_args(["180", "2"], "bpm") == (180.0, 180.0, 2)
+    # 短横线范围 / 范围+页码
+    assert parse_range_args(["13.5-14.0"], "定数") == (13.5, 14.0, 1)
+    assert parse_range_args(["13.5-14.0", "3"], "定数") == (13.5, 14.0, 3)
+    assert parse_range_args(["150-180"], "bpm") == (150.0, 180.0, 1)
+    # 非法：空格两数第二位非页码 / 逆序范围 / 超参 / 非数值
+    with pytest.raises(ValueError, match="参数错误"):
+        parse_range_args(["7.4", "7.6"], "定数")
+    with pytest.raises(ValueError, match="参数错误"):
+        parse_range_args(["180-150"], "bpm")
+    with pytest.raises(ValueError, match="参数错误"):
+        parse_range_args(["13.5", "2", "3"], "定数")
+    with pytest.raises(ValueError, match="参数错误"):
+        parse_range_args(["abc"], "bpm")
+
+
 def test_new_best_score_baseline_from_version_side():
     """加分基线 = 版本分段列表的入线线（最低 RA，不分谱面类型）。
 
@@ -889,7 +916,7 @@ async def test_search_pending_fallback_card(app: App, songs, monkeypatch):
 async def test_ds_search_pending_fallback_card(app: App, songs):
     """定数查歌：样例库无 7.5 定数 → pending 兜底出临时卡（定数揭晓即可查）。"""
     await _seed_pending()
-    await _assert_pending_card(app, "search", "定数查歌 7.4 7.6")
+    await _assert_pending_card(app, "search", "定数查歌 7.4-7.6")
 
 
 @requires_assets

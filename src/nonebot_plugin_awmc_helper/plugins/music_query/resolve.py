@@ -24,25 +24,40 @@ def _is_float(value: str) -> bool:
         return False
 
 
+_RANGE_USAGE = (
+    "{label}查歌参数错误，请输入正确格式：\n"
+    "{label}查歌「{label}」（单值）\n"
+    "{label}查歌「最小{label}-最大{label}」（短横线范围）\n"
+    "页码作第二参数：{label}查歌 <{label}|最小{label}-最大{label}> <页数>"
+)
+
+
 def parse_range_args(a_list: list[str], label: str) -> "tuple[float, float, int]":
     """数值范围查歌参数解析（定数/bpm 两分支同构，报错文案按 label 定制）。
 
-    形态：「值」（单值=上下限相同）或「最小 最大」+ 可选页数；不合法抛
-    ``ValueError``（文案面向用户，handler 转 finish）。
+    形态（2026-10-31 定案，有意偏离基准 Hoshino 的「两数=范围、大值在前=
+    单值+页」约定——该歧义形态由「首参数=值或短横线范围、第二参数=页码」
+    无歧义承接）：首参数为「值」（单值=上下限相同）或「最小-最大」，可选
+    第二参数为页码。不合法抛 ``ValueError``（文案面向用户，handler 转
+    finish）。
     """
-    page = 1
-    if len(a_list) >= 2 and _is_float(a_list[0]) and _is_float(a_list[1]):
-        v1, v2 = float(a_list[0]), float(a_list[1])
-        if len(a_list) >= 3 and a_list[2].isdigit():
-            page = int(a_list[2])
-    elif len(a_list) == 1 and _is_float(a_list[0]):
-        v1 = v2 = float(a_list[0])
+    if not 1 <= len(a_list) <= 2:
+        raise ValueError(_RANGE_USAGE.format(label=label))
+    head = a_list[0]
+    if "-" in head:
+        lo, _, hi = head.partition("-")
+        if not _is_float(lo) or not _is_float(hi) or float(lo) > float(hi):
+            raise ValueError(_RANGE_USAGE.format(label=label))
+        v1, v2 = float(lo), float(hi)
+    elif _is_float(head):
+        v1 = v2 = float(head)
     else:
-        raise ValueError(
-            f"{label}查歌参数错误，请输入正确格式，页数为可选：\n"
-            f"{label}查歌「{label}」「页数」\n"
-            f"{label}查歌「最小{label}」「最大{label}」「页数」"
-        )
+        raise ValueError(_RANGE_USAGE.format(label=label))
+    page = 1
+    if len(a_list) == 2:
+        if not a_list[1].isdigit() or int(a_list[1]) < 1:
+            raise ValueError(_RANGE_USAGE.format(label=label))
+        page = int(a_list[1])
     return v1, v2, page
 
 
