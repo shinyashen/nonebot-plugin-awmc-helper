@@ -153,7 +153,7 @@ async def test_ensure_silent_on_fetch_failure(jp_env, mock):
 
 @pytest.mark.asyncio
 async def test_ensure_false_when_song_unknown(jp_env, mock):
-    """规范表无此曲（无 image_url）时直接 False，不发起请求。"""
+    """规范表无此曲（无 image_url）时官方/otoge 层不发起请求（落雪层仍尝试）。"""
     _store, _static, cache = jp_env
     route = mock.get(url=URL).respond(200, content=PNG)
 
@@ -161,6 +161,24 @@ async def test_ensure_false_when_song_unknown(jp_env, mock):
 
     assert await jp_cover.ensure(999999, cache_dir=cache) is False
     assert route.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_ensure_lxns_covers_song_without_image_url(jp_env, mock):
+    """无 image_url（otoge 未收录的 CN 先行曲）→ 落雪层按 id 命中落缓存。"""
+    store, _static, cache = jp_env
+    async with store.session() as session:
+        session.add(store.SongRow(id=2025, title="x", image_url=None))
+        await session.commit()
+    lxns = mock.get(url="https://assets.lxns.net/maimai/jacket/2025.png").respond(
+        200, content=PNG
+    )
+
+    from nonebot_plugin_awmc_helper.core.render import jp_cover
+
+    assert await jp_cover.ensure(2025, cache_dir=cache) is True
+    assert (cache / "2025.png").read_bytes() == PNG
+    assert lxns.call_count == 1
 
 
 def test_ssl_context_includes_intermediate():

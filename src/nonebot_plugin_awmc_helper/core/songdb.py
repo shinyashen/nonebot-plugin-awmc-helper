@@ -1158,6 +1158,31 @@ def apply_cn(state: State, cn: dict[int, Entry], df: dict[str, dict] | None) -> 
                             f"「{entry.title}」{kind}{level_id} 国服定数推导 "
                             f"{derived} ≠ 落雪 {chart.cn_level_value}"
                         )
+                # CN 先行曲的国服定数基线（2026-10-30）：无任何定数历史时以
+                # 落雪实测退化为单行（version_cn 锚）——CN 视图的标级/定数
+                # 原本只能从 maimaiinfo 历史推导，CN 先行窗口内恒 "?"/0.0
+                # （魔法仕掛けのファンタジア 12025 实测）。maimaiinfo 跟进后
+                # apply_jp 的 set_history 以真实历史整行替换；基线已存在时
+                # 仅在同构单行上刷新值（落雪重测纠偏），不动多行历史。
+                if (
+                    chart.cn_level_value
+                    and kind != "utage"
+                    and not state.history_of(song_id, kind, level_id)
+                ):
+                    anchor = group.version_cn or cn_current
+                    state.set_history(
+                        song_id, kind, level_id, [(anchor, chart.cn_level_value)]
+                    )
+                elif (
+                    chart.cn_level_value
+                    and kind != "utage"
+                    and group.version_cn is not None
+                ):
+                    points = state.history_of(song_id, kind, level_id)
+                    if len(points) == 1 and points[0][0] == group.version_cn:
+                        state.levels[(song_id, kind, level_id)] = [
+                            (group.version_cn, chart.cn_level_value)
+                        ]
         _crosscheck_df(state, song_id, entry, df, cn_current)
 
 

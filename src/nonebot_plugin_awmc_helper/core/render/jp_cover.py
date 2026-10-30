@@ -95,8 +95,10 @@ async def _fetch_cover_chain(
 async def get_cover_path(song_id: int, cache_dir: Path | None = None) -> Path:
     """曲绘解析**唯一入口**（2026-10-30 定案）：所有需要封面的渲染统一经此。
 
-    static 素材 → 缓存 → 官方站 → 落雪资产站 → otoge-db 仓库 → 占位 0.png，
-    逐级尝试；在线命中即落缓存（后续走缓存环）。
+    static 素材 → 缓存 → 在线链（落雪 → 官方 NET → otoge 仓库）→ 占位 0.png，
+    逐级尝试；在线命中即落缓存（后续走缓存环）。落雪层按曲目 id 寻址、**不
+    依赖 image_url**——otoge 未收录的 CN 先行曲同样覆盖；NET/otoge 两层需要
+    otoge 哈希名，无 image_url 的曲跳过。
     ``cache_dir`` 供测试注入缓存目录，默认取 localstore 的 ``jp_covers``。
     """
     static, cached, placeholder = assets.cover_candidates(song_id)
@@ -105,9 +107,7 @@ async def get_cover_path(song_id: int, cache_dir: Path | None = None) -> Path:
     if cached.exists():
         return cached
     image_url = await store.song_image_url(song_id)
-    if image_url and await _fetch_cover_chain(
-        song_id, image_url, cached, with_lxns=True
-    ):
+    if await _fetch_cover_chain(song_id, image_url, cached, with_lxns=True):
         return cached
     return placeholder
 

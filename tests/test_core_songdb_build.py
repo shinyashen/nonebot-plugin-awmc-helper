@@ -195,6 +195,31 @@ async def test_jp_missing_and_cn_absence_delete(db):
 
 
 @pytest.mark.asyncio
+async def test_cn_baseline_history_for_cn_first_song(db):
+    """CN 先行曲（maimaiinfo 无历史）以落雪实测退化为 version_cn 锚单行。
+
+    魔法仕掛けのファンタジア 12025 形态：CN 视图原本标级/定数恒 "?"/0.0
+    （定数历史只来自 maimaiinfo dschange）；基线写入后标级由定数推导，
+    maimaiinfo 跟进时 apply_jp 的 set_history 以真实历史整行替换。
+    """
+    from nonebot_plugin_awmc_helper.core import songdb
+
+    await songdb.rebuild(full_payloads())
+    state = await songdb.State.load()
+    # 构造国服限定 9002：落雪 level_value=7.2、version_cn=25500
+    assert state.history_of(9002, "sd", 0) == [(25500, 7.2)]
+    song = songdb.build_song(state, 9002, "cn")
+    assert song is not None
+    diff = song.get_difficulties()[0]
+    assert diff.level == "7"
+    assert diff.level_value == 7.2
+    # 落雪重测纠偏：同构单行值刷新
+    await songdb.rebuild(full_payloads())
+    state = await songdb.State.load()
+    assert state.history_of(9002, "sd", 0) == [(25500, 7.2)]
+
+
+@pytest.mark.asyncio
 async def test_closed_world_cn_keeps_jp_removed(db):
     """closed-world：JP 移除（otoge 标题缺席）而国服在列 → JP 版本列置 NULL、
     国服列与曲保留（人マニア形态：JP 已删・CN 在列，§2.17 逐源可用性）。"""
