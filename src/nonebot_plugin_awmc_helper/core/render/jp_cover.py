@@ -85,8 +85,11 @@ async def _fetch_cover_chain(
     # image_url 寻址，必 404 的请求不入链
     if image_url:
         attempts.append(
-            (_MUSIC_IMG_URL.format(image_url=image_url),
-             maimaidx_ssl_context(), _NET_TAG)
+            (
+                _MUSIC_IMG_URL.format(image_url=image_url),
+                maimaidx_ssl_context(),
+                _NET_TAG,
+            )
         )
         attempts.append(
             (_OTOGE_JACKET_URL.format(image_url=image_url), True, _OTOGE_TAG)

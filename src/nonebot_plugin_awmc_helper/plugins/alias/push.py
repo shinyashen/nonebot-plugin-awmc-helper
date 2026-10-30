@@ -65,9 +65,11 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
 
 
 async def _push_to_groups(bot, group_list, text: str, default: bool) -> None:
-    targets = [g for g in group_list if await store.get_switch(
-        str(g["group_id"]), PUSH_FEATURE, default
-    )]
+    targets = [
+        g
+        for g in group_list
+        if await store.get_switch(str(g["group_id"]), PUSH_FEATURE, default)
+    ]
     for i, g in enumerate(targets):
         gid = str(g["group_id"])
         # 合并转发优先（core/forward 统一构造），失败降级普通消息

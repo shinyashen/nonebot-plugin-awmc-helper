@@ -283,5 +283,3 @@ def _multi_stop_gradient(
     idx = np.round(t * 255).astype(np.int32).clip(0, 255)
     arr = np.dstack([lut[idx], np.full((h, w), 255, np.uint8)])
     return Image.fromarray(arr, "RGBA")
-
-
