@@ -65,14 +65,16 @@ async def push_apply(push: yuzu_ext.AliasPush) -> None:
 
 
 async def _push_to_groups(bot, group_list, text: str, default: bool) -> None:
-    for g in group_list:
+    targets = [g for g in group_list if await store.get_switch(
+        str(g["group_id"]), PUSH_FEATURE, default
+    )]
+    for i, g in enumerate(targets):
         gid = str(g["group_id"])
-        if not await store.get_switch(gid, PUSH_FEATURE, default):
-            continue
         # 合并转发优先（core/forward 统一构造），失败降级普通消息
         if not await try_send_forward(bot, [text], group_id=gid):
             try:
                 await bot.send_group_msg(group_id=int(gid), message=ob11_text(text))
             except Exception:
                 logger.exception(f"别名推送到群 {gid} 失败")
-        await asyncio.sleep(_PUSH_GROUP_INTERVAL)
+            if i < len(targets) - 1:  # 间隔只在群间，末群不空等
+                await asyncio.sleep(_PUSH_GROUP_INTERVAL)

@@ -70,8 +70,12 @@ def extract_at_target(event: "Event | None") -> str | None:
     if message is None:
         return None
     for seg in message:
-        if seg.type == "at" and str(seg.data.get("qq")) != "all":
-            return str(seg.data["qq"])
+        if seg.type != "at":
+            continue
+        qq = seg.data.get("qq")
+        # 缺 qq 键防御：字符串 "None" 不作目标；"all" 为全体 at
+        if qq is not None and str(qq) != "all":
+            return str(qq)
     return None
 
 

@@ -164,7 +164,7 @@ async def _pick_rise_song(scores: list[ScoreExtend], jp: bool = False):
         side = [s for s in scores if s.type == other]
         if not side:
             return None
-    side.sort(key=lambda s: s.dx_rating or 0)  # 升序，取末位应为最低
+    side.sort(key=lambda s: s.dx_rating or 0)  # 升序后取首位（该侧 RA 最低）
     # 末位 RA 口径刻意与 score_tools 推分推荐不同：此处取**同谱面类型一侧**
     # 的 B50 末位（随机出的谱面与该侧同池，才有替换意义），见 rise_candidates 注
     lowest_ra = side[0].dx_rating or 0

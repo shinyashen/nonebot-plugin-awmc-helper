@@ -81,10 +81,16 @@ async def _fetch_cover_chain(
     attempts = []
     if with_lxns:
         attempts.append((_LXNS_JACKET_URL.format(song_id=song_id), True, _LXNS_TAG))
-    attempts.append(
-        (_MUSIC_IMG_URL.format(image_url=image_url), maimaidx_ssl_context(), _NET_TAG)
-    )
-    attempts.append((_OTOGE_JACKET_URL.format(image_url=image_url), True, _OTOGE_TAG))
+    # 无 image_url 的曲（lxns 失败时的 CN 先行曲场景）：NET/otoge 两站均按
+    # image_url 寻址，必 404 的请求不入链
+    if image_url:
+        attempts.append(
+            (_MUSIC_IMG_URL.format(image_url=image_url),
+             maimaidx_ssl_context(), _NET_TAG)
+        )
+        attempts.append(
+            (_OTOGE_JACKET_URL.format(image_url=image_url), True, _OTOGE_TAG)
+        )
     for url, verify, tag in attempts:
         subject = f"jp_cover：{song_id} 曲绘" + (f"（{tag}）" if tag else "")
         if await _download_cover(url, path, subject=subject, verify=verify):
