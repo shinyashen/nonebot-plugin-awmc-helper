@@ -84,9 +84,7 @@ async def _fetch_cover_chain(
     attempts.append(
         (_MUSIC_IMG_URL.format(image_url=image_url), maimaidx_ssl_context(), _NET_TAG)
     )
-    attempts.append(
-        (_OTOGE_JACKET_URL.format(image_url=image_url), True, _OTOGE_TAG)
-    )
+    attempts.append((_OTOGE_JACKET_URL.format(image_url=image_url), True, _OTOGE_TAG))
     for url, verify, tag in attempts:
         subject = f"jp_cover：{song_id} 曲绘" + (f"（{tag}）" if tag else "")
         if await _download_cover(url, path, subject=subject, verify=verify):
