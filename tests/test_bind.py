@@ -394,10 +394,10 @@ async def test_df_subject_derivable_regardless_of_service(db, monkeypatch):
     monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
     monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
 
-    b = UserBinding(platform="OneBot V11", user_id="935302685", service="net")
+    b = UserBinding(platform="OneBot V11", user_id="123456789", service="net")
     assert binding_service.divingfish_subject(b) is not None
     assert binding_service.divingfish_subject(b) == binding_service.divingfish_subject(
-        UserBinding(platform="OneBot V11", user_id="935302685", service="divingfish")
+        UserBinding(platform="OneBot V11", user_id="123456789", service="divingfish")
     )
 
 
