@@ -27,7 +27,13 @@ from maimai_py import Version, SongType, LevelIndex
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import credit_text, truncate_hoshino
 from .assets import assets
-from .nb_chart import LOGO_SIZE, major_type_of, version_image, paste_version_logo
+from .nb_chart import (
+    LOGO_SIZE,
+    major_type_of,
+    version_image,
+    fit_version_logo,
+    paste_version_logo,
+)
 from .score_line import _DARK, _GRAY, _card, _theme_bg, _theme_style
 from ...constants import GENRE_TO_ZH, DIFF_DISPLAY_NAMES, ds_text, chart_display_id
 
@@ -64,21 +70,6 @@ _FOOTNOTE = (
     "※ 仅统计 DX 世代定数 · 未调整的版本沿用前值不占节点 · "
     "换行时行首箭头为自上行末节点的变化"
 )
-
-
-def _fit_node_logo(img: Image.Image, box: tuple[int, int] = (112, 56)) -> Image.Image:
-    """节点槽位版 ``nb_chart.fit_version_logo``：裁透明留白 → 内容双下限
-    （高 46 / 宽 88，按槽位等比缩小自 182×90 槽的 72/140）→ 不超槽位。
-    各世代 logo 画布留白差异大，直接 resize 会变形或大小不一。"""
-    alpha = img.getchannel("A").point(lambda v: 255 if v > 16 else 0)  # type: ignore[arg-type]
-    if bb := alpha.getbbox():
-        img = img.crop(bb)
-    scale = max(46 / img.height, 88 / img.width)
-    scale = min(scale, box[0] / img.width, box[1] / img.height)
-    return img.resize(
-        (round(img.width * scale), round(img.height * scale)),
-        Image.Resampling.LANCZOS,
-    )
 
 
 def linfo_card(
@@ -323,7 +314,7 @@ def _draw_node(im, draw, points, ver, val, nx, y, *, idx, cn_current, jp) -> Non
     )
     logo = version_image(ver, jp=True)
     if logo is not None:
-        logo = _fit_node_logo(logo)
+        logo = fit_version_logo(logo, (112, 56), min_h=46, min_w=88)
         pill.alpha_composite(
             logo, ((NODE_W - logo.width) // 2, (PILL_H - logo.height) // 2)
         )

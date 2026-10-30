@@ -193,17 +193,25 @@ def version_image(version: int, jp: bool = False) -> Image.Image | None:
     return None
 
 
-def fit_version_logo(img: Image.Image, box: tuple[int, int] = (182, 90)) -> Image.Image:
-    """版本 logo 等比适配槽位：裁透明留白 → 高≥72 且 宽≥140（取大者）→ 不超槽位。
+def fit_version_logo(
+    img: Image.Image,
+    box: tuple[int, int] = (182, 90),
+    *,
+    min_h: int = 72,
+    min_w: int = 140,
+) -> Image.Image:
+    """版本 logo 等比适配槽位：裁透明留白 → 内容双下限（高≥min_h 且 宽≥min_w，
+    取大者）→ 不超槽位。
 
     各世代素材画布的留白量与宽高比差异很大（国服 AR 1.2~4.9、日服 1.4~2.8），
     直接 resize 到槽位（比例 2.02）会带来 10~140% 的拉伸变形；按内容双下限
-    等比缩放才能兼顾不变形与整组 logo 视觉大小一致。
+    等比缩放才能兼顾不变形与整组 logo 视觉大小一致。linfo 节点小槽
+    （46/88、box(112,56)）同算法不同常量，经参数复用本函数。
     """
     alpha = img.getchannel("A").point(lambda v: 255 if v > 16 else 0)  # type: ignore[arg-type]
     if bb := alpha.getbbox():
         img = img.crop(bb)
-    scale = max(72 / img.height, 140 / img.width)
+    scale = max(min_h / img.height, min_w / img.width)
     scale = min(scale, box[0] / img.width, box[1] / img.height)
     return img.resize(
         (round(img.width * scale), round(img.height * scale)),
