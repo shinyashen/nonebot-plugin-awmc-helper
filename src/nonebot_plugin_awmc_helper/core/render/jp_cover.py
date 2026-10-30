@@ -122,11 +122,6 @@ async def ensure(song_id: int, cache_dir: Path | None = None) -> bool:
     return got != placeholder and got.exists()
 
 
-def has_local(song_id: int, cache: Path | None = None) -> bool:
-    """曲绘本地是否可得（static 素材或缓存；sidecar 愈合检查用）。"""
-    return _has_local(song_id, cache or jp_cache_dir())
-
-
 def any_local(song_ids: Iterable[int], cache: Path | None = None) -> bool:
     """任一 id 的曲绘本地可得（sidecar 愈合检查：缺口被他路补齐即重渲）。"""
     return any(_has_local(i, cache or jp_cache_dir()) for i in song_ids)

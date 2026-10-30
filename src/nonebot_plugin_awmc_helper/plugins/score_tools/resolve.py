@@ -76,7 +76,7 @@ async def resolve_color_chart(
     *,
     binding: UserBinding,
     command: str = "分数线",
-) -> tuple[Song, SongType | None, bool, SongDifficultyUtage] | None:
+) -> tuple[Song, SongType | None, bool, SongDifficultyUtage | None] | None:
     """分数线 / linfo 共用的「难度色/宴 + 曲」解析链。
 
     返回 ``resolved`` 四元组 ``(曲, 谱面类型偏好, 日服, 宴谱)``；未命中返回

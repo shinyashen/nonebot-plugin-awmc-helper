@@ -72,7 +72,7 @@ class _ChartRenderer(_HudMixin):
         ] = {}
 
     # ---- 帧渲染
-    def render_frame(self, now_ms: float, fps: int) -> Image.Image:
+    def render_frame(self, now_ms: float) -> Image.Image:
         from PIL import ImageChops
 
         c = _Canvas(self.config, base_image=self._base_img)
@@ -81,7 +81,7 @@ class _ChartRenderer(_HudMixin):
         fire_notes = [n for n in self.renderer.touches if n.fire]
         if fire_notes:
             self.fireworks.render(c, fire_notes, now_ms)
-        self._hud(c, now_ms, fps)
+        self._hud(c, now_ms)
         # clip 圆内播放场（ctx.clip 等价：先画到独立层再按圆裁切合成）
         field = Image.new("RGBA", c.img.size, (0, 0, 0, 0))
         fc = _Canvas(self.config)

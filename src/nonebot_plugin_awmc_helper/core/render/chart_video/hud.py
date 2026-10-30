@@ -32,7 +32,7 @@ class _HudMixin:
     _bpm_changes: list[tuple[float, int]]
     _text_cache: dict[tuple, tuple[Image.Image, Image.Image, float, float]]
 
-    def _hud(self, c: _Canvas, now: float, fps: int) -> None:
+    def _hud(self, c: _Canvas, now: float) -> None:
         """renderBpmDisplay（L8583）+ renderNoteCounts（L8637）。"""
 
         s = c.ss

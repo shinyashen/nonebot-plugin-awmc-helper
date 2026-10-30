@@ -199,20 +199,6 @@ def plate_roster_hint(jp: bool) -> str:
     return f"{'日服' if jp else '国服'}数据源可查至「{roster[-1]}」代牌子"
 
 
-def major_type_of_plate(version: str) -> SongType:
-    """牌子主类型（maimai_py MaimaiPlates._major_type 同语义）。
-
-    DX 世代牌推 DX 谱，旧作牌（含舞/霸）推 SD 谱——决定 per-type 游戏 id
-    与定数取哪侧谱面。
-    """
-    if version in _LEGACY_PLATES:
-        return SongType.STANDARD
-    pv = plate_to_version.get(version)
-    return (
-        SongType.DX if pv is not None and pv >= Version.MAIMAI_DX else SongType.STANDARD
-    )
-
-
 def plate_version_range(version: str, *, jp: bool = False) -> tuple[int, int] | None:
     """牌子覆盖的谱面版本码闭区间（未知牌字返回 None）。
 

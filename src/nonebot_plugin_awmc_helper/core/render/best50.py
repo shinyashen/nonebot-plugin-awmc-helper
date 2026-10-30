@@ -221,7 +221,7 @@ def cover_song_id(score: ScoreExtend) -> int:
     根 id 收录其官方曲绘（已与 otoge-db 官方 jacket 逐一比对确认），取模
     同样命中。新版本素材包未收录的新宴谱宿主由 cover 候选链落占位图。
     """
-    return score.id % 10000
+    return score.id % DX_ID_OFFSET
 
 
 def dani_plate_num(course_rank: int) -> str:

@@ -146,7 +146,6 @@ async def _deliver(
     event: Event,
     entry,
     result: PreviewResult,
-    hi_speed: float,
 ) -> None:
     """发送视频 + 歌曲信息 + 视频信息：优先合并转发，失败/不支持降级普通消息。"""
     video = UniMessage.video(path=str(result.path))
@@ -267,7 +266,7 @@ async def _(bot: Bot, event: Event, args=CommandArg()):
         )
         await UniMessage.text(hint).send(at_sender=True)
     result = await build_preview(entry, index, range_token, speed)
-    await _deliver(bot, event, entry, result, speed)
+    await _deliver(bot, event, entry, result)
 
 
 # ---------------------------------------------------------------- 帮助声明

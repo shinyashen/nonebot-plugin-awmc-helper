@@ -112,7 +112,7 @@ def render_golden_frames(chart, times: list[float]) -> list[bytes]:
     renderer = _ChartRenderer(chart)
     out: list[bytes] = []
     for now_ms in times:
-        frame = renderer.render_frame(now_ms, 30)
+        frame = renderer.render_frame(now_ms)
         buf = io.BytesIO()
         frame.save(buf, format="PNG")
         out.append(buf.getvalue())

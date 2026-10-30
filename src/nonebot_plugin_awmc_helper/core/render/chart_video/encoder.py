@@ -32,7 +32,7 @@ def _compose_frame(
     """合成单帧：普通谱面 600×600；buddy 谱面 1200×600（左 1P、右 2P）。"""
 
     def panel(r: "_ChartRenderer") -> Image.Image:
-        frame = r.render_frame(now_ms, fps)
+        frame = r.render_frame(now_ms)
         rgb = frame if frame.mode == "RGB" else frame.convert("RGB")
         return rgb.resize((_WORKER_SIZE, _WORKER_SIZE), Image.Resampling.BILINEAR)
 

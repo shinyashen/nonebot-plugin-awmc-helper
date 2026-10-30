@@ -332,6 +332,18 @@ def _read_stats(video: Path) -> PreviewResult | None:
     )
 
 
+def _cache_file(
+    song_id: int, type_key: str, index: int, fp: str, cache_suffix: str
+) -> Path:
+    """缓存文件名单源（cached_path 与 build_preview 共用，漂移即「渲染中」
+    提示与实际缓存键失配）。"""
+    return cache_dir() / f"{song_id}_{type_key}_{index}_r{fp}{cache_suffix}.mp4"
+
+
+def _type_key_of(prefer: SongType | None) -> str:
+    return "ut" if prefer is None else ("dx" if prefer is SongType.DX else "sd")
+
+
 def cached_path(
     entry: ChartEntry,
     index: int,
@@ -340,11 +352,9 @@ def cached_path(
 ) -> Path | None:
     """缓存命中查询（供 matcher 决定是否发「渲染中」提示）。"""
     _display_id, song, prefer = entry
-    is_utage = prefer is None
-    type_key = "ut" if is_utage else ("dx" if prefer is SongType.DX else "sd")
-    suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
+    cache_suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
     fp = _render_fingerprint(hi_speed)
-    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{fp}{suffix}.mp4"
+    out = _cache_file(song.id, _type_key_of(prefer), index, fp, cache_suffix)
     return out if out.exists() else None
 
 
@@ -374,9 +384,9 @@ async def build_preview(
         level_label = diff.level
 
     type_key = "ut" if is_utage else ("dx" if dx else "sd")
-    suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
+    cache_suffix = _range_suffix(range_token) + _speed_suffix(hi_speed)
     fp = _render_fingerprint(hi_speed)
-    out = cache_dir() / f"{song.id}_{type_key}_{index}_r{fp}{suffix}.mp4"
+    out = _cache_file(song.id, type_key, index, fp, cache_suffix)
     if out.exists():
         cached = _read_stats(out)
         if cached is not None:
@@ -387,8 +397,10 @@ async def build_preview(
     if is_utage:
         # 宴谱文件以 diff_id 命名（宿主曲 id 对应的是普通谱，不能拿来渲染）
         simai_text = await fetch_chart_text_by_id(display_id)
-        suffix, buddy_suffix = _pick_utage_suffixes(simai_text, utage_diff)
-        site_chart = parse_site_chart(simai_text, difficulty=suffix).get(suffix)
+        simai_suffix, buddy_suffix = _pick_utage_suffixes(simai_text, utage_diff)
+        site_chart = parse_site_chart(simai_text, difficulty=simai_suffix).get(
+            simai_suffix
+        )
         if site_chart is None:
             raise ValueError("素材站的谱面数据缺少该难度")
         if buddy_suffix is not None:
@@ -399,8 +411,10 @@ async def build_preview(
                 raise ValueError("素材站缺少该 buddy 宴谱的 2P 谱面数据")
     else:
         simai_text, _official_id = await fetch_chart_text(song.id, dx=dx)
-        suffix = _SUFFIX_BY_INDEX[index]
-        site_chart = parse_site_chart(simai_text, difficulty=suffix).get(suffix)
+        simai_suffix = _SUFFIX_BY_INDEX[index]
+        site_chart = parse_site_chart(simai_text, difficulty=simai_suffix).get(
+            simai_suffix
+        )
         if site_chart is None:
             raise ValueError("素材站的谱面数据缺少该难度")
 

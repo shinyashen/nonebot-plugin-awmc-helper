@@ -193,7 +193,7 @@ async def test_command_single_hit_sends_video(
 
     monkeypatch.setattr(matchers, "build_preview", fake_build)
 
-    async def fake_deliver(bot, event, entry, result, hi_speed):
+    async def fake_deliver(bot, event, entry, result):
         from nonebot.exception import FinishedException
 
         raise FinishedException
@@ -284,7 +284,7 @@ async def test_command_range_hint_and_build(
 
     monkeypatch.setattr(matchers, "build_preview", fake_build)
 
-    async def fake_deliver(bot, event, entry, result, hi_speed):
+    async def fake_deliver(bot, event, entry, result):
         from nonebot.exception import FinishedException
 
         raise FinishedException
@@ -424,7 +424,7 @@ async def test_command_speed_and_range_args(
 
     monkeypatch.setattr(matchers, "build_preview", fake_build)
 
-    async def fake_deliver(bot, event, entry, result, hi_speed):
+    async def fake_deliver(bot, event, entry, result):
         from nonebot.exception import FinishedException
 
         raise FinishedException
@@ -660,7 +660,7 @@ async def test_deliver_node_order(monkeypatch, tmp_path):
         id = 11355
 
     with pytest.raises(FinishedException):
-        await matchers._deliver(bot, event, (11355, Song(), None), result, 7.0)
+        await matchers._deliver(bot, event, (11355, Song(), None), result)
 
     entries = captured["entries"]
     assert len(entries) == 3
@@ -782,7 +782,7 @@ async def test_command_alias_duplicate_views_not_listed(
     async def fake_build(entry, index, range_token=None, hi_speed=7.0):
         return _preview_result(fake_out)
 
-    async def fake_deliver(bot, event, entry, result, hi_speed):
+    async def fake_deliver(bot, event, entry, result):
         from nonebot.exception import FinishedException
 
         raise FinishedException
@@ -927,7 +927,7 @@ async def test_command_utage_resolves_diff_id_from_host(
         seen["entry"] = entry
         return _preview_result(fake_out, label="蛸")
 
-    async def fake_deliver(bot, event, entry, result, hi_speed):
+    async def fake_deliver(bot, event, entry, result):
         from nonebot.exception import FinishedException
 
         raise FinishedException
