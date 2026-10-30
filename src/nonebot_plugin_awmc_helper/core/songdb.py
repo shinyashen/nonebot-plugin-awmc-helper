@@ -1355,7 +1355,7 @@ async def rebuild(
             }
             if len(absent_filtered) != len(jp):
                 logger.info(
-                    f"songdb：MuNET 缺席复核，跳过 maimaiinfo 重建行 "
+                    f"songdb：屏蔽名单/本轮删除曲，跳过 maimaiinfo 重建行 "
                     f"{sorted(set(jp) - set(absent_filtered))}"
                 )
             jp = absent_filtered
@@ -2646,7 +2646,7 @@ async def _merge_extra_docs(
     主表缺失的曲（骨架外新曲、maimaiinfo 滞后的新版曲等，文档自带 id）直接
     创建（仅日侧行，version_cn 恒 NULL）；单元素 sd/dx ``level`` 按「当前定数」
     语义合并（:func:`_merge_current_level`），多元素列表按 01 文档线格式对位。
-    ``excluded_ids``（MuNET 缺席复核确认的删除曲）跳过——机台快照等挖掘
+    ``excluded_ids``（屏蔽名单/本轮删除曲，closed-world 判定产物）跳过——机台快照等挖掘
     类文档可能收录删除曲，合并建行会让其随刷新复活。返回 (applied 处理条目数,
     created 新增曲数, changed 真实值变化字段数)。
     """

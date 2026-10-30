@@ -388,7 +388,6 @@ async def test_batch_adds_missing_sd_group(db, monkeypatched_munet, monkeypatch)
     assert (await db.kv_get("munet_batch_groups"))["1154"] == {
         "sd": {"version": 27002, "confirmed": True}
     }
-    assert 1154 in (await db.kv_get("munet_batch_ids"))
 
     # 下一轮：组已齐候选清零，校正稳态无动作
     second = await munet.run_batch_supplement()
@@ -470,52 +469,6 @@ async def test_batch_intl_first_song_uses_otoge_fact(
     assert group.date == 261002
 
 
-@pytest.mark.asyncio
-async def test_deletion_sweep_drops_absent_ids(db, monkeypatch):
-    """MuNET 删除复核（2026-10-05）：GetById 真缺席（404/空壳）剔出
-    munet_batch_ids 保护集并留档缺席裁决；请求失败与在列曲保留、在列
-    只验一次（present 缓存）。"""
-    from nonebot_plugin_awmc_helper.core.ext import munet
-
-    await db.kv_set("munet_batch_ids", [2020, 2055, 2056])
-
-    async def fake_by_id(music_id: int):
-        if music_id == 2055:
-            return None  # 删除曲：MuNET 已无索引（确定性缺席）
-        if music_id == 2056:
-            raise munet.ExtError("MuNET WAF 拦截")  # 不确定态，保留
-        return {"name": "x"}
-
-    monkeypatch.setattr(munet, "_MIN_INTERVAL", 0)
-    monkeypatch.setattr(munet, "fetch_music_by_id", fake_by_id)
-
-    assert await munet.run_deletion_sweep() == [2055]
-    assert await db.kv_get("munet_batch_ids") == [2020, 2056]
-    assert await db.kv_get("munet_absent_ids") == [2055]
-    assert await db.kv_get("munet_present_ids") == [2020]
-
-    # 在列缓存：2020 不再复核（2055 复核由候选集驱动，无候选时不再请求）
-    calls = []
-
-    async def counting_by_id(music_id: int):
-        calls.append(music_id)
-        return {"name": "x"}
-
-    monkeypatch.setattr(munet, "fetch_music_by_id", counting_by_id)
-    assert await munet.run_deletion_sweep() == []
-    assert 2020 not in calls
-
-    # 空留痕 / 全量失败：无缺席、留痕不动
-    await db.kv_set("munet_batch_ids", [])
-
-    async def fail_by_id(music_id: int):
-        raise munet.ExtNetworkError("down")
-
-    monkeypatch.setattr(munet, "fetch_music_by_id", fail_by_id)
-    assert await munet.run_deletion_sweep() == []
-    await db.kv_set("munet_batch_ids", [2055])
-    assert await munet.run_deletion_sweep() == []
-    assert await db.kv_get("munet_batch_ids") == [2055]
 
 
 def _deleted_song_entry() -> dict:
