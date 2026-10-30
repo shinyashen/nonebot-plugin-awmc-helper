@@ -538,7 +538,7 @@ async def test_jp_fallback_mixed_list(db, monkeypatch, app):
         await _assert_reply(
             app,
             "search",
-            "定数查歌 8.58 8.62",
+            "定数查歌 8.58-8.62",
             "「30」 ネコ日和。"
             "\n「10555」 （构造）日服限定样例（日服限定）"
             "\n列表中包含日服限定歌曲",
@@ -604,7 +604,7 @@ async def test_jp_fallback_all_cn_delegates(db, monkeypatch, app):
         await _assert_image_reply(
             app,
             "search",
-            "定数查歌 14.1 14.3",
+            "定数查歌 14.1-14.3",
             lambda: chart_card_bytes(song, None),
         )
     finally:
