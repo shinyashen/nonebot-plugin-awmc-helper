@@ -382,10 +382,10 @@ async def test_plate_template_filtered_by_yuzu_list(songs, tmp_path, monkeypatch
     # 指纹落库且与当前牌单一致 → 查询不触发重渲
     from nonebot_plugin_awmc_helper.core.plate_source import (
         cn_plate_ids,
-        plate_fingerprint,
+        admission_fingerprint,
     )
 
-    fp = plate_fingerprint(await cn_plate_ids("真"))
+    fp = admission_fingerprint(await cn_plate_ids("真"), bypass=())
     assert await store.kv_get("plate_fp:真极") == fp
     stale_fp = await store.kv_get("plate_fp:真极")
 

@@ -11,7 +11,13 @@
   inline 拉取；
 - 失败链全降级：任何拉取失败 → ``cn_plate_ids`` 返回 None = 不过筛（维持
   既有口径），不向查询路径上抛，负缓存 5 分钟防抖；
-- 霸无专键 → 复用舞单（Hoshino ``VERSION_MAP["霸"] → "舞"`` 同款）。
+- 霸无专键 → 复用舞单（Hoshino ``VERSION_MAP["霸"] → "舞"`` 同款）；
+- **当期新曲受控放行（2026-10-30）**：白名单的固有滞后（国服新批次 → 柚子
+  收录隔数日）会让新曲缺席当期完成表——谱面版本码大于库 ``current_version``
+  的曲（国服后缀批次码，maimai_py 未跟进期间）经**落雪 disabled 删除检查**
+  放行：disabled 集不可用即不放行（fail-closed，防当版本删除曲经双源确认
+  滞后窗口混入）；库跟进 current_version 后规则自动退役回纯白名单。
+  disabled 集惰性拉取（出现当期新曲候选才请求），指纹并入放行态。
 """
 
 import time
@@ -19,10 +25,15 @@ import asyncio
 import hashlib
 
 from nonebot import logger
-from maimai_py import LevelIndex, PlateObject
+from maimai_py import LevelIndex, PlateObject, current_version
 
 from . import store
-from .plates import PLATE_FULL_SET_VERSIONS, PlatesView, norm_plate
+from .plates import (
+    PLATE_FULL_SET_VERSIONS,
+    PlatesView,
+    norm_plate,
+    plate_entry_allowed,
+)
 from .ext.yuzu import get_plate_list
 from ..constants import DX_ID_OFFSET
 
@@ -152,12 +163,85 @@ async def cn_remaster_ids() -> frozenset[int] | None:
     return data["remaster"] if data is not None else None
 
 
-def plate_fingerprint(ids: frozenset[int] | None) -> str:
-    """牌单内容指纹（完成表底图失效检测）：None 态定值参与比对，牌单
-    可用性翻转同样触发底图重渲。"""
+_disabled_cache: dict | None = None
+"""落雪 disabled 根 id 集：``{"ids": frozenset, "fetched_at": 秒}``。"""
+
+_disabled_fail_ts = 0.0
+
+
+async def cn_disabled_ids() -> "frozenset[int] | None":
+    """落雪 disabled 曲根 id 集（当期新曲放行的删除曲检查源）。
+
+    落雪对删除/下架曲打 disabled 留在列表（官方文档口径）——国服删曲的
+    首个信号，早于「落雪 ∪ 水鱼」双源确认清 ``version_cn`` 的滞后窗口。
+    过期旧值强于失败（删除检查弱化不失效）；无缓存时失败返回 None（消费
+    侧 fail-closed 不放行）。
+    """
+    global _disabled_cache, _disabled_fail_ts
+    if _disabled_cache is not None:
+        if time.time() - _disabled_cache["fetched_at"] < _TTL:
+            return _disabled_cache["ids"]
+        try:
+            return await _disabled_fetch()
+        except Exception:
+            return _disabled_cache["ids"]
+    if time.time() - _disabled_fail_ts < _FAIL_RETRY:
+        return None
+    try:
+        return await _disabled_fetch()
+    except Exception:
+        _disabled_fail_ts = time.time()
+        _warn_once("落雪 disabled 集不可用，当期新曲暂不放行牌子白名单（fail-closed）")
+        return None
+
+
+async def _disabled_fetch() -> "frozenset[int]":
+    global _disabled_cache
+    from .ext.lxns import fetch_song_list
+
+    songs = await fetch_song_list(notes=False)
+    _disabled_cache = {
+        "ids": frozenset(
+            int(s["id"]) % DX_ID_OFFSET for s in songs if s.get("disabled")
+        ),
+        "fetched_at": time.time(),
+    }
+    return _disabled_cache["ids"]
+
+
+def is_current_batch_newcomer(song) -> bool:
+    """当期批次新曲：曲版本码大于库 ``current_version``（国服后缀批次码，
+    maimai_py 未跟进期间）——唯一放行面，库跟进后自动退役回纯白名单。"""
+    return song.version > current_version.value
+
+
+async def plate_admission(
+    song, diff, *, plate_ids, remaster_ids=None, disabled=None
+) -> bool:
+    """国服牌子入表判定：白名单（Q60）∨ 当期新曲受控放行。
+
+    放行面 = :func:`is_current_batch_newcomer` 且**落雪 disabled 删除检查
+    通过**；``disabled=None``（检查不可用）不放行（fail-closed）。
+    """
+    if plate_entry_allowed(plate_ids, song, diff, remaster_ids=remaster_ids):
+        return True
+    if disabled is None or not is_current_batch_newcomer(song):
+        return False
+    return song.id not in disabled
+
+
+def admission_fingerprint(
+    ids: "frozenset[int] | None", *, bypass: tuple[int, ...]
+) -> str:
+    """入表状态指纹（完成表底图失效检测）：柚子单 + 放行实绩并检。
+
+    ``bypass`` 为本次经受控放行入表的根 id 元组——新曲后续被柚子收录
+    （转白名单口径）或被落雪打 disabled（删除出表）都会改变放行实绩，
+    触发查询侧重渲；``ids=None`` 恒 "off"。
+    """
     if ids is None:
         return "off"
-    joined = ",".join(map(str, sorted(ids)))
+    joined = ",".join(map(str, sorted(ids))) + "|" + ",".join(map(str, sorted(bypass)))
     return hashlib.sha1(joined.encode()).hexdigest()[:16]
 
 
@@ -176,11 +260,13 @@ class _FilteredPlates:
         ids: frozenset[int] | None,
         remaster_ids: frozenset[int] | None,
         full_set: bool,
+        disabled: frozenset[int] | None = None,
     ) -> None:
         self._inner = inner
         self._ids = ids
         self._remaster_ids = remaster_ids
         self._full_set = full_set
+        self._disabled = disabled
 
     def _apply(self, objs: list[PlateObject]) -> list[PlateObject]:
         out: list[PlateObject] = []
@@ -190,7 +276,14 @@ class _FilteredPlates:
             if self._ids is not None and not (
                 obj.song.id in self._ids or obj.song.id + DX_ID_OFFSET in self._ids
             ):
-                continue
+                # 当期新曲受控放行（2026-10-30）：删除检查 fail-closed
+                # （disabled 集为根 id 空间，与库对象一致；% 归一兜底）
+                if not (
+                    self._disabled is not None
+                    and is_current_batch_newcomer(obj.song)
+                    and obj.song.id % DX_ID_OFFSET not in self._disabled
+                ):
+                    continue
             levels = obj.levels
             if (
                 self._full_set
@@ -221,20 +314,31 @@ async def filter_cn_plates(plate: str, plates: PlatesView) -> PlatesView:
     remaster_ids = await cn_remaster_ids() if full_set else None
     if ids is None and remaster_ids is None:
         return plates
+    # 当期新曲放行的删除检查源：白名单内有曲（无需放行）或视图内无当期新曲
+    # 时不拉取（惰性，稳态零请求）
+    disabled = None
+    if ids is not None:
+        objs = await plates.get_cleared() + await plates.get_remained()
+        if any(is_current_batch_newcomer(o.song) for o in objs):
+            disabled = await cn_disabled_ids()
     return _FilteredPlates(
         plates,
         ids=ids,
         remaster_ids=remaster_ids,
         full_set=full_set,
+        disabled=disabled,
     )
 
 
 def _cache_clear() -> None:
     """进程内缓存整体清空（测试用）：含负缓存与后台刷新任务状态。"""
-    global _cache, _fail_ts, _warn_ts, _refresh_task
+    global _cache, _fail_ts, _warn_ts, _refresh_task, _disabled_cache
+    global _disabled_fail_ts
     _cache = None
     _fail_ts = 0.0
     _warn_ts = 0.0
+    _disabled_cache = None
+    _disabled_fail_ts = 0.0
     if _refresh_task is not None and not _refresh_task.done():
         _refresh_task.cancel()
     _refresh_task = None

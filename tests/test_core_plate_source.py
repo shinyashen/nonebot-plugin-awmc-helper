@@ -28,6 +28,19 @@ def snapshot() -> dict:
     return load_yuzu_plate()
 
 
+@pytest.fixture(autouse=True)
+def _fail_closed_disabled(monkeypatch):
+    """默认 fail-closed：disabled 集不可用（None）→ 放行面关闭。既有白名单
+    语义用例零改动（make_song 默认 version=26000 恒为「当期新曲」形态，
+    无此夹具会走放行路径）；放行用例自行覆写为具体集合。"""
+    from nonebot_plugin_awmc_helper.core import plate_source
+
+    async def _none():
+        return None
+
+    monkeypatch.setattr(plate_source, "cn_disabled_ids", _none)
+
+
 def test_normalize_keys(snapshot):
     """键归一：繁体→简体、组合牌两字同单、霸复用舞单、舞ReMASTER 单列。"""
     from nonebot_plugin_awmc_helper.core import plate_source
@@ -170,13 +183,18 @@ async def test_stale_while_revalidate(db, snapshot, monkeypatch):
 
 
 def test_fingerprint():
-    from nonebot_plugin_awmc_helper.core.plate_source import plate_fingerprint
+    from nonebot_plugin_awmc_helper.core.plate_source import admission_fingerprint
 
-    assert plate_fingerprint(None) == "off"
-    a = plate_fingerprint(frozenset({3, 1, 2}))
-    assert a == plate_fingerprint(frozenset({1, 2, 3}))  # 序无关
-    assert a != plate_fingerprint(frozenset({1, 2}))
-    assert a != plate_fingerprint(None)  # 可用性翻转必换指纹
+    assert admission_fingerprint(None, bypass=()) == "off"
+    a = admission_fingerprint(frozenset({3, 1, 2}), bypass=())
+    assert a == admission_fingerprint(frozenset({1, 2, 3}), bypass=())  # 序无关
+    assert a != admission_fingerprint(frozenset({1, 2}), bypass=())
+    assert a != admission_fingerprint(None, bypass=())  # 可用性翻转必换指纹
+    # 放行实绩并入：新曲被柚子收录 / 被落雪 disabled 都会换指纹 → 重渲
+    assert a != admission_fingerprint(frozenset({1, 2, 3}), bypass=(2025,))
+    assert admission_fingerprint(
+        frozenset({1, 2, 3}), bypass=(2, 1)
+    ) == admission_fingerprint(frozenset({1, 2, 3}), bypass=(1, 2))
 
 
 class _FakePlates:
@@ -190,12 +208,14 @@ class _FakePlates:
         return self._remained
 
 
-def _plate_obj(song_id: int, levels: set) -> "PlateObject":
+def _plate_obj(song_id: int, levels: set, *, version: int = 26000) -> "PlateObject":
     from mocks import make_song
     from maimai_py import PlateObject
 
     return PlateObject(
-        song=make_song(song_id, f"曲{song_id}"), levels=levels, scores=[]
+        song=make_song(song_id, f"曲{song_id}", version=version),
+        levels=levels,
+        scores=[],
     )
 
 
@@ -250,6 +270,62 @@ async def test_filter_cn_plates_dx_full_id(snapshot):
     )
     out = await filter_cn_plates("华将", inner)
     assert [p.song.id for p in await out.get_cleared()] == [811]
+    assert await out.get_remained() == []
+
+
+@pytest.mark.asyncio
+async def test_filter_cn_plates_newcomer_bypass(db, monkeypatch):
+    """当期新曲受控放行（2026-10-30）：白名单缺席 × 落雪删除检查三态。
+
+    彩将形态（魔法仕掛けのファンタジア 12025）：柚子单未及收录的国服新曲，
+    落雪未 disabled → 放行入表；disabled → 剔除（当版本删除曲防混入）；
+    disabled 集不可用 → fail-closed 剔除。旧世代曲不适用放行面。
+    """
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.core import plate_source
+
+    seed_plate_cache({"彩": [2044]})  # 柚子单未含 12025
+
+    # 放行：未 disabled
+    async def _empty():
+        return frozenset()
+
+    monkeypatch.setattr(plate_source, "cn_disabled_ids", _empty)
+    inner = _FakePlates(
+        [],
+        [
+            # 库对象按根 id 给曲（CN 视图空间）：12025 显示 id 的根 = 2025
+            _plate_obj(2025, {LevelIndex.MASTER}, version=25505),
+            _plate_obj(2044, {LevelIndex.MASTER}, version=25500),
+        ],
+    )
+    out = await plate_source.filter_cn_plates("彩将", inner)
+    assert sorted(p.song.id for p in await out.get_remained()) == [2025, 2044]
+
+    # 删除检查命中：disabled 根 id 2025 → 12025 出表
+    async def _deleted():
+        return frozenset({2025})
+
+    monkeypatch.setattr(plate_source, "cn_disabled_ids", _deleted)
+    out = await plate_source.filter_cn_plates("彩将", inner)
+    assert [p.song.id for p in await out.get_remained()] == [2044]
+
+    # fail-closed（autouse 默认 None）：不放行
+    out = await plate_source.filter_cn_plates("彩将", inner)
+    assert [p.song.id for p in await out.get_remained()] == [2044]
+
+    # 旧世代曲（version ≤ current_version）不适用放行面：白名单外恒剔除
+    # （重置进程内牌单缓存：前序 seed 的彩单仍驻留；华单需重新 seed）
+    plate_source._cache_clear()
+    seed_plate_cache({"华": [10811, 812]})
+
+    async def _empty2():
+        return frozenset()
+
+    monkeypatch.setattr(plate_source, "cn_disabled_ids", _empty2)
+    inner_old = _FakePlates([], [_plate_obj(813, {LevelIndex.MASTER}, version=24000)])
+    out = await plate_source.filter_cn_plates("华将", inner_old)
     assert await out.get_remained() == []
 
 
