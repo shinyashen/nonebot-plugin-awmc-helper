@@ -124,6 +124,16 @@ def test_guide_validation_rejects_shell():
         reg.declare_guide(_guide("无步骤", intro="有简介", steps=[]))
 
 
+def test_overview_tolerates_empty_intro_guide():
+    """intro 为空（prerequisites 非空的合法指南）总览回退标题，不 IndexError。"""
+    from nonebot_plugin_awmc_helper.core.help import OverviewPage, page_entries
+
+    reg = _registry()
+    reg.declare_guide(_guide("空简介", intro="", prerequisites="需先绑定"))
+    blocks = "\n".join(page_entries(reg, OverviewPage(include_hidden=False)))
+    assert "空简介" in blocks
+
+
 def test_unknown_category_autocreate():
     """第三方未知类别键自动创建（builtin=False），总览可见。"""
     from nonebot_plugin_awmc_helper.core.help import OverviewPage, page_entries

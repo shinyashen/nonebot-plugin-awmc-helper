@@ -328,9 +328,14 @@ def _draw_node(im, draw, points, ver, val, nx, y, *, idx, cn_current, jp) -> Non
             logo, ((NODE_W - logo.width) // 2, (PILL_H - logo.height) // 2)
         )
     im.alpha_composite(pill, (nx, y))
+    ver_name = _VER_SHORT.get(Version(ver))
+    if ver_name is None:
+        # 表止于现役最新代：maimai_py 跟进新代目后、本表补充前的兜底
+        # （枚举名去前缀），防日服定数历史出现新版本变化点时 KeyError 崩卡
+        ver_name = Version(ver).name.removeprefix("MAIMAI_DX_")
     draw.text(
         (nx + NODE_W / 2, y + PILL_H + 16),
-        _VER_SHORT[Version(ver)],
+        ver_name,
         font=font(_NAME_SIZE),
         fill=_GRAY,
         anchor="mm",

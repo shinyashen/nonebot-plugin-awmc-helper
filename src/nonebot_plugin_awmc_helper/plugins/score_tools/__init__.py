@@ -56,7 +56,12 @@ __plugin_meta__ = PluginMetadata(
 )
 
 score_line_cmd = on_command("分数线", block=True)
-rise_score = on_regex(r"^我要在?([0-9]+\+?)?[上加\+]([0-9]+)?分$", block=True)
+# 推分指令正则：基准 mai_base.py 同式修正——基准的连接字单字类使帮助
+# 文档的「我要在<等级>上加N分」双连接字形态永不匹配（上游自带死形态），
+# 改 {1,2} 使其生效且为基准全形态超集；仍不支持颜色字（「紫13+」类
+# 不入示例——test_rise_score_regex_matches_documented_examples 互证）
+RISE_SCORE_PATTERN = r"^我要在?([0-9]+\+?)?[上加\+]{1,2}([0-9]+)?分$"
+rise_score = on_regex(RISE_SCORE_PATTERN, block=True)
 rating_ranking = on_command("查看排名", aliases={"查看排行"}, block=True)
 my_rating_ranking = on_command("我的排名", block=True)
 
@@ -274,8 +279,10 @@ help_registry.declare(
             brief="基于全体最低 RA 反推定数区间的推分推荐",
             detail=(
                 "基于全体最低 RA 反推定数区间给出推分推荐。\n"
+                # 示例须与 RISE_SCORE_PATTERN 实际可触发形态一致（正则
+                # 不支持颜色字，勿写「紫13+」类示例）
                 "格式：我要上N分 / 我要在<等级>上加N分"
-                "（如 我要上20分、我要在紫13+上加10分）。"
+                "（如 我要上20分、我要在13+上加10分）。"
             ),
         ),
         CommandSpec(

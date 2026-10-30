@@ -69,8 +69,8 @@ class Guide:
     key: str
     title: str
     aliases: tuple[str, ...] = ()
-    # 概览（本指南覆盖的指令清单/能做什么）与前置条件；均为必填引导——
-    # 防止第三方注册出空壳流程
+    # 概览（本指南覆盖的指令清单/能做什么）与前置条件；declare_guide 要求
+    # 至少其一非空——防止第三方注册出空壳流程（intro 单独可空，总览空则回退标题）
     intro: str = ""
     prerequisites: str = ""
     steps: list[GuideStep] = field(default_factory=list)
@@ -396,7 +396,10 @@ def _overview_blocks(
             blocks.append(f"━━ {cat.title} ━\n" + "\n".join(lines))
     if reg.guides:
         lines = [
-            f"{_LINE_PREFIX} {g.title} —— {g.intro.splitlines()[0]}（舞萌帮助 {g.key}）"
+            # intro 与 prerequisites 仅要求至少其一非空（declare_guide 校验
+            # 口径），intro 可为空——空则回退标题，防总览 IndexError
+            f"{_LINE_PREFIX} {g.title} —— {(g.intro.splitlines() or [g.title])[0]}"
+            f"（舞萌帮助 {g.key}）"
             for g in reg.guides.values()
         ]
         blocks.append("━━ 指南 ━\n" + "\n".join(lines))

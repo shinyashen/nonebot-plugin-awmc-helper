@@ -189,7 +189,9 @@ def _map_error(e: Exception) -> UserScoreError:
         return UserScoreError("水鱼 OAuth 应用凭据无效或缺失，请联系管理员检查部署配置")
     if isinstance(e, InvalidPlateError):
         return UserScoreError(
-            "牌子名称有误，请检查版本与牌种（如：真将 / 樱极 / 舞舞）"
+            # 示例须为本插件牌单真实存在的牌：真无将（初代整代无牌）、
+            # 舞舞牌全名「舞舞舞」
+            "牌子名称有误，请检查版本与牌种（如：樱将 / 真极 / 舞舞舞）"
         )
     if isinstance(e, httpx.RequestError):
         return UserScoreError("查分器网络异常，请稍后再试")
@@ -556,7 +558,12 @@ class DivingFishSource(ProberSource):
             raise UserScoreError("请先绑定水鱼查分器后再查询排名")
         # query/player 响应含 username（DivingFishPlayer.name），qq 查询同样可用
         player = await self.get_player(binding, notify_slow=notify_slow)
-        users = await df_ext.rating_ranking()
+        try:
+            users = await df_ext.rating_ranking()
+        except ExtError as e:
+            # 榜单拉取属 ext 层：ExtError 不经 _run/_map_error，须显式映射，
+            # 否则裸穿到 handler 通用兜底（丢「水鱼排行榜网络异常」专项文案）
+            raise UserScoreError(str(e)) from e
         for i, u in enumerate(users):
             if u.username.lower() == player.name.lower():
                 return u, i + 1

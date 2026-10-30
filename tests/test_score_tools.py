@@ -790,3 +790,27 @@ async def test_score_line_stray_tail_silent(app: App, songs):
                 },
             )
             ctx.should_finished()
+
+
+def test_rise_score_regex_matches_documented_examples():
+    """「我要上N分」正则与帮助示例互证（第七次审查：示例「紫13+」永不触发）。
+
+    正则与基准 mai_base.py 同式，不支持颜色字；示例文案须与真实可触发
+    形态一致，用户照抄帮助即应命中。
+    """
+    import re
+
+    from nonebot_plugin_awmc_helper.plugins.score_tools import RISE_SCORE_PATTERN
+
+    pat = re.compile(RISE_SCORE_PATTERN)
+    # 帮助文档形态（双连接字「上…加」，基准正则下单字类永不匹配）
+    assert pat.search("我要在13+上加10分")
+    assert pat.search("我要在13上加10分")
+    # 基准既有形态全保留（超集）
+    assert pat.search("我要上20分")
+    assert pat.search("我要加20分")
+    assert pat.search("我要在13加10分")
+    assert pat.search("我要在13+10分")
+    assert pat.search("我要在13上10分")
+    # 颜色字不受支持——帮助示例不得出现该形态
+    assert not pat.search("我要在紫13+上加10分")
