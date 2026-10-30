@@ -357,6 +357,12 @@ def _render_chart_video_impl(
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         assert proc.stdin is not None
 
+    def _write(data: bytes) -> None:
+        nonlocal proc
+        assert proc is not None
+        assert proc.stdin is not None
+        proc.stdin.write(data)
+
     def _iter_serial_frames():
         # 与并行路径同构：按「帧块」产出（此处每块一帧），写入循环统一按块迭代
         renderer2 = _ChartRenderer(buddy_chart, config) if buddy_chart else None
@@ -365,6 +371,7 @@ def _render_chart_video_impl(
             yield [_compose_frame(renderer, renderer2, now_ms, fps).tobytes()]
 
     proc: subprocess.Popen | None = None
+    code = 0  # 异常路径在 finally 前抛出，走不到末尾的 code 检查
     using_parallel = workers > 1
     if using_parallel:
         # 并行帧为压缩态（~59KB/帧），探测完成前先缓冲
@@ -404,19 +411,19 @@ def _render_chart_video_impl(
                     if buffer:
                         buffer.append(raw)
                         for compressed in buffer:
-                            proc.stdin.write(zlib.decompress(compressed))
+                            _write(zlib.decompress(compressed))
                             wrote += 1
                         buffer.clear()
                     else:
-                        proc.stdin.write(zlib.decompress(raw))
+                        _write(zlib.decompress(raw))
                         wrote += 1
                 else:
-                    proc.stdin.write(raw)
+                    _write(raw)
                     wrote += 1
         _open_video()
         if buffer:
             for compressed in buffer:
-                proc.stdin.write(zlib.decompress(compressed))
+                _write(zlib.decompress(compressed))
                 wrote += 1
             buffer.clear()
     finally:

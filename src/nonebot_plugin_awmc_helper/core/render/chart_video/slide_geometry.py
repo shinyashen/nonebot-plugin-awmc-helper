@@ -39,6 +39,9 @@ class _SlideGeometryMixin:
     """
 
     r: "_Renderer"  # 运行时由 _SlideRenderer 注入
+    _chain_cache: dict[tuple, list | None]
+    _lut_cache: dict[tuple, list]
+    _metrics_cache: dict[tuple, float]
 
     # ---- getBarChain（L5580）：段 → 旋转后锚点列 [{x,y,angle}]
     def bar_chain(self, seg: SlideSegment) -> list | None:

@@ -15,10 +15,22 @@ from .constants import (
     C_HUD_GRAY,
     C_BREAK_DOT,
 )
+from ..chart_notes import SiteChart
+from .note_renderer import _Renderer
+from .render_config import RenderConfig
 
 
 class _HudMixin:
-    """_ChartRenderer 的 HUD 方法：按整帧组合器混入。"""
+    """_ChartRenderer 的 HUD 方法：按整帧组合器混入。
+
+    下列注解声明宿主必须提供的属性（运行时由 _ChartRenderer.__init__ 赋值）。
+    """
+
+    chart: SiteChart
+    renderer: _Renderer
+    config: RenderConfig
+    _bpm_changes: list[tuple[float, int]]
+    _text_cache: dict[tuple, tuple[Image.Image, Image.Image, float, float]]
 
     def _hud(self, c: _Canvas, now: float, fps: int) -> None:
         """renderBpmDisplay（L8583）+ renderNoteCounts（L8637）。"""
