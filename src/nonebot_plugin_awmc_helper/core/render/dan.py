@@ -35,7 +35,7 @@ from dataclasses import field, dataclass
 from PIL import Image, ImageDraw
 
 from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
-from .tools import WHITE, fit_text, image_to_bytes
+from .tools import WHITE, fit_box, fit_text, fit_width, fit_height, image_to_bytes
 from .assets import assets
 
 # ---------------------------------------------------------------- 素材定位
@@ -414,7 +414,7 @@ def _paste_type_badge(card: Image.Image, kind: str) -> int:
     """类型徽章（スタンダード/でらっくす，static 既有）：移入蓝胶囊条右端，
     h20 使条完整包裹（条 y 10-40，上下各留 5px），返回徽章左缘 x 供曲名避让。"""
     badge = assets.pic("SD.png" if kind == "std" else "DX.png")
-    badge = _fit_height(badge, BADGE_HEIGHT)
+    badge = fit_height(badge, BADGE_HEIGHT)
     left = BADGE_RIGHT - badge.width
     card.alpha_composite(badge, (left, BADGE_TOP))
     return left
@@ -460,19 +460,19 @@ def _draw_song_card(im: Image.Image, song: DanSongCard, left: int, top: int) -> 
 def _draw_dan_title_card(im: Image.Image, dan_id: str) -> None:
     """左下称号卡：白卡上花丸衬底，叠称号字图；随机段位叠段位牌。"""
     cx, cy = TITLE_CARD_CENTER
-    hanamaru = _fit_height(dan_asset("UI_DNM_Icon_Hanamaru.png"), HANAMARU_SIZE)
+    hanamaru = fit_height(dan_asset("UI_DNM_Icon_Hanamaru.png"), HANAMARU_SIZE)
     im.alpha_composite(hanamaru, (cx - hanamaru.width // 2, cy - hanamaru.height // 2))
     if _base_kind(dan_id) == "random":
         diff = "expert" if "_expert" in dan_id else "master"
         tier = int(dan_id.rsplit("_", 1)[1])
         plate = dan_asset(f"{_RANDOM_PLATE[(diff, tier)]}.png")
-        plate = _fit_box(plate, *RANDOM_PLATE_FIT)
+        plate = fit_box(plate, RANDOM_PLATE_FIT, allow_upscale=True)
         im.alpha_composite(plate, (cx - plate.width // 2, cy - plate.height // 2))
         return
     title_img = dan_asset(f"UI_DNM_DaniTitle_{_DANI_TITLE_NO[dan_id]:02d}.png")
     if bbox := title_img.getchannel("A").getbbox():
         title_img = title_img.crop(bbox)
-    title_img = _fit_box(title_img, *TITLE_FIT)
+    title_img = fit_box(title_img, TITLE_FIT, allow_upscale=True)
     im.alpha_composite(
         title_img, (cx - title_img.width // 2, cy - title_img.height // 2)
     )
@@ -583,48 +583,26 @@ def _draw_damage_boxes(im: Image.Image, data: DanCardData) -> None:
     )
 
 
-def _fit_box(img: Image.Image, width: int, height: int) -> Image.Image:
-    """等比缩放至完全落入 (width, height) 框（取 min 比例）。"""
-    scale = min(width / img.width, height / img.height)
-    return img.resize(
-        (round(img.width * scale), round(img.height * scale)), Image.Resampling.LANCZOS
-    )
-
-
-def _fit_height(img: Image.Image, height: int) -> Image.Image:
-    """等比缩放至目标高。"""
-    return img.resize(
-        (round(img.width * height / img.height), height), Image.Resampling.LANCZOS
-    )
-
-
-def _fit_width(img: Image.Image, width: int) -> Image.Image:
-    """等比缩放至目标宽。"""
-    return img.resize(
-        (width, round(img.height * width / img.width)), Image.Resampling.LANCZOS
-    )
-
-
 def _draw_reward(im: Image.Image, dan_id: str, logo: Image.Image | None) -> None:
     """右下奖励列：版本 logo → 通关奖励（CLEAR BONUS，待换国服）→ 奖励牌
     （随机段位为 1.5 倍奖励票，底对齐绿横幅）。"""
     if logo is not None:
-        logo = _fit_box(logo, *LOGO_BOX)
+        logo = fit_box(logo, LOGO_BOX, allow_upscale=True)
         im.alpha_composite(logo, (REWARD_CENTER - logo.width // 2, LOGO_TOP))
-    bonus = _fit_width(dan_asset("UI_DNM_TrackStart_Text_01.png"), BONUS_WIDTH)
+    bonus = fit_width(dan_asset("UI_DNM_TrackStart_Text_01.png"), BONUS_WIDTH)
     im.alpha_composite(bonus, (REWARD_CENTER - bonus.width // 2, BONUS_TOP))
     if _base_kind(dan_id) == "random":
         # 随机段位通关奖励 = 1.5 倍奖励票：裁画布留白后放大，底对齐绿横幅
         ticket = dan_asset("UI_CMN_Tix_Icon_Free.png")
         if bbox := ticket.getchannel("A").getbbox():
             ticket = ticket.crop(bbox)
-        ticket = _fit_width(ticket, TICKET_WIDTH)
+        ticket = fit_width(ticket, TICKET_WIDTH)
         im.alpha_composite(
             ticket, (REWARD_CENTER - ticket.width // 2, TICKET_BOTTOM - ticket.height)
         )
         return
     plate = assets.pic(f"UI_DNM_DaniPlate_{_CN_PLATE_NO[dan_id]:02d}.png")
-    plate = _fit_box(plate, *PLATE_BOX)
+    plate = fit_box(plate, PLATE_BOX, allow_upscale=True)
     im.alpha_composite(plate, (REWARD_CENTER - plate.width // 2, PLATE_TOP))
 
 

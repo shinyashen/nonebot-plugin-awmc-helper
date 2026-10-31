@@ -177,6 +177,67 @@ def image_to_bytes(img: Image.Image, fmt: Literal["PNG", "JPEG"] = "PNG") -> byt
     return buf.getvalue()
 
 
+def scaled_size(img: Image.Image, scale: float) -> tuple[int, int]:
+    """等比缩放后的画布尺寸（至少 1px）。"""
+    return (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+
+
+def fit_box(
+    img: Image.Image,
+    box: tuple[int, int],
+    *,
+    allow_upscale: bool = False,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
+) -> Image.Image:
+    """等比缩放至完全落入 box（取 min 比例；默认只缩不放）。
+
+    ``allow_upscale`` 允许小于框的图放大到贴合（如官方名牌图 396 宽入 800
+    槽位）。``resample`` 保留各版式迁移前的原滤镜口径。
+    """
+    limit = min(box[0] / img.width, box[1] / img.height)
+    scale = limit if allow_upscale else min(limit, 1.0)
+    return img.resize(scaled_size(img, scale), resample)
+
+
+def fit_into(
+    img: Image.Image,
+    box: tuple[int, int],
+    *,
+    allow_upscale: bool = False,
+    resample: Image.Resampling = Image.Resampling.BICUBIC,
+) -> Image.Image:
+    """等比缩放后居中合成到 box 尺寸透明画布（NET 官方徽章/名牌槽位版式）。"""
+    width, height = img.size
+    limit = min(box[0] / width, box[1] / height)
+    scale = limit if allow_upscale else min(limit, 1.0)
+    size = scaled_size(img, scale)
+    canvas = Image.new("RGBA", box, (0, 0, 0, 0))
+    canvas.alpha_composite(
+        img.resize(size, resample), ((box[0] - size[0]) // 2, (box[1] - size[1]) // 2)
+    )
+    return canvas
+
+
+def fit_height(
+    img: Image.Image,
+    height: int,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
+) -> Image.Image:
+    """等比缩放至目标高。"""
+    return img.resize(
+        (max(1, round(img.width * height / img.height)), height), resample
+    )
+
+
+def fit_width(
+    img: Image.Image,
+    width: int,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
+) -> Image.Image:
+    """等比缩放至目标宽。"""
+    return img.resize((width, max(1, round(img.height * width / img.width))), resample)
+
+
 def scale_output(img: Image.Image, factor: float = 0.8) -> Image.Image:
     """出图前整体缩放（NB 完成表系版式同款 0.8×LANCZOS：1400 宽底图按
     0.8 缩到 1120 发送）。"""

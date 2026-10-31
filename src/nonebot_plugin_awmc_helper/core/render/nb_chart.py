@@ -219,6 +219,12 @@ def fit_version_logo(
 LOGO_SIZE = (249, 120)
 """maimai 主 logo（logo.png）在头部名片的统一贴图尺寸。"""
 
+
+def paste_logo(im: Image.Image, theme: str, pos: tuple[int, int]) -> None:
+    """主 logo 统一贴图（LOGO_SIZE 目标尺寸，就位合成）——头部名片六版式单源。"""
+    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), pos)
+
+
 NEWSONG_BADGE_SIZE = (249, 120)
 """「新曲だよ!」徽章（UI_CMN_TabTitle_NewSong.png）统一贴图尺寸
 （与 LOGO_SIZE 数值相同但语义独立，勿互相替代）。"""
@@ -277,7 +283,7 @@ def song_chart_info(
     f_rodin = font(28, FONT_RODIN)
     text_color = theme_text_color(theme)
 
-    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (65, 25))
+    paste_logo(im, theme, (65, 25))
     # 主类型单源（major_type_of）：prefer_sd 从其派生。与原逐字判定
     # （prefer_type==STANDARD and bool(standard)）的差异仅在「标准/DX 双空」
     # 形态（原 False / 派生 True）——该形态 major_diffs 直接 TypeError，
@@ -484,9 +490,7 @@ def song_chart_banquet_info(song: Song, utage_diffs=None, jp: bool = False) -> b
     im.alpha_composite(assets.pic(player_file), (98, p_y))
 
     # logo / 新曲标
-    im.alpha_composite(
-        assets.pic("logo.png", THEME_PRISM_PLUS).resize(LOGO_SIZE), (10, 35)
-    )
+    paste_logo(im, THEME_PRISM_PLUS, (10, 35))
     # 版本/新曲标口径 = 宴谱组自己的登场版本：宿主曲整曲最小版本常由普通谱
     # 决定（悪戯センセーション DX 21000 / 宴[奏] 26509），按整曲取会画错世代；
     # 宴谱组无版本时回落整曲版本。日服限定卡（jp）用日服世代图（pic/jp/）

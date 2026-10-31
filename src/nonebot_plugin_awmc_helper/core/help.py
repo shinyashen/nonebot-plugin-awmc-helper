@@ -362,14 +362,15 @@ def _scope_tags(spec: CommandSpec) -> str:
     return "；".join(p for p in (spec.scope, _source_tag(spec)) if p)
 
 
-def _command_line(spec: CommandSpec) -> str:
+def _command_body(spec: CommandSpec) -> str:
+    """指令行主体（names+scope 标注，可带 brief）——总览与指南步骤共用。"""
     tags = _scope_tags(spec)
     body = f"{_names(spec)}（{tags}）" if tags else _names(spec)
-    return (
-        f"{_LINE_PREFIX} {body} —— {spec.brief}"
-        if spec.brief
-        else f"{_LINE_PREFIX} {body}"
-    )
+    return f"{body} —— {spec.brief}" if spec.brief else body
+
+
+def _command_line(spec: CommandSpec) -> str:
+    return f"{_LINE_PREFIX} {_command_body(spec)}"
 
 
 def _visible(spec: CommandSpec, include_hidden: bool) -> bool:
@@ -464,15 +465,23 @@ def _guide_entries(reg: HelpRegistry, guide: Guide) -> "list[str | UniMessage]":
                 if spec is None:
                     lines.append(f"{_LINE_PREFIX} {name}（当前不可用：未启用或未声明）")
                 else:
-                    tags = _scope_tags(spec)
-                    body = f"{_names(spec)}（{tags}）" if tags else _names(spec)
-                    if spec.brief:
-                        body = f"{body} —— {spec.brief}"
-                    lines.append(f"{_LINE_PREFIX} {body}")
+                    lines.append(f"{_LINE_PREFIX} {_command_body(spec)}")
             entries.append("\n".join(lines))
         if step.image is not None:  # 纯图节点（可与文案同步骤，core.forward 惯例）
             entries.append(UniMessage.image(path=step.image))
     return entries
+
+
+async def spec_help_text(spec: CommandSpec):
+    """指令详情页纯文本回执（渲染注册表单源出口）：详情页恒为纯文本节点。
+
+    供插件「指令名 帮助」入口直接 finish，避免各处自行 page_entries+assert。
+    """
+    from nonebot_plugin_alconna.uniseg import UniMessage
+
+    entry = page_entries(help_registry, CommandPage(spec=spec))[0]
+    assert isinstance(entry, str)  # 指令详情页恒为纯文本节点
+    await UniMessage.text(entry).finish(at_sender=True)
 
 
 def _manage_blocks(reg: HelpRegistry) -> "str | None":

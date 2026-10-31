@@ -27,7 +27,7 @@ from .tools import (
     generate_prism_bg,
 )
 from .assets import assets
-from .nb_chart import LOGO_SIZE, major_type_of, paste_version_logo
+from .nb_chart import paste_logo, major_type_of, paste_version_logo
 from ...constants import (
     GENRE_TO_ZH,
     THEME_CIRCLE,
@@ -211,7 +211,7 @@ def score_line_card(
     draw = ImageDraw.Draw(im)
 
     # 标题行：logo 左上 + 主题描边大标题（prism 紫描边 / circle 白描边）
-    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (40, 24))
+    paste_logo(im, theme, (40, 24))
     draw.text(
         (600, 84),
         "分数线计算",

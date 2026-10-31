@@ -37,6 +37,7 @@ from .tools import (
     CELL_COVER_75,
     ID_TEXT_COLORS,
     DIFF_TEXT_COLORS,
+    fit_into,
     credit_text,
     image_to_bytes,
     theme_text_color,
@@ -45,7 +46,7 @@ from .tools import (
 from .assets import assets, online_item_cache_dir
 from ...config import plugin_config
 from .download import DownloadGate, download_to_file
-from .nb_chart import LOGO_SIZE
+from .nb_chart import paste_logo
 from ...constants import (
     SYNC_FILE,
     COMBO_FILE,
@@ -315,26 +316,6 @@ async def _qq_avatar(qqid: int) -> Image.Image | None:
         return None
 
 
-def _fit_into(
-    img: Image.Image, box: tuple[int, int], *, allow_upscale: bool = False
-) -> Image.Image:
-    """等比缩放居中放进 box（默认只缩不放）——NET 官方徽章图适配既有槽位。
-
-    官方图为哈希文件名、无数字可解析，无法走本地按数字索引的素材；
-    等比贴图与本地素材本就是同一套游戏内徽章美术，视觉一致。
-    名牌官方图（396 宽）相对槽位（800 宽）过小，需 allow_upscale 放大。
-    """
-    width, height = img.size
-    limit = min(box[0] / width, box[1] / height)
-    scale = limit if allow_upscale else min(limit, 1.0)
-    size = (max(1, round(width * scale)), max(1, round(height * scale)))
-    canvas = Image.new("RGBA", box, (0, 0, 0, 0))
-    canvas.alpha_composite(
-        img.resize(size), ((box[0] - size[0]) // 2, (box[1] - size[1]) // 2)
-    )
-    return canvas
-
-
 async def _draw_header(
     im: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -365,7 +346,7 @@ async def _draw_header(
     成绩行版式联动（b40 → 头部徽章走旧 rating 语境分段）。
     """
     pic = assets.static_path() / "mai" / "pic"
-    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (14, 60))
+    paste_logo(im, theme, (14, 60))
 
     # 名牌：水鱼版本牌字符串 → plate_version；落雪收藏牌 → 在线素材；
     # NET 装备中姓名框 → 官方原图放大适配；缺省 550101
@@ -378,7 +359,7 @@ async def _draw_header(
     elif plate_item is not None:
         plate_img = await _fetch_item_image("plate", plate_item.id)
     if plate_img is None and nameplate_image:
-        plate_img = _fit_into(
+        plate_img = fit_into(
             Image.open(BytesIO(nameplate_image)).convert("RGBA"),
             (800, 130),
             allow_upscale=True,
@@ -434,7 +415,7 @@ async def _draw_header(
     if course_rank is None:
         course_rank = getattr(player, "additional_rating", 0) or 0
     if course_image:
-        course_badge = _fit_into(
+        course_badge = fit_into(
             Image.open(BytesIO(course_image)).convert("RGBA"), (80, 32)
         )
     else:
@@ -443,7 +424,7 @@ async def _draw_header(
         ).resize((80, 32))
     im.alpha_composite(course_badge, (625, 120))
     if class_image:
-        class_badge = _fit_into(
+        class_badge = fit_into(
             Image.open(BytesIO(class_image)).convert("RGBA"), (90, 54)
         )
     else:

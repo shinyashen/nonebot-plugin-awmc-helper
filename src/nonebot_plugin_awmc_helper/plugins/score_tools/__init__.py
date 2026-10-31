@@ -30,7 +30,7 @@ from ...core.calc import (
     achievement_cap,
     rise_candidates,
 )
-from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
+from ...core.help import CommandSpec, help_registry, spec_help_text
 from ...core.score import UserScoreError, score_service
 from ...core.songs import song_service, chart_of_color
 from ...core.store import UserBinding
@@ -77,10 +77,7 @@ async def _(
 ):
     args = message.extract_plain_text().strip()
     if args in ("帮助", ""):
-        # 文案单源：渲染注册表里的「分数线」详情页（旧 SCORE_LINE_HELP 已迁入）
-        entry = page_entries(help_registry, CommandPage(spec=_score_line_spec))[0]
-        assert isinstance(entry, str)  # 指令详情页恒为纯文本节点
-        await UniMessage.text(entry).finish(at_sender=True)
+        await spec_help_text(_score_line_spec)
     level_index, is_utage, candidates, line = split_args(args)
     # 裸数字（无色无宴前缀）放行：6 位宴谱 diff_id 自带完整规格可直出
     is_digit_candidate = bool(candidates and candidates[-1].isdigit())

@@ -329,7 +329,7 @@ def test_fit_into_scales_and_centers():
     """NET 官方徽章图等比适配槽位：只缩不放、居中、画布透明。"""
     from PIL import Image
 
-    from nonebot_plugin_awmc_helper.core.render.best50 import _fit_into
+    from nonebot_plugin_awmc_helper.core.render.tools import fit_into as _fit_into
 
     wide = Image.new("RGBA", (100, 50), (255, 0, 0, 255))  # 2:1 → 装进 80x32
     out = _fit_into(wide, (80, 32))
@@ -351,7 +351,7 @@ def test_fit_into_upscale_opt_in():
     """名牌图放大适配：默认不放大，allow_upscale=True 才放大填满槽位。"""
     from PIL import Image
 
-    from nonebot_plugin_awmc_helper.core.render.best50 import _fit_into
+    from nonebot_plugin_awmc_helper.core.render.tools import fit_into as _fit_into
 
     plate = Image.new("RGBA", (396, 66), (255, 0, 0, 255))
     out = _fit_into(plate, (800, 130))  # 默认只缩不放

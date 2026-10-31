@@ -28,7 +28,7 @@ from .fonts import FONT_HAN, FONT_NUM, FONT_RODIN, font
 from .tools import credit_text, truncate_hoshino
 from .assets import assets
 from .nb_chart import (
-    LOGO_SIZE,
+    paste_logo,
     major_type_of,
     version_image,
     fit_version_logo,
@@ -107,7 +107,7 @@ def linfo_card(
     draw = ImageDraw.Draw(im)
 
     # ---- 标题行（与分数线卡同位）----
-    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (40, 24))
+    paste_logo(im, theme, (40, 24))
     draw.text(
         (600, 84),
         "定数历史",

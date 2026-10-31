@@ -16,7 +16,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from . import net
 from ...core.ext import lxns as lxns_ext
 from ...core.ext import divingfish as df_ext
-from ...constants import SERVICE_ZH, THEME_CIRCLE, THEME_PRISM_PLUS
+from ...constants import SERVICE_ZH, THEME_CIRCLE, THEME_DISPLAY, THEME_PRISM_PLUS
 from ...core.help import CommandSpec, help_registry
 from ...core.utils import NoTail, handle_errors, is_private_session
 from ...core.binding import (
@@ -432,7 +432,9 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
     arg = message.extract_plain_text().strip()
     if not arg:
         await UniMessage.text(
-            f" 用法：主题 <0|1>（0 = {THEME_PRISM_PLUS}，1 = {THEME_CIRCLE}）"
+            f" 用法：主题 <0|1>（0 = {THEME_DISPLAY[THEME_PRISM_PLUS]}"
+            f"（{THEME_PRISM_PLUS}），1 = {THEME_DISPLAY[THEME_CIRCLE]}"
+            f"（{THEME_CIRCLE}））"
         ).finish(at_sender=True)
     if arg not in ("0", "1"):
         # 残片（「主题是什么」类闲聊）静默：参数表为严格枚举，非 0/1 的
@@ -474,7 +476,7 @@ async def _(_: NoTail, session: Session = UniSession()):
         )
     # 与 set_theme 同口径归一展示（theme 缺失回落 circle，保持原行为）
     theme = THEME_PRISM_PLUS if binding.theme == THEME_PRISM_PLUS else THEME_CIRCLE
-    lines.append(f"主题：{theme}")
+    lines.append(f"主题：{THEME_DISPLAY[theme]}")
     await UniMessage.text("\n".join(lines)).finish(at_sender=True)
 
 

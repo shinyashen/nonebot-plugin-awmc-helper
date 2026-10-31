@@ -577,7 +577,7 @@ async def test_plate_completion_sheet_scope_split(app: App, db, songs, monkeypat
         return await real_get_all()
 
     async def fake_draw(
-        version, kind, scores, entries, *, page, song_service, jp=False
+        version, kind, scores, entries, *, page, song_service, jp=False, **kwargs
     ):
         calls["draw"] = (version, kind, len(entries), jp)
         raise _Sentinel
@@ -696,7 +696,7 @@ async def test_plate_completion_cn_preview_sheet(app: App, db, songs, monkeypatc
         return await real_get_all()
 
     async def fake_draw(
-        version, kind, scores, entries, *, page, song_service, jp=False
+        version, kind, scores, entries, *, page, song_service, jp=False, **kwargs
     ):
         calls.setdefault("draw_pages", []).append(page)
         return b"png"
@@ -1406,7 +1406,7 @@ async def test_wu_plate_completion_full_pages_forward(app: App, db, songs, monke
     draw_pages: list[int] = []
 
     async def fake_draw(
-        version, kind, scores, entries, *, page, song_service, jp=False
+        version, kind, scores, entries, *, page, song_service, jp=False, **kwargs
     ):
         draw_pages.append(page)
         return f"png{page}".encode()

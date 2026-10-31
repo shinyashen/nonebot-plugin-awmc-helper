@@ -183,7 +183,7 @@ async def test_theme_and_mybind_and_unbind(app: App, db):
     assert binding is not None
     assert binding.theme == "circle"
 
-    await _assert_reply(app, bind.my_bind, "我的绑定", "数据源：水鱼\n主题：circle")
+    await _assert_reply(app, bind.my_bind, "我的绑定", "数据源：水鱼\n主题：圆圈版式")
     await _assert_reply(app, bind.unbind, "解绑", "已解除绑定")
     await _assert_reply(app, bind.unbind, "解绑", "尚未绑定")
 

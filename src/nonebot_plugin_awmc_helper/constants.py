@@ -197,6 +197,11 @@ CHART_TYPE_BY_PREFIX: dict[str, SongType] = {
 THEME_PRISM_PLUS = "prism_plus"
 THEME_CIRCLE = "circle"
 THEMES = (THEME_PRISM_PLUS, THEME_CIRCLE)
+# 主题的用户可读显示名（素材目录键 prism_plus/circle 对用户无意义）
+THEME_DISPLAY: dict[str, str] = {
+    THEME_PRISM_PLUS: "PRiSM PLUS 版式",
+    THEME_CIRCLE: "圆圈版式",
+}
 DEFAULT_THEME = THEME_PRISM_PLUS
 
 # 绑定服务标识（binding/store 表值与 sources 注册表键的单一事实源；

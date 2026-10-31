@@ -22,7 +22,7 @@ from .tools import (
 )
 from .assets import assets
 from .nb_chart import (
-    LOGO_SIZE,
+    paste_logo,
     major_diffs,
     major_type_of,
     chart_version_of,
@@ -66,7 +66,7 @@ def song_play_data(
     dr = ImageDraw.Draw(im)
 
     # logo
-    im.alpha_composite(assets.pic("logo.png", theme).resize(LOGO_SIZE), (42, 34))
+    paste_logo(im, theme, (42, 34))
     # 曲绘（assets.cover 自带回退链）
     im.alpha_composite(assets.cover(song.id).resize((300, 300)), (100, 260))
     # 分类徽章（素材缺失时跳过，如宴会場）

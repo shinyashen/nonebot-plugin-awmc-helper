@@ -28,7 +28,7 @@ from ...constants import (
     LEVEL_COLOR_ZH,
     ds_text,
 )
-from ...core.help import CommandPage, CommandSpec, page_entries, help_registry
+from ...core.help import CommandSpec, spec_help_text
 from ...core.songs import cn_song_map, song_service, chart_of_color
 from ...core.types import SongType
 from ...core.utils import handle_errors
@@ -55,10 +55,7 @@ async def _(
 ):
     args = message.extract_plain_text().strip()
     if args in ("帮助", ""):
-        # 文案单源：渲染注册表里的「linfo」详情页
-        entry = page_entries(help_registry, CommandPage(spec=_linfo_spec))[0]
-        assert isinstance(entry, str)  # 指令详情页恒为纯文本节点
-        await UniMessage.text(entry).finish(at_sender=True)
+        await spec_help_text(_linfo_spec)
     level_index, is_utage, candidates, line = split_args(args)
     if is_utage:
         # 宴谱定数不采信，规范表不建 levels 行——入口即拦截，不走解析链

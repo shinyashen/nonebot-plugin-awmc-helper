@@ -17,11 +17,12 @@ from typing import Any, cast
 import httpx
 from nonebot import logger
 from sqlmodel import select
+from maimai_py import Genre
 
 from . import ExtError, ExtNetworkError, get_client
 from .. import store, songdb
 from ...config import plugin_config
-from ...constants import DX_ID_OFFSET, normalize_text
+from ...constants import GENRE_TO_ZH, DX_ID_OFFSET, normalize_text
 
 _PORTAL_ORIGIN = "https://portal.mumur.net"
 _HOSTS = (
@@ -67,17 +68,17 @@ _BATCH_TITLE_CAP = 300
 
 # genre 数字 → 规范表流派名（落雪/国服值域）。2026-09-28 与规范表全量分组对账
 # 推导（抽样 46 曲六档全一致），非官方映射表；107=宴会場 为推断（未实测到条目）。
-# 与 constants.GENRE_TO_ZH（Genre 枚举 → 中文显示名）、songdb 规范表 canonical
-# 流派名映射 OTOGE_CATCODE_TO_GENRE（songdb.py ~391，otoge catcode → maimai_py
-# Genre 值域）是三个各自语义正确的平行表（本表=规范表 canonical，constants=
-# 显示名），独立维护；规范表流派名变更时须同步核对本表。
-_GENRE_NAMES = {
-    101: "流行&动漫",
-    102: "niconico & VOCALOID",
-    103: "东方Project",
-    104: "其他游戏",
-    105: "舞萌",
-    106: "音击&中二节奏",
+# MuNET 流派 id → 规范表 canonical 流派名：除 107 外自 constants.GENRE_TO_ZH
+# （显示名单源）派生；songdb 规范表 canonical 流派名映射另见
+# OTOGE_CATCODE_TO_GENRE（songdb.py ~391，otoge catcode → maimai_py Genre 值域）。
+_GENRE_NAMES: dict[int, str] = {
+    101: GENRE_TO_ZH[Genre.POPSアニメ],
+    102: GENRE_TO_ZH[Genre.niconicoボーカロイド],
+    103: GENRE_TO_ZH[Genre.東方Project],
+    104: GENRE_TO_ZH[Genre.ゲームバラエティ],
+    105: GENRE_TO_ZH[Genre.maimai],
+    106: GENRE_TO_ZH[Genre.オンゲキCHUNITHM],
+    # 107 规范表 canonical 为日文「宴会場」（显示名表为简体「宴会场」），独立保留
     107: "宴会場",
 }
 

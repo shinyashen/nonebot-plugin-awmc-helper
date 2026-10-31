@@ -133,7 +133,7 @@ async def plate_completion_sheet(
     songs = await (song_service.jp_all() if jp else song_service.get_all())
     # 底图网格与叠章同一收集（单一事实源 plate_source.collect_plate_entries）：
     # 区间 + 白名单 + 当期新曲受控放行——两口径漂移即全网错位（11876 事故）
-    entries, _bypass = await collect_plate_entries(songs, version=version, jp=jp)
+    entries, bypass = await collect_plate_entries(songs, version=version, jp=jp)
     if not entries:
         await UniMessage.text(" 该牌子范围内没有谱面").finish(at_sender=True)
     if preview:
@@ -176,7 +176,14 @@ async def plate_completion_sheet(
     pngs = []
     for p in render_pages:
         png = await table_template.draw_plate_table_with_fallback(
-            version, kind, scores, entries, page=p, song_service=song_service, jp=jp
+            version,
+            kind,
+            scores,
+            entries,
+            page=p,
+            song_service=song_service,
+            jp=jp,
+            bypass=bypass,
         )
         if png is not None:
             pngs.append(png)
@@ -196,6 +203,12 @@ async def plate_progress_overview(
     binding, plates, version: str, kind: str, page: int
 ) -> None:
     """进度总览（NB DrawPlateProgress 版式总览图）。"""
+    # 范围保护与完成表入口同口径：舞/霸两页，页码越界提示而非静默截断
+    is_wu_plate = version in ("舞", "霸")
+    if page > (2 if is_wu_plate else 1):
+        await UniMessage.text(
+            f" {version}{kind}进度总览共 {2 if is_wu_plate else 1} 页，页码超出范围"
+        ).finish(at_sender=True)
     cleared_plates = await plates.get_cleared()
     remained = await plates.get_remained()
 

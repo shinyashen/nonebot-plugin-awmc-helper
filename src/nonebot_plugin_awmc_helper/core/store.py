@@ -902,15 +902,15 @@ async def kv_get(key: str) -> Any | None:
 
 
 async def kv_set(key: str, payload: Any) -> None:
+    data = json.dumps(payload, ensure_ascii=False)
+    now = datetime.now()
     async with session() as db:
-        row = (await db.exec(select(KvCache).where(KvCache.key == key))).first()
-        data = json.dumps(payload, ensure_ascii=False)
-        if row is None:
-            row = KvCache(key=key, payload=data)
-        else:
-            row.payload = data
-            row.updated_at = datetime.now()
-        db.add(row)
+        # upsert：读后写非原子，同键并发双写后到者会撞主键 IntegrityError
+        stmt = sqlite.insert(KvCache).values(key=key, payload=data, updated_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[KvCache.key], set_={"payload": data, "updated_at": now}
+        )
+        await db.execute(stmt)
         await db.commit()
 
 

@@ -667,6 +667,7 @@ async def draw_plate_table_with_fallback(
     page: int,
     song_service,
     jp: bool = False,
+    bypass: "tuple[int, ...] | None" = None,
 ) -> bytes | None:
     """牌子完成表渲染；底图缺失时现场生成一次后重试（仍失败返回 None）。
 
@@ -678,17 +679,17 @@ async def draw_plate_table_with_fallback(
 
     # 指纹按当前入表状态算（CN；jp 恒 "off"）：柚子单或当期新曲放行实绩
     # 变化即重渲，保证叠章 entries（调用方按同口径过滤）与底图网格不错位
+    # bypass 由调用方传入（底图网格与叠章同一收集时本就产出），免整表重收
+    if bypass is None:
+        bypass = (
+            await collect_plate_entries(
+                await song_service.get_all(), version=version, jp=False
+            )
+        )[1]
     fp = (
         "off"
         if jp
-        else admission_fingerprint(
-            await cn_plate_ids(version),
-            bypass=(
-                await collect_plate_entries(
-                    await song_service.get_all(), version=version, jp=False
-                )
-            )[1],
-        )
+        else admission_fingerprint(await cn_plate_ids(version), bypass=bypass)
     )
     png = draw_plate_table(version, kind, scores, entries, page=page, jp=jp)
     if png is not None and (
