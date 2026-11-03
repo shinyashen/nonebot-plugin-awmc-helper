@@ -7,6 +7,7 @@ maimai-py 的 `Genre` 枚举值是日文分类，库未公开导出中文映射�
 import re
 import unicodedata
 
+import zhconv.zhconv as _zhconv_mod
 from zhconv import convert
 from maimai_py import (
     Genre,
@@ -24,6 +25,30 @@ from maimai_py.enums import (
     divingfish_to_version as _DF_TO_VERSION,
 )
 from maimai_py.utils.coefficient import SCORE_COEFFICIENT_TABLE
+
+
+class _CloseAfterRead:
+    """read() 完成即关闭底层流的代理。
+
+    zhconv 上游（0.4.x，维护停滞）的 loaddict 用 get_module_res(filename)
+    .read() 读词典后把流直接丢弃、不显式关闭，句柄只能等 GC 兜底，会在
+    测试与长驻进程中间歇产生 ResourceWarning（unclosed file）。词典只在
+    首次转换时加载一次，这里在接入点包一层读完即关的代理，句柄确定性
+    关闭，问题从根上消掉（无需告警过滤）。
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def read(self, *args):
+        try:
+            return self._stream.read(*args)
+        finally:
+            self._stream.close()
+
+
+_orig_get_module_res = _zhconv_mod.get_module_res
+_zhconv_mod.get_module_res = lambda *res: _CloseAfterRead(_orig_get_module_res(*res))
 
 # ---------------------------------------------------------------------------
 # 分类（Genre）：枚举 → 中文显示名

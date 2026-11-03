@@ -44,6 +44,7 @@ from sqlalchemy import (
     inspect,
 )
 from sqlalchemy.exc import OperationalError as SAOperationalError
+from sqlalchemy.pool import NullPool
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from nonebot_plugin_localstore import get_data_dir
@@ -375,8 +376,16 @@ def create_plugin_engine(data_dir: Path | str, filename: str) -> AsyncEngine:
     （nonebot-plugin-awmc-score-updater）的引擎管理样板与本仓逐行同构，
     后续换用本工厂与 :func:`init_plugin_db`（先主仓落地，兄弟仓择机切换）。
     返回的引擎不入本仓全局单例，生命周期归调用方（用完 ``dispose()``）。
+
+    用 NullPool：会话归还即真正关闭底层 aiosqlite 连接，不留池化连接——
+    否则引擎被丢弃（set_db_file 重置/测试清理）时池中连接被 GC，产生
+    「deleted before being closed」ResourceWarning。SQLite 文件库每次
+    会话开一个连接（aiosqlite 每连接一线程）开销毫秒级，无需池化。
     """
-    return create_async_engine(f"sqlite+aiosqlite:///{Path(data_dir) / filename}")
+    return create_async_engine(
+        f"sqlite+aiosqlite:///{Path(data_dir) / filename}",
+        poolclass=NullPool,
+    )
 
 
 def get_engine() -> AsyncEngine:
@@ -910,7 +919,9 @@ async def kv_set(key: str, payload: Any) -> None:
         stmt = stmt.on_conflict_do_update(
             index_elements=[KvCache.key], set_={"payload": data, "updated_at": now}
         )
-        await db.execute(stmt)
+        # SQLModel Session.execute() 已 @deprecated（0.0.46 起）；exec() 接受
+        # UpdateBase（含 Insert）且不触发弃用告警
+        await db.exec(stmt)
         await db.commit()
 
 
