@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageChops
 
 from .notes import _Note
@@ -89,63 +90,68 @@ class _TouchRenderer:
             h = p_in
         return is_hold, dt, fade, flick, h
 
-    # ---- gauge 进度环（getTouchHoldProgressSprite L6818 + L6918 楔形 clip）
+    # ---- gauge 进度填充（getTouchHoldProgressSprite L6818 + L6918 楔形 clip）
     def gauge_sprite(self) -> Image.Image:
         if self._gauge_sprite is not None:
             return self._gauge_sprite
         ss = self.r.config.supersample
         r = _RADIUS / 480
-        half = _GAUGE_GEO["canvas_half"] * r
+        # 画布按轮廓最大伸达外延（站内 canvas_half=99.75 仅作下限保护）
+        half = max(
+            _GAUGE_GEO["canvas_half"] * r,
+            _GAUGE_GEO["outer_axis"] * r + 2.0,
+        )
 
         def ring_path(axis: float, diag: float) -> list[tuple[float, float]]:
-            n = diag * math.sqrt(2) * r
-            i = 2 * (n - axis * r)
+            # 轮廓 = 45° 旋转方 + 与直边相切的大圆弧角（机台实拍确认的特征：
+            # 斜边平直、四角宽大圆弧），见 local/reference/lxns-renderer/
+            # parity-notes.md touch 节。K 表语义沿站内口径：平边距 a = diag·r、
+            # 角弧顶点伸达 c = axis·r；圆角半径由二者反解
+            # rc = (a√2 − c)/(√2−1)。圆弧与直边相切（G1 连续）且曲率恒定，
+            # 消除站内「二次贝塞尔切角」在接合处的曲率跳变（生硬感的来源）。
+            a = diag * r
+            c = axis * r
+            rc = (a * math.sqrt(2) - c) / (math.sqrt(2) - 1)
+            rc = max(0.0, min(rc, a))  # 常数异常时退化为方角/圆角全占
+            arc_n = 48  # 每 90° 弧采样数（弦差 ~0.004 设计px，足够圆滑）
             pts: list[tuple[float, float]] = []
-
-            def q(
-                c0: tuple[float, float],
-                ctrl: tuple[float, float],
-                c1: tuple[float, float],
-            ) -> None:
-                # 二次贝塞尔（与 JS quadraticCurveTo 一致）：
-                # B(t)=(1-t)²P0+2(1-t)tP1+t²P2。旧实现漏了 t²P2 项，
-                # 四个角被截成直线弦 → 四边缺角。
-                for k in (1, 2, 3):
-                    t = k / 4
-                    w0 = (1 - t) ** 2
-                    w1 = 2 * (1 - t) * t
-                    w2 = t * t
-                    pts.append(
-                        (
-                            w0 * c0[0] + w1 * ctrl[0] + w2 * c1[0],
-                            w0 * c0[1] + w1 * ctrl[1] + w2 * c1[1],
-                        )
-                    )
-
-            pts.append((-i, -n + i))
-            q((-i, -n + i), (0, -n), (i, -n + i))
-            pts.append((i, -n + i))
-            pts.append((n - i, -i))
-            q((n - i, -i), (n, 0), (n - i, i))
-            pts.append((n - i, i))
-            pts.append((i, n - i))
-            q((i, n - i), (0, n), (-i, n - i))
-            pts.append((-i, n - i))
-            pts.append((-n + i, i))
-            q((-n + i, i), (-n, 0), (-n + i, -i))
-            pts.append((-n + i, -i))
-            return pts
+            corners = (
+                (1, 1, 0.0),
+                (-1, 1, math.pi / 2),
+                (-1, -1, math.pi),
+                (1, -1, 3 * math.pi / 2),
+            )
+            for sx, sy, base in corners:
+                cxc, cyc = sx * (a - rc), sy * (a - rc)
+                for k in range(arc_n + 1):
+                    t = base + k / arc_n * math.pi / 2
+                    pts.append((cxc + rc * math.cos(t), cyc + rc * math.sin(t)))
+                # 直边不补中间点：多边形以单一线段直连相邻弧端点。PIL 的
+                # polygon 填充对共线中间顶点会逐点独立求扫描线穿越，舍入
+                # 抖动直接变成直边上的 ±1px 锯齿（实测对比见
+                # local/scratch/th_edge_probe.py）；单一线段则阶梯干净。
+            # 方坐标系 → 屏幕系（旋转 -45°，方角落在轴向上）
+            inv = 1 / math.sqrt(2)
+            return [((x + y) * inv, (y - x) * inv) for x, y in pts]
 
         size = math.ceil(half * 2 * ss)
-        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        off = size / 2
+        # sprite 内部再翻倍构建后缩回设备尺寸：掩码是 PIL 硬填充多边形（无
+        # 抗采样），45° 直边在部分子像素相位下会出现 ±1px 阶梯回退（实测见
+        # local/scratch/th_edge_probe.py），加倍光栅化 + 预乘 LANCZOS 缩放
+        # 让轮廓亚像素平滑。gauge sprite 每次渲染仅构建一次，开销可忽略。
+        ss_b = ss * 2
+        size_b = math.ceil(half * 2 * ss_b)
+        img = Image.new("RGBA", (size_b, size_b), (0, 0, 0, 0))
+        off = size_b / 2
 
         def to_px(pts):
-            return [(px * ss + off, py * ss + off) for px, py in pts]
+            return [(px * ss_b + off, py * ss_b + off) for px, py in pts]
 
         outer = to_px(ring_path(_GAUGE_GEO["outer_axis"], _GAUGE_GEO["outer_diagonal"]))
-        inner = to_px(ring_path(_GAUGE_GEO["inner_axis"], _GAUGE_GEO["inner_diagonal"]))
-        mask = _poly_mask((size, size), outer, inner)
+        # 实心象限填充（机台同构：彩色填满整个圆角菱形，花瓣叠于其上）。
+        # 站内的环带（外-内双轮廓）在此不成立：花瓣剪影（弦边 ~31、角向顶点
+        # ~43）盖不住环带内缘的平边（36），会露出 4 条弧形黑缝。
+        mask = _poly_mask((size_b, size_b), outer, None)
         n_max = _GAUGE_GEO["outer_diagonal"] * math.sqrt(2) * r
         for e in range(4):
             t = -math.pi / 4 + e * math.pi / 2
@@ -166,36 +172,63 @@ class _TouchRenderer:
                 (1.0, _mix(col, C_WHITE, 0.08)),
             )
             grad = _multi_stop_gradient(
-                (size, size),
-                g0[0] * ss + off,
-                g0[1] * ss + off,
-                g1[0] * ss + off,
-                g1[1] * ss + off,
+                (size_b, size_b),
+                g0[0] * ss_b + off,
+                g0[1] * ss_b + off,
+                g1[0] * ss_b + off,
+                g1[1] * ss_b + off,
                 stops,
             )
             # 象限矩形裁剪（fillRect i>0?0:-n 等）
             x0q = 0 if ca > 0 else -n_max
             y0q = 0 if sa > 0 else -n_max
-            quad_mask = Image.new("L", (size, size), 0)
+            quad_mask = Image.new("L", (size_b, size_b), 0)
             ImageDraw.Draw(quad_mask).rectangle(
                 [
-                    x0q * ss + off,
-                    y0q * ss + off,
-                    (x0q + n_max) * ss + off,
-                    (y0q + n_max) * ss + off,
+                    x0q * ss_b + off,
+                    y0q * ss_b + off,
+                    (x0q + n_max) * ss_b + off,
+                    (y0q + n_max) * ss_b + off,
                 ],
                 fill=255,
             )
 
             quad = Image.composite(
-                grad, Image.new("RGBA", (size, size), (0, 0, 0, 0)), quad_mask
+                grad, Image.new("RGBA", (size_b, size_b), (0, 0, 0, 0)), quad_mask
             )
             img.alpha_composite(quad)
-        # 环形裁剪
-        ring = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        # 轮廓裁剪（外轮廓多边形掩码）
+        ring = Image.new("RGBA", (size_b, size_b), (0, 0, 0, 0))
         ring.paste(img, (0, 0), mask)
-        self._gauge_sprite = ring
-        return ring
+        # 预乘 LANCZOS 缩回设备尺寸（直接缩 RGBA 会在透明边缘渗黑）
+        ch = ring.split()
+        rgb_p = Image.merge(
+            "RGB",
+            (
+                ImageChops.multiply(ch[0], ch[3]),
+                ImageChops.multiply(ch[1], ch[3]),
+                ImageChops.multiply(ch[2], ch[3]),
+            ),
+        )
+        a_s = ch[3].resize((size, size), Image.LANCZOS)
+        rgb_s = rgb_p.resize((size, size), Image.LANCZOS)
+        a_arr = np.asarray(a_s).astype(np.float32) / 255.0
+        rgb_arr = np.asarray(rgb_s).astype(np.float32)
+        # 反预乘（alpha≥1 处无变化；极小 alpha 处钳制防溢出）
+        rgb_u = np.clip(rgb_arr / np.maximum(a_arr, 1e-3)[..., None], 0, 255).astype(
+            np.uint8
+        )
+        out = Image.merge(
+            "RGBA",
+            (
+                Image.fromarray(rgb_u[..., 0]),
+                Image.fromarray(rgb_u[..., 1]),
+                Image.fromarray(rgb_u[..., 2]),
+                a_s,
+            ),
+        )
+        self._gauge_sprite = out
+        return out
 
     def draw_gauge(
         self, c: _Canvas, note: _Note, x: float, y: float, dt: float, alpha: float

@@ -41,7 +41,11 @@ def _rounded_tri_points(
     p2: tuple[float, float],
     radius: float,
 ) -> list[tuple[float, float]]:
-    """drawRoundedTriangle：每角按半径切角，二次曲线（控制点=角点）过角。"""
+    """drawRoundedTriangle：每角按半径切角，二次曲线（控制点=角点）过角。
+
+    曲线按 10 点采样（站内 quadraticCurveTo 由浏览器平滑渲染，PIL 侧
+    是折线近似，3 点会在花瓣白边上留可见棱角）。
+    """
     pts = (p0, p1, p2)
     out: list[tuple[float, float]] = []
     for i in range(3):
@@ -60,8 +64,8 @@ def _rounded_tri_points(
             cur[1] + (nxt[1] - cur[1]) / dist_out * rr,
         )
         out.append(a_pt)
-        for k in (1, 2, 3):
-            t = k / 4
+        for k in range(1, 11):
+            t = k / 11
             out.append(
                 (
                     (1 - t) ** 2 * a_pt[0] + 2 * (1 - t) * t * cur[0] + t**2 * b_pt[0],
