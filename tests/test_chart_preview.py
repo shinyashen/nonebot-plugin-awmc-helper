@@ -19,6 +19,7 @@ from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
 SNAPSHOTS = Path(__file__).parent / "data" / "snapshots" / "simai"
 BASE = "https://assets2.lxns.net"
+MOANT_ROUTE = "https://dw.moant.cn:34225/api/chartFile"
 
 
 def _preview_result(path: Path, label: str = "13+", range_text: str | None = None):
@@ -259,6 +260,94 @@ async def test_build_preview_orchestration(
     result2 = await build_preview(entry, 2)
     assert result2.path == out
     assert len(fake_render) == calls_before
+
+
+@pytest.mark.asyncio
+async def test_build_preview_moant_fallback_hit(
+    app: App, db, cache_dir, songs, fake_render, monkeypatch
+):
+    """落雪 404 → moant 兜底命中：谱面文本补齐，渲染/音频链路照常。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.types import SongType
+    from nonebot_plugin_awmc_helper.plugins.chart_preview import preview
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import build_preview
+
+    async def _no_hit_sounds():
+        return None
+
+    monkeypatch.setattr(preview, "fetch_hit_sounds", _no_hit_sounds)
+    await song_service.inject(songs)
+    song_199 = next(s for s in songs if s.id == 199)
+    entry = (199, song_199, SongType.STANDARD)  # SD Master（index 3）
+
+    with respx.mock(assert_all_called=False) as m:
+        # 落雪 SD 双探（199.txt / 10199.txt）全 404
+        lxns_404 = m.get(url__regex=rf"^{BASE}/maimai/chart/\d+\.txt").respond(
+            status_code=404
+        )
+        moant_hit = m.get(
+            MOANT_ROUTE, params={"musicId": "199", "file": "maidata.txt"}
+        ).respond(text=(SNAPSHOTS / "199.txt").read_text())
+        m.get(f"{BASE}/maimai/music/199.mp3").respond(content=b"fake-audio")
+        result = await build_preview(entry, 3)
+
+    assert lxns_404.called
+    assert moant_hit.called
+    assert result.path.exists()
+    assert result.path.parent == cache_dir
+    assert result.label  # 难度标签照常构造
+    assert fake_render
+    assert fake_render[0]["chart"].difficulty == 5  # 后缀 _5 = Master
+
+
+@pytest.mark.asyncio
+async def test_build_preview_moant_fallback_disabled(
+    app: App, db, cache_dir, songs, fake_render, monkeypatch
+):
+    """开关关闭：落雪 404 直接抛 ChartNotAvailableError，不碰 moant。"""
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.types import SongType
+    from nonebot_plugin_awmc_helper.core.ext.lxns_assets import ChartNotAvailableError
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import build_preview
+
+    monkeypatch.setattr(plugin_config, "awmc_chart_preview_moant_fallback", False)
+    await song_service.inject(songs)
+    song_199 = next(s for s in songs if s.id == 199)
+    entry = (199, song_199, SongType.STANDARD)
+
+    with respx.mock(assert_all_called=False) as m:
+        lxns_404 = m.get(url__regex=rf"^{BASE}/maimai/chart/\d+\.txt").respond(
+            status_code=404
+        )
+        moant_route = m.get(MOANT_ROUTE).respond(status_code=404)
+        with pytest.raises(ChartNotAvailableError):
+            await build_preview(entry, 3)
+    assert lxns_404.called
+    assert not moant_route.called
+    assert fake_render == []
+
+
+@pytest.mark.asyncio
+async def test_build_preview_moant_fallback_both_missing(
+    app: App, db, cache_dir, songs, fake_render, monkeypatch
+):
+    """落雪与 moant 双缺 → 维持 ChartNotAvailableError（不进渲染）。"""
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.types import SongType
+    from nonebot_plugin_awmc_helper.core.ext.lxns_assets import ChartNotAvailableError
+    from nonebot_plugin_awmc_helper.plugins.chart_preview.preview import build_preview
+
+    await song_service.inject(songs)
+    song_199 = next(s for s in songs if s.id == 199)
+    entry = (199, song_199, SongType.STANDARD)
+
+    with respx.mock(assert_all_called=False) as m:
+        m.get(url__regex=rf"^{BASE}/maimai/chart/\d+\.txt").respond(status_code=404)
+        m.get(MOANT_ROUTE).respond(status_code=404)
+        with pytest.raises(ChartNotAvailableError):
+            await build_preview(entry, 3)
+    assert fake_render == []
 
 
 @pytest.mark.asyncio

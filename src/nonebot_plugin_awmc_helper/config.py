@@ -116,6 +116,9 @@ class Config(BaseModel):
     awmc_chart_preview_preroll_measures: int = 2
     # 谱面预览音频响度目标（LUFS，两遍 loudnorm 线性增益，TP ≤ -1.5 dBTP）
     awmc_chart_preview_loudness_lufs: float = -16.0
+    # 谱面预览落雪 404 时回退第三方谱面镜像（dw.moant.cn 个人服务，仅补
+    # 谱面文本、不换音频/音效；.env 名 AWMC_CHART_PREVIEW_MOANT_FALLBACK）
+    awmc_chart_preview_moant_fallback: bool = True
 
 
 plugin_config: Config = get_plugin_config(Config)

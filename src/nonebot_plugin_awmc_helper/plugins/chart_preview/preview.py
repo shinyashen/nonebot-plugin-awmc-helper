@@ -19,6 +19,12 @@ from ...config import plugin_config
 from ...core.simai import parse_simai
 from ...core.songs import ChartEntry, utage_diff_of
 from ...core.types import SongType, LevelIndex
+from ...core.ext.moant import (
+    fetch_chart_text as moant_fetch_chart_text,
+)
+from ...core.ext.moant import (
+    fetch_chart_text_by_id as moant_fetch_chart_text_by_id,
+)
 from ...core.ext.lxns_assets import (
     ChartNotAvailableError,
     fetch_music,
@@ -358,6 +364,41 @@ def cached_path(
     return out if out.exists() else None
 
 
+async def _load_chart_text(root_id: int, *, dx: bool) -> tuple[str, int]:
+    """落雪优先取谱面文本；仅 404（ChartNotAvailableError）时按开关回退
+    moant 兜底源。
+
+    回退关闭或兜底也无谱面时原样抛落雪的 ChartNotAvailableError（保留
+    「素材站没有该谱面数据」语义）；网络错误/5xx 不回退，直接透传——
+    兜底只补「落雪没有」而非「落雪暂时坏了」。
+    """
+    try:
+        return await fetch_chart_text(root_id, dx=dx)
+    except ChartNotAvailableError:
+        if not plugin_config.awmc_chart_preview_moant_fallback:
+            raise
+        hit = await moant_fetch_chart_text(root_id, dx=dx)
+        if hit is None:
+            raise
+        text, official_id = hit
+        logger.info(f"谱面预览兜底：moant 命中官方 id {official_id}（root {root_id}）")
+        return text, official_id
+
+
+async def _load_chart_text_by_id(official_id: int) -> str:
+    """宴谱 diff_id 直取的兜底版本（语义同 :func:`_load_chart_text`）。"""
+    try:
+        return await fetch_chart_text_by_id(official_id)
+    except ChartNotAvailableError:
+        if not plugin_config.awmc_chart_preview_moant_fallback:
+            raise
+        text = await moant_fetch_chart_text_by_id(official_id)
+        if text is None:
+            raise
+        logger.info(f"谱面预览兜底：moant 命中官方 id {official_id}（宴谱直取）")
+        return text
+
+
 async def build_preview(
     entry: ChartEntry,
     index: int,
@@ -396,7 +437,7 @@ async def build_preview(
     buddy_stats: ChartStats | None = None
     if is_utage:
         # 宴谱文件以 diff_id 命名（宿主曲 id 对应的是普通谱，不能拿来渲染）
-        simai_text = await fetch_chart_text_by_id(display_id)
+        simai_text = await _load_chart_text_by_id(display_id)
         simai_suffix, buddy_suffix = _pick_utage_suffixes(simai_text, utage_diff)
         site_chart = parse_site_chart(simai_text, difficulty=simai_suffix).get(
             simai_suffix
@@ -410,7 +451,7 @@ async def build_preview(
             if buddy_chart is None:
                 raise ValueError("素材站缺少该 buddy 宴谱的 2P 谱面数据")
     else:
-        simai_text, _official_id = await fetch_chart_text(song.id, dx=dx)
+        simai_text, _official_id = await _load_chart_text(song.id, dx=dx)
         simai_suffix = _SUFFIX_BY_INDEX[index]
         site_chart = parse_site_chart(simai_text, difficulty=simai_suffix).get(
             simai_suffix
