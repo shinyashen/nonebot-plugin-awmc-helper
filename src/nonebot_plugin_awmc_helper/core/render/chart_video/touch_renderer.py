@@ -210,8 +210,8 @@ class _TouchRenderer:
                 ImageChops.multiply(ch[2], ch[3]),
             ),
         )
-        a_s = ch[3].resize((size, size), Image.LANCZOS)
-        rgb_s = rgb_p.resize((size, size), Image.LANCZOS)
+        a_s = ch[3].resize((size, size), Image.Resampling.LANCZOS)
+        rgb_s = rgb_p.resize((size, size), Image.Resampling.LANCZOS)
         a_arr = np.asarray(a_s).astype(np.float32) / 255.0
         rgb_arr = np.asarray(rgb_s).astype(np.float32)
         # 反预乘（alpha≥1 处无变化；极小 alpha 处钳制防溢出）
