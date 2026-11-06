@@ -406,11 +406,18 @@ class BindingService:
     def divingfish_subject(self, binding: UserBinding) -> str | None:
         """水鱼 OAuth subject（ref 摘要）：``sha256(f"{client_id}:{external_id}")``。
 
-        external_id 必须与 Developer-Token 时代 ``/dev/*`` 调用**实际传入**的参数
-        原值完全一致——水鱼迁移快照按原值等值建映射，差一字节即 ``consent_required``
-        且与「未授权」不可区分。本插件公开键口径为「用户名 > QQ 号」，此处同样
-        用户名优先、否则取 QQ 号（仅 QQ 系平台）。OAuth 未配置或无可用标识时
-        返回 None（调用方回退旧路径）。
+        consent 已建立（``divingfish_ref`` 非空）时**直接返回冻结值**：ref 是
+        授权服务器侧的 opaque 句柄，consent 建立后改用户名不得改变 subject，
+        否则 subject 随用户名漂移、换票落空（consent_required）（2026-11-06
+        定案，起因：误绑无效用户名→OAuth 绑定→查询仍走无效用户名，见
+        divingfish-oauth-sunset.md §5 决策 6）。
+
+        冻结值缺失时按 bind 时点同款公式派生：external_id 必须与
+        Developer-Token 时代 ``/dev/*`` 调用**实际传入**的参数原值完全一致——
+        水鱼迁移快照按原值等值建映射，差一字节即 ``consent_required``
+        且与「未授权」不可区分。本插件公开键口径为「用户名 > QQ 号」，此处
+        同样用户名优先、否则取 QQ 号（仅 QQ 系平台）。OAuth 未配置或无可用
+        标识时返回 None（调用方回退旧路径）。
 
         ⚠️ 不检查 ``binding.service``：service 仅是查询偏好，水鱼凭据与它无关
         （score-updater 对 service=net/lxns 且已完成 OAuth 授权的用户同样凭
@@ -421,6 +428,8 @@ class BindingService:
         拿去写入必败——导分等写路径须以 ``divingfish_oauth`` 标志为准判定
         可写（2026-09-28 二次修订，修复仅 QQ 行被误当凭据装配导致整链失败）。
         """
+        if binding.divingfish_ref:
+            return binding.divingfish_ref
         client_id = plugin_config.awmc_divingfish_oauth_client_id
         if not (client_id and plugin_config.awmc_divingfish_oauth_client_secret):
             return None
@@ -687,14 +696,84 @@ class BindingService:
     ) -> None:
         """标记水鱼 OAuth consent 已建立（设备码绑定成功后调用）。
 
-        映射本体在授权服务器侧（ref 摘要换票），本地仅存标志与水鱼用户 ID
-        （sub，诊断/展示/将来 sub: 换票备胎）；不改 service——OAuth 写凭据
-        与默认查分器偏好无关。
+        映射本体在授权服务器侧（ref 摘要换票），本地仅存标志、水鱼用户 ID
+        （sub，诊断/展示/将来 sub: 换票备胎）与**冻结 subject**（consent
+        建立时点的派生值，此后用户名修正不影响 OAuth 身份）；不改
+        service——OAuth 写凭据与默认查分器偏好无关。
+
+        ⚠️ 冻结必须在任何用户名变更之前完成：``divingfish_ref`` 取的是
+        consent 实际对应的派生值（发起绑定时 ``df_bind`` 用的同一结果），
+        先改用户名再冻结会把 consent 对不上的新摘要当冻结值锁进去。
         """
+        if binding.divingfish_ref is None:
+            binding.divingfish_ref = self.divingfish_subject(binding)
         binding.divingfish_oauth = True
         if sub is not None:
             binding.divingfish_sub = sub
         await store.save_binding(binding)
+
+    async def heal_divingfish_username(
+        self, binding: UserBinding, *, username_missing: bool = False
+    ) -> bool:
+        """水鱼用户名档自愈：OAuth 已确立本人身份而绑定用户名查无此人时，
+        按 QQ 公开键探测真实用户名并落库（2026-11-06，修复「误绑无效用户名
+        → OAuth 绑定后查询仍走无效用户名」的存量行）。返回用户名是否被改写。
+
+        触发条件（缺一不可）：OAuth 已授权 + 已绑用户名 + QQ 系平台 + 绑定
+        用户名**确认**查无此人——授权完成即表明本人身份已由水鱼侧背书，用户
+        名查无此人只可能是误绑（「绑定水鱼用户名」是本人公开键语义，代查走
+        ``b50 <用户名>`` 参数形态）。``username_missing``：调用方已确认（查询
+        路径刚收到 400）时传 True 免重复探测；缺省先按用户名探测，200（有效）
+        与 403 隐私关闭/网络异常等无法确认的情形一律不动——免得把用户特意
+        绑定的主账号用户名换成 QQ 绑定的另一个水鱼账号。按 QQ 探测成功以
+        水鱼侧返回的 ``username`` 为准覆写；QQ 未绑水鱼账号等探测失败不动
+        绑定、返回 False 由调用方按原错误收口。
+
+        调用方：OAuth 完成时（``_complete_df``，无论当前数据源——用户名是
+        水鱼侧状态，与默认查分器偏好无关）与查询路径（DivingFishSource.
+        get_player）。后者含 @代查：修正的是目标本人已授权行的误绑公开键、
+        不新建行，不违背代查「不给对方建行」的口径。
+
+        ⚠️ 覆写前必须先冻结 subject（存量行 ``divingfish_ref`` 为空）：冻结
+        值取**覆写前**的派生结果（= consent 建立时所用摘要），顺序颠倒会把
+        新用户名的摘要锁进去、OAuth 换票从此落空。
+        """
+        if not binding.divingfish_oauth or not binding.divingfish_username:
+            return False
+        qq = self.qq_of(binding)
+        if qq is None:
+            return False
+        from .ext import divingfish as df_ext
+
+        try:
+            if not username_missing:
+                try:
+                    await df_ext.query_player_public(
+                        username=binding.divingfish_username
+                    )
+                    return False  # 用户名有效：不覆写
+                except df_ext.DivingFishUserNotFoundError:
+                    pass  # 确认查无此人，继续按 QQ 自愈
+            profile = await df_ext.query_player_public(qq=qq)
+        except df_ext.ExtError:
+            # 用户名存在性无法确认（403 隐私/网络）或 QQ 探测未命中
+            logger.info(
+                f"水鱼用户名自愈未执行（{binding.platform}:"
+                f"{binding.user_id}），维持原绑定"
+            )
+            return False
+        username = profile.get("username")
+        if not username or str(username) == binding.divingfish_username:
+            return False
+        if binding.divingfish_ref is None:
+            binding.divingfish_ref = self.divingfish_subject(binding)
+        binding.divingfish_username = str(username)
+        await store.save_binding(binding)
+        logger.info(
+            f"水鱼用户名已按 OAuth 身份自愈为「{username}」"
+            f"（{binding.platform}:{binding.user_id}）"
+        )
+        return True
 
     async def bind_lxns(
         self,

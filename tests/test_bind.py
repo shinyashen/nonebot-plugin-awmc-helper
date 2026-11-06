@@ -57,21 +57,90 @@ async def _assert_reply(app: App, matcher, text: str, reply: str, *, user_id=123
 
 @pytest.mark.asyncio
 async def test_bind_divingfish_username(app: App, db):
-    """「绑定水鱼用户名 <用户名>」：用户名公开查询档绑定。"""
+    """「绑定水鱼用户名 <用户名>」：用户名公开查询档绑定（绑定即验证）。"""
+    import respx
+
     from nonebot_plugin_awmc_helper.plugins import bind
     from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import QUERY_PLAYER_URL
 
-    await _assert_reply(
-        app,
-        bind.df_user,
-        "绑定水鱼用户名 测试者",
-        "已绑定水鱼账号「测试者」（公开查询）。\n"
-        "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」；"
-        "如需成绩写入/导分等全功能，请发送「绑定水鱼」走 OAuth 授权",
-    )
+    with respx.mock(assert_all_called=False) as m:
+        m.post(QUERY_PLAYER_URL).respond(
+            200,
+            json={
+                "username": "测试者",
+                "rating": 3000,
+                "nickname": "测试者",
+                "plate": "初将",
+                "additional_rating": [],
+            },
+        )
+        await _assert_reply(
+            app,
+            bind.df_user,
+            "绑定水鱼用户名 测试者",
+            "已绑定水鱼账号「测试者」（公开查询）。\n"
+            "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」；"
+            "如需成绩写入/导分等全功能，请发送「绑定水鱼」走 OAuth 授权",
+        )
     binding = await binding_service.get("OneBot V11", "12345678")
     assert binding is not None
     assert binding.divingfish_username == "测试者"
+
+
+@pytest.mark.asyncio
+async def test_bind_divingfish_username_rejects_unknown(app: App, db):
+    """「绑定水鱼用户名」绑定即验证：查无此人（400）拒绝落库。
+
+    误绑无效用户名曾导致 OAuth 绑定后公开查询仍走无效用户名必败
+    （2026-11-06），验证在入口拦下；隐私关闭（403，账号存在）不拦截。
+    """
+    import respx
+
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import QUERY_PLAYER_URL
+
+    with respx.mock(assert_all_called=False) as m:
+        route = m.post(QUERY_PLAYER_URL).respond(
+            400, json={"message": "user not exists"}
+        )
+        await _assert_reply(
+            app,
+            bind.df_user,
+            "绑定水鱼用户名 不存在的名字",
+            "水鱼查分器没有「不存在的名字」这个用户名，"
+            "请到水鱼个人页核对后重试（用户名以个人页显示为准）",
+        )
+        assert route.called
+    # 请求体确实按用户名探测
+    body = route.calls[0].request.content.decode()
+    assert '"username"' in body
+    assert await binding_service.get("OneBot V11", "12345678") is None
+
+
+@pytest.mark.asyncio
+async def test_bind_divingfish_username_privacy_allowed(app: App, db):
+    """「绑定水鱼用户名」：隐私关闭（403）说明账号存在，不阻塞绑定。"""
+    import respx
+
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import QUERY_PLAYER_URL
+
+    with respx.mock(assert_all_called=False) as m:
+        m.post(QUERY_PLAYER_URL).respond(403, json={"message": "该用户开启了隐私保护"})
+        await _assert_reply(
+            app,
+            bind.df_user,
+            "绑定水鱼用户名 隐私玩家",
+            "已绑定水鱼账号「隐私玩家」（公开查询）。\n"
+            "如需查询全量成绩（牌子/表格），请使用「绑定水鱼token <Import-Token>」；"
+            "如需成绩写入/导分等全功能，请发送「绑定水鱼」走 OAuth 授权",
+        )
+    binding = await binding_service.get("OneBot V11", "12345678")
+    assert binding is not None
+    assert binding.divingfish_username == "隐私玩家"
 
 
 @pytest.mark.asyncio
@@ -381,6 +450,134 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
         assert binding is not None
         assert binding_service.divingfish_subject(binding) == expect
         assert re.fullmatch(r"[0-9a-f]{64}", expect[4:])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bound", "bound_valid"), [("bogus_name", False), ("main_account", True)]
+)
+async def test_df_oauth_completes_with_username_heal(
+    app: App, db, monkeypatch, bound: str, bound_valid: bool
+):
+    """OAuth 完成时按 QQ 自愈误绑用户名（2026-11-06 修复场景）：
+
+    先绑用户名（存量行，经服务层直造绕过入口验证）→ OAuth 授权完成 →
+    subject 冻结为 consent 时点摘要（所绑用户名摘要）；绑定用户名**确认查无
+    此人**才按 QQ 公开键探测替换并在成功提示中说明——有效用户名（用户特意
+    绑的主账号）原样保留、不发 QQ 探测；此后改用户名不再牵动 subject。
+    """
+    import hashlib
+    import urllib.parse
+
+    import respx
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.plugins import bind
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import QUERY_PLAYER_URL
+
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
+
+    def fake_jwt(sub: str) -> str:
+        payload = (
+            base64.urlsafe_b64encode(b'{"sub":"' + sub.encode() + b'"}')
+            .decode()
+            .rstrip("=")
+        )
+        return f"eyJhbGciOiJQUzI1NiJ9.{payload}.sig"
+
+    def player_payload(username: str) -> dict:
+        return {
+            "username": username,
+            "rating": 3000,
+            "nickname": username,
+            "plate": "初将",
+            "additional_rating": [],
+        }
+
+    # 存量行：service 层直绑（入口验证上线前的历史状态）
+    binding = await binding_service.ensure("OneBot V11", "12345678")
+    await binding_service.bind_divingfish_username(binding, bound)
+
+    expect_ref = "ref:" + hashlib.sha256(f"cid:{bound}".encode()).hexdigest()
+
+    with respx.mock(assert_all_called=False) as m:
+        m.post(url__regex=r".*/oauth/device_authorization").respond(
+            200,
+            json={
+                "device_code": "dev",
+                "user_code": "BCDF-GHJK-LMNP",
+                "verification_uri": "https://auth.diving-fish.com/device",
+                "verification_uri_complete": "https://auth.diving-fish.com/device",
+                "expires_in": 1200,
+                "interval": 5,
+            },
+        )
+        m.post(url__regex=r".*/oauth/token").respond(
+            200,
+            json={
+                "access_token": fake_jwt("987654321"),
+                "token_type": "Bearer",
+                "expires_in": 900,
+                "sub": "987654321",
+            },
+        )
+        # 先验证所绑用户名：无效 → 400 查无此人；有效 → 200
+        username_probe = m.post(QUERY_PLAYER_URL, json={"username": bound})
+        if bound_valid:
+            username_probe.respond(200, json=player_payload(bound))
+        else:
+            username_probe.respond(400, json={"message": "user not exists"})
+        # 确认查无此人后才按 QQ 探测本 QQ 绑定的水鱼账号
+        qq_probe = m.post(QUERY_PLAYER_URL, json={"qq": "12345678"}).respond(
+            200, json=player_payload("real_name")
+        )
+        await _assert_reply(
+            app,
+            bind.df_bind,
+            "绑定水鱼",
+            (
+                "水鱼已要求所有成绩写入走 OAuth 授权，请完成一次绑定：\n\n"
+                "1. 打开以下链接并登录水鱼账号，授权本 BOT 访问您的水鱼查分器数据\n"
+                "=======================\n"
+                "https://auth.diving-fish.com/device\n"
+                "=======================\n"
+                "2. 确认页面显示的绑定身份为「QQ 12****78」后点击「同意授权」\n"
+                "3. 复制页面给出的确认码，直接发送给我（无需任何前缀）\n\n"
+                "本次绑定 20 分钟内有效，确认码只能使用一次；"
+                "超时或失效后请重新发送「绑定水鱼」。\n"
+                "=======================\n"
+                "请注意！！链接与确认码都仅供您本人使用，请勿转发他人。\n"
+                "确认码建议在与 BOT 的私聊中发送，避免被他人看到。\n"
+                "如需取消授权，请前往 https://auth.diving-fish.com/apps"
+            ),
+        )
+        # 发起绑定的 subject_ref 用的是当时派生值（所绑用户名摘要）
+        device_calls = [c for c in m.routes[0].calls if c.request.content]
+        form = urllib.parse.parse_qs(device_calls[0].request.content.decode())
+        assert form["subject_ref"] == [expect_ref[4:]]
+
+        success = "水鱼查分器授权完成，现在可以直接使用查询指令了。"
+        if not bound_valid:
+            success += (
+                f"\n原绑定的水鱼用户名「{bound}」查无此人，"
+                "已按本 QQ 绑定的水鱼账号修正为「real_name」"
+            )
+        await _assert_reply(app, bind.df_code, "水鱼授权码 BCDF-GHJK-LMNP", success)
+        assert username_probe.called
+        # 有效用户名不发 QQ 探测（不会被 QQ 绑定的另一个账号顶掉）
+        assert qq_probe.called is not bound_valid
+
+    row = await store.get_binding("OneBot V11", "12345678")
+    assert row is not None
+    assert row.divingfish_oauth is True
+    assert row.divingfish_username == (bound if bound_valid else "real_name")
+    # subject 冻结为 consent 时点摘要，换绑用户名不再牵动
+    assert row.divingfish_ref == expect_ref
+    row.divingfish_username = "another_name"
+    assert binding_service.divingfish_subject(row) == expect_ref
 
 
 @pytest.mark.asyncio

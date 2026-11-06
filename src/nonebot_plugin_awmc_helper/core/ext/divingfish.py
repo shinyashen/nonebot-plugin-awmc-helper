@@ -14,6 +14,7 @@ from ...config import plugin_config
 
 RANKING_URL = "https://www.diving-fish.com/api/maimaidxprober/rating_ranking"
 MUSIC_DATA_URL = "https://www.diving-fish.com/api/maimaidxprober/music_data"
+QUERY_PLAYER_URL = "https://www.diving-fish.com/api/maimaidxprober/query/player"
 
 
 async def fetch_music_data() -> list[dict]:
@@ -22,6 +23,50 @@ async def fetch_music_data() -> list[dict]:
     与落雪同为唯二国服源；不得走 MaimaiClient（理由同 lxns.fetch_song_list）。
     """
     return await fetch_json(MUSIC_DATA_URL, name="水鱼曲库")
+
+
+class DivingFishUserNotFoundError(ExtError):
+    """公开查询查无此人（``query/player`` 400）：用户名不存在或 QQ 未绑定
+    水鱼账号。供绑定层与「用户名即验证」区分确定性失败与暂时性错误。"""
+
+
+async def query_player_public(
+    *, qq: int | None = None, username: str | None = None
+) -> dict:
+    """公开 ``query/player`` 直连（maimai-py 公开玩家查询的单跳轻封装）。
+
+    消费方：绑定层用户名即验证（2026-11-06，杜绝误绑无效用户名）与 OAuth
+    身份自愈探测（:meth:`core.binding.BindingService.heal_divingfish_username`）
+    ——两者都要「只判账号存在性、拿 username」，不需要 MaimaiClient 的缓存
+    与 provider 体系。200 返回含 ``username``/``rating`` 的原始 dict；
+    400 抛 :class:`DivingFishUserNotFoundError`（查无此人，含 QQ 未绑水鱼）；
+    403（隐私关闭「禁止第三方查询」）与其余非 200 抛一般 :class:`ExtError`；
+    网络异常经 :func:`ext_request` 包装。
+
+    请求体形状对齐 maimai_py ``PlayerIdentifier._as_diving_fish``（qq 序列化
+    为字符串）；qq/username 都不给返回 ValueError。
+    """
+    payload: dict = {}
+    if qq is not None:
+        payload["qq"] = str(qq)
+    if username is not None:
+        payload["username"] = username
+    if not payload:
+        raise ValueError("query_player_public 需要 qq 或 username 之一")
+    resp = await ext_request(
+        "POST",
+        QUERY_PLAYER_URL,
+        name="水鱼公开查询",
+        json=payload,
+    )
+    if resp.status_code == 400:
+        raise DivingFishUserNotFoundError("水鱼查分器查无此人")
+    if resp.status_code != 200:
+        raise ExtError(f"水鱼公开查询失败（HTTP {resp.status_code}）")
+    try:
+        return resp.json()
+    except Exception as e:
+        raise ExtError("水鱼公开查询返回了无效数据") from e
 
 
 @dataclass

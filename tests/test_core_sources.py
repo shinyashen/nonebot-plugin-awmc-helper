@@ -211,3 +211,60 @@ async def test_net_hooks_route_via_facade(db, songs):
     assert score_service.supports(net_binding.service, "b50") is True
     assert score_service.supports(net_binding.service, "scores_all") is True
     assert score_service.supports(net_binding.service, "plates") is True
+
+
+@pytest.mark.asyncio
+async def test_get_player_heals_stale_username(db, songs, monkeypatch):
+    """水鱼 get_player 用户名档自愈（2026-11-06）：绑定用户名查无此人且
+    OAuth 已授权 → 按 QQ 公开键探测真实用户名落库并重试一跳；探测不命中
+    （无 OAuth 等）按原错误映射收口，行为不变。"""
+    import respx
+
+    from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import QUERY_PLAYER_URL
+
+    def player_payload(username: str) -> dict:
+        return {
+            "username": username,
+            "rating": 3000,
+            "nickname": username,
+            "plate": "初将",
+            "additional_rating": [],
+        }
+
+    # 存量无效行：OAuth 已授权、用户名误绑（服务层直造）
+    binding = await binding_service.ensure("OneBot V11", "70010")
+    await binding_service.bind_divingfish_username(binding, "bogus")
+    await binding_service.bind_divingfish_oauth(binding, sub="9")
+
+    with respx.mock(assert_all_called=False) as m:
+        # 首跳：用户名查无此人
+        m.post(QUERY_PLAYER_URL, json={"username": "bogus"}).respond(
+            400, json={"message": "user not exists"}
+        )
+        # 自愈探测：按 QQ 命中真实用户名
+        m.post(QUERY_PLAYER_URL, json={"qq": "70010"}).respond(
+            200, json=player_payload("real_user")
+        )
+        # 重试：修正后的用户名命中
+        m.post(QUERY_PLAYER_URL, json={"username": "real_user"}).respond(
+            200, json=player_payload("real_user")
+        )
+        player = await score_service.get_player(binding)
+    assert player.name == "real_user"
+    # 自愈落库：绑定用户名已被真实值替换
+    got = await binding_service.get("OneBot V11", "70010")
+    assert got is not None
+    assert got.divingfish_username == "real_user"
+
+    # 无 OAuth 行为不变：查无此人直接收口（无自愈探测）
+    plain = await binding_service.ensure("OneBot V11", "70011")
+    await binding_service.bind_divingfish_username(plain, "bogus2")
+    with respx.mock(assert_all_called=False) as m:
+        route = m.post(QUERY_PLAYER_URL, json={"username": "bogus2"}).respond(
+            400, json={"message": "user not exists"}
+        )
+        with pytest.raises(UserScoreError, match="没有找到这个玩家"):
+            await score_service.get_player(plain)
+    assert route.call_count == 1

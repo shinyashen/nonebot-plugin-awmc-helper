@@ -55,3 +55,59 @@ def test_jwt_payload_unverified_shared_helper():
     assert jwt_payload_unverified(_jwt([1, 2])) is None
     assert token_subject("garbage") is None
     assert token_expiry("garbage") is None
+
+
+@pytest.mark.asyncio
+async def test_query_player_public():
+    """公开 query/player 直连探针（绑定即验证/自愈共用）：200 返回原始 dict、
+    400 查无此人专项异常、403（隐私关闭）与其余非 200 一般 ExtError、
+    请求体形状对齐 maimai_py（qq 序列化为字符串）。"""
+    from nonebot_plugin_awmc_helper.core.ext import ExtError
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import (
+        DivingFishUserNotFoundError,
+        query_player_public,
+    )
+
+    with respx.mock(assert_all_called=False) as m:
+        route = m.post(f"{BASE_DF}/query/player").respond(
+            200,
+            json={
+                "username": "tester",
+                "rating": 3000,
+                "nickname": "tester",
+                "plate": "初将",
+                "additional_rating": [],
+            },
+        )
+        profile = await query_player_public(qq=12345678)
+        assert profile["username"] == "tester"
+        # qq 序列化为字符串（maimai_py _as_diving_fish 同形状）
+        body = route.calls[0].request.content.decode()
+        assert '"qq":"12345678"' in body.replace(" ", "")
+
+        # 查无此人（400）→ 专项异常
+        m.post(f"{BASE_DF}/query/player").respond(
+            400, json={"message": "user not exists"}
+        )
+        with pytest.raises(DivingFishUserNotFoundError):
+            await query_player_public(username="no_such_user")
+
+        # 隐私关闭（403）→ 一般 ExtError（账号存在，调用方按暂时性语义放行）
+        m.post(f"{BASE_DF}/query/player").respond(
+            403, json={"message": "该用户开启了隐私保护"}
+        )
+        with pytest.raises(ExtError) as ei:
+            await query_player_public(username="privacy_user")
+        assert not isinstance(ei.value, DivingFishUserNotFoundError)
+
+    # 网络异常 → ExtNetworkError（ExtError 子类）
+    import httpx
+
+    with respx.mock(assert_all_called=False) as m:
+        m.post(f"{BASE_DF}/query/player").side_effect = httpx.ConnectError("boom")
+        with pytest.raises(ExtError):
+            await query_player_public(username="x")
+
+    # qq/username 都不给 → ValueError（编程错误，不走网络）
+    with pytest.raises(ValueError, match="需要 qq 或 username"):
+        await query_player_public()

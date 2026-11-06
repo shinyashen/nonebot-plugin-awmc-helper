@@ -71,6 +71,11 @@ class UserBinding(SQLModel, table=True):
     # 本地只存「已完成 consent」标志与水鱼用户 ID（诊断/展示用）
     divingfish_oauth: bool = Field(default=False)
     divingfish_sub: str | None = Field(default=None)
+    # OAuth subject 冻结值（"ref:<sha256 摘要>"，consent 建立时点的派生结果）。
+    # ref 是授权服务器侧的 opaque 句柄，consent 一经建立即不可再变——此后
+    # divingfish_username 只作公开查询键，可自由修正（自愈/换绑）而不再
+    # 反向影响 OAuth 身份（修正前派生值随用户名变、会把 consent 甩掉）
+    divingfish_ref: str | None = Field(default=None)
     lxns_friend_code: int | None = Field(default=None)
     lxns_token: str | None = Field(default=None)
     # 落雪 OAuth refresh_token（maimai-py 暂无刷新流程，先落库防迁移丢失）

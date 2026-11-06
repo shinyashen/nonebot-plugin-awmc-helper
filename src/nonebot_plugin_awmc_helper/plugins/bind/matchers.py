@@ -239,7 +239,13 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 @df_user.handle()
 @handle_errors("绑定失败，请稍后再试")
 async def _(session: Session = UniSession(), message: Message = CommandArg()):
-    """「绑定水鱼用户名」：用户名公开查询档（玩家信息/b50/RA 排名）。"""
+    """「绑定水鱼用户名」：用户名公开查询档（玩家信息/b50/RA 排名）。
+
+    绑定即验证（2026-11-06，对齐「绑定日服」）：公开 ``query/player`` 探测
+    用户名，查无此人拒绝落库——无效用户名一旦落库，公开查询路径（b50 卡头
+    玩家资料等）必败。仅确定性「查无此人」拦截：网络异常/隐私关闭（403，
+    账号真实存在只是关了第三方查询）不阻塞绑定，避免暂时性故障误伤。
+    """
     platform, user_id = session_keys(session)
     arg = message.extract_plain_text().strip()
     if not arg:
@@ -252,6 +258,15 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
         await UniMessage.text(" " + DIVINGFISH_TOKEN_LOOKALIKE_MSG).finish(
             at_sender=True
         )
+    try:
+        await df_ext.query_player_public(username=arg)
+    except df_ext.DivingFishUserNotFoundError:
+        await UniMessage.text(
+            f" 水鱼查分器没有「{arg}」这个用户名，请到水鱼个人页核对后重试"
+            "（用户名以个人页显示为准）"
+        ).finish(at_sender=True)
+    except df_ext.ExtError:
+        pass  # 验证 best-effort：暂时性故障不阻塞绑定
     binding = await binding_service.ensure(platform, user_id)
     await binding_service.bind_divingfish_username(binding, arg)
     await UniMessage.text(
@@ -262,7 +277,14 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 
 
 async def _complete_df(platform: str, user_id: str, code: str) -> None:
-    """确认码回填收尾：兑换令牌（水鱼侧校验回填人 = 发起人）→ 落 OAuth 标志。"""
+    """确认码回填收尾：兑换令牌（水鱼侧校验回填人 = 发起人）→ 落 OAuth 标志
+    （内部冻结 subject）→ 绑定用户名确认查无此人时按 QQ 自愈。
+
+    自愈先于成功提示完成：授权确立本人身份后，此前误绑的无效用户名按 QQ
+    公开键探测替换（best-effort，探测失败不影响授权完成），让「先绑错用户
+    名、后 OAuth 授权」的绑定一步收敛到可用状态，无需再手动换绑；有效用户
+    名不动（自愈内部先验证，见 heal_divingfish_username）。
+    """
     binding = await binding_service.get(platform, user_id)
     if binding is None:
         await UniMessage.text(" " + DIVINGFISH_NO_SESSION_MSG).finish(at_sender=True)
@@ -279,8 +301,17 @@ async def _complete_df(platform: str, user_id: str, code: str) -> None:
         await UniMessage.text(f" {e}").finish(at_sender=True)
     sub = df_ext.token_subject(result.get("access_token", "")) or result.get("sub")
     await binding_service.bind_divingfish_oauth(binding, sub=sub)
+    old_username = binding.divingfish_username
+    healed = ""
+    if await binding_service.heal_divingfish_username(binding):
+        healed = (
+            f"\n原绑定的水鱼用户名「{old_username}」查无此人，"
+            f"已按本 QQ 绑定的水鱼账号修正为「{binding.divingfish_username}」"
+        )
     pending_bindings.discard(platform, user_id)
-    await UniMessage.text(" " + DIVINGFISH_BIND_SUCCESS_MSG).finish(at_sender=True)
+    await UniMessage.text(" " + DIVINGFISH_BIND_SUCCESS_MSG + healed).finish(
+        at_sender=True
+    )
 
 
 @df_token.handle()

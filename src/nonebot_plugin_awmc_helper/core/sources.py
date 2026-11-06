@@ -521,12 +521,46 @@ class ProberSource(SourceBase):
 
 
 class DivingFishSource(ProberSource):
-    """水鱼适配器：全能力 + RA 榜定位 + 公开代查。"""
+    """水鱼适配器：全能力 + RA 榜定位 + 公开代查 + 用户名档自愈。"""
 
     key = SERVICE_DIVINGFISH
     zh_name = "水鱼数据源"
     short_zh = "水鱼"
     capabilities = frozenset(Capability)
+
+    async def get_player(self, binding: UserBinding, notify_slow=None):
+        """玩家资料：绑定用户名查无此人且 OAuth 已授权时先自愈再重试一次。
+
+        「绑定水鱼用户名」误绑无效用户名后（存量行/验证上线前的历史行），
+        公开键查询必败（水鱼 400 user not exists）；OAuth 已确立本人身份，
+        此时按 QQ 公开键探测真实用户名落库（:meth:`binding.BindingService.
+        heal_divingfish_username`，内部自行冻结 subject），以修正后的绑定
+        重试一跳。自愈不触发（条件不符/探测未命中）按原错误映射收口。
+        ``propagate_identifier_error`` 让查无此人裸穿上抛（水鱼绑定不走
+        落雪续期阶梯），供此处区分确定性失败与其他错误。
+        """
+        await song_service.ensure_loaded()
+
+        def make():
+            return lambda: client.players(
+                binding_service.identifier(binding),
+                provider=binding_service.provider(binding),
+            )
+
+        try:
+            return await _run(
+                binding,
+                make(),
+                notify_slow,
+                propagate_identifier_error=True,
+            )
+        except InvalidPlayerIdentifierError as e:
+            # 公开 query/player 的 400 即查无此人：已确认，自愈免重复探测
+            if not await binding_service.heal_divingfish_username(
+                binding, username_missing=True
+            ):
+                raise _map_error(e) from e
+            return await _run(binding, make(), notify_slow)
 
     async def get_b50_public(
         self, username: str
