@@ -128,6 +128,13 @@ source_of(service) -> SourceBase
 command_hints(service) -> str     # 指令支持清单（帮助「数据源」详情用）
 support_note(cap) -> str | None   # 能力不支持时的用户提示（无则 None）
 UserScoreError                    # message 为用户可读文案（sources 定义）
+
+# 数据站拒绝访问文案（core.score 转导出；自行捕获 maimai-py 异常的第三方用它，勿复刻）
+access_denied_hint(exc, service=None) -> str | None
+#   「未同意用户协议」与「隐私限制」分开给（maimai-py 两者都抛 PrivacyLimitationError，
+#   按服务端原话分类）；service 为 SERVICE_DIVINGFISH / SERVICE_LXNS 时文案指向该站，
+#   None 时协议类按水鱼、隐私类给两站合并指引；非此类异常返回 None
+DF_AGREEMENT_HINT                 # 水鱼账号未同意用户协议的处置文案（读写通用）
 ```
 
 ## calc

@@ -107,6 +107,9 @@ plugins/
 - core 服务对外全部是**异步可等待**接口，曲库未就绪时内部 `await ensure_loaded()`；
 - maimai-py 异常只在 `core/score.py` 捕获并转 `UserScoreError`；
   handler 用 `@handle_errors(except_with_message=(UserScoreError,))` 透传文案；
+- 确需自行捕获 maimai-py 异常的第三方插件（如传分插件），「未同意用户协议 /
+  隐私限制」两类拒绝访问的文案统一取 `core.score.access_denied_hint(exc, service)`
+  ——两者处置不同、库层不分类，不要自行 isinstance 判断或复刻文案；
 - ext 直连层异常为 `ExtError`/`ExtNetworkError`，message 面向用户；
 - 会话型交互用「TTL 会话表 + priority=0 on_message Rule」，不用 `got`；
 - 群级开关用 `store.get_switch(group_id, feature, default)`：

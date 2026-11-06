@@ -69,7 +69,7 @@ async def test_get_b50_divingfish(db, songs):
 
 @pytest.mark.asyncio
 async def test_error_mapping_privacy(db, songs):
-    """水鱼 403 → 隐私提示文案。"""
+    """水鱼 403（非协议类）→ 水鱼专属隐私指引（按绑定数据源给站点文案）。"""
     from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
 
@@ -78,7 +78,7 @@ async def test_error_mapping_privacy(db, songs):
         m.post(f"{BASE_DF}/query/player").respond(
             status_code=403, json={"message": "未授权"}
         )
-        with pytest.raises(UserScoreError, match="未授权"):
+        with pytest.raises(UserScoreError, match="水鱼查分器设置了隐私限制"):
             await score_service.get_player(binding)
 
 
@@ -326,9 +326,9 @@ async def test_run_retry_ladder_after_refresh(db, songs, monkeypatch):
     assert calls["n"] == 1
     assert sleeps == []
 
-    # 续期后遇到非 401 异常：立即映射，不进阶梯
+    # 续期后遇到非 401 异常：立即映射（续期阶梯只服务落雪 → 落雪专属文案），不进阶梯
     factory, calls = await make_other_error(1)
-    with pytest.raises(UserScoreError, match="未授权第三方查询"):
+    with pytest.raises(UserScoreError, match="落雪查分器设置了隐私限制"):
         await sources_module._run(binding, factory)
     assert calls["n"] == 2
     assert sleeps == []

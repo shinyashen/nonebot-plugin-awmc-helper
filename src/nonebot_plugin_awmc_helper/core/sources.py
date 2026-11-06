@@ -77,6 +77,7 @@ __all__ = [
     "Capability",
     "SourceBase",
     "UserScoreError",
+    "access_denied_hint",
     "command_hints",
     "source_of",
     "support_note",
@@ -106,13 +107,72 @@ _DF_TOKEN_HINT = (
 """全量路径 **token 失效**（400「导入token有误」）收口文案：路由到 token 的
 绑定专属——两类失败凭路由天然可分，各自给最直接的行动指引。"""
 
+# ------------------------------------------- 数据站拒绝访问（协议 / 隐私，子插件共用）
+
 DF_AGREEMENT_HINT = (
-    "该水鱼账号尚未同意水鱼查分器的用户协议，水鱼暂不开放其数据：\n"
+    "该水鱼账号尚未同意水鱼查分器的用户协议，水鱼拒绝了本次访问：\n"
     "请登录水鱼查分器网页（https://www.diving-fish.com/maimaidx/prober/）"
-    "同意用户协议后再查询"
+    "同意用户协议后再试"
 )
 """水鱼账号未同意用户协议的处置文案（Bearer 端点 403「该用户未同意用户协议」，
-公开查询同时报查无此人；2026-11-06 生产实况）。bind 插件授权完成时同源引用。"""
+公开查询同时报查无此人；2026-11-06 生产实况）。措辞不分读写——查分、导分、
+授权完成提示同源引用。"""
+
+_LX_AGREEMENT_HINT = (
+    "该落雪账号尚未同意落雪查分器的相关协议，落雪拒绝了本次访问：\n"
+    "请登录落雪查分器（https://maimai.lxns.net/）按页面提示同意后再试"
+)
+
+_DF_PRIVACY_HINT = (
+    "该玩家在水鱼查分器设置了隐私限制，水鱼拒绝了本次访问：\n"
+    "请到 水鱼查分器个人页 → 隐私设置 关闭「禁止第三方查询」后再试"
+)
+
+_LX_PRIVACY_HINT = (
+    "该玩家在落雪查分器设置了隐私限制，落雪拒绝了本次访问：\n"
+    "请在 落雪查分器 → 隐私设置 中允许通过好友码查询后再试"
+)
+
+_PRIVACY_HINT_ANY = (
+    "该玩家未授权第三方查询数据：\n"
+    "水鱼请到 个人页 → 隐私设置 关闭「禁止第三方查询」；\n"
+    "落雪请在 落雪查分器 → 隐私设置 中允许通过好友码查询"
+)
+"""数据源不明时的隐私文案（两站指引合并）。"""
+
+_AGREEMENT_HINTS = {
+    SERVICE_DIVINGFISH: DF_AGREEMENT_HINT,
+    SERVICE_LXNS: _LX_AGREEMENT_HINT,
+}
+_PRIVACY_HINTS = {
+    SERVICE_DIVINGFISH: _DF_PRIVACY_HINT,
+    SERVICE_LXNS: _LX_PRIVACY_HINT,
+}
+
+
+def access_denied_hint(exc: BaseException, service: str | None = None) -> str | None:
+    """数据站拒绝访问的用户文案：「未同意用户协议」与「隐私限制」分开给；
+    非此类异常返回 None。
+
+    maimai-py 把两类拒绝一律抛 ``PrivacyLimitationError``（水鱼 Bearer 端点非
+    缺权限的 403、落雪 ``code`` 403），只带服务端原话、库层不分类；两者处置却
+    完全不同——前者本人登录网页同意协议，后者改隐私开关，混用会把人指错方向。
+    按原话分类：含「协议」即未同意用户协议（水鱼实测原话「该用户未同意用户
+    协议」，2026-11-06），否则按隐私限制。ext 资料兜底的
+    ``DivingFishAgreementRequired`` 同归水鱼协议类。
+
+    ``service``：数据源键（``SERVICE_DIVINGFISH`` / ``SERVICE_LXNS``），决定文案
+    指向哪个站；不明（``None``）时协议类按水鱼（唯一实测来源），隐私类给两站
+    合并指引。主插件查分映射与第三方子插件（传分插件导分失败文案等）共用本
+    函数——消费侧勿自行 isinstance 判断或复刻文案。
+    """
+    if isinstance(exc, df_ext.DivingFishAgreementRequired):
+        return DF_AGREEMENT_HINT
+    if not isinstance(exc, PrivacyLimitationError):
+        return None
+    if "协议" in str(exc):
+        return _AGREEMENT_HINTS.get(service or SERVICE_DIVINGFISH, DF_AGREEMENT_HINT)
+    return _PRIVACY_HINTS.get(service or "", _PRIVACY_HINT_ANY)
 
 
 class Capability(str, Enum):
@@ -170,8 +230,15 @@ def _has_scores(
     return any(s.type == song_type for s in scores) if song_type else True
 
 
-def _map_error(e: Exception) -> UserScoreError:
-    """maimai-py / ext 异常 → 用户文案（统一映射表，含已知坑）。"""
+def _map_error(e: Exception, service: str | None = None) -> UserScoreError:
+    """maimai-py / ext 异常 → 用户文案（统一映射表，含已知坑）。
+
+    ``service``：数据源键，数据站拒绝访问类按站给文案（:func:`access_denied_hint`）；
+    该判断须先于 ExtError 分支——ext 的 ``DivingFishAgreementRequired`` 也是
+    ExtError，后判会把水鱼原话直接甩给用户。
+    """
+    if (hint := access_denied_hint(e, service)) is not None:
+        return UserScoreError(hint)
     if isinstance(e, NetError):
         return UserScoreError(NET_ERROR_MESSAGES.get(e.code, str(e)))
     if isinstance(e, ExtError):
@@ -185,16 +252,6 @@ def _map_error(e: Exception) -> UserScoreError:
     if isinstance(e, InvalidPlayerIdentifierError):
         return UserScoreError(
             "没有找到这个玩家，请确认绑定信息（水鱼用户名/QQ、落雪好友码或个人 Token）"
-        )
-    if isinstance(e, PrivacyLimitationError):
-        if "用户协议" in str(e):
-            # maimai-py 把 Bearer 端点的 403 一律归为隐私限制；「未同意用户协议」
-            # 与隐私开关无关，套隐私文案会把人指错地方
-            return UserScoreError(DF_AGREEMENT_HINT)
-        return UserScoreError(
-            "该玩家未授权第三方查询数据：\n"
-            "水鱼请到 个人页 → 隐私设置 关闭「禁止第三方查询」；\n"
-            "落雪请在 落雪查分器 → 隐私设置 中允许通过好友码查询"
         )
     if isinstance(e, InvalidDeveloperTokenError):
         # 1.6.0 起 dev 端点及其 410 映射已从库中删除，此异常只剩 OAuth 应用凭据
@@ -246,7 +303,7 @@ async def _run(
         if binding is None:
             raise _map_error(e) from e
         if not isinstance(e, InvalidPlayerIdentifierError):
-            raise _map_error(e) from e
+            raise _map_error(e, binding.service) from e
         if propagate_identifier_error and binding.service != SERVICE_LXNS:
             raise
         status = await binding_service.refresh_lxns(binding)
@@ -254,7 +311,7 @@ async def _run(
             return await _retry_after_refresh(make_coro, e, notify_slow)
         if status == "dead":
             raise UserScoreError("落雪授权已过期，请重新「绑定落雪」") from e
-        raise _map_error(e) from e
+        raise _map_error(e, binding.service) from e
 
 
 async def _retry_after_refresh(make_coro, first: Exception, notify_slow=None):
@@ -282,7 +339,7 @@ async def _retry_after_refresh(make_coro, first: Exception, notify_slow=None):
         except InvalidPlayerIdentifierError as e:
             last = e
         except (MaimaiPyError, httpx.RequestError) as e2:
-            raise _map_error(e2) from e2
+            raise _map_error(e2, SERVICE_LXNS) from e2  # 续期阶梯只服务落雪
     logger.warning(f"落雪续期后阶梯重试（0/5/10s）仍 401：{last!r}")
     raise UserScoreError("落雪查分器暂时无法访问，请一分钟后再试") from last
 
@@ -312,7 +369,8 @@ async def _run_full(binding: UserBinding, make, notify_slow=None):
         raise UserScoreError(_DF_OAUTH_HINT) from e
     except InvalidPlayerIdentifierError as e:
         if binding.service != SERVICE_DIVINGFISH:
-            raise _map_error(e) from e  # 落雪：维持「没有找到」既有语义
+            # 落雪：维持「没有找到」既有语义
+            raise _map_error(e, binding.service) from e
         # 路由到 token 的绑定 401 合流＝token 已在水鱼侧重置（授权缺失走
         # PlayerNotAuthorizedError 分支，两类失败凭路由天然可分）
         raise UserScoreError(_DF_TOKEN_HINT) from e
@@ -583,18 +641,18 @@ class DivingFishSource(ProberSource):
             else None
         )
         if subject is None:
-            raise _map_error(original) from original
+            raise _map_error(original, SERVICE_DIVINGFISH) from original
         try:
             token = await df_ext.exchange_subject_token(subject)
             profile = await df_ext.fetch_oauth_profile(token)
         except df_ext.DivingFishAgreementRequired as e:
-            raise UserScoreError(DF_AGREEMENT_HINT) from e
+            raise _map_error(e, SERVICE_DIVINGFISH) from e  # 协议类专项文案
         except ExtError as e:
             logger.info(f"水鱼 OAuth 资料兜底失败，按原错误收口：{e}")
-            raise _map_error(original) from original
+            raise _map_error(original, SERVICE_DIVINGFISH) from original
         username = profile.get("username")
         if not username:
-            raise _map_error(original) from original
+            raise _map_error(original, SERVICE_DIVINGFISH) from original
         await binding_service.learn_divingfish_username(binding, str(username))
         return DivingFishPlayer(
             name=str(username),

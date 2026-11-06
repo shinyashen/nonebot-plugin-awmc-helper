@@ -23,15 +23,23 @@ from .calc import build_bests
 from .plates import PlatesView
 from .songdb import Scope
 from .binding import SERVICE_DIVINGFISH, UserBinding
-from .sources import Capability, UserScoreError, DivingFishSource, source_of
+from .sources import (
+    Capability,
+    UserScoreError,
+    DivingFishSource,
+    source_of,
+    access_denied_hint,
+)
 
 if TYPE_CHECKING:
     from maimai_py import DivingFishPlayer
 
     from .ext.divingfish import RankUser
 
-__all__ = ["UserScoreError", "build_bests", "score_service"]
-"""模块公开面：第三方 b50 变体（pc50 等）从 core.score 一站式导入。"""
+__all__ = ["UserScoreError", "access_denied_hint", "build_bests", "score_service"]
+"""模块公开面：第三方 b50 变体（pc50 等）从 core.score 一站式导入；自行捕获
+maimai-py 异常的第三方（如传分插件）用 :func:`access_denied_hint` 取「未同意用户
+协议 / 隐私限制」文案，勿复刻。"""
 
 
 class ScoreService:

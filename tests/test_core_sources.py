@@ -312,14 +312,65 @@ async def test_get_player_oauth_fallback(db, songs, monkeypatch):
     assert not exchange.called
 
 
-def test_map_error_agreement_hint():
-    """maimai-py 把 Bearer 端点 403 一律归为隐私限制：「未同意用户协议」须映射
-    为专项处置文案，真正的隐私限制维持原文案（b50/minfo/全量路径共用）。"""
-    from maimai_py import PrivacyLimitationError
+def test_access_denied_hint():
+    """数据站拒绝访问文案（主插件与第三方子插件共用的单一事实源）：
 
+    maimai-py 把「未同意用户协议」与「隐私限制」一律抛 PrivacyLimitationError，
+    按原话含「协议」分类、按数据源给站点专属文案——两类处置不同（前者本人去
+    网页同意协议，后者改隐私开关），不得混用；非此类异常返回 None 供调用方
+    继续自己的映射。
+    """
+    from maimai_py import RateLimitError, PrivacyLimitationError
+
+    from nonebot_plugin_awmc_helper.core.score import access_denied_hint
+    from nonebot_plugin_awmc_helper.core.binding import SERVICE_LXNS, SERVICE_DIVINGFISH
     from nonebot_plugin_awmc_helper.core.sources import DF_AGREEMENT_HINT, _map_error
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import (
+        DivingFishAgreementRequired,
+    )
 
-    assert str(_map_error(PrivacyLimitationError("该用户未同意用户协议"))) == (
+    agreement = PrivacyLimitationError("该用户未同意用户协议")  # 水鱼实测原话
+    privacy = PrivacyLimitationError("该玩家已设置隐私")
+
+    # 水鱼：协议 / 隐私分开，各指水鱼自己的处置入口
+    assert access_denied_hint(agreement, SERVICE_DIVINGFISH) == DF_AGREEMENT_HINT
+    df_privacy = access_denied_hint(privacy, SERVICE_DIVINGFISH)
+    assert df_privacy is not None
+    assert "禁止第三方查询" in df_privacy
+    assert "用户协议" not in df_privacy
+    assert "落雪" not in df_privacy
+
+    # 落雪：同样分开，文案指向落雪
+    lx_agreement = access_denied_hint(agreement, SERVICE_LXNS)
+    lx_privacy = access_denied_hint(privacy, SERVICE_LXNS)
+    assert lx_agreement is not None
+    assert lx_privacy is not None
+    assert "落雪" in lx_agreement
+    assert "协议" in lx_agreement
+    assert "好友码" in lx_privacy
+    assert "水鱼" not in lx_privacy
+
+    # 数据源不明：协议类按水鱼（唯一实测来源），隐私类给两站合并指引
+    assert access_denied_hint(agreement) == DF_AGREEMENT_HINT
+    any_privacy = access_denied_hint(privacy)
+    assert any_privacy is not None
+    assert "水鱼" in any_privacy
+    assert "落雪" in any_privacy
+
+    # ext 资料兜底的协议异常同归水鱼协议类
+    assert (
+        access_denied_hint(DivingFishAgreementRequired("该用户未同意用户协议"))
+        == DF_AGREEMENT_HINT
+    )
+
+    # 非拒绝访问类：返回 None，交调用方自己的映射
+    assert access_denied_hint(RateLimitError("quota")) is None
+    assert access_denied_hint(ValueError("x"), SERVICE_DIVINGFISH) is None
+
+    # _map_error 经同一函数、带数据源键；协议判断先于 ExtError 分支（ext 协议
+    # 异常也是 ExtError，后判会把水鱼原话直接甩给用户）
+    assert str(_map_error(agreement, SERVICE_DIVINGFISH)) == DF_AGREEMENT_HINT
+    assert str(_map_error(privacy, SERVICE_LXNS)) == lx_privacy
+    assert str(_map_error(DivingFishAgreementRequired("该用户未同意用户协议"))) == (
         DF_AGREEMENT_HINT
     )
-    assert "隐私设置" in str(_map_error(PrivacyLimitationError("禁止第三方查询")))
