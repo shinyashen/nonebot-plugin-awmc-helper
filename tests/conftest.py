@@ -44,3 +44,29 @@ def plate_source_offline(monkeypatch):
     monkeypatch.setattr(plate_source, "_fetch", _no_fetch)
     yield
     plate_source._cache_clear()
+
+
+def _clear_songdb_derived_caches() -> None:
+    from nonebot_plugin_awmc_helper.core import songdb
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+    from nonebot_plugin_awmc_helper.core.net_score import net_score_service
+
+    songdb.CURRENT_FINGERPRINT = None
+    song_service._jp_cache_clear()
+    net_score_service._title_index_clear()
+
+
+@pytest.fixture(autouse=True)
+def songdb_derived_caches_isolated():
+    """规范表派生的进程级缓存按用例隔离（前后各清一次）。
+
+    日服视图、日服标题索引等按 ``songdb.CURRENT_FINGERPRINT`` 失效，指纹只在
+    规范表重建时刷新；各用例换库（``store.set_db_file``）不动指纹，前一个
+    用例的库建出的视图会被指纹相同的下一个用例原样复用——xdist 打散顺序
+    后偶发（2026-11-06：songdb_views 的 8 个用例留下含「物語はここから」的
+    日服视图，test_alias_song_pending_fallback_card 因此出日服限定卡而非
+    pending 兜底卡）。
+    """
+    _clear_songdb_derived_caches()
+    yield
+    _clear_songdb_derived_caches()

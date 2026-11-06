@@ -251,6 +251,11 @@ class NetScoreService:
         self._title_index = (fp, index)
         return index
 
+    def _title_index_clear(self) -> None:
+        """清空日服标题索引（测试用）：索引派生自日服视图、同按规范表指纹
+        失效，测试换库后须与 ``song_service._jp_cache_clear`` 一并清。"""
+        self._title_index = (None, {})
+
     def _resolve_chart(
         self, index: dict[str, list[Song]], record: NetRecord
     ) -> _Chart | None:

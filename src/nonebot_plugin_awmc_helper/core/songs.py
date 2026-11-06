@@ -544,6 +544,21 @@ class SongService:
         self._jp_fingerprint = fp
         return self._jp_view
 
+    def _jp_cache_clear(self) -> None:
+        """清空日服视图及其派生缓存（测试用，恢复到初始空态）。
+
+        这些缓存按规范表指纹 ``songdb.CURRENT_FINGERPRINT`` 失效，而指纹只在
+        规范表重建时刷新；测试换库（``store.set_db_file``）不动指纹，上一个库
+        建出的视图会被指纹相同的下一个用例原样复用（2026-11-06 偶发失败根因）。
+        生产进程内库只经重建变化，无此问题。
+        """
+        self._jp_view = {}
+        self._jp_fingerprint = None
+        self._jp_alias_cache = None
+        self._jp_kanji = set()
+        self._jp_kanji_cache_fp = None
+        self._jp_utage_index = {}
+
     async def jp_all(self) -> list[Song]:
         """日服视图全量曲目（日服数据源 NET 记录映射用，随指纹缓存）。"""
         return list((await self._jp_songs_map()).values())
