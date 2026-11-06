@@ -26,11 +26,12 @@ from ...core.binding import (
     LXNS_PENDING_TTL,
     SERVICE_DIVINGFISH,
     BindingError,
+    DivingFishProfileSync,
     session_keys,
     binding_service,
     pending_bindings,
 )
-from ...core.sources import command_hints
+from ...core.sources import DF_AGREEMENT_HINT, command_hints
 
 # 落雪好友码位数区间（纯数字直绑判定，实测口径）
 _FRIEND_CODE_MIN_DIGITS = 9
@@ -278,12 +279,12 @@ async def _(session: Session = UniSession(), message: Message = CommandArg()):
 
 async def _complete_df(platform: str, user_id: str, code: str) -> None:
     """确认码回填收尾：兑换令牌（水鱼侧校验回填人 = 发起人）→ 落 OAuth 标志
-    （内部冻结 subject）→ 绑定用户名确认查无此人时按 QQ 自愈。
+    （内部冻结 subject）→ 用本次令牌同步本人水鱼资料。
 
-    自愈先于成功提示完成：授权确立本人身份后，此前误绑的无效用户名按 QQ
-    公开键探测替换（best-effort，探测失败不影响授权完成），让「先绑错用户
-    名、后 OAuth 授权」的绑定一步收敛到可用状态，无需再手动换绑；有效用户
-    名不动（自愈内部先验证，见 heal_divingfish_username）。
+    资料同步（core ``sync_divingfish_profile``）把公开查询用户名对齐到授权
+    账号：水鱼账号未绑本 QQ 的用户不再因 b50 卡头公开查询查无此人而失败；
+    账号未同意水鱼用户协议时当场给出处置指引，而不是报「可以直接查询」。
+    同步失败不影响授权完成（查询路径另有同源兜底）。
     """
     binding = await binding_service.get(platform, user_id)
     if binding is None:
@@ -299,19 +300,28 @@ async def _complete_df(platform: str, user_id: str, code: str) -> None:
         await UniMessage.text(" " + DIVINGFISH_MISMATCH_MSG).finish(at_sender=True)
     except df_ext.ExtError as e:
         await UniMessage.text(f" {e}").finish(at_sender=True)
-    sub = df_ext.token_subject(result.get("access_token", "")) or result.get("sub")
+    access_token = result.get("access_token") or ""
+    sub = df_ext.token_subject(access_token) or result.get("sub")
     await binding_service.bind_divingfish_oauth(binding, sub=sub)
-    old_username = binding.divingfish_username
-    healed = ""
-    if await binding_service.heal_divingfish_username(binding):
-        healed = (
-            f"\n原绑定的水鱼用户名「{old_username}」查无此人，"
-            f"已按本 QQ 绑定的水鱼账号修正为「{binding.divingfish_username}」"
-        )
     pending_bindings.discard(platform, user_id)
-    await UniMessage.text(" " + DIVINGFISH_BIND_SUCCESS_MSG + healed).finish(
-        at_sender=True
-    )
+    if not access_token:  # 防御：兑换响应缺令牌，资料留待查询路径兜底
+        await UniMessage.text(" " + DIVINGFISH_BIND_SUCCESS_MSG).finish(at_sender=True)
+    sync = await binding_service.sync_divingfish_profile(binding, access_token)
+    await UniMessage.text(" " + _df_bind_success_text(sync)).finish(at_sender=True)
+
+
+def _df_bind_success_text(sync: DivingFishProfileSync) -> str:
+    """水鱼授权完成提示：按本人资料同步结果附说明。"""
+    if sync.status == "agreement_required":
+        return "水鱼查分器授权完成。\n" + DF_AGREEMENT_HINT
+    if sync.status == "learned":
+        return DIVINGFISH_BIND_SUCCESS_MSG + f"\n已同步水鱼用户名「{sync.new}」"
+    if sync.status == "updated":
+        return (
+            DIVINGFISH_BIND_SUCCESS_MSG
+            + f"\n公开查询用户名已由「{sync.old}」更新为授权账号的「{sync.new}」"
+        )
+    return DIVINGFISH_BIND_SUCCESS_MSG
 
 
 @df_token.handle()

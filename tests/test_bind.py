@@ -415,7 +415,7 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
         assert form["subject_ref"] == [expect_ref]
         assert form["binding_label"] == ["QQ 12****78"]
 
-        # 回填确认码 → 兑换 → 落标志
+        # 回填确认码 → 兑换 → 落标志 → 用本次令牌同步本人资料（记下用户名）
         m.post(url__regex=r".*/oauth/token").respond(
             200,
             json={
@@ -426,18 +426,35 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
                 "sub": "987654321",
             },
         )
+        records = m.get(url__regex=r".*/player/records").respond(
+            200,
+            json={
+                "username": "tester",
+                "nickname": "tester",
+                "rating": 3000,
+                "additional_rating": 0,
+                "plate": None,
+                "records": [],
+            },
+        )
         await _assert_reply(
             app,
             bind.df_code,
             "水鱼授权码 BCDF-GHJK-LMNP",
-            "水鱼查分器授权完成，现在可以直接使用查询指令了。",
+            "水鱼查分器授权完成，现在可以直接使用查询指令了。\n"
+            "已同步水鱼用户名「tester」",
+        )
+        # 资料读取用的就是本次兑换令牌（不另换票）
+        assert records.calls[0].request.headers["Authorization"] == (
+            f"Bearer {fake_jwt('987654321')}"
         )
         row = await store.get_binding("OneBot V11", "12345678")
         assert row is not None
         assert row.divingfish_oauth is True
         assert row.divingfish_sub == "987654321"
+        assert row.divingfish_username == "tester"
         assert not pending_bindings.is_active("OneBot V11", "12345678", "divingfish")
-        # subject 与水鱼侧公式一致
+        # subject 与水鱼侧公式一致（冻结在 consent 时点的 QQ 摘要，记下用户名不牵动）
         from nonebot_plugin_awmc_helper.config import plugin_config as cfg
 
         expect = (
@@ -454,127 +471,102 @@ async def test_df_oauth_device_flow(app: App, db, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("bound", "bound_valid"), [("bogus_name", False), ("main_account", True)]
+    ("bound", "records_status", "expect_username", "expect_note"),
+    [
+        # 水鱼账号未绑本 QQ、也没绑用户名（2026-11-06 生产实况）：记下用户名
+        (None, 200, "real_name", "\n已同步水鱼用户名「real_name」"),
+        # 误绑/他人用户名：以授权账号为准
+        (
+            "bogus_name",
+            200,
+            "real_name",
+            "\n公开查询用户名已由「bogus_name」更新为授权账号的「real_name」",
+        ),
+        # 账号未同意水鱼用户协议：授权照常完成，当场给处置指引
+        (None, 403, None, None),
+    ],
 )
-async def test_df_oauth_completes_with_username_heal(
-    app: App, db, monkeypatch, bound: str, bound_valid: bool
+async def test_df_oauth_completion_profile_sync(
+    app: App,
+    db,
+    monkeypatch,
+    bound: str | None,
+    records_status: int,
+    expect_username: str | None,
+    expect_note: str | None,
 ):
-    """OAuth 完成时按 QQ 自愈误绑用户名（2026-11-06 修复场景）：
+    """OAuth 完成时用本次兑换令牌同步本人资料（2026-11-06 修复）：
 
-    先绑用户名（存量行，经服务层直造绕过入口验证）→ OAuth 授权完成 →
-    subject 冻结为 consent 时点摘要（所绑用户名摘要）；绑定用户名**确认查无
-    此人**才按 QQ 公开键探测替换并在成功提示中说明——有效用户名（用户特意
-    绑的主账号）原样保留、不发 QQ 探测；此后改用户名不再牵动 subject。
+    公开 /query/player 只认 QQ/用户名，水鱼账号未绑本 QQ 的授权用户 b50 卡头
+    必「没有找到这个玩家」——授权完成即读 Bearer 记录端点把公开查询用户名对齐
+    到授权账号；subject 冻结在 consent 时点摘要，改名不牵动。账号未同意
+    水鱼用户协议时不报「可以直接查询」，改给处置指引。
     """
     import hashlib
-    import urllib.parse
 
     import respx
 
     from nonebot_plugin_awmc_helper.core import store
     from nonebot_plugin_awmc_helper.config import plugin_config
     from nonebot_plugin_awmc_helper.plugins import bind
-    from nonebot_plugin_awmc_helper.core.binding import binding_service
-    from nonebot_plugin_awmc_helper.core.ext.divingfish import QUERY_PLAYER_URL
+    from nonebot_plugin_awmc_helper.core.binding import (
+        binding_service,
+        pending_bindings,
+    )
+    from nonebot_plugin_awmc_helper.core.sources import DF_AGREEMENT_HINT
 
     monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
     monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
 
-    def fake_jwt(sub: str) -> str:
-        payload = (
-            base64.urlsafe_b64encode(b'{"sub":"' + sub.encode() + b'"}')
-            .decode()
-            .rstrip("=")
-        )
-        return f"eyJhbGciOiJQUzI1NiJ9.{payload}.sig"
-
-    def player_payload(username: str) -> dict:
-        return {
-            "username": username,
-            "rating": 3000,
-            "nickname": username,
-            "plate": "初将",
-            "additional_rating": [],
-        }
-
-    # 存量行：service 层直绑（入口验证上线前的历史状态）
     binding = await binding_service.ensure("OneBot V11", "12345678")
-    await binding_service.bind_divingfish_username(binding, bound)
-
-    expect_ref = "ref:" + hashlib.sha256(f"cid:{bound}".encode()).hexdigest()
+    if bound is not None:  # 存量误绑行：服务层直造，绕过入口验证
+        await binding_service.bind_divingfish_username(binding, bound)
+    external_id = bound or "12345678"
+    expect_ref = "ref:" + hashlib.sha256(f"cid:{external_id}".encode()).hexdigest()
+    pending_bindings.start("OneBot V11", "12345678", "divingfish", ttl=600)
 
     with respx.mock(assert_all_called=False) as m:
-        m.post(url__regex=r".*/oauth/device_authorization").respond(
+        redeem = m.post(url__regex=r".*/oauth/token").respond(
             200,
             json={
-                "device_code": "dev",
-                "user_code": "BCDF-GHJK-LMNP",
-                "verification_uri": "https://auth.diving-fish.com/device",
-                "verification_uri_complete": "https://auth.diving-fish.com/device",
-                "expires_in": 1200,
-                "interval": 5,
-            },
-        )
-        m.post(url__regex=r".*/oauth/token").respond(
-            200,
-            json={
-                "access_token": fake_jwt("987654321"),
+                "access_token": "redeem-token",
                 "token_type": "Bearer",
                 "expires_in": 900,
                 "sub": "987654321",
             },
         )
-        # 先验证所绑用户名：无效 → 400 查无此人；有效 → 200
-        username_probe = m.post(QUERY_PLAYER_URL, json={"username": bound})
-        if bound_valid:
-            username_probe.respond(200, json=player_payload(bound))
-        else:
-            username_probe.respond(400, json={"message": "user not exists"})
-        # 确认查无此人后才按 QQ 探测本 QQ 绑定的水鱼账号
-        qq_probe = m.post(QUERY_PLAYER_URL, json={"qq": "12345678"}).respond(
-            200, json=player_payload("real_name")
-        )
-        await _assert_reply(
-            app,
-            bind.df_bind,
-            "绑定水鱼",
-            (
-                "水鱼已要求所有成绩写入走 OAuth 授权，请完成一次绑定：\n\n"
-                "1. 打开以下链接并登录水鱼账号，授权本 BOT 访问您的水鱼查分器数据\n"
-                "=======================\n"
-                "https://auth.diving-fish.com/device\n"
-                "=======================\n"
-                "2. 确认页面显示的绑定身份为「QQ 12****78」后点击「同意授权」\n"
-                "3. 复制页面给出的确认码，直接发送给我（无需任何前缀）\n\n"
-                "本次绑定 20 分钟内有效，确认码只能使用一次；"
-                "超时或失效后请重新发送「绑定水鱼」。\n"
-                "=======================\n"
-                "请注意！！链接与确认码都仅供您本人使用，请勿转发他人。\n"
-                "确认码建议在与 BOT 的私聊中发送，避免被他人看到。\n"
-                "如需取消授权，请前往 https://auth.diving-fish.com/apps"
-            ),
-        )
-        # 发起绑定的 subject_ref 用的是当时派生值（所绑用户名摘要）
-        device_calls = [c for c in m.routes[0].calls if c.request.content]
-        form = urllib.parse.parse_qs(device_calls[0].request.content.decode())
-        assert form["subject_ref"] == [expect_ref[4:]]
-
-        success = "水鱼查分器授权完成，现在可以直接使用查询指令了。"
-        if not bound_valid:
-            success += (
-                f"\n原绑定的水鱼用户名「{bound}」查无此人，"
-                "已按本 QQ 绑定的水鱼账号修正为「real_name」"
+        if records_status == 200:
+            m.get(url__regex=r".*/player/records").respond(
+                200,
+                json={
+                    "username": "real_name",
+                    "nickname": "Real",
+                    "rating": 3000,
+                    "additional_rating": 0,
+                    "plate": None,
+                    "records": [],
+                },
             )
-        await _assert_reply(app, bind.df_code, "水鱼授权码 BCDF-GHJK-LMNP", success)
-        assert username_probe.called
-        # 有效用户名不发 QQ 探测（不会被 QQ 绑定的另一个账号顶掉）
-        assert qq_probe.called is not bound_valid
+        else:
+            m.get(url__regex=r".*/player/records").respond(
+                403, json={"message": "该用户未同意用户协议", "status": "error"}
+            )
+        expected = (
+            "水鱼查分器授权完成，现在可以直接使用查询指令了。" + expect_note
+            if expect_note is not None
+            else "水鱼查分器授权完成。\n" + DF_AGREEMENT_HINT
+        )
+        await _assert_reply(app, bind.df_code, "水鱼授权码 BCDF-GHJK-LMNP", expected)
+        # 兑换用的是 consent 时点派生摘要（所绑用户名或 QQ）
+        redeem_form = redeem.calls[0].request.content.decode()
+        assert f"subject_ref={expect_ref[4:]}" in redeem_form
 
     row = await store.get_binding("OneBot V11", "12345678")
     assert row is not None
     assert row.divingfish_oauth is True
-    assert row.divingfish_username == (bound if bound_valid else "real_name")
-    # subject 冻结为 consent 时点摘要，换绑用户名不再牵动
+    assert row.divingfish_username == (expect_username or bound)
+    assert not pending_bindings.is_active("OneBot V11", "12345678", "divingfish")
+    # subject 冻结为 consent 时点摘要，同步/换绑用户名不再牵动
     assert row.divingfish_ref == expect_ref
     row.divingfish_username = "another_name"
     assert binding_service.divingfish_subject(row) == expect_ref

@@ -393,10 +393,48 @@ async def test_divingfish_subject_frozen_ref(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_divingfish_username_heal(db, monkeypatch):
-    """heal_divingfish_username（2026-11-06）：OAuth 行用户名**确认**查无此人 →
-    按 QQ 公开键探测覆写并**先冻结 subject**；有效用户名、无法确认存在性
-    （403/网络）、条件不符一律不动绑定。"""
+async def test_bind_username_freezes_legacy_oauth_row(db, monkeypatch):
+    """冻结上线前完成授权的存量行（divingfish_ref 为空）：「绑定水鱼用户名」
+    必须先冻结当前派生（QQ 摘要 = consent 当时所用）再改名，否则 subject
+    随用户名漂移、换票 consent_required（2026-11-06 补缺口）。"""
+    import hashlib
+
+    from nonebot_plugin_awmc_helper.core import store
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.binding import binding_service
+
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
+
+    qq_ref = "ref:" + hashlib.sha256(b"cid:30001").hexdigest()
+    legacy = await binding_service.ensure("OneBot V11", "30001")
+    legacy.divingfish_oauth = True  # 存量行：已授权、无冻结值
+    await store.save_binding(legacy)
+    assert legacy.divingfish_ref is None
+    assert binding_service.divingfish_subject(legacy) == qq_ref
+
+    await binding_service.bind_divingfish_username(legacy, "fishuser")
+    got = await store.get_binding("OneBot V11", "30001")
+    assert got is not None
+    assert got.divingfish_username == "fishuser"
+    assert got.divingfish_ref == qq_ref
+    assert binding_service.divingfish_subject(got) == qq_ref
+
+    # 未授权行改名不冻结（无 consent 可保，派生如旧随用户名走）
+    plain = await binding_service.ensure("OneBot V11", "30002")
+    await binding_service.bind_divingfish_username(plain, "other")
+    assert plain.divingfish_ref is None
+    assert binding_service.divingfish_subject(plain) == (
+        "ref:" + hashlib.sha256(b"cid:other").hexdigest()
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_divingfish_profile(db, monkeypatch):
+    """授权完成后的本人资料同步（2026-11-06）：用户名以授权账号为准——
+    缺失记下（learned）、不一致改为授权账号的（updated，含误绑查无此人）、
+    一致不动（unchanged）；未同意水鱼用户协议单列（agreement_required），
+    其余读取失败静默（unavailable）；改名前先冻结 subject。"""
     import hashlib
 
     from nonebot_plugin_awmc_helper.core import store
@@ -404,88 +442,62 @@ async def test_divingfish_username_heal(db, monkeypatch):
     from nonebot_plugin_awmc_helper.core.binding import binding_service
     from nonebot_plugin_awmc_helper.core.ext.divingfish import (
         ExtError,
-        DivingFishUserNotFoundError,
+        DivingFishAgreementRequired,
     )
 
     monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
     monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
 
-    valid_usernames = {"real_name", "main_account"}
-    calls: list[dict] = []
+    outcome: dict = {"profile": {"username": "real_name"}}
+    tokens: list[str] = []
 
-    async def fake_probe(**kw):
-        calls.append(kw)
-        if "username" in kw and kw["username"] not in valid_usernames:
-            raise DivingFishUserNotFoundError("水鱼查分器查无此人")
-        return {"username": "real_name"}  # 按 QQ：本 QQ 绑定的水鱼账号
-
-    async def failing_probe(**kw):
-        raise ExtError("水鱼公开查询失败（HTTP 403）")
+    async def fake_fetch(access_token: str) -> dict:
+        tokens.append(access_token)
+        if isinstance(outcome.get("raise"), Exception):
+            raise outcome["raise"]
+        return outcome["profile"]
 
     monkeypatch.setattr(
-        "nonebot_plugin_awmc_helper.core.ext.divingfish.query_player_public",
-        fake_probe,
+        "nonebot_plugin_awmc_helper.core.ext.divingfish.fetch_oauth_profile",
+        fake_fetch,
     )
+    qq_ref = "ref:" + hashlib.sha256(b"cid:40001").hexdigest()
 
-    # 条件不符：未 OAuth / 无用户名 → 不探测、不落库
-    b = await binding_service.ensure("OneBot V11", "20001")
-    assert await binding_service.heal_divingfish_username(b) is False
-    await binding_service.bind_divingfish_username(b, "bogus")
-    assert await binding_service.heal_divingfish_username(b) is False
-    assert calls == []
-
-    # OAuth 行 + 无效用户名：先验证（查无此人）→ 按 QQ 覆写 + 冻结
-    # （冻结值 = 覆写前派生，即 bogus 摘要）
-    await binding_service.bind_divingfish_oauth(b, sub="7")
-    assert await binding_service.heal_divingfish_username(b) is True
-    assert calls == [{"username": "bogus"}, {"qq": 20001}]
-    got = await store.get_binding("OneBot V11", "20001")
+    # 无用户名：记下授权账号用户名，subject 冻结在 QQ 摘要
+    b = await binding_service.ensure("OneBot V11", "40001")
+    await binding_service.bind_divingfish_oauth(b, sub="1")
+    sync = await binding_service.sync_divingfish_profile(b, "tok-1")
+    assert (sync.status, sync.old, sync.new) == ("learned", None, "real_name")
+    assert tokens == ["tok-1"]  # 用的是本次兑换令牌，不另换票
+    got = await store.get_binding("OneBot V11", "40001")
     assert got is not None
     assert got.divingfish_username == "real_name"
-    frozen = "ref:" + hashlib.sha256(b"cid:bogus").hexdigest()
-    assert got.divingfish_ref == frozen
+    assert binding_service.divingfish_subject(got) == qq_ref
 
-    # 有效用户名（用户特意绑的主账号）：验证通过即止，不按 QQ 覆写
-    calls.clear()
-    await binding_service.bind_divingfish_username(got, "main_account")
-    assert await binding_service.heal_divingfish_username(got) is False
-    assert calls == [{"username": "main_account"}]
-    assert got.divingfish_username == "main_account"
+    # 一致：不落库
+    sync = await binding_service.sync_divingfish_profile(got, "tok-2")
+    assert sync.status == "unchanged"
 
-    # username_missing=True（查询路径已收到 400）：跳过验证直接按 QQ 探测；
-    # 冻结后换绑/自愈都不再牵动 ref
-    calls.clear()
-    await binding_service.bind_divingfish_username(got, "bogus2")
-    assert (
-        await binding_service.heal_divingfish_username(got, username_missing=True)
-        is True
-    )
-    assert calls == [{"qq": 20001}]
-    got2 = await store.get_binding("OneBot V11", "20001")
-    assert got2 is not None
-    assert got2.divingfish_username == "real_name"
-    assert got2.divingfish_ref == frozen
-    assert binding_service.divingfish_subject(got2) == frozen
-    # 按 QQ 探到的就是现绑用户名：无可修正，返回 False（调用方不白重试）
-    assert (
-        await binding_service.heal_divingfish_username(got2, username_missing=True)
-        is False
-    )
+    # 不一致（误绑/他人用户名）：以授权账号为准，subject 仍冻结
+    await binding_service.bind_divingfish_username(got, "bogus")
+    sync = await binding_service.sync_divingfish_profile(got, "tok-3")
+    assert (sync.status, sync.old, sync.new) == ("updated", "bogus", "real_name")
+    assert got.divingfish_username == "real_name"
+    assert binding_service.divingfish_subject(got) == qq_ref
 
-    # 存在性无法确认（403 隐私/网络）：返回 False、绑定不动
-    monkeypatch.setattr(
-        "nonebot_plugin_awmc_helper.core.ext.divingfish.query_player_public",
-        failing_probe,
-    )
-    await binding_service.bind_divingfish_username(got2, "bogus3")
-    assert await binding_service.heal_divingfish_username(got2) is False
-    got3 = await store.get_binding("OneBot V11", "20001")
-    assert got3 is not None
-    assert got3.divingfish_username == "bogus3"
-    assert got3.divingfish_ref == frozen
+    # 未同意水鱼用户协议：单列状态，绑定不动
+    outcome["raise"] = DivingFishAgreementRequired("该用户未同意用户协议")
+    sync = await binding_service.sync_divingfish_profile(got, "tok-4")
+    assert sync.status == "agreement_required"
+    assert got.divingfish_username == "real_name"
 
-    # 非 QQ 平台（无 qq 可探）→ False
-    b4 = await binding_service.ensure("telegram", "u1")
-    await binding_service.bind_divingfish_username(b4, "bogus")
-    await binding_service.bind_divingfish_oauth(b4, sub="8")
-    assert await binding_service.heal_divingfish_username(b4) is False
+    # 其余读取失败：静默 unavailable
+    outcome["raise"] = ExtError("水鱼查分器网络异常，请稍后再试")
+    sync = await binding_service.sync_divingfish_profile(got, "tok-5")
+    assert sync.status == "unavailable"
+
+    # 资料缺用户名：同按 unavailable
+    outcome.pop("raise")
+    outcome["profile"] = {"username": None}
+    sync = await binding_service.sync_divingfish_profile(got, "tok-6")
+    assert sync.status == "unavailable"

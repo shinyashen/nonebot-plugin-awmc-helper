@@ -72,6 +72,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "DF_AGREEMENT_HINT",
     "SOURCES",
     "Capability",
     "SourceBase",
@@ -104,6 +105,14 @@ _DF_TOKEN_HINT = (
 )
 """全量路径 **token 失效**（400「导入token有误」）收口文案：路由到 token 的
 绑定专属——两类失败凭路由天然可分，各自给最直接的行动指引。"""
+
+DF_AGREEMENT_HINT = (
+    "该水鱼账号尚未同意水鱼查分器的用户协议，水鱼暂不开放其数据：\n"
+    "请登录水鱼查分器网页（https://www.diving-fish.com/maimaidx/prober/）"
+    "同意用户协议后再查询"
+)
+"""水鱼账号未同意用户协议的处置文案（Bearer 端点 403「该用户未同意用户协议」，
+公开查询同时报查无此人；2026-11-06 生产实况）。bind 插件授权完成时同源引用。"""
 
 
 class Capability(str, Enum):
@@ -178,6 +187,10 @@ def _map_error(e: Exception) -> UserScoreError:
             "没有找到这个玩家，请确认绑定信息（水鱼用户名/QQ、落雪好友码或个人 Token）"
         )
     if isinstance(e, PrivacyLimitationError):
+        if "用户协议" in str(e):
+            # maimai-py 把 Bearer 端点的 403 一律归为隐私限制；「未同意用户协议」
+            # 与隐私开关无关，套隐私文案会把人指错地方
+            return UserScoreError(DF_AGREEMENT_HINT)
         return UserScoreError(
             "该玩家未授权第三方查询数据：\n"
             "水鱼请到 个人页 → 隐私设置 关闭「禁止第三方查询」；\n"
@@ -521,7 +534,7 @@ class ProberSource(SourceBase):
 
 
 class DivingFishSource(ProberSource):
-    """水鱼适配器：全能力 + RA 榜定位 + 公开代查 + 用户名档自愈。"""
+    """水鱼适配器：全能力 + RA 榜定位 + 公开代查 + OAuth 资料兜底。"""
 
     key = SERVICE_DIVINGFISH
     zh_name = "水鱼数据源"
@@ -529,38 +542,67 @@ class DivingFishSource(ProberSource):
     capabilities = frozenset(Capability)
 
     async def get_player(self, binding: UserBinding, notify_slow=None):
-        """玩家资料：绑定用户名查无此人且 OAuth 已授权时先自愈再重试一次。
+        """玩家资料：公开键查无此人且已 OAuth 授权时，改经 OAuth 记录端点取。
 
-        「绑定水鱼用户名」误绑无效用户名后（存量行/验证上线前的历史行），
-        公开键查询必败（水鱼 400 user not exists）；OAuth 已确立本人身份，
-        此时按 QQ 公开键探测真实用户名落库（:meth:`binding.BindingService.
-        heal_divingfish_username`，内部自行冻结 subject），以修正后的绑定
-        重试一跳。自愈不触发（条件不符/探测未命中）按原错误映射收口。
-        ``propagate_identifier_error`` 让查无此人裸穿上抛（水鱼绑定不走
-        落雪续期阶梯），供此处区分确定性失败与其他错误。
+        公开 ``/query/player`` 只认 QQ/用户名（maimai-py 资料无 OAuth 形态）：
+        水鱼账号未绑本 QQ 又没绑用户名、或绑定用户名有误的授权用户，公开键
+        必 400——b50 卡头先取资料，整条指令即败（2026-11-06 生产实况：OAuth
+        换票与成绩读写均正常，只有这一步失败）。此时走
+        :meth:`_player_via_oauth`。``propagate_identifier_error`` 让查无此人
+        裸穿上抛（水鱼绑定不走落雪续期阶梯），供此处区分确定性失败。
         """
         await song_service.ensure_loaded()
-
-        def make():
-            return lambda: client.players(
-                binding_service.identifier(binding),
-                provider=binding_service.provider(binding),
-            )
-
         try:
             return await _run(
                 binding,
-                make(),
+                lambda: client.players(
+                    binding_service.identifier(binding),
+                    provider=binding_service.provider(binding),
+                ),
                 notify_slow,
                 propagate_identifier_error=True,
             )
         except InvalidPlayerIdentifierError as e:
-            # 公开 query/player 的 400 即查无此人：已确认，自愈免重复探测
-            if not await binding_service.heal_divingfish_username(
-                binding, username_missing=True
-            ):
-                raise _map_error(e) from e
-            return await _run(binding, make(), notify_slow)
+            return await self._player_via_oauth(binding, e)
+
+    async def _player_via_oauth(
+        self, binding: UserBinding, original: InvalidPlayerIdentifierError
+    ) -> DivingFishPlayer:
+        """OAuth 资料兜底：换票读 Bearer 记录端点顶层资料，并把授权账号用户名
+        记为公开查询键（:meth:`binding.BindingService.learn_divingfish_username`，
+        内部先冻结 subject），此后走回廉价的公开键查询——兜底每人至多一次。
+
+        未授权/无 subject、换票或读取失败均按原「查无此人」收口；账号未同意
+        水鱼用户协议给专项处置文案（公开查询的 400 其实也是它，原文案会把人
+        指错方向）。@代查同样适用：改的是目标本人已授权行的公开键、不新建行，
+        不违背代查「不给对方建行」的口径。
+        """
+        subject = (
+            binding_service.divingfish_subject(binding)
+            if binding.divingfish_oauth
+            else None
+        )
+        if subject is None:
+            raise _map_error(original) from original
+        try:
+            token = await df_ext.exchange_subject_token(subject)
+            profile = await df_ext.fetch_oauth_profile(token)
+        except df_ext.DivingFishAgreementRequired as e:
+            raise UserScoreError(DF_AGREEMENT_HINT) from e
+        except ExtError as e:
+            logger.info(f"水鱼 OAuth 资料兜底失败，按原错误收口：{e}")
+            raise _map_error(original) from original
+        username = profile.get("username")
+        if not username:
+            raise _map_error(original) from original
+        await binding_service.learn_divingfish_username(binding, str(username))
+        return DivingFishPlayer(
+            name=str(username),
+            rating=int(profile.get("rating") or 0),
+            nickname=profile.get("nickname") or "",
+            plate=profile.get("plate") or "",
+            additional_rating=int(profile.get("additional_rating") or 0),
+        )
 
     async def get_b50_public(
         self, username: str

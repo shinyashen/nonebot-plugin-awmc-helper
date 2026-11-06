@@ -15,6 +15,7 @@ from ...config import plugin_config
 RANKING_URL = "https://www.diving-fish.com/api/maimaidxprober/rating_ranking"
 MUSIC_DATA_URL = "https://www.diving-fish.com/api/maimaidxprober/music_data"
 QUERY_PLAYER_URL = "https://www.diving-fish.com/api/maimaidxprober/query/player"
+RECORDS_URL = "https://www.diving-fish.com/api/maimaidxprober/player/records"
 
 
 async def fetch_music_data() -> list[dict]:
@@ -35,13 +36,12 @@ async def query_player_public(
 ) -> dict:
     """公开 ``query/player`` 直连（maimai-py 公开玩家查询的单跳轻封装）。
 
-    消费方：绑定层用户名即验证（2026-11-06，杜绝误绑无效用户名）与 OAuth
-    身份自愈探测（:meth:`core.binding.BindingService.heal_divingfish_username`）
-    ——两者都要「只判账号存在性、拿 username」，不需要 MaimaiClient 的缓存
-    与 provider 体系。200 返回含 ``username``/``rating`` 的原始 dict；
-    400 抛 :class:`DivingFishUserNotFoundError`（查无此人，含 QQ 未绑水鱼）；
-    403（隐私关闭「禁止第三方查询」）与其余非 200 抛一般 :class:`ExtError`；
-    网络异常经 :func:`ext_request` 包装。
+    消费方：「绑定水鱼用户名」绑定即验证（2026-11-06，杜绝误绑无效用户名）
+    ——只判账号存在性，不需要 MaimaiClient 的缓存与 provider 体系。200 返回
+    含 ``username``/``rating`` 的原始 dict；400 抛
+    :class:`DivingFishUserNotFoundError`（查无此人，含 QQ 未绑水鱼、账号未同意
+    用户协议）；403（隐私关闭「禁止第三方查询」）与其余非 200 抛一般
+    :class:`ExtError`；网络异常经 :func:`ext_request` 包装。
 
     请求体形状对齐 maimai_py ``PlayerIdentifier._as_diving_fish``（qq 序列化
     为字符串）；qq/username 都不给返回 ValueError。
@@ -252,3 +252,77 @@ async def redeem(ref: str, confirmation_code: str) -> dict:
         detail = data.get("error_description") or error or status
         raise ExtError(f"水鱼确认码兑换失败：{detail}")
     return data
+
+
+# ---------------------------------------------------------------------------
+# OAuth 本人资料（maimai-py 的玩家资料只有公开键形态，补齐 OAuth 形态）
+# ---------------------------------------------------------------------------
+
+PROFILE_FIELDS = ("username", "nickname", "rating", "additional_rating", "plate")
+"""Bearer ``/player/records`` 响应顶层携带的玩家资料字段（与公开 query/player
+同名同义，2026-11-06 生产实测）。"""
+
+
+class DivingFishAgreementRequired(ExtError):
+    """水鱼账号尚未同意查分器用户协议（Bearer 端点 403「该用户未同意用户协议」）。
+
+    水鱼对此类账号屏蔽数据读取——公开查询同时报 user not exists（2026-11-06
+    生产实测：OAuth 换票 200、记录 403、公开按 QQ 400），只能用户本人登录
+    水鱼查分器网页同意，bot 侧无从代办。
+    """
+
+
+async def exchange_subject_token(subject: str) -> str:
+    """on-behalf-of 换票，返回短时 access token（不缓存、不落库）。
+
+    仅供 OAuth 本人资料兜底（:func:`fetch_oauth_profile`）这一低频路径：
+    成绩读写的换票与令牌缓存全在 maimai-py provider 内（sunset 决策 2），
+    这里另换一张是因为 maimai-py 的玩家资料没有 OAuth 形态、且其令牌缓存
+    属 ``client._cache`` 不得触碰；资料兜底每人至多一次（用户名学到后
+    走公开键），换票量可忽略。
+    """
+    status, data = await _post_form(
+        f"{DF_AUTH_BASE}/oauth/token",
+        {
+            "grant_type": "urn:diving-fish:params:oauth:grant-type:on-behalf-of",
+            "client_id": plugin_config.awmc_divingfish_oauth_client_id,
+            "client_secret": plugin_config.awmc_divingfish_oauth_client_secret,
+            "subject": subject,
+        },
+    )
+    if status != 200 or "error" in data or not data.get("access_token"):
+        detail = data.get("error_description") or data.get("error") or status
+        raise ExtError(f"水鱼授权换票失败：{detail}")
+    return data["access_token"]
+
+
+async def fetch_oauth_profile(access_token: str) -> dict:
+    """经 OAuth Bearer ``/player/records`` 读本人水鱼资料（:data:`PROFILE_FIELDS`）。
+
+    公开 ``/query/player`` 只认 QQ/用户名：水鱼账号未绑本 QQ 又没绑用户名的
+    OAuth 用户，公开键必查无此人（b50 卡头玩家资料即败）；记录端点响应顶层
+    带全套资料字段，是 OAuth 形态唯一可用的资料来源（``/player/profile`` 不收
+    Bearer，实测「尚未登录」）。代价是整份记录下载，故只在兜底路径用。
+
+    403「用户协议」抛 :class:`DivingFishAgreementRequired`；其余非 200、
+    JSON 解析失败抛 :class:`ExtError`；网络异常经 :func:`ext_request` 包装。
+    """
+    resp = await ext_request(
+        "GET",
+        RECORDS_URL,
+        name="水鱼成绩记录",
+        network_message="水鱼查分器网络异常，请稍后再试",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    try:
+        data = resp.json()
+    except Exception as e:
+        raise ExtError(f"水鱼成绩记录响应异常（HTTP {resp.status_code}）") from e
+    if not isinstance(data, dict):
+        raise ExtError("水鱼成绩记录返回了无效数据")
+    message = str(data.get("message") or "")
+    if resp.status_code == 403 and "用户协议" in message:
+        raise DivingFishAgreementRequired(message)
+    if resp.status_code != 200:
+        raise ExtError(f"水鱼成绩记录读取失败（HTTP {resp.status_code}）：{message}")
+    return {k: data.get(k) for k in PROFILE_FIELDS}

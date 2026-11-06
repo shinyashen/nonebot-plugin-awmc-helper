@@ -10,7 +10,7 @@ import re
 import time
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Literal, ClassVar
 from dataclasses import dataclass
 
 from maimai_py import PlayerIdentifier
@@ -246,6 +246,24 @@ class PendingSession(TtlSession):
     kind: str
 
 
+@dataclass(frozen=True)
+class DivingFishProfileSync:
+    """授权完成后的本人资料同步结果（:meth:`BindingService.sync_divingfish_profile`；
+    文案由 bind 插件按状态组装）。
+
+    ``learned``：原无用户名，已记下授权账号用户名；``updated``：原用户名与
+    授权账号不一致（含误绑查无此人），已改为授权账号的；``unchanged``：本就
+    一致；``agreement_required``：账号未同意水鱼用户协议，读不到资料；
+    ``unavailable``：网络等其余原因读不到（查询路径另有兜底）。
+    """
+
+    status: Literal[
+        "learned", "updated", "unchanged", "agreement_required", "unavailable"
+    ]
+    old: str | None = None
+    new: str | None = None
+
+
 class PendingBindingStore:
     """绑定回填会话表（进程内存；键 = (platform, user_id)）。
 
@@ -408,9 +426,9 @@ class BindingService:
 
         consent 已建立（``divingfish_ref`` 非空）时**直接返回冻结值**：ref 是
         授权服务器侧的 opaque 句柄，consent 建立后改用户名不得改变 subject，
-        否则 subject 随用户名漂移、换票落空（consent_required）（2026-11-06
-        定案，起因：误绑无效用户名→OAuth 绑定→查询仍走无效用户名，见
-        divingfish-oauth-sunset.md §5 决策 6）。
+        否则 subject 随用户名漂移、换票落空（consent_required）——授权后同步
+        /换绑用户名（:meth:`learn_divingfish_username` 等）都依赖此冻结
+        （2026-11-06 定案，见 divingfish-oauth-sunset.md §5 决策 6）。
 
         冻结值缺失时按 bind 时点同款公式派生：external_id 必须与
         Developer-Token 时代 ``/dev/*`` 调用**实际传入**的参数原值完全一致——
@@ -679,9 +697,21 @@ class BindingService:
 
         return lxns_provider if binding.service == SERVICE_LXNS else divingfish_provider
 
+    def _freeze_divingfish_ref(self, binding: UserBinding) -> None:
+        """consent 已建立而 subject 未冻结时，冻结**当前**派生值（不落库）。
+
+        凡改动 ``divingfish_username`` 的路径都必须先调本方法：派生公式用户名
+        优先，改名后再派生会漂移出 consent 对不上的摘要（换票 consent_required）。
+        冻结上线前完成授权的存量行没有冻结值，首次改名即冻结时机——此刻的
+        派生值就是 consent 当时所用（此前未改过名）。
+        """
+        if binding.divingfish_oauth and binding.divingfish_ref is None:
+            binding.divingfish_ref = self.divingfish_subject(binding)
+
     async def bind_divingfish_username(
         self, binding: UserBinding, username: str
     ) -> None:
+        self._freeze_divingfish_ref(binding)
         binding.service = SERVICE_DIVINGFISH
         binding.divingfish_username = username
         await store.save_binding(binding)
@@ -712,68 +742,59 @@ class BindingService:
             binding.divingfish_sub = sub
         await store.save_binding(binding)
 
-    async def heal_divingfish_username(
-        self, binding: UserBinding, *, username_missing: bool = False
+    async def learn_divingfish_username(
+        self, binding: UserBinding, username: str
     ) -> bool:
-        """水鱼用户名档自愈：OAuth 已确立本人身份而绑定用户名查无此人时，
-        按 QQ 公开键探测真实用户名并落库（2026-11-06，修复「误绑无效用户名
-        → OAuth 绑定后查询仍走无效用户名」的存量行）。返回用户名是否被改写。
+        """把 OAuth 授权账号的用户名记为公开查询键（先冻结 subject）。
 
-        触发条件（缺一不可）：OAuth 已授权 + 已绑用户名 + QQ 系平台 + 绑定
-        用户名**确认**查无此人——授权完成即表明本人身份已由水鱼侧背书，用户
-        名查无此人只可能是误绑（「绑定水鱼用户名」是本人公开键语义，代查走
-        ``b50 <用户名>`` 参数形态）。``username_missing``：调用方已确认（查询
-        路径刚收到 400）时传 True 免重复探测；缺省先按用户名探测，200（有效）
-        与 403 隐私关闭/网络异常等无法确认的情形一律不动——免得把用户特意
-        绑定的主账号用户名换成 QQ 绑定的另一个水鱼账号。按 QQ 探测成功以
-        水鱼侧返回的 ``username`` 为准覆写；QQ 未绑水鱼账号等探测失败不动
-        绑定、返回 False 由调用方按原错误收口。
-
-        调用方：OAuth 完成时（``_complete_df``，无论当前数据源——用户名是
-        水鱼侧状态，与默认查分器偏好无关）与查询路径（DivingFishSource.
-        get_player）。后者含 @代查：修正的是目标本人已授权行的误绑公开键、
-        不新建行，不违背代查「不给对方建行」的口径。
-
-        ⚠️ 覆写前必须先冻结 subject（存量行 ``divingfish_ref`` 为空）：冻结
-        值取**覆写前**的派生结果（= consent 建立时所用摘要），顺序颠倒会把
-        新用户名的摘要锁进去、OAuth 换票从此落空。
+        授权账号是 bot 读写成绩的权威身份：公开 ``/query/player`` 只认 QQ/用户名，
+        水鱼账号未绑本 QQ 又没绑用户名时公开键必查无此人（b50 卡头玩家资料
+        即败，2026-11-06 生产实况）；绑定用户名与授权账号不一致时卡头资料与
+        Bearer 成绩分属两个账号。两种情形都以授权账号的用户名为准。返回是否
+        改写（相同则不落库）。
         """
-        if not binding.divingfish_oauth or not binding.divingfish_username:
+        if not username or username == binding.divingfish_username:
             return False
-        qq = self.qq_of(binding)
-        if qq is None:
-            return False
-        from .ext import divingfish as df_ext
-
-        try:
-            if not username_missing:
-                try:
-                    await df_ext.query_player_public(
-                        username=binding.divingfish_username
-                    )
-                    return False  # 用户名有效：不覆写
-                except df_ext.DivingFishUserNotFoundError:
-                    pass  # 确认查无此人，继续按 QQ 自愈
-            profile = await df_ext.query_player_public(qq=qq)
-        except df_ext.ExtError:
-            # 用户名存在性无法确认（403 隐私/网络）或 QQ 探测未命中
-            logger.info(
-                f"水鱼用户名自愈未执行（{binding.platform}:"
-                f"{binding.user_id}），维持原绑定"
-            )
-            return False
-        username = profile.get("username")
-        if not username or str(username) == binding.divingfish_username:
-            return False
-        if binding.divingfish_ref is None:
-            binding.divingfish_ref = self.divingfish_subject(binding)
-        binding.divingfish_username = str(username)
+        self._freeze_divingfish_ref(binding)
+        binding.divingfish_username = username
         await store.save_binding(binding)
         logger.info(
-            f"水鱼用户名已按 OAuth 身份自愈为「{username}」"
+            f"水鱼公开查询用户名已同步为授权账号「{username}」"
             f"（{binding.platform}:{binding.user_id}）"
         )
         return True
+
+    async def sync_divingfish_profile(
+        self, binding: UserBinding, access_token: str
+    ) -> "DivingFishProfileSync":
+        """授权完成即时：用确认码兑换所得的本次令牌读本人水鱼资料，把公开
+        查询用户名同步为授权账号的用户名（:meth:`learn_divingfish_username`）。
+
+        读不到不影响授权完成：账号未同意水鱼用户协议（Bearer 403）单列状态
+        供调用方给出处置指引，网络等其余失败按 ``unavailable`` 静默——查询
+        路径另有同源兜底（DivingFishSource.get_player）。
+        """
+        from .ext import divingfish as df_ext
+
+        old = binding.divingfish_username
+        try:
+            profile = await df_ext.fetch_oauth_profile(access_token)
+        except df_ext.DivingFishAgreementRequired:
+            return DivingFishProfileSync("agreement_required", old)
+        except df_ext.ExtError:
+            logger.info(
+                f"水鱼授权完成后资料同步失败（{binding.platform}:"
+                f"{binding.user_id}），留待查询路径兜底",
+                exc_info=True,
+            )
+            return DivingFishProfileSync("unavailable", old)
+        username = profile.get("username")
+        if not username:
+            return DivingFishProfileSync("unavailable", old)
+        if not await self.learn_divingfish_username(binding, str(username)):
+            return DivingFishProfileSync("unchanged", old, old)
+        status: Literal["updated", "learned"] = "updated" if old else "learned"
+        return DivingFishProfileSync(status, old, str(username))
 
     async def bind_lxns(
         self,

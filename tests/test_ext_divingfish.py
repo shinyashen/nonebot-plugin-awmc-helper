@@ -111,3 +111,80 @@ async def test_query_player_public():
     # qq/username 都不给 → ValueError（编程错误，不走网络）
     with pytest.raises(ValueError, match="需要 qq 或 username"):
         await query_player_public()
+
+
+@pytest.mark.asyncio
+async def test_oauth_profile_fetch(monkeypatch):
+    """OAuth 本人资料（2026-11-06）：on-behalf-of 换票 + Bearer /player/records
+    顶层资料字段；403「该用户未同意用户协议」专项异常，其余失败一般 ExtError。"""
+    import httpx
+
+    from nonebot_plugin_awmc_helper.config import plugin_config
+    from nonebot_plugin_awmc_helper.core.ext import ExtError
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import (
+        RECORDS_URL,
+        DivingFishAgreementRequired,
+        fetch_oauth_profile,
+        exchange_subject_token,
+    )
+
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
+    token_url = "https://auth.diving-fish.com/oauth/token"
+
+    with respx.mock(assert_all_called=False) as m:
+        route = m.post(token_url).respond(
+            200, json={"access_token": "at-1", "expires_in": 300}
+        )
+        assert await exchange_subject_token("ref:abc") == "at-1"
+        form = route.calls[0].request.content.decode()
+        assert "on-behalf-of" in form
+        assert "subject=ref%3Aabc" in form
+
+        m.post(token_url).respond(400, json={"error": "consent_required"})
+        with pytest.raises(ExtError, match="consent_required"):
+            await exchange_subject_token("ref:abc")
+
+        records = m.get(RECORDS_URL).respond(
+            200,
+            json={
+                "username": "fish",
+                "nickname": "Fish",
+                "rating": 770,
+                "additional_rating": 0,
+                "plate": None,
+                "records": [{"song_id": 1}],
+            },
+        )
+        profile = await fetch_oauth_profile("at-1")
+        assert profile == {
+            "username": "fish",
+            "nickname": "Fish",
+            "rating": 770,
+            "additional_rating": 0,
+            "plate": None,
+        }
+        assert records.calls[0].request.headers["Authorization"] == "Bearer at-1"
+
+        m.get(RECORDS_URL).respond(
+            403, json={"message": "该用户未同意用户协议", "status": "error"}
+        )
+        with pytest.raises(DivingFishAgreementRequired):
+            await fetch_oauth_profile("at-1")
+
+        # 其余 403（如缺权限）不归为用户协议
+        m.get(RECORDS_URL).respond(
+            403, json={"message": "缺少权限：prober.records.read"}
+        )
+        with pytest.raises(ExtError) as ei:
+            await fetch_oauth_profile("at-1")
+        assert not isinstance(ei.value, DivingFishAgreementRequired)
+
+        m.get(RECORDS_URL).respond(502, text="bad gateway")
+        with pytest.raises(ExtError):
+            await fetch_oauth_profile("at-1")
+
+    with respx.mock(assert_all_called=False) as m:
+        m.get(RECORDS_URL).side_effect = httpx.ConnectError("boom")
+        with pytest.raises(ExtError):
+            await fetch_oauth_profile("at-1")

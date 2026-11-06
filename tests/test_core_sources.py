@@ -214,57 +214,112 @@ async def test_net_hooks_route_via_facade(db, songs):
 
 
 @pytest.mark.asyncio
-async def test_get_player_heals_stale_username(db, songs, monkeypatch):
-    """水鱼 get_player 用户名档自愈（2026-11-06）：绑定用户名查无此人且
-    OAuth 已授权 → 按 QQ 公开键探测真实用户名落库并重试一跳；探测不命中
-    （无 OAuth 等）按原错误映射收口，行为不变。"""
+async def test_get_player_oauth_fallback(db, songs, monkeypatch):
+    """水鱼 get_player 的 OAuth 资料兜底（2026-11-06 生产实况复刻）：
+
+    - 已授权、水鱼账号未绑本 QQ、无用户名：公开按 QQ 400 → 换票读 Bearer
+      记录端点顶层资料出卡头，并记下授权账号用户名（subject 冻结在 QQ 摘要），
+      下次直接走公开键；
+    - 账号未同意水鱼用户协议：记录端点 403 → 专项处置文案（而非「没有找到」）；
+    - 未授权：行为不变，按原「没有找到这个玩家」收口、不发 OAuth 请求。
+    """
+    import hashlib
+
     import respx
 
+    from nonebot_plugin_awmc_helper.config import plugin_config
     from nonebot_plugin_awmc_helper.core.score import UserScoreError, score_service
     from nonebot_plugin_awmc_helper.core.binding import binding_service
-    from nonebot_plugin_awmc_helper.core.ext.divingfish import QUERY_PLAYER_URL
+    from nonebot_plugin_awmc_helper.core.sources import DF_AGREEMENT_HINT
+    from nonebot_plugin_awmc_helper.core.ext.divingfish import (
+        RECORDS_URL,
+        QUERY_PLAYER_URL,
+    )
 
-    def player_payload(username: str) -> dict:
-        return {
-            "username": username,
-            "rating": 3000,
-            "nickname": username,
-            "plate": "初将",
-            "additional_rating": [],
-        }
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_id", "cid")
+    monkeypatch.setattr(plugin_config, "awmc_divingfish_oauth_client_secret", "sec")
+    token_url = "https://auth.diving-fish.com/oauth/token"
+    not_found = {"message": "user not exists"}
 
-    # 存量无效行：OAuth 已授权、用户名误绑（服务层直造）
+    # 已授权、无用户名、水鱼账号未绑本 QQ
     binding = await binding_service.ensure("OneBot V11", "70010")
-    await binding_service.bind_divingfish_username(binding, "bogus")
     await binding_service.bind_divingfish_oauth(binding, sub="9")
-
+    qq_ref = "ref:" + hashlib.sha256(b"cid:70010").hexdigest()
     with respx.mock(assert_all_called=False) as m:
-        # 首跳：用户名查无此人
-        m.post(QUERY_PLAYER_URL, json={"username": "bogus"}).respond(
-            400, json={"message": "user not exists"}
+        m.post(QUERY_PLAYER_URL, json={"qq": "70010"}).respond(400, json=not_found)
+        exchange = m.post(token_url).respond(
+            200, json={"access_token": "at-9", "expires_in": 300}
         )
-        # 自愈探测：按 QQ 命中真实用户名
-        m.post(QUERY_PLAYER_URL, json={"qq": "70010"}).respond(
-            200, json=player_payload("real_user")
-        )
-        # 重试：修正后的用户名命中
-        m.post(QUERY_PLAYER_URL, json={"username": "real_user"}).respond(
-            200, json=player_payload("real_user")
+        m.get(RECORDS_URL).respond(
+            200,
+            json={
+                "username": "real_user",
+                "nickname": "Real",
+                "rating": 770,
+                "additional_rating": 0,
+                "plate": None,
+                "records": [],
+            },
         )
         player = await score_service.get_player(binding)
-    assert player.name == "real_user"
-    # 自愈落库：绑定用户名已被真实值替换
+    assert (player.name, player.rating, player.nickname) == ("real_user", 770, "Real")
+    assert player.plate == ""  # 资料缺省值归一为模型类型
+    assert f"subject={qq_ref.replace(':', '%3A')}" in (
+        exchange.calls[0].request.content.decode()
+    )
     got = await binding_service.get("OneBot V11", "70010")
     assert got is not None
     assert got.divingfish_username == "real_user"
+    assert binding_service.divingfish_subject(got) == qq_ref
 
-    # 无 OAuth 行为不变：查无此人直接收口（无自愈探测）
-    plain = await binding_service.ensure("OneBot V11", "70011")
-    await binding_service.bind_divingfish_username(plain, "bogus2")
+    # 学到用户名后走回公开键：不再换票
     with respx.mock(assert_all_called=False) as m:
-        route = m.post(QUERY_PLAYER_URL, json={"username": "bogus2"}).respond(
-            400, json={"message": "user not exists"}
+        public = m.post(QUERY_PLAYER_URL, json={"username": "real_user"}).respond(
+            200,
+            json={
+                "username": "real_user",
+                "rating": 770,
+                "nickname": "Real",
+                "plate": "",
+                "additional_rating": 0,
+            },
         )
+        exchange = m.post(token_url).respond(500)
+        assert (await score_service.get_player(got)).name == "real_user"
+    assert public.called
+    assert not exchange.called
+
+    # 账号未同意水鱼用户协议：专项处置文案
+    pending = await binding_service.ensure("OneBot V11", "70011")
+    await binding_service.bind_divingfish_oauth(pending, sub="10")
+    with respx.mock(assert_all_called=False) as m:
+        m.post(QUERY_PLAYER_URL, json={"qq": "70011"}).respond(400, json=not_found)
+        m.post(token_url).respond(200, json={"access_token": "at-10"})
+        m.get(RECORDS_URL).respond(
+            403, json={"message": "该用户未同意用户协议", "status": "error"}
+        )
+        with pytest.raises(UserScoreError) as ei:
+            await score_service.get_player(pending)
+    assert str(ei.value) == DF_AGREEMENT_HINT
+
+    # 未授权：行为不变（不发 OAuth 请求）
+    plain = await binding_service.ensure("OneBot V11", "70012")
+    with respx.mock(assert_all_called=False) as m:
+        m.post(QUERY_PLAYER_URL, json={"qq": "70012"}).respond(400, json=not_found)
+        exchange = m.post(token_url).respond(500)
         with pytest.raises(UserScoreError, match="没有找到这个玩家"):
             await score_service.get_player(plain)
-    assert route.call_count == 1
+    assert not exchange.called
+
+
+def test_map_error_agreement_hint():
+    """maimai-py 把 Bearer 端点 403 一律归为隐私限制：「未同意用户协议」须映射
+    为专项处置文案，真正的隐私限制维持原文案（b50/minfo/全量路径共用）。"""
+    from maimai_py import PrivacyLimitationError
+
+    from nonebot_plugin_awmc_helper.core.sources import DF_AGREEMENT_HINT, _map_error
+
+    assert str(_map_error(PrivacyLimitationError("该用户未同意用户协议"))) == (
+        DF_AGREEMENT_HINT
+    )
+    assert "隐私设置" in str(_map_error(PrivacyLimitationError("禁止第三方查询")))
