@@ -280,13 +280,15 @@ async def test_search_list_image(app: App, songs):
 
     matched = await song_service.by_title_fuzzy("ト")
     assert len(matched) >= 5
+    # 列表图走条目展开（双谱曲 SD/DX 两行），计数文案同步条目数
+    entries = song_render.list_entries(matched)
     page = 1
-    suffix = f"第 {page} 页，共 {len(matched)} 首，可用「查歌 <标题> {page + 1}」翻页"
+    suffix = f"第 {page} 页，共 {len(entries)} 项，可用「查歌 <标题> {page + 1}」翻页"
     await _assert_image_reply(
         app,
         "search",
         f"查歌 ト {page}",
-        lambda: song_render.song_list_bytes(matched, page),
+        lambda: song_render.song_list_bytes(entries, page),
         suffix=suffix,
     )
 
@@ -381,6 +383,7 @@ async def test_render_smoke(songs):
     """绘图冒烟：卡片与列表图渲染出非空 PNG（新列表版式依赖素材包）。"""
     from nonebot_plugin_awmc_helper.core.songs import song_service
     from nonebot_plugin_awmc_helper.core.render.song import (
+        list_entries,
         song_card_bytes,
         song_list_bytes,
     )
@@ -390,7 +393,7 @@ async def test_render_smoke(songs):
     card = song_card_bytes(song199)
     assert card.startswith(b"\x89PNG")
     assert len(card) > 1000
-    listing = song_list_bytes(await song_service.get_all(), 1)
+    listing = song_list_bytes(list_entries(await song_service.get_all()), 1)
     assert listing.startswith(b"\x89PNG")
     assert len(listing) > 1000
 

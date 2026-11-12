@@ -469,8 +469,9 @@ def chart_display_id(song, diff) -> int:
     SD = 根 id；DX = 根 id + 10000（机台内部 id 规则，如 835 → 10835），
     该规则单一来源为 maimai_py ``Song.get_divingfish_id``；
     宴 = 6 位机台内部 diff_id（直接读谱面对象，不要求已挂到 song）。
-    卡片代表**具体谱面**时用本函数；曲级展示（搜索列表等）用
-    :func:`display_song_id`。
+    卡片代表**具体谱面**时用本函数；查歌列表的 SD/DX 展开条目行
+    （``render/song.py::list_entry_id``）同样落到本函数；曲级展示
+    （宴条目、宿主级文本等）用 :func:`display_song_id`。
     """
     from maimai_py.models import SongDifficultyUtage
 

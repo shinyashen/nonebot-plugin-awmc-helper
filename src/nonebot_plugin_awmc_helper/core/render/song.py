@@ -26,13 +26,14 @@ from .tools import (
 )
 from ..utils import paginate
 from .assets import assets
-from .nb_chart import major_type_of, paste_version_logo
+from .nb_chart import major_type_of, chart_version_of, paste_version_logo
 from ...constants import (
     GENRE_TO_ZH,
     THEME_PRISM_PLUS,
     ds_text,
     version_zh,
     display_song_id,
+    chart_display_id,
 )
 
 LEVEL_COLORS = {
@@ -142,12 +143,54 @@ def draw_song_card(song: Song, id_override: int | None = None) -> Image.Image:
     return img
 
 
-def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Image.Image:
-    """搜索结果列表图（Hoshino song_list 版式，默认 25 条/页）。"""
-    page_data, total = paginate(songs, page, per_page)
+def list_entries(songs: list[Song]) -> "list[tuple[Song, SongType]]":
+    """查歌列表条目展开：双谱曲拆 SD/DX 两行（2026-11-13 用户拍板）。
+
+    Hoshino/NB 数据模型中双谱歌曲本就是两个条目（各带类型/版本/谱面表），
+    合并视图一行带过时行卡只能画主类型的徽章与定数，版本 logo 取曲级最小
+    版本会与徽章错代（bpm查歌 240 实测：411 初音ミクの消失 DX 行配 PiNK
+    logo）。展开 per-type 条目后行内 id/徽章/定数/版本全部按类型自洽
+    （``id 411``、``id 10411`` 与行信息一一对应），与别名流「条目展开」
+    及详卡 ``chart_version_of`` 的 per-type 语义对齐。
+
+    条目规则：有标准谱 → STANDARD 条、有 DX 谱 → DX 条（SD 前 DX 后，与
+    详卡 SD 优先排序一致）；两组皆空 → UTAGE 单条（纯宴曲维持整行宴形态）。
+    宿主曲挂宴谱不展开宴条目（维持既有普通谱行形态，宴谱经 6 位 id 召唤）。
+    展开**必须发生在分页/计数之前**：调用方一并消费条目数，避免图文计数错位。
+    """
+    entries: "list[tuple[Song, SongType]]" = []
+    for song in songs:
+        if song.difficulties.standard:
+            entries.append((song, SongType.STANDARD))
+        if song.difficulties.dx:
+            entries.append((song, SongType.DX))
+        if not song.difficulties.standard and not song.difficulties.dx:
+            entries.append((song, SongType.UTAGE))
+    return entries
+
+
+def list_entry_id(song: Song, entry_type: SongType) -> int:
+    """列表条目展示 id：SD/DX 条用查分器 id 形状（:func:`chart_display_id`
+    单源，SD=根 id、DX=根 id+10000）；宴条目维持曲级 :func:`display_song_id`
+    （根 id，与既有纯宴行口径一致，6 位 diff_id 属 id 召唤域）。"""
+    if entry_type == SongType.UTAGE:
+        return display_song_id(song)
+    return chart_display_id(song, song.get_difficulties(entry_type)[0])
+
+
+def draw_song_list(
+    entries: "list[tuple[Song, SongType]]", page: int = 1, per_page: int = 25
+) -> Image.Image:
+    """搜索结果列表图（Hoshino song_list 版式，默认 25 条/页）。
+
+    入参为 :func:`list_entries` 展开后的 ``(曲, 条目类型)`` 条目：徽章/定数/
+    版本 logo/展示 id 按条目类型取侧，版本即该类型组登场版本
+    （:func:`chart_version_of` 语义），宴条目回落曲级 version。
+    """
+    page_data, total = paginate(entries, page, per_page)
     if not page_data:  # 页码越界回落末页（Hoshino clamp 同语义）
         page = total
-        page_data = songs[(page - 1) * per_page : page * per_page]
+        page_data = entries[(page - 1) * per_page : page * per_page]
 
     lines = -(-len(page_data) // 2)  # 两列行数（Hoshino sum(divmod(n,2)) 同值）
     height = 200 + lines * 145 + 200
@@ -178,7 +221,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
     draw = ImageDraw.Draw(im)
 
     x_gap, y_gap, start_x, start_y = 450, 145, 70, 200
-    for num, song in enumerate(page_data):
+    for num, (song, entry_type) in enumerate(page_data):
         row, col = divmod(num, 2)
         x = start_x + col * x_gap
         y = start_y + row * y_gap
@@ -187,16 +230,21 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         im.alpha_composite(
             assets.cover(song.id).resize(CELL_COVER_80), (x + 10, y + 10)
         )
-        paste_version_logo(im, song.version, (x + 315, y - 30, 104, 50))
-        utage = song.get_difficulties(SongType.UTAGE)
-        is_utage = bool(utage) and not (
-            song.difficulties.standard or song.difficulties.dx
+        # 条目类型即行卡的谱面侧：宴条目 ⟺ 纯宴曲（无标准/DX 组，原
+        # is_utage = utage and not (standard or dx) 同值）；版本 logo 取该
+        # 类型组登场版本（chart_version_of），不再用曲级最小版本（旧实测：
+        # 411 DX 行配 PiNK logo），宴条目回落曲级
+        is_utage = entry_type == SongType.UTAGE
+        version = (
+            song.version
+            if is_utage
+            else chart_version_of(song, entry_type == SongType.STANDARD)
         )
+        paste_version_logo(im, version, (x + 315, y - 30, 104, 50))
         if not is_utage:
-            # 主类型单源（major_type_of）：DX 组优先、组空回落标准——
-            # 与原「DX if dx else SD」在非宴谱分支逐字等价
-            type_abbr = "SD" if major_type_of(song) == SongType.STANDARD else "DX"
-            if badge := assets.type_badge(type_abbr, (40, 15)):
+            if badge := assets.type_badge(
+                "SD" if entry_type == SongType.STANDARD else "DX", (40, 15)
+            ):
                 im.alpha_composite(badge, (x + 50, y + 75))
         im.alpha_composite(
             assets.pic("sl_diff_utg.png" if is_utage else "sl_diff.png"),
@@ -204,7 +252,7 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         )
         draw.text(
             (x + 50, y + 105),
-            str(display_song_id(song)),
+            str(list_entry_id(song, entry_type)),
             font=font(15, FONT_RODIN),
             fill=TEXT_BLUE,
             anchor="mm",
@@ -242,17 +290,14 @@ def draw_song_list(songs: list[Song], page: int = 1, per_page: int = 25) -> Imag
         if is_utage:
             draw.text(
                 (x + 125, y + 105),
-                ds_text(utage[0].level_value),
+                ds_text(song.get_difficulties(SongType.UTAGE)[0].level_value),
                 font=font(15, FONT_RODIN),
                 fill=WHITE,
                 anchor="mm",
             )
         else:
-            # 主类型单源（major_type_of），同上：非宴谱分支逐字等价
-            major = major_type_of(song)
-            for diff in song.get_difficulties():
-                if diff.type != major or diff.type == SongType.UTAGE:
-                    continue
+            # 条目类型定侧：只画该类型组的定数（多张宴谱压缩为首张，原口径）
+            for diff in song.get_difficulties(entry_type):
                 # 难度配色单源 tools.DIFF_TEXT_COLORS（0-3 白、ReM 紫）
                 color = DIFF_TEXT_COLORS[diff.level_index.value]
                 draw.text(

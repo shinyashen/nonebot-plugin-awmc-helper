@@ -36,7 +36,13 @@ async def _banquet_card(song, utage_diff=None, jp: bool = False) -> bytes:
 
 
 async def _render_result(songs, page: int, binding=None) -> None:
-    """1 首出卡片；≤5 文本；更多列表图（25/页）。"""
+    """1 首出卡片；≤5 文本；更多列表图（25/页）。
+
+    列表图分支经 :func:`list_entries` 条目展开（双谱曲 SD/DX 两行，行内
+    id/徽章/定数/版本按类型自洽，计数文案同步条目数防图文错位）；≤5 文本
+    行只有 id+标题、无版本/定数可错代，维持曲级行避免同名重复（与「相似
+    标题」分支按曲计数同口径）；单曲卡不展开（详卡本就主类型 per-type 出卡）。
+    """
     if not songs:
         await _reply(NOT_FOUND).finish(at_sender=True)
     if len(songs) == 1:
@@ -45,9 +51,10 @@ async def _render_result(songs, page: int, binding=None) -> None:
     if len(songs) <= 5:
         text = "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in songs)
         await _reply(text.rstrip("\n")).finish(at_sender=True)
+    entries = song_render.list_entries(songs)
     await (
-        UniMessage.image(raw=song_render.song_list_bytes(songs, page))
-        .text(f"第 {page} 页，共 {len(songs)} 首，可用「查歌 <标题> {page + 1}」翻页")
+        UniMessage.image(raw=song_render.song_list_bytes(entries, page))
+        .text(f"第 {page} 页，共 {len(entries)} 项，可用「查歌 <标题> {page + 1}」翻页")
         .finish(at_sender=True)
     )
 
@@ -56,7 +63,8 @@ async def _render_jp_result(songs, page: int, binding=None) -> None:
     """日服 fallback 结果：逐曲判定日服限定，混合列表只标注限定曲。
 
     日服视图含国服也有的曲（标题子串、日服定数口径变更等场景可命中）：
-    整列表国服都有时按普通结果渲染，混合时国服曲回取国服对象。
+    整列表国服都有时按普通结果渲染，混合时国服曲回取国服对象。列表图
+    分支同 :func:`_render_result` 条目展开，≤5 文本维持曲级行。
     """
     # 逐曲日服判定须回查国服视图：去重后一次并发建 map（判定与回取共用，见 core）
     cn_songs = await cn_song_map(songs)
@@ -74,9 +82,10 @@ async def _render_jp_result(songs, page: int, binding=None) -> None:
             for s, f in zip(songs, flags)
         )
         await _reply(text.rstrip("\n") + "\n" + note).finish(at_sender=True)
+    entries = song_render.list_entries(songs)
     await (
-        UniMessage.image(raw=song_render.song_list_bytes(songs, page))
-        .text(f"第 {page} 页，共 {len(songs)} 首\n" + note)
+        UniMessage.image(raw=song_render.song_list_bytes(entries, page))
+        .text(f"第 {page} 页，共 {len(entries)} 项\n" + note)
         .finish(at_sender=True)
     )
 

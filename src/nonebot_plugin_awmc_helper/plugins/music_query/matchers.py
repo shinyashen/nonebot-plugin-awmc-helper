@@ -183,9 +183,11 @@ async def _(
         msg += "".join(f"「{display_song_id(s)}」 {s.title}\n" for s in result)
         msg += "※ 请使用「id xxxxx」查询指定曲目"
         await _reply(msg.rstrip("\n")).finish(at_sender=True)
+    # 列表图走条目展开（双谱曲 SD/DX 两行）；≤5 文本分支维持曲级行——
+    # 前缀计数「找到 N 个」按曲计，展开会造成行数与计数错位
     await (
         _reply(not_found_prefix)
-        .image(raw=song_render.song_list_bytes(result, page))
+        .image(raw=song_render.song_list_bytes(song_render.list_entries(result), page))
         .finish(at_sender=True)
     )
 
