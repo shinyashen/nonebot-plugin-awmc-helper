@@ -227,13 +227,15 @@ async def test_rebuild_drops_unreleased_cn_song(db):
     from nonebot_plugin_awmc_helper.core import songdb
 
     payloads = full_payloads()
+    # 「未来上线日」用远期常量：写死临近日期会被真实时钟翻过去（2026-11-13
+    # 实测 2026-11-11 已成过去时，未上线形态变上线形态）
     future = {
         "id": 1876,
         "title": "Retribution ～ Cycle of Redemption ～",
         "artist": "x",
         "genre": "maimai",
         "bpm": 200,
-        "release_date": "2026-11-11",
+        "release_date": "2099-12-31",
         "difficulties": {
             "dx": [
                 {
@@ -250,10 +252,7 @@ async def test_rebuild_drops_unreleased_cn_song(db):
     await songdb.rebuild(payloads)
     state = await songdb.State.load()
     assert 1876 not in state.songs  # CN 预注册不算在列、JP 无源 → 不入库
-    assert 2025 not in state.songs or True
     # 上线：日期翻过去 → 回填
-    future["release_date"] = "2026-11-11"
-
     payloads2 = full_payloads()
     future2 = dict(future, release_date="2026-10-01")
     payloads2["lxns"]["songs"].append(future2)
