@@ -320,5 +320,7 @@ def song_card_bytes(song: Song) -> bytes:
     return image_to_bytes(draw_song_card(song))
 
 
-def song_list_bytes(songs: list[Song], page: int = 1, per_page: int = 25) -> bytes:
-    return image_to_bytes(draw_song_list(songs, page, per_page))
+def song_list_bytes(
+    entries: "list[tuple[Song, SongType]]", page: int = 1, per_page: int = 25
+) -> bytes:
+    return image_to_bytes(draw_song_list(entries, page, per_page))
