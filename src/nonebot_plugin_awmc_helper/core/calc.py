@@ -5,10 +5,14 @@ RA 计算直接使用 maimai-py 的 ``ScoreCoefficient``（单一事实来源）
 """
 
 from typing import Any
+from dataclasses import asdict
 from collections.abc import Callable
 
 from maimai_py import (
     Song,
+    Score,
+    FCType,
+    FSType,
     RateType,
     SongType,
     PlayerBests,
@@ -17,6 +21,7 @@ from maimai_py import (
     current_version,
 )
 from maimai_py.utils import ScoreCoefficient
+from maimai_py.maimai import MaimaiScores
 
 from ..constants import RATE_TO_ZH
 
@@ -467,3 +472,69 @@ def build_bests(
         scores_b35=old,
         scores_b15=new,
     )
+
+
+def max_sort_key(s: ScoreExtend):
+    """理论满分行排序键（:func:`build_bests` 降序消费）：RA → DX 分 → 达成率
+    → 定数。
+
+    满分卡 DX 分/达成率恒定，实际即 RA 降序、定数降序破平手（RA 整数截断
+    会折叠相邻定数），保证输出顺序确定。
+    """
+    return (s.dx_rating or 0, s.dx_score or 0, s.achievements or 0, s.level_value)
+
+
+def max_scores(songs: "list[Song]", *, legacy: bool = False) -> list[ScoreExtend]:
+    """视图曲库谱面 → 理论满分成绩行（max50 上界卡用，与用户成绩无关）。
+
+    每张标准/DX 谱面按满档构造：达成率 101.0000（游戏上限，RA 公式内部
+    按 100.5 封顶）、AP+ / 舞舞 / DX 分满（物量×3）→ DX 星满，单曲 RA 即
+    该谱理论最大（``legacy=True`` 改用 FiNALE 旧系数，b40max 用）。宴谱不
+    参与 rating，跳过；id 取根 id、类型取谱面自身（字段约定对齐
+    net_score._to_score_extend 的归一根 id 口径）。
+    """
+    rows: list[ScoreExtend] = []
+    for song in songs:
+        for diff in song.get_difficulties():
+            if diff.type == SongType.UTAGE:
+                continue
+            ds = diff.level_value
+            dx_score = diff.level_dx_score
+            ra = (
+                _old_ra(ds, THEORETICAL_ACHIEVEMENT)
+                if legacy
+                else compute_rating(ds, THEORETICAL_ACHIEVEMENT)
+            )
+            score = Score(
+                id=song.id,
+                level=diff.level,
+                level_index=diff.level_index,
+                achievements=THEORETICAL_ACHIEVEMENT,
+                fc=FCType.APP,
+                fs=FSType.FSDP,
+                dx_score=dx_score,
+                dx_rating=ra,
+                play_count=None,
+                play_time=None,
+                rate=RateType._from_achievement(THEORETICAL_ACHIEVEMENT),
+                type=diff.type,
+            )
+            rows.append(
+                ScoreExtend(
+                    **{
+                        **asdict(score),
+                        "title": song.title,
+                        "level_value": ds,
+                        "level_dx_score": dx_score,
+                        # 阈值表单源 maimai_py（net_score._dx_star 同款 falsy 守卫：
+                        # 物量缺失的谱面 dx_score=0，直接除会 ZeroDivisionError）
+                        "dx_star": (
+                            MaimaiScores._calcuate_dx_star(dx_score, dx_score)
+                            if dx_score
+                            else None
+                        ),
+                        "version": diff.version,
+                    }
+                )
+            )
+    return rows
