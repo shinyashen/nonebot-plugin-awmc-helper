@@ -1157,3 +1157,266 @@ async def test_render_combo_b40_trophy_and_rating(monkeypatch):
         assert captured["rating_b35"] == 4000  # 分区小计保持底分口径
         assert captured["rating_b15"] == 1000
         assert captured["layout"] == "b40"  # 收窄版式（行距 125/b15 起 941）
+
+
+# --------------------------------------- max50/b40max（理论最大曲库上界卡）
+
+
+def test_max_commands_registered():
+    """priority 1（on_command 缺省）先于 combo50 松匹配（max50/max40 否则会被
+    当作条件串「max」吸收；Trie 最长前缀使 b50max 不被 b50 截胡）；帮助
+    capability 空 = 与查分数据源无关（纯曲库卡，不取成绩）。"""
+    from nonebot_plugin_awmc_helper.core.help import help_registry
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    for matcher in (sq.b50max, sq.b40max):
+        assert matcher.priority < sq.combo50.priority
+        assert matcher.block is True
+    spec = help_registry.spec_of(sq.b50max)
+    assert spec is not None
+    assert spec.name == "b50max"
+    assert "max50" in spec.aliases
+    assert "b50maxscore" in spec.aliases
+    assert spec.capability == ""
+    spec40 = help_registry.spec_of(sq.b40max)
+    assert spec40 is not None
+    assert spec40.name == "b40max"
+    assert "max40" in spec40.aliases
+
+
+def _patch_max_render(monkeypatch, captured: dict) -> None:
+    """max 卡渲染替身：捕获 best50_bytes 实参 + 封面预取置空（零网络）。"""
+    from nonebot_plugin_awmc_helper.core.render import best50 as b50mod
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    async def fake_bytes(_name, head_rating, b35, b15, _s35, _s15, **kwargs):
+        captured["name"] = _name
+        captured["head_rating"] = head_rating
+        captured["rating_b35"] = b35
+        captured["rating_b15"] = b15
+        captured.update(kwargs)
+        return b"png"
+
+    async def no_prefetch(_bests):
+        return None
+
+    monkeypatch.setattr(b50mod, "best50_bytes", fake_bytes)
+    monkeypatch.setattr(sq, "prefetch_covers", no_prefetch)
+
+
+async def _assert_max_image_reply(app: App, matcher, text: str):
+    """max 卡图片回复断言（未绑定即出图 = 通用卡不要求绑定）。"""
+    import base64
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    event = fake_group_message_event_v11(message=text)
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(b'png').decode()}"),
+        ]
+    )
+    async with app.test_matcher(matcher) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_max50_card_params(app: App, db, songs, monkeypatch):
+    """b50max 出图参数：通用卡头部（player 缺省链）、b50 版式、称号条缺省
+    「B35: X + B15: Y = Z」（彩虹条）；nonebug 假 bot self_id="test" 非数字
+    → 不传 qqid（头像落渲染层默认素材，测试零网络）。"""
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    captured: dict = {}
+    _patch_max_render(monkeypatch, captured)
+    await _assert_max_image_reply(app, sq.b50max, "b50max")
+    assert captured["name"] == "理论最大B50"
+    assert captured["layout"] == "b50"
+    assert captured["trophy_name"] is None
+    assert captured["force_trophy_name"] is False
+    assert captured["qqid"] is None
+    assert captured["theme"] is DEFAULT_THEME
+    # 头部 rating 位 = 理论合计（曲库行 RA 之和）
+    assert captured["head_rating"] == captured["rating_b35"] + captured["rating_b15"]
+
+
+@pytest.mark.asyncio
+async def test_b40max_card_params(app: App, db, songs, monkeypatch):
+    """b40max 出图参数：b40 收窄版式、称号条「底分 + 段位分 2100」、
+    头部 rating = 底分 + 2100（与裸 b40 的 _render_combo B40 分支同口径）。"""
+    from nonebot_plugin_awmc_helper.core.combo import B40_DAN_SCORE
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    captured: dict = {}
+    _patch_max_render(monkeypatch, captured)
+    await _assert_max_image_reply(app, sq.b40max, "b40max")
+    assert captured["name"] == "理论最大B40"
+    assert captured["layout"] == "b40"
+    base_ra = captured["rating_b35"] + captured["rating_b15"]
+    assert captured["trophy_name"] == f"底分: {base_ra} + 段位分: {B40_DAN_SCORE}"
+    assert captured["force_trophy_name"] is True
+    assert captured["head_rating"] == base_ra + B40_DAN_SCORE
+
+
+@pytest.mark.asyncio
+async def test_max50_alias_routing(app: App, db, songs, monkeypatch):
+    """别名路由：max50/B50MAX/b50maxscore 都命中 b50max matcher——能跑通
+    CommandRule 即证明 Trie 最长前缀生效（不被 b50 截胡）。"""
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    captured: dict = {}
+    _patch_max_render(monkeypatch, captured)
+    for text in ("max50", "MAX50", "B50MAX", "b50maxscore"):
+        await _assert_max_image_reply(app, sq.b50max, text)
+
+
+@pytest.mark.asyncio
+async def test_max50_bot_avatar_qqid(app: App, db, songs, monkeypatch):
+    """bot self_id 为数字（QQ 适配器）→ qqid 传 bot 号（头像取 bot 头像）。"""
+    import base64
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.core.render import best50 as b50mod
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    captured: dict = {}
+    _patch_max_render(monkeypatch, captured)
+
+    async def fake_qq_avatar(_qqid):
+        return None  # 头像素材链替身：只验证 qqid 传递，不真取图
+
+    monkeypatch.setattr(b50mod, "_qq_avatar", fake_qq_avatar)
+    event = fake_group_message_event_v11(message="b50max")
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(b'png').decode()}"),
+        ]
+    )
+    async with app.test_matcher(sq.b50max) as ctx:
+        bot = ctx.create_bot(
+            base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter), self_id="12345"
+        )
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()
+    assert captured["qqid"] == 12345
+
+
+@requires_assets
+@pytest.mark.asyncio
+async def test_max50_generic_card_renders(app: App, db, songs, monkeypatch):
+    """未绑定 b50max 全链路出图：期望图与 handler 同路径渲染（max_bests(None)
+    + 同参 best50_bytes）逐字节一致——未绑定不终止、CN 视图、无身份头部。"""
+    import base64
+
+    import nonebot
+    from fake import fake_group_message_event_v11
+    from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    from nonebot_plugin_awmc_helper.constants import DEFAULT_THEME
+    from nonebot_plugin_awmc_helper.core.maxbest import max_bests
+    from nonebot_plugin_awmc_helper.core.render.best50 import best50_bytes
+    from nonebot_plugin_awmc_helper.plugins.score_query import matchers as sq
+
+    async def no_prefetch(_bests):
+        return None
+
+    monkeypatch.setattr(sq, "prefetch_covers", no_prefetch)
+    # 期望渲染与 handler 同参（nonebug 假 bot self_id="test" 非数字 → qqid=None）
+    bests = await max_bests(None)
+    expected_png = await best50_bytes(
+        "理论最大B50",
+        bests.rating,
+        bests.rating_b35,
+        bests.rating_b15,
+        bests.scores_b35,
+        bests.scores_b15,
+        qqid=None,
+        theme=DEFAULT_THEME,
+    )
+    event = fake_group_message_event_v11(message="b50max")
+    expected = Message(
+        [
+            MessageSegment.at(12345678),
+            MessageSegment.image(f"base64://{base64.b64encode(expected_png).decode()}"),
+        ]
+    )
+    async with app.test_matcher(sq.b50max) as ctx:
+        bot = ctx.create_bot(base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter))
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "get_group_info",
+            {"group_id": 87654321},
+            result={
+                "group_id": 87654321,
+                "group_name": "g",
+                "member_count": 1,
+                "max_member_count": 10,
+            },
+        )
+        ctx.should_call_api(
+            "get_group_member_info",
+            {"group_id": 87654321, "user_id": 12345678, "no_cache": True},
+            result={
+                "user_id": 12345678,
+                "role": "member",
+                "card": "",
+                "nickname": "t",
+            },
+        )
+        ctx.should_call_send(event, expected, result=None, bot=bot)
+        ctx.should_finished()

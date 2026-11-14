@@ -51,11 +51,25 @@ from ...core.binding import (
     binding_service,
     resolve_session_query,
 )
+from ...core.maxbest import max_bests, prefetch_covers
 from ...core.sources import Capability
 from ...core.net_score import net_best50_card
 
 b50 = on_command("b50", aliases={"B50"}, block=True)
 b40 = on_command("b40", aliases={"B40"}, block=True)
+# 理论最大卡（b50max/b40max）：曲库上界、与用户成绩无关，无需绑定；
+# priority 1（on_command 缺省）先于 combo50 松匹配（max50/max40 否则会被当
+# 作条件串「max」吸收），NoneBot Trie 最长前缀匹配使 b50max 不被 b50 截胡
+b50max = on_command(
+    "b50max",
+    aliases={"B50MAX", "max50", "MAX50", "b50maxscore", "B50MAXSCORE"},
+    block=True,
+)
+b40max = on_command(
+    "b40max",
+    aliases={"B40MAX", "max40", "MAX40", "b40maxscore", "B40MAXSCORE"},
+    block=True,
+)
 ap50 = on_command("ap50", aliases={"AP50"}, block=True)
 # 条件组合查询（辉50/紫谱50/神50/dx2024b40 类）：`^(.+?)(40|50)$` 松匹配，
 # 「b40」的 b 由 tokenizer 未识别残片跳过自然吸收（nb40=牛逼、dx2024b40=回到
@@ -273,6 +287,58 @@ async def _(
     await _combo_query([], binding, OutputKind.B40, suffix="40")
 
 
+@b50max.handle()
+@handle_errors("查询失败，请稍后再试")
+async def _(
+    session: Session = UniSession(),
+    event: Event | None = None,
+):
+    await _max_query(session, event, legacy=False)
+
+
+@b40max.handle()
+@handle_errors("查询失败，请稍后再试")
+async def _(
+    session: Session = UniSession(),
+    event: Event | None = None,
+):
+    await _max_query(session, event, legacy=True)
+
+
+async def _max_query(session: Session, event: Event | None, *, legacy: bool) -> None:
+    """理论最大卡共享收尾（b50max/b40max）：宽松视图解析 → 组装 → 出图。
+
+    通用卡与用户成绩无关：不要求绑定（未绑定不终止），绑定仅用于视图
+    路由（NET → 日服池，其余 CN 池）；头部身份走渲染层默认素材链
+    （player=None），QQ 适配器下传 qqid=bot 使头像取 bot 头像
+    （``_qq_avatar`` 回退，非数字 id/取图失败自然落默认素材）。
+    """
+    binding, _ = await resolve_session_query(session, event)
+    bests = await max_bests(binding, legacy=legacy)
+    await prefetch_covers(bests)
+    if legacy:
+        name, layout = "理论最大B40", "b40"
+        label = f"底分: {bests.rating} + 段位分: {B40_DAN_SCORE}"
+        head_rating = bests.rating + B40_DAN_SCORE
+    else:
+        name, layout, label, head_rating = "理论最大B50", "b50", None, bests.rating
+    self_id = session.self_id
+    png = await b50_render.best50_bytes(
+        name,
+        head_rating,
+        bests.rating_b35,
+        bests.rating_b15,
+        bests.scores_b35,
+        bests.scores_b15,
+        qqid=int(self_id) if self_id.isdigit() else None,
+        theme=DEFAULT_THEME,
+        trophy_name=label,
+        force_trophy_name=label is not None,
+        layout=layout,
+    )
+    await UniMessage.image(raw=png).finish(at_sender=True)
+
+
 async def _render_combo(result, binding, output=None) -> bytes:
     """条件50/40 结果渲染：flat（条件50）走 flat 版式，拆分沿用标准 35/15
     版式（b40=25/15 旧系数，同版式卡面）。
@@ -471,6 +537,31 @@ help_registry.declare(
                 "裸 b40 = 全部成绩按旧系数（FiNALE 口径）重算（恒拆 25+15），"
                 "头部称号条固定「底分 + 段位分 2100」；\n"
                 "带条件的旧系数卡（nb40、dx2022b40 等）见「条件50」。"
+            ),
+        ),
+        CommandSpec(
+            matcher=b50max,
+            name="b50max",
+            aliases=("B50MAX", "max50", "MAX50", "b50maxscore", "B50MAXSCORE"),
+            brief="理论最大 B50（曲库上界卡，与个人成绩无关，无需绑定）",
+            detail=(
+                "格式：b50max（无参数，无需绑定）\n"
+                "当前视图曲库全部已上线谱面按满分计的理论上界：达成率 "
+                "101.0000%（SSS+，RA 按 100.5 封顶）、AP+ / 舞舞 / "
+                "DX 分满 → DX 星满；\n"
+                "35+15 拆分与版本分界跟真实 b50 同口径（跟随绑定数据源视图，"
+                "未绑定=国服；日服绑定按日服现行版本）。"
+            ),
+        ),
+        CommandSpec(
+            matcher=b40max,
+            name="b40max",
+            aliases=("B40MAX", "max40", "MAX40", "b40maxscore", "B40MAXSCORE"),
+            brief="理论最大 B40（旧系数 FiNALE 口径上界卡，无需绑定）",
+            detail=(
+                "格式：b40max（无参数，无需绑定）\n"
+                "全部已上线谱面按旧系数（FiNALE 口径）满档重算的理论上界，"
+                "恒拆 25+15，头部称号条固定「底分 + 段位分 2100」。"
             ),
         ),
         CommandSpec(
