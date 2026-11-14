@@ -446,6 +446,10 @@ async def test_search_excludes_utage(songs):
     assert await song_service.by_note_designer("TEST") == []
     # 专用入口不受影响：宴关键词召唤仍可命中纯宴曲与宿主
     assert {s.id for s in await song_service.utage_by_keyword("ハム太郎")} == {2020}
+    # 别名流标题兜底保持宴可见（2026-11-14 追加拍板）：cn_title 路径
+    # （minfo 名称定位）曲名可搜出纯宴曲并列出宴条目 id
+    entries = await song_service.entries_for_name("ハム太郎とっとこうた", cn_title=True)
+    assert [(eid, t) for eid, _s, t in entries] == [(102020, None)]
 
 
 @pytest.mark.asyncio
@@ -547,6 +551,10 @@ async def test_jp_attribute_fallbacks(songs):
         assert [s.id for s in await song_service.jp_by_artist(artist)] == [2019]
         designer = await song_service.jp_by_note_designer("test")
         assert [s.id for s in designer] == [2019]
+        # 别名流标题兜底保持宴可见（2026-11-14 追加拍板）：曲名未收录为
+        # 别名时仍列出宴条目 id（「是什么歌」走的 jp 标题兜底路径）
+        entries = await song_service.entries_for_name("ハム太郎とっとこうた")
+        assert [(eid, t) for eid, _s, t in entries] == [(102022, None)]
     finally:
         song_service._jp_view = {}
         song_service._jp_fingerprint = None

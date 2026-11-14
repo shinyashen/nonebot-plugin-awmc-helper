@@ -503,18 +503,24 @@ class SongService:
         songs = await (await self.ensure_loaded()).get_all()
         return [s for s in songs if include_disabled or not s.disabled]
 
-    async def _songs_of_scope(self, scope: Scope) -> list[Song]:
+    async def _songs_of_scope(
+        self, scope: Scope, *, include_utage: bool = False
+    ) -> list[Song]:
         """scope 视图曲目集：CN 排除 disabled；JP 为完整日服视图（缓存）。
 
-        纯宴曲排除（2026-11-14 用户拍板）：查歌族五入口（标题/曲师/BPM/
+        纯宴曲默认排除（2026-11-14 用户拍板）：查歌族五入口（标题/曲师/BPM/
         定数/谱师）不搜宴谱，对齐 NB/Hoshino 基准（其搜索曲库来自标准库、
         宴谱单列）——宴谱只在专用入口出现（6 位 id 召唤 / 宴关键词召唤 /
         别名宴词条目展开）。宿主曲（普通谱+宴谱）保留，宴谱不随宿主展示。
+        ``include_utage=True``：别名流的**标题兜底**保持宴可见（2026-11-14
+        追加拍板，恢复排宴前原行为）——曲名未收录为别名时仍可列出宴条目。
         """
         if scope == "jp":
             songs = list((await self._jp_songs_map()).values())
         else:
             songs = await self.get_all()
+        if include_utage:
+            return songs
         return [
             s
             for s in songs
@@ -524,14 +530,24 @@ class SongService:
     async def by_id(self, song_id: int) -> Song | None:
         return await (await self.ensure_loaded()).by_id(song_id)
 
-    async def by_title_fuzzy(self, title: str, scope: Scope = "cn") -> list[Song]:
+    async def by_title_fuzzy(
+        self, title: str, scope: Scope = "cn", *, include_utage: bool = False
+    ) -> list[Song]:
         """标题子串匹配（大小写不敏感），标题**精确命中**置顶、其余按 id
         升序（对齐 maimai_py ``by_keywords`` 的精确优先语义——用户输入完整
         曲名时目标曲不再被子串命中群淹没在按 id 排的中间页；匹配域保持
-        title 单域：别名/曲师/谱师各有独立指令，上游的三域匹配不并入）。"""
+        title 单域：别名/曲师/谱师各有独立指令，上游的三域匹配不并入）。
+
+        查歌族搜索域默认排宴（2026-11-14 拍板）；别名流的标题兜底传
+        ``include_utage=True`` 保持宴可见（同日追加拍板）。
+        """
         kw = title.lower()
         return _exact_first(
-            [s for s in await self._songs_of_scope(scope) if kw in s.title.lower()],
+            [
+                s
+                for s in await self._songs_of_scope(scope, include_utage=include_utage)
+                if kw in s.title.lower()
+            ],
             kw,
         )
 
@@ -586,9 +602,11 @@ class SongService:
             lib = await store.load_song_aliases(list(ALIAS_SOURCES))
         return lib
 
-    async def jp_by_title_fuzzy(self, title: str) -> list[Song]:
+    async def jp_by_title_fuzzy(
+        self, title: str, *, include_utage: bool = False
+    ) -> list[Song]:
         """日服视图标题子串匹配（国服查歌 fallback）。"""
-        return await self.by_title_fuzzy(title, "jp")
+        return await self.by_title_fuzzy(title, "jp", include_utage=include_utage)
 
     async def jp_by_artist(self, artist: str) -> list[Song]:
         """日服视图曲师查歌。"""
@@ -838,6 +856,10 @@ class SongService:
         保留 SD/DX 双条目交调用方列出 id 让用户指定，带前缀时直接定位该类型
         （社区惯用写法）。``cn_title`` 供以曲名为主要输入的指令（minfo）
         使用；「是什么歌」按设计不查国服标题（输入是别名，曲名走其后的兜底措辞）。
+
+        标题兜底传 ``include_utage=True`` 保持宴可见（2026-11-14 用户拍板）：
+        曲名未收录为别名时仍可列出宴条目 id——别名流是宴谱的专用入口之一，
+        与查歌族搜索域排宴（DEVELOPMENT_PLAN §4.2）的分界在此。
         """
         songs: list[Song] = []
         strip_info: tuple[str, str, str] | None = None
@@ -846,9 +868,9 @@ class SongService:
         if not songs:
             songs, strip_info = await self.jp_by_alias_detail(name)
         if not songs and cn_title and scope == "cn":
-            songs = await self.by_title_fuzzy(name)
+            songs = await self.by_title_fuzzy(name, include_utage=True)
         if not songs:
-            songs = await self.jp_by_title_fuzzy(name)
+            songs = await self.jp_by_title_fuzzy(name, include_utage=True)
         songs = await self._complete_chart_types(songs)
         entries = chart_entries_many(songs)
         if not strip_info:

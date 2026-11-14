@@ -90,7 +90,9 @@ async def _resolve_song(key: str):
     if len(songs) == 1:
         return songs[0]
     if not songs:
-        songs = await song_service.by_title_fuzzy(key)
+        # 标题兜底保持宴可见（2026-11-14 拍板）：查分名称定位与「是什么歌」
+        # 同为别名流，曲名可列出宴条目 id
+        songs = await song_service.by_title_fuzzy(key, include_utage=True)
     if not songs:
         await UniMessage.text(f" 没有找到「{key}」对应的乐曲").finish(at_sender=True)
     if len(songs) > 1:
