@@ -118,6 +118,37 @@ def compute_rating(ds: float, achievement: float) -> int:
     return int(ScoreCoefficient(achievement).ra(ds))
 
 
+_OLD_RATE_COEF: "dict[RateType, float]" = {
+    RateType.D: 0.0,
+    RateType.C: 5.0,
+    RateType.B: 6.0,
+    RateType.BB: 7.0,
+    RateType.BBB: 7.5,
+    RateType.A: 8.5,
+    RateType.AA: 9.5,
+    RateType.AAA: 10.5,
+    RateType.S: 12.5,
+    RateType.SP: 12.7,
+    RateType.SS: 13.0,
+    RateType.SSP: 13.2,
+    RateType.SSS: 13.5,
+    RateType.SSSP: 14.0,
+}
+"""FiNALE 旧版 RA 系数表（KarenBot ``Rating.kt`` calcOld 同源；SSS+ 14.0 vs
+现行 22.4）。b40 唯一动公式处（§3），maimai_py 无此表、本地硬编码。"""
+
+
+def _old_ra(level_value: float, achievements: "float | None") -> int:
+    """旧版单曲 RA：``floor(定数 × 档位系数 × min(100.5, 达成率)万倍 / 1e6)``。
+
+    成绩为现达成率（历史成绩任何实现不可得，§9 S-2 固有限制）；
+    万分位口径与 ``combo._bps`` 同源（达成率 → 万分位整数）。
+    """
+    coef = _OLD_RATE_COEF[RateType._from_achievement(achievements or 0)]
+    bps = min(1_005_000, round((achievements or 0) * _ACHIEVEMENT_BPS))
+    return int(level_value * coef * bps / 1_000_000)
+
+
 def rate_of(achievement: float) -> str:
     """达成率 → 评级名（SSS+ 等）。"""
     return RATE_TO_ZH[RateType._from_achievement(achievement)]
