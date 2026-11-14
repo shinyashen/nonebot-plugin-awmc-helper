@@ -81,6 +81,7 @@ def make_utage(
     touch_num: int = 0,
     break_num: int = 7,
     version: int = 24000,
+    note_designer: str = "-",
 ) -> SongDifficultyUtage:
     """默认宴谱 = 100199 [蛸]チルノのパーフェクトさんすう教室 真实值。"""
     return SongDifficultyUtage(
@@ -88,7 +89,7 @@ def make_utage(
         level=level,
         level_value=level_value,
         level_index=LevelIndex.BASIC,
-        note_designer="-",
+        note_designer=note_designer,
         version=version,
         tap_num=tap_num,
         hold_num=hold_num,

@@ -504,10 +504,22 @@ class SongService:
         return [s for s in songs if include_disabled or not s.disabled]
 
     async def _songs_of_scope(self, scope: Scope) -> list[Song]:
-        """scope 视图曲目集：CN 排除 disabled；JP 为完整日服视图（缓存）。"""
+        """scope 视图曲目集：CN 排除 disabled；JP 为完整日服视图（缓存）。
+
+        纯宴曲排除（2026-11-14 用户拍板）：查歌族五入口（标题/曲师/BPM/
+        定数/谱师）不搜宴谱，对齐 NB/Hoshino 基准（其搜索曲库来自标准库、
+        宴谱单列）——宴谱只在专用入口出现（6 位 id 召唤 / 宴关键词召唤 /
+        别名宴词条目展开）。宿主曲（普通谱+宴谱）保留，宴谱不随宿主展示。
+        """
         if scope == "jp":
-            return list((await self._jp_songs_map()).values())
-        return await self.get_all()
+            songs = list((await self._jp_songs_map()).values())
+        else:
+            songs = await self.get_all()
+        return [
+            s
+            for s in songs
+            if s.difficulties.standard or s.difficulties.dx or not s.difficulties.utage
+        ]
 
     async def by_id(self, song_id: int) -> Song | None:
         return await (await self.ensure_loaded()).by_id(song_id)
@@ -875,11 +887,18 @@ class SongService:
     async def by_level_value(
         self, min_ds: float, max_ds: float, scope: Scope = "cn"
     ) -> list[Song]:
-        """定数查歌：任意谱面定数落在 [min, max] 闭区间。"""
+        """定数查歌：任意标准/DX 谱面定数落在 [min, max] 闭区间。
+
+        宴谱不参与匹配（2026-11-14 用户拍板，随搜索域排宴）：宿主曲不因
+        宴谱定数落入窗口而进入结果，对齐基准定数搜索只认标准/DX。
+        """
         return [
             s
             for s in await self._songs_of_scope(scope)
-            if any(min_ds <= d.level_value <= max_ds for d in s.get_difficulties())
+            if any(
+                min_ds <= d.level_value <= max_ds
+                for d in (*s.difficulties.standard, *s.difficulties.dx)
+            )
         ]
 
     async def by_note_designer(self, designer: str, scope: Scope = "cn") -> list[Song]:
@@ -888,7 +907,8 @@ class SongService:
         查询先过 QUERY_ALIASES 解析（中文昵称/单字，显式语境专用）→ 等价类
         needle 集（本名/別名義/curated 名义串），任一 needle 整串包含于
         note_designer 即命中；精确命中排前。用户可见行为变化：由旧版
-        「实名精确相等」扩展为等价类包含式（Q55 拍板）。
+        「实名精确相等」扩展为等价类包含式（Q55 拍板）。匹配域为标准/DX
+        谱面——宴谱谱师不参与（2026-11-14 用户拍板，随搜索域排宴）。
         """
         from .designer import match as _designer_match
         from .designer import build_needles as _build_needles
@@ -897,7 +917,10 @@ class SongService:
         exact: list[Song] = []
         partial: list[Song] = []
         for s in await self._songs_of_scope(scope):
-            names = [(d.note_designer or "").strip() for d in s.get_difficulties()]
+            names = [
+                (d.note_designer or "").strip()
+                for d in (*s.difficulties.standard, *s.difficulties.dx)
+            ]
             if any(_designer_match(n, needles) for n in names if n and n != "-"):
                 if any(n.lower() == designer.lower() for n in names):
                     exact.append(s)

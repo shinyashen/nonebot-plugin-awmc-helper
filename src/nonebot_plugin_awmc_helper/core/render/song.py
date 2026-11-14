@@ -32,7 +32,6 @@ from ...constants import (
     THEME_PRISM_PLUS,
     ds_text,
     version_zh,
-    display_song_id,
     chart_display_id,
 )
 
@@ -154,8 +153,9 @@ def list_entries(songs: list[Song]) -> "list[tuple[Song, SongType]]":
     及详卡 ``chart_version_of`` 的 per-type 语义对齐。
 
     条目规则：有标准谱 → STANDARD 条、有 DX 谱 → DX 条（SD 前 DX 后，与
-    详卡 SD 优先排序一致）；两组皆空 → UTAGE 单条（纯宴曲维持整行宴形态）。
-    宿主曲挂宴谱不展开宴条目（维持既有普通谱行形态，宴谱经 6 位 id 召唤）。
+    详卡 SD 优先排序一致）。纯宴曲不产出条目（2026-11-14 用户拍板：查歌族
+    不搜宴谱，上游 ``SongService._songs_of_scope`` 已排除，此处为渲染侧
+    不变量双保险）；宿主曲挂宴谱只出普通谱条目（宴谱经 6 位 id 召唤）。
     展开**必须发生在分页/计数之前**：调用方一并消费条目数，避免图文计数错位。
     """
     entries: "list[tuple[Song, SongType]]" = []
@@ -164,17 +164,12 @@ def list_entries(songs: list[Song]) -> "list[tuple[Song, SongType]]":
             entries.append((song, SongType.STANDARD))
         if song.difficulties.dx:
             entries.append((song, SongType.DX))
-        if not song.difficulties.standard and not song.difficulties.dx:
-            entries.append((song, SongType.UTAGE))
     return entries
 
 
 def list_entry_id(song: Song, entry_type: SongType) -> int:
-    """列表条目展示 id：SD/DX 条用查分器 id 形状（:func:`chart_display_id`
-    单源，SD=根 id、DX=根 id+10000）；宴条目维持曲级 :func:`display_song_id`
-    （根 id，与既有纯宴行口径一致，6 位 diff_id 属 id 召唤域）。"""
-    if entry_type == SongType.UTAGE:
-        return display_song_id(song)
+    """列表条目展示 id（查分器 id 形状，:func:`chart_display_id` 单源）：
+    SD=根 id、DX=根 id+10000。"""
     return chart_display_id(song, song.get_difficulties(entry_type)[0])
 
 
@@ -185,7 +180,7 @@ def draw_song_list(
 
     入参为 :func:`list_entries` 展开后的 ``(曲, 条目类型)`` 条目：徽章/定数/
     版本 logo/展示 id 按条目类型取侧，版本即该类型组登场版本
-    （:func:`chart_version_of` 语义），宴条目回落曲级 version。
+    （:func:`chart_version_of` 语义）。
     """
     page_data, total = paginate(entries, page, per_page)
     if not page_data:  # 页码越界回落末页（Hoshino clamp 同语义）
@@ -230,26 +225,18 @@ def draw_song_list(
         im.alpha_composite(
             assets.cover(song.id).resize(CELL_COVER_80), (x + 10, y + 10)
         )
-        # 条目类型即行卡的谱面侧：宴条目 ⟺ 纯宴曲（无标准/DX 组，原
-        # is_utage = utage and not (standard or dx) 同值）；版本 logo 取该
-        # 类型组登场版本（chart_version_of），不再用曲级最小版本（旧实测：
-        # 411 DX 行配 PiNK logo），宴条目回落曲级
-        is_utage = entry_type == SongType.UTAGE
-        version = (
-            song.version
-            if is_utage
-            else chart_version_of(song, entry_type == SongType.STANDARD)
+        # 条目类型即行卡的谱面侧：版本 logo 取该类型组登场版本
+        # （chart_version_of），不用曲级最小版本（旧实测：411 DX 行配 PiNK logo）
+        paste_version_logo(
+            im,
+            chart_version_of(song, entry_type == SongType.STANDARD),
+            (x + 315, y - 30, 104, 50),
         )
-        paste_version_logo(im, version, (x + 315, y - 30, 104, 50))
-        if not is_utage:
-            if badge := assets.type_badge(
-                "SD" if entry_type == SongType.STANDARD else "DX", (40, 15)
-            ):
-                im.alpha_composite(badge, (x + 50, y + 75))
-        im.alpha_composite(
-            assets.pic("sl_diff_utg.png" if is_utage else "sl_diff.png"),
-            (x + 100, y + 95),
-        )
+        if badge := assets.type_badge(
+            "SD" if entry_type == SongType.STANDARD else "DX", (40, 15)
+        ):
+            im.alpha_composite(badge, (x + 50, y + 75))
+        im.alpha_composite(assets.pic("sl_diff.png"), (x + 100, y + 95))
         draw.text(
             (x + 50, y + 105),
             str(list_entry_id(song, entry_type)),
@@ -287,26 +274,17 @@ def draw_song_list(
             fill=TEXT_BLUE,
             anchor="lm",
         )
-        if is_utage:
+        # 条目类型定侧：只画该类型组的定数
+        for diff in song.get_difficulties(entry_type):
+            # 难度配色单源 tools.DIFF_TEXT_COLORS（0-3 白、ReM 紫）
+            color = DIFF_TEXT_COLORS[diff.level_index.value]
             draw.text(
-                (x + 125, y + 105),
-                ds_text(song.get_difficulties(SongType.UTAGE)[0].level_value),
+                (x + 125 + 50 * diff.level_index.value, y + 105),
+                ds_text(diff.level_value),
                 font=font(15, FONT_RODIN),
-                fill=WHITE,
+                fill=color,
                 anchor="mm",
             )
-        else:
-            # 条目类型定侧：只画该类型组的定数（多张宴谱压缩为首张，原口径）
-            for diff in song.get_difficulties(entry_type):
-                # 难度配色单源 tools.DIFF_TEXT_COLORS（0-3 白、ReM 紫）
-                color = DIFF_TEXT_COLORS[diff.level_index.value]
-                draw.text(
-                    (x + 125 + 50 * diff.level_index.value, y + 105),
-                    ds_text(diff.level_value),
-                    font=font(15, FONT_RODIN),
-                    fill=color,
-                    anchor="mm",
-                )
 
     draw.text(
         (500, 70),

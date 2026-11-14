@@ -47,7 +47,8 @@ def test_list_entries_expand_dual():
 
 
 def test_list_entries_shapes():
-    """单类型曲单条目；纯宴曲 UTAGE 单条；宿主曲挂宴谱不展开宴条目。
+    """单类型曲单条目；纯宴曲不产出条目（查歌族不搜宴谱，2026-11-14 拍板，
+    渲染侧不变量）；宿主曲挂宴谱不展开宴条目。
 
     纯宴宿主无真实快照原型（宴谱均挂普通曲），按测试数据口径以构造补位。
     """
@@ -70,13 +71,13 @@ def test_list_entries_shapes():
     )
     assert list_entries([sd_only]) == [(sd_only, SongType.STANDARD)]
     assert list_entries([dx_only]) == [(dx_only, SongType.DX)]
-    assert list_entries([utage_only]) == [(utage_only, SongType.UTAGE)]
+    assert list_entries([utage_only]) == []
     # 宿主曲（199 普通+宴）：只出普通谱条目，宴谱经 6 位 id 召唤
     assert list_entries([host]) == [(host, SongType.STANDARD), (host, SongType.DX)]
 
 
 def test_list_entry_id():
-    """条目 id 按查分器 id 形状：SD=根 id、DX=根 id+10000；宴条目维持根 id。"""
+    """条目 id 按查分器 id 形状：SD=根 id、DX=根 id+10000。"""
     from nonebot_plugin_awmc_helper.core.render.song import list_entry_id
 
     song = _song411()

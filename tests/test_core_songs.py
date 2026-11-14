@@ -191,8 +191,9 @@ async def test_filters(songs):
     # 定数查歌：13.0~14.0 命中 199（SD 13.3 / DX 13.0）与 624 的 13.4
     got = await song_service.by_level_value(13.0, 14.0)
     assert {s.id for s in got} == {199, 624}
-    # 宴谱定数同样参与窗口查询（199 蛸宴 12.7）
-    assert {s.id for s in await song_service.by_level_value(12.6, 12.8)} == {199}
+    # 宴谱定数不参与匹配（2026-11-14 拍板：查歌族不搜宴谱，宿主曲不因
+    # 宴定数入结果；199 蛸宴 12.7 不再命中）
+    assert await song_service.by_level_value(12.6, 12.8) == []
     # 曲师（大小写不敏感精确匹配）
     assert {s.id for s in await song_service.by_artist("ao")} == {624}
     # 谱师查询暂缺断言：真实数据低难度谱面无谱师（note_designer=None），
@@ -396,6 +397,58 @@ async def test_jp_title_fallback(songs, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_search_excludes_utage(songs):
+    """查歌族不搜宴谱（2026-11-14 用户拍板）：纯宴曲五入口（标题/曲师/
+    BPM/定数/谱师）均不命中，宿主曲不因宴定数/宴谱师进入结果；专用入口
+    （宴关键词召唤）不受影响。纯宴曲取材真实 [回]ハム太郎とっとこうた
+    （lxns utage 快照，CN 25500 在列形态），谱师宿主构造补位。"""
+    from mocks import make_diff, make_song, make_utage
+    from maimai_py import LevelIndex
+
+    from nonebot_plugin_awmc_helper.core.songs import song_service
+
+    utage_only = make_song(
+        2020,
+        "[回]ハム太郎とっとこうた",
+        artist="ハムちゃんず [covered by 光吉猛修]",
+        genre=Genre.宴会場,
+        bpm=140,
+        diffs=[],
+        utage=[make_utage(diff_id=102020, kanji="回")],
+    )
+    # 谱师域用宿主：SD 谱面谱师「別人」，宴谱面谱师「TEST」——
+    # 修复前宴谱师参与匹配会误命中宿主
+    named_host = make_song(
+        2021,
+        "テスト領域",
+        bpm=200,
+        diffs=[
+            make_diff(
+                type=SongType.STANDARD,
+                level_index=LevelIndex.BASIC,
+                level="3",
+                level_value=3.0,
+                note_designer="別人",
+                version=22000,
+            )
+        ],
+        utage=[make_utage(diff_id=102021, kanji="試", note_designer="TEST")],
+    )
+    await song_service.inject([*songs, utage_only, named_host])
+
+    assert await song_service.by_title_fuzzy("ハム太郎") == []
+    bpm_ids = {s.id for s in await song_service.by_bpm(135, 145)}
+    assert 2020 not in bpm_ids
+    assert await song_service.by_artist("ハムちゃんず") == []
+    # 宿主曲不因宴定数（199 蛸宴 12.7 / 2021 宴谱 12.7）落入窗口而命中
+    assert await song_service.by_level_value(12.6, 12.8) == []
+    # 宿主曲不因宴谱师命中（SD 谱师「別人」不匹配 needle「TEST」）
+    assert await song_service.by_note_designer("TEST") == []
+    # 专用入口不受影响：宴关键词召唤仍可命中纯宴曲与宿主
+    assert {s.id for s in await song_service.utage_by_keyword("ハム太郎")} == {2020}
+
+
+@pytest.mark.asyncio
 async def test_jp_attribute_fallbacks(songs):
     """定数/BPM/曲师/谱师四条属性查询的日服视图版本（Q32）。"""
     from nonebot_plugin_awmc_helper.core import store
@@ -442,12 +495,53 @@ async def test_jp_attribute_fallbacks(songs):
                     level_value=13.5,
                 )
             )
+            # 纯宴曲（日服视图）：真实 [回]ハム太郎形态（CN 25500 在列），
+            # 查歌族不搜出（2026-11-14 拍板，随搜索域排宴）
+            session.add(
+                store.SongRow(
+                    id=2022,
+                    title="[回]ハム太郎とっとこうた",
+                    artist="ハムちゃんず [covered by 光吉猛修]",
+                    bpm="140",
+                    image_url="hmt.png",
+                )
+            )
+            session.add(
+                store.SongSheetGroup(
+                    song_id=2022,
+                    kind="utage",
+                    version=26000,
+                    version_cn=None,
+                    date=20260702,
+                )
+            )
+            session.add(
+                store.SongChart(
+                    song_id=2022,
+                    kind="utage",
+                    level_id=0,
+                    notes_tap=421,
+                    designer="-",
+                )
+            )
+            session.add(
+                store.SongChartLevel(
+                    song_id=2022,
+                    kind="utage",
+                    level_id=0,
+                    version=26000,
+                    level_value=12.7,
+                )
+            )
             await session.commit()
         lv = await song_service.jp_by_level_value(13.0, 14.0)
         assert [s.id for s in lv] == [2019]
         assert await song_service.jp_by_level_value(10.0, 11.0) == []
         bpm = await song_service.jp_by_bpm(170, 190)
         assert [s.id for s in bpm] == [2019]
+        # 纯宴曲不进查歌族结果（标题/BPM 窗口本为其独占命中域）
+        assert await song_service.jp_by_title_fuzzy("ハム太郎") == []
+        assert await song_service.jp_by_bpm(135, 145) == []
         assert await song_service.jp_by_artist("Camellia") == []
         artist = "camellia ft. petra gurin「in falsus」"
         assert [s.id for s in await song_service.jp_by_artist(artist)] == [2019]
